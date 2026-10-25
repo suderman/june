@@ -5,7 +5,7 @@
   "description": "Jon's personal assistant on Pi Durable",
   "type": "module",
   "bin": { "june": "bin/june" },
-  "engines": { "node": ">=24" },
+  "engines": { "node": ">=22.19" },
   "scripts": {
     "typecheck": "tsc --noEmit -p .",
     "test": "node --test --test-concurrency=1 \"test/*.test.ts\""
