@@ -1,0 +1,83 @@
+#+TITLE: June architecture decisions
+
+Status as of 2026-10-25. Pi Durable is experimental; recheck these when upgrading it.
+
+* Shape
+
+#+begin_src text
+ june (Kitty, Herdr pane, ssh -t)      june ask / status (scripts, Emacs)
+                \                         /
+          Unix socket, one JSON object per line
+                           |
+ Telegram Bot API --- june serve (one process, owns the database)
+   long polling            |
+                     Pi Durable harness  ---  $XDG_STATE_HOME/june/june.sqlite
+                           |
+        prompt: SOUL.md, operating rules, skill list
+        tools: org_*, herdr_*, skill_read, clock, telegram_send_file
+                           |
+            +--------------+---------------+
+          ripgrep over ~/org          herdr CLI (JSON), ssh for other hosts
+          org-dispatch scan
+#+end_src
+
+* Decisions
+
+** One daemon owns the database
+Pi Durable has no cross-process locking, so only =june serve= opens =june.sqlite=. It takes pi-durable-telegram's data-directory lock before opening storage; a second daemon on the same state exits with the owner's pid. Clients never open the database.
+
+** Pi Durable 1.2.0, pinned to match pi-durable-telegram
+pi-durable-telegram 0.1.5, the newest on npm, depends on =@earendil-works/*= 1.2.0 exactly. Running 1.4.0 beside it would load two copies of pi-durable into one process, with task and document definitions split between them. June pins the whole family to 1.2.0 with npm =overrides=, and =npm ls= shows a single copy. Upgrade together when pi-durable-telegram moves.
+
+** Telegram as a library, routed into the primary conversation
+=createTelegramChannel()= is used as published, without its workspace tools, shell, prompt, or plugins. Its only tool is =telegram_send_file=. The channel keeps a chat-to-conversation map in the session document =tg.chats=; before =channel.start()=, June writes Jon's user id into that map pointing at the root conversation, so Telegram and the terminal share one conversation. This depends on two document kinds the library does not export (=tg.chats=, =tg.chat=); June redefines them with the same kind and version, and =test/daemon.test.ts= fails if that stops working.
+
+Delivery is per admitted Telegram message: a =tg.deliver= task submits the message and sends its answer back. Answers to terminal input therefore stay in the terminal, while the TUI shows Telegram exchanges because it watches the conversation. Telegram's =/new= resets the shared conversation for every surface.
+
+** Source tags instead of separate conversations
+Terminal input is placed as a =june.input= entry with ={source, text}=, and the model sees it prefixed =[kitty]= or =[cli]=. Telegram input is a plain =pi.user= entry. The prompt tells June that untagged messages come from Telegram, so she can keep those answers compact.
+
+** Transport: newline-delimited JSON over a Unix socket
+The socket is =$XDG_RUNTIME_DIR/june/june.sock=, mode 0600 in a 0700 directory. There is no network listener. Requests are =status=, =attach=, =submit=, and =abort=. After =attach= the daemon sends a snapshot trimmed to the last 200 entries, then Pi Durable's own agent events from =watchEvents()= unchanged, so the wire format is the library's, not a new one. Request ids map to Durable =requestId=s namespaced by source, so a retried =submit= returns the same submission. Remote use is =ssh -t kit june= or =ssh kit june ask ...=; that needs no new authentication.
+
+** Terminal client from pi-tui
+The TUI uses =@earendil-works/pi-tui= (alt screen, =VStack=, =ScrollView=, =Editor=, =Markdown=), following dpi-tui's layout without importing durable-pi. =src/transcript.ts= folds the snapshot and events into display items and has no terminal dependency. Enter sends (a steer while June works), Alt+Enter queues a follow-up, Esc aborts the run, Ctrl+D detaches. The client reconnects with backoff and reloads from a fresh snapshot.
+
+** Models from Pi's models.json
+pi-ai has no loader for Pi's =models.json=; that lives in pi-coding-agent. June reads the configured provider entry from =~/.pi/agent/models.json= and builds it with =createProvider()=, so codex-lb is defined in one place. The entry's =apiKey= must name an environment variable. Keys come from systemd =EnvironmentFile= or, in development, =envFiles= in June's config, and pass only to pi-ai's auth context. June has no shell tool, so the model cannot read them.
+
+Pi's =thinkingLevelMap= for gpt-6-luna maps =low= to =light=, which codex-lb rejects. June defaults to =medium=.
+
+** Restricted tools only
+No =read=, =write=, =edit=, or =bash=. Org tools are read-only: ripgrep for search, heading lines for context, path checks that keep reads inside =~/org=, and =org-dispatch scan= for what AUTO would launch. Org writes, when added, go through =org-edit= and =org-dispatch=, which run Org in Emacs; June does not edit Org structure itself. Herdr tools call the herdr CLI with argv arrays. Other hosts are reached with =ssh host herdr ...= using token-only arguments, and only for reads. =herdr_prompt_agent= exists but is off unless =herdr.allowPrompt= is true. Every read tool is =replay: "safe"=; the prompt tool is not, so a restart never repeats it.
+
+** Identity outside the repository
+=SOUL.md= lives in =$XDG_CONFIG_HOME/june/=, adapted from the Hermes June profile (=~/.local/share/hermes/profiles/june/SOUL.md=) with Hermes runtime directives removed. Skills are read in place from =~/profile/skills= and =~/.agents/skills= through =skill_read=, confined to each skill's directory. Nothing personal is committed.
+
+** No memory store
+The Durable transcript is short-term continuity. Long-term facts belong in Org. Hermes memories are reviewed in the Org project, not copied.
+
+** Node 22
+Pi Durable needs Node 22.19 or later and uses =node:sqlite=. The NixOS repository pins Camofox to Node 22 because Node 24 aborts when GC collects =node:sqlite= objects (nodejs/node#65446). June builds with =nodejs_22=. Node 22.18 and later strip TypeScript types by default, so the package ships =src/*.ts= and has no build step beyond a typecheck.
+
+** Deployment: a user service on kit
+kit runs Herdr's default session, org-dispatch, and most work, and is always on. June needs Jon's Herdr socket, his Org files, his SSH agent for other hosts, and the =org-dispatch= that loads his Emacs config. A dedicated system account would need all of that shared with it, which Herdr does not support cleanly, so June runs as Jon's lingering user service. Hardening is limited to =NoNewPrivileges= and =UMask=0077=: in a user unit =PrivateTmp= and =ProtectSystem= create a user namespace in which store-owned files appear owned by nobody, and ssh then refuses =~/.ssh/config=. The real boundary is the tool list.
+
+* Verified behaviour
+
+- Real codex-lb model through June's provider.
+- =june ask= and the TUI share one conversation; a CLI message sent while the TUI's request ran was queued and answered after it.
+- Ctrl+D detaches mid-run; the run finishes and a new TUI shows it.
+- SIGKILL mid-answer, then restart: the run resumed, and resubmitting the same request id returned the same submission with one answer.
+- SIGTERM with a TUI attached: the daemon exits, a new one starts, and the TUI reconnects.
+- Esc aborts a run.
+- Under systemd with the module's settings: Org search, =org-dispatch scan=, local Herdr, and SSH to lux.
+- Tests (=npm test=, =nix flake check=): duplicate request ids, restart with unfinished work, attach snapshot and events, Telegram routing, redelivery dedupe and refusal of unknown users with a fake Bot API port, the data-directory lock, Org search and read without modification, Org path escapes, Herdr argv, target validation, and Herdr error replies.
+
+* Known risks
+
+- Pi Durable and pi-durable-telegram are pre-1.0 in practice. The =tg.chats= routing relies on an internal document.
+- The attach snapshot carries up to 200 entries; a long tool-heavy transcript makes attach slower. Compaction bounds what the model sees, not what storage keeps.
+- A model-made Herdr prompt is at most once, not exactly once: a crash after Herdr accepted it reports the call as interrupted, and June must check before resending.
+- Org reads are not a parser. Unusual headings (inline tasks, odd keywords) may be missed by =org_tasks=.
+- Remote Herdr depends on Jon's SSH agent being unlocked; cog is often asleep.

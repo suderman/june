@@ -1,1 +1,107 @@
-* june
+#+TITLE: June
+
+June is Jon's personal assistant: one persistent daemon on Pi Durable that he talks to from Kitty and Telegram. She reads Org for tasks and knowledge and Herdr for live agent sessions. She does not replace either, and she has no shell. Design and rationale are in [[file:docs/architecture.org][docs/architecture.org]].
+
+* Commands
+
+#+begin_src sh
+june                 # terminal client attached to the primary conversation
+june ask "What are my agents doing?"
+june ask --json "..."    # {"requestId","status","text","reason"}
+echo "..." | june ask -
+june status [--json] # daemon, model, and conversation state; no model call
+june doctor          # configuration and dependency checks
+june serve           # the daemon
+#+end_src
+
+Exit codes: 0 answered, 1 unanswered or failed, 2 usage, 3 daemon not running. In the client, Enter sends (as a steer while June is working), Alt+Enter queues a follow-up, Esc interrupts the run, Ctrl+D detaches. Detaching or losing the connection never stops work, and the client reconnects by itself. From another host, run =ssh -t kit june= or =ssh kit june ask "..."=.
+
+* Files
+
+| What                     | Where                                       |
+|--------------------------+---------------------------------------------|
+| Configuration            | =$XDG_CONFIG_HOME/june/config.json=          |
+| Identity                 | =$XDG_CONFIG_HOME/june/SOUL.md=              |
+| Durable state            | =$XDG_STATE_HOME/june/june.sqlite=           |
+| Telegram attachments     | =$XDG_STATE_HOME/june/files/inbox/=          |
+| Socket                   | =$XDG_RUNTIME_DIR/june/june.sock=            |
+
+=JUNE_CONFIG_DIR=, =JUNE_STATE_DIR=, =JUNE_RUNTIME_DIR=, and =JUNE_SOCKET= override these, which is how a development daemon runs beside the real one.
+
+* Configuration
+
+Every key is optional. Defaults:
+
+#+begin_src json
+{
+  "model": { "provider": "codex-lb", "modelId": "gpt-6-luna", "thinkingLevel": "medium" },
+  "providersFile": "~/.pi/agent/models.json",
+  "envFiles": [],
+  "contextCap": 200000,
+  "soulFile": "SOUL.md",
+  "skillDirs": ["~/profile/skills", "~/.agents/skills"],
+  "org": { "root": "~/org" },
+  "herdr": { "session": "default", "host": "<hostname>", "hosts": {}, "allowPrompt": false },
+  "telegram": { "tokenEnv": "JUNE_TELEGRAM_BOT_TOKEN", "allowedUserIds": [] }
+}
+#+end_src
+
+- =model.provider= names a provider in =providersFile=, Pi's own =models.json=. Its =apiKey= must be a =$VARIABLE=.
+- =envFiles= are dotenv files read for keys at startup, for development. Under systemd, use the module's =environmentFiles=.
+- =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"cog": {}, "lux": {}}=; ={"ssh": "target"}= overrides the SSH destination.
+- =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an existing agent on this host.
+- =telegram= turns the channel on. Leave it out to run without Telegram.
+
+* Telegram setup
+
+1. Create a new bot with @BotFather. Do not reuse the Hermes bot: two processes polling one token fail with 409 Conflict.
+2. Put =JUNE_TELEGRAM_BOT_TOKEN=<token>= in an agenix secret, or an env file for development.
+3. Find Jon's numeric user id (for example from @userinfobot) and set ="telegram": {"allowedUserIds": [<id>]}=.
+4. Restart June. =june status= shows =telegram polling=, and a message to the bot appears in the terminal client too.
+
+Only allowed users reach the model. Private chats share the primary conversation; Telegram's =/new= resets it for every surface.
+
+* Development
+
+#+begin_src sh
+nix develop           # node 22 and ripgrep
+npm ci
+npm run typecheck
+npm test              # also: nix flake check
+JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june serve
+JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june
+#+end_src
+
+Unix socket paths are limited to 108 bytes, so keep =JUNE_RUNTIME_DIR= short. Tests use pi-ai's faux model and a fake Telegram port; they never call a provider or Telegram. =nix build= typechecks and produces =result/bin/june=. After changing dependencies, update =npmDepsHash= in =nix/package.nix=.
+
+* Deployment
+
+The flake exports =packages.<system>.default= and =homeModules.default=. On the daemon host (kit):
+
+#+begin_src nix
+services.june = {
+  enable = true;
+  settings = {
+    envFiles = [];
+    herdr.hosts = { cog = {}; lux = {}; };
+    telegram.allowedUserIds = [ /* Jon's id */ ];
+  };
+  daemon = {
+    enable = true;
+    environmentFiles = [ "%h/.pi/agent/.env" config.age.secrets.june-telegram.path ];
+  };
+};
+#+end_src
+
+Other hosts set only =services.june.enable= to get the client, which then reaches kit's daemon over =ssh -t kit june=. The service persists =~/.local/state/june= through impermanence when the =persist= option exists. Logs go to the journal as =level event key=value= lines with secrets redacted: =journalctl --user -u june=. June and the Hermes June can run side by side until Jon cuts over.
+
+* Roadmap
+
+Short technical list until this moves into the Org project.
+
+1. Telegram with a real bot token on kit; then the service in the NixOS flake.
+2. Safe Org writes through =org-edit=: capture to the inbox, add a note to a task, change state, schedule. Idempotency keys, a check of the current state before retrying, and refusal of =asana.org= and conflict copies.
+3. Herdr follow-up prompts on by default once tested, with a confirmation rule for agents that are blocked on an approval.
+4. A bounded supervision check from a systemd timer: deterministic Herdr and Org scans, silence when nothing changed, a small ledger of notified and acknowledged events, and a separate background conversation for judgment.
+5. Upgrade to Pi Durable 1.4 when pi-durable-telegram does.
+6. Later: notmuch, calendar, Home Assistant, voice.
