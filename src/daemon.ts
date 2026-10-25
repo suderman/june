@@ -149,14 +149,22 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			};
 		};
 
-		const server = await listen(paths.socket, (socket) => serve(socket, { harness, root, status, log }));
+		const clients = new Set<Socket>();
+		const server = await listen(paths.socket, (socket) => {
+			clients.add(socket);
+			socket.once("close", () => clients.delete(socket));
+			serve(socket, { harness, root, status, log });
+		});
 		log.info("june_started", { pid: process.pid, socket: paths.socket, conversation: root.id, telegram: telegramState });
 
 		let closing: Promise<void> | undefined;
 		const close = () =>
 			(closing ??= (async () => {
 				log.info("june_stopping", {});
-				await new Promise<void>((resolve) => server.close(() => resolve()));
+				// Clients reconnect on their own; an open connection must not hold the shutdown.
+				const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+				for (const socket of clients) socket.destroy();
+				await closed;
 				await telegram?.stop();
 				await harness.close(BG);
 				rmSync(paths.socket, { force: true });
