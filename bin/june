@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Node runs the TypeScript sources directly (type stripping); there is no build step.
+here=$(dirname "$(readlink -f "$0")")
+exec "${JUNE_NODE:-node}" --disable-warning=ExperimentalWarning "$here/../src/cli.ts" "$@"

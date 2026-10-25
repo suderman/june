@@ -1,0 +1,192 @@
+// Folds a Pi Durable snapshot and its agent events into display items for the terminal client.
+import type { AgentEvent, SnapshotEvent } from "@earendil-works/pi-durable";
+
+type Block = { type: string; text?: string; thinking?: string; name?: string; arguments?: unknown; id?: string };
+
+export type Item =
+	| { kind: "user"; id: string; source: string; text: string }
+	| { kind: "assistant"; id: string; blocks: Block[]; streaming: boolean; error?: string }
+	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; output: string }
+	| { kind: "note"; id: string; text: string };
+
+export class Transcript {
+	items: Item[] = [];
+	running = false;
+	queued = 0;
+	omitted = 0;
+	model = "";
+	notice: string | undefined;
+	#entries = new Set<string>();
+	#live: Extract<Item, { kind: "assistant" }> | undefined;
+	#tools = new Map<string, Extract<Item, { kind: "tool" }>>();
+	#calls = new Map<string, string>();
+
+	load(snapshot: SnapshotEvent, omitted = 0): void {
+		this.items = [];
+		this.#entries.clear();
+		this.#tools.clear();
+		this.#live = undefined;
+		this.omitted = omitted;
+		for (const entry of snapshot.entries) this.#entry(entry);
+		this.running = snapshot.run !== undefined;
+		this.queued = snapshot.inbox.length;
+		this.#model(snapshot.agent);
+		if (snapshot.generation?.message) this.#startLive(snapshot.generation.message);
+		for (const slot of snapshot.tools as readonly any[]) {
+			if (slot?.toolCallId && !this.#tools.has(slot.toolCallId))
+				this.#tool(slot.toolCallId, slot.toolName ?? slot.name ?? "tool", slot.args);
+		}
+	}
+
+	apply(events: readonly AgentEvent[]): void {
+		for (const event of events) this.#event(event);
+	}
+
+	#event(event: AgentEvent): void {
+		switch (event.type) {
+			case "snapshot":
+				return this.load(event);
+			case "run_start":
+				this.running = true;
+				this.notice = undefined;
+				return;
+			case "run_end":
+				this.running = false;
+				return;
+			case "inbox_update":
+				this.queued = event.items.length;
+				return;
+			case "message_start":
+				return this.#startLive(event.message);
+			case "message_update": {
+				const live = this.#live;
+				if (live === undefined) return;
+				for (const change of event.changes as readonly any[]) {
+					if (change.type === "message") live.blocks = [...change.message.content];
+					else if (change.type === "text_delta") (live.blocks[change.contentIndex] ??= { type: "text", text: "" }).text += change.delta;
+					else if (change.type === "thinking_delta")
+						(live.blocks[change.contentIndex] ??= { type: "thinking", thinking: "" }).thinking += change.delta;
+					else if (change.block) live.blocks[change.contentIndex] = { ...change.block };
+				}
+				return;
+			}
+			case "message_end":
+				this.#dropLive();
+				return this.#entry(event.entry);
+			case "entry_appended":
+				return this.#entry(event.entry);
+			case "tool_execution_start":
+				if (event.parentToolCallId === undefined) this.#tool(event.toolCallId, event.toolName, event.args);
+				return;
+			case "tool_execution_update": {
+				const tool = this.#tools.get(event.toolCallId);
+				const output = event.output as any;
+				if (tool === undefined || output === undefined) return;
+				if ("set" in output) tool.output = output.set;
+				else tool.output = tool.output.slice(output.trimStart ?? 0) + (output.append ?? "");
+				return;
+			}
+			case "tool_execution_end": {
+				const tool = this.#tools.get(event.toolCallId);
+				if (tool !== undefined && tool.status === "running") tool.status = "done";
+				if (event.entry) this.#entry(event.entry);
+				return;
+			}
+			case "auto_retry_start":
+				this.notice = `retrying (attempt ${event.attempt}): ${event.errorMessage}`;
+				return;
+			case "auto_retry_end":
+				this.notice = undefined;
+				return;
+			case "task_failed":
+				this.notice = `${event.kind} failed: ${event.message}`;
+				return;
+			case "agent_changed":
+				return this.#model(event.agent);
+		}
+	}
+
+	#model(agent: any): void {
+		if (agent?.model) this.model = `${agent.model.modelId}${agent.thinkingLevel ? `:${agent.thinkingLevel}` : ""}`;
+	}
+
+	#startLive(message: any): void {
+		this.#dropLive();
+		this.#live = { kind: "assistant", id: "live", blocks: [...(message?.content ?? [])], streaming: true };
+		this.items.push(this.#live);
+	}
+
+	#dropLive(): void {
+		if (this.#live === undefined) return;
+		this.items = this.items.filter((item) => item !== this.#live);
+		this.#live = undefined;
+	}
+
+	#tool(id: string, name: string, args: unknown): void {
+		const item = { kind: "tool" as const, id, name, summary: summarize(args), status: "running" as const, output: "" };
+		this.#tools.set(id, item);
+		this.items.push(item);
+	}
+
+	#entry(entry: any): void {
+		const id = String(entry.id);
+		if (this.#entries.has(id)) return;
+		this.#entries.add(id);
+		const message = entry.model?.[0];
+		switch (entry.kind) {
+			case "june.input":
+				this.items.push({ kind: "user", id, source: entry.data?.source ?? "?", text: entry.data?.text ?? "" });
+				return;
+			case "pi.user":
+				this.items.push({ kind: "user", id, source: "telegram", text: textOf(message?.content) });
+				return;
+			case "pi.assistant": {
+				const content: Block[] = message?.content ?? [];
+				for (const b of content) if (b.type === "toolCall" && b.id) this.#calls.set(b.id, summarize(b.arguments));
+				const blocks = content.filter((b) => b.type !== "toolCall");
+				const error = message?.stopReason === "error" || message?.stopReason === "aborted" ? (message.errorMessage ?? message.stopReason) : undefined;
+				if (blocks.length > 0 || error) this.items.push({ kind: "assistant", id, blocks, streaming: false, ...(error ? { error } : {}) });
+				return;
+			}
+			case "pi.tool-result": {
+				const callId = message?.toolCallId as string | undefined;
+				const tool = callId ? this.#tools.get(callId) : undefined;
+				if (tool !== undefined) {
+					tool.status = message.isError ? "error" : "done";
+					return;
+				}
+				this.items.push({
+					kind: "tool",
+					id,
+					name: message?.toolName ?? "tool",
+					summary: (callId && this.#calls.get(callId)) ?? "",
+					status: message?.isError ? "error" : "done",
+					output: message?.isError ? textOf(message.content) : "",
+				});
+				return;
+			}
+			case "pi.reset":
+				this.items.push({ kind: "note", id, text: "new context" });
+				return;
+			case "pi.compaction":
+				this.items.push({ kind: "note", id, text: "earlier conversation compacted" });
+				return;
+		}
+	}
+}
+
+export function textOf(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.map((block) => (block.type === "text" ? block.text : block.type === "image" ? "[image]" : ""))
+		.join("");
+}
+
+function summarize(args: unknown): string {
+	if (args === null || typeof args !== "object") return "";
+	const values = Object.entries(args as Record<string, unknown>)
+		.filter(([, v]) => typeof v === "string" || typeof v === "number")
+		.map(([k, v]) => `${k}=${String(v).replace(/\s+/g, " ").slice(0, 60)}`);
+	return values.join(" ");
+}
