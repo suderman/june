@@ -42,8 +42,13 @@ export class Herdr {
 	}
 
 	async json(host: string, args: readonly string[], timeoutMs = 15_000): Promise<any> {
-		const out = await this.#run(this.#argv(host, args), timeoutMs);
-		return JSON.parse(out);
+		const out = await this.#run(this.#argv(host, args), timeoutMs).catch((error: Error & { stdout?: string }) => {
+			if (error.stdout?.trim().startsWith("{")) return error.stdout;
+			throw error;
+		});
+		const json = JSON.parse(out);
+		if (json?.error) throw new Error(`herdr on ${host}: ${json.error.code}: ${json.error.message}`);
+		return json;
 	}
 
 	async text(host: string, args: readonly string[], timeoutMs = 15_000): Promise<string> {

@@ -57,7 +57,9 @@ export class Transcript {
 				this.queued = event.items.length;
 				return;
 			case "message_start":
-				return this.#startLive(event.message);
+				// Inputs are placed as messages too; only an assistant message streams.
+				if (event.message.role === "assistant") this.#startLive(event.message);
+				return;
 			case "message_update": {
 				const live = this.#live;
 				if (live === undefined) return;
@@ -71,7 +73,7 @@ export class Transcript {
 				return;
 			}
 			case "message_end":
-				this.#dropLive();
+				if (event.entry.kind === "pi.assistant") this.#dropLive();
 				return this.#entry(event.entry);
 			case "entry_appended":
 				return this.#entry(event.entry);
