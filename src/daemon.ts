@@ -27,9 +27,10 @@ import {
 	type TelegramPort,
 } from "pi-durable-telegram";
 import { type CommandScope, runCommand } from "./commands.ts";
-import type { Config, Paths } from "./config.ts";
+import { type Config, expandHome, type Paths } from "./config.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { readLines, type Reply, type Request, type Status, writeLine } from "./protocol.ts";
+import { createCodingExtension } from "./tools/coding.ts";
 import { createHerdrExtension, Herdr } from "./tools/herdr.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
 import { createOrgExtension, Org } from "./tools/org.ts";
@@ -89,11 +90,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const org = new Org(config.org.root);
 		const herdr = new Herdr(config.herdr);
 		const extensions = options.extensions ?? [
+			createCodingExtension(),
 			createOrgExtension(config, org),
 			createHerdrExtension(config, herdr),
 			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, herdr, instanceId(paths.state))] : []),
 		];
-		const prompt = createPromptExtension(config);
+		const prompt = createPromptExtension(config, paths.layers);
 		for (const extension of [prompt.extension, ...extensions]) registry.install(extension);
 
 		const telegram = createTelegram(options, model, log);
@@ -113,10 +115,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			BG,
 		);
 
-		const agent = { model, thinkingLevel: config.model.thinkingLevel as never, cwd: workdir };
+		// Commands and relative paths start in the home directory; Telegram downloads stay in the workdir.
+		const agent = { model, thinkingLevel: config.model.thinkingLevel as never, cwd: expandHome("~") };
 		const root = await harness.root(BG, { agent });
 		const current = await root.agent(BG);
-		if (current.model?.modelId !== model.modelId || current.model?.provider !== model.provider || current.thinkingLevel !== agent.thinkingLevel)
+		if (
+			current.model?.modelId !== model.modelId ||
+			current.model?.provider !== model.provider ||
+			current.thinkingLevel !== agent.thinkingLevel ||
+			current.cwd !== agent.cwd
+		)
 			await root.configure(agent, BG);
 
 		let telegramState: Status["telegram"] = "off";

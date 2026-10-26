@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
+import { promptFiles } from "../src/config.ts";
 import { Client, parseCommand, type Reply } from "../src/protocol.ts";
 import { ask, fakeTelegram, openTestDaemon, tempDir, until } from "./helpers.ts";
 
@@ -202,13 +203,15 @@ test("/reload refreshes prompt files and skill discovery without a model call or
 	const skills = join(tmp.dir, "skills");
 	const oldSkill = join(skills, "old");
 	const newSkill = join(skills, "new");
-	const soul = join(tmp.dir, "SOUL.md");
+	const personal = join(tmp.dir, "personal");
+	const layers = [tmp.dir, personal];
 	const instructions = join(tmp.dir, "AGENTS.md");
 	await mkdir(oldSkill, { recursive: true });
+	await mkdir(personal);
 	await writeFile(join(oldSkill, "SKILL.md"), "---\nname: old\ndescription: Old skill\n---\nOld body.");
-	await writeFile(soul, "Soul before.");
+	await writeFile(join(tmp.dir, "SOUL.org"), "Soul before.");
 	await writeFile(instructions, "Rules before.");
-	const stamp = await stat(soul);
+	const stamp = await stat(instructions);
 	const faux = fauxProvider();
 	// Durable keeps system updates in the transcript; later sections replace earlier ones by name.
 	const prompt = (ctx: TranscriptContext) => JSON.stringify(Object.assign({}, ...ctx.messages.filter((m) => m.role === "system").map((m) => m.sections)));
@@ -217,19 +220,28 @@ test("/reload refreshes prompt files and skill discovery without a model call or
 			assert.match(prompt(ctx), /Soul before\./);
 			assert.match(prompt(ctx), /Rules before\./);
 			assert.match(prompt(ctx), /old: Old skill/);
+			assert.match(prompt(ctx), /MEMORY.org is empty or does not exist yet/, "a missing memory file is not an error");
 			return fauxAssistantMessage("Before reload.");
 		},
 	]);
-	const daemon = await openTestDaemon({ ...tmp, faux, config: { soulFile: soul, instructionsFile: instructions, skillDirs: [skills] } });
+	const daemon = await openTestDaemon({
+		...tmp,
+		paths: { ...tmp.paths, layers },
+		faux,
+		config: { ...promptFiles(layers), skillDirs: [skills] },
+	});
 	t.after(() => daemon.close());
 	await ask(tmp.paths.socket, "before");
 
 	await rm(oldSkill, { recursive: true });
 	await mkdir(newSkill);
 	await writeFile(join(newSkill, "SKILL.md"), "---\nname: new\ndescription: New skill\n---\nNew body.");
-	await writeFile(soul, "Soul after!."); // Same size and mtime: /reload must bypass the file cache.
-	await utimes(soul, stamp.atime, stamp.mtime);
-	await writeFile(instructions, "Rules after.");
+	// The identity moves to a more specific layer after startup, and memory starts beside it.
+	await writeFile(join(personal, "SOUL.org"), "Soul after!.");
+	await writeFile(join(personal, "MEMORY.org"), "* Jon prefers Org");
+	await writeFile(join(personal, "MEMORY.sync-conflict-20261026-120000-ABCDEFG.org"), "* other copy");
+	await writeFile(instructions, "Rules after!."); // Same size and mtime: /reload must bypass the file cache.
+	await utimes(instructions, stamp.atime, stamp.mtime);
 	const before = (await daemon.root.context(BG)).entries;
 	const conversation = (await daemon.status()).conversation;
 	const reloaded = await command(tmp.paths.socket, "reload");
@@ -241,7 +253,11 @@ test("/reload refreshes prompt files and skill discovery without a model call or
 	faux.setResponses([
 		(ctx) => {
 			assert.match(prompt(ctx), /Soul after!\./);
-			assert.match(prompt(ctx), /Rules after\./);
+			assert.doesNotMatch(prompt(ctx), /Soul before/, "one identity, from the most specific layer");
+			assert.match(prompt(ctx), /Rules after!\./);
+			assert.match(prompt(ctx), /\* Jon prefers Org/);
+			assert.ok(prompt(ctx).includes(join(personal, "MEMORY.org")), "June is told where her memory lives");
+			assert.match(prompt(ctx), /conflict copies in .*MEMORY\.sync-conflict-20261026-120000-ABCDEFG\.org/);
 			assert.match(prompt(ctx), /new: New skill/);
 			assert.doesNotMatch(prompt(ctx), /old: Old skill/);
 			return fauxAssistantMessage([fauxToolCall("skill_read", { name: "new" })], { stopReason: "toolUse" });

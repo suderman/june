@@ -189,9 +189,13 @@ async function doctor(): Promise<number> {
 		return found.join(", ");
 	});
 	check("identity", () => {
-		if (config!.soulFile === undefined) throw new Error(`no SOUL.md in ${p.layers.join(", ")}`);
+		if (config!.soulFile === undefined) throw new Error(`no SOUL.org in ${p.layers.join(", ")}`);
 		accessSync(config!.soulFile, constants.R_OK);
-		return `${config!.soulFile}; instructions ${config!.instructionsFile ?? "none"}`;
+		// SOUL.md is no longer read; a leftover one would be a second, silent identity.
+		const stale = p.layers.map((dir) => `${dir}/SOUL.md`).filter((file) => existsSync(file));
+		if (stale.length > 0) throw new Error(`${stale.join(", ")} is ignored; move it into ${config!.soulFile}`);
+		const memory = existsSync(config!.memoryFile!) ? config!.memoryFile : `${config!.memoryFile} (not yet created)`;
+		return `${config!.soulFile}; memory ${memory}; instructions ${config!.instructionsFile ?? "none"}`;
 	});
 	check("model", async () => {
 		const secrets = readEnvFiles(config!.envFiles);

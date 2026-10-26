@@ -1,6 +1,6 @@
 #+TITLE: June
 
-June is Jon's personal assistant: one persistent daemon on Pi Durable that he talks to from Kitty and Telegram. She reads Org for tasks and knowledge and Herdr for live agent sessions. She does not replace either, and she has no shell. Design and rationale are in [[file:docs/architecture.org][docs/architecture.org]].
+June is Jon's personal assistant: one persistent daemon on Pi Durable that he talks to from Kitty and Telegram. She reads Org for tasks and knowledge and Herdr for live agent sessions, and does quick checks and small edits herself with a shell and file tools on the daemon host. She does not replace either, and she still hands larger work to coding agents through the dispatcher. Design and rationale are in [[file:docs/architecture.org][docs/architecture.org]].
 
 * Commands
 
@@ -26,7 +26,7 @@ The terminal client, =june ask=, and Telegram share these slash commands, with t
 | =/status=                | Model, state, queue, context use, and spend.                   |
 | =/help=                  | List the commands.                                             |
 
-The terminal client and =june ask "/reload"= also support =/reload=. It rescans the configured skill directories and rereads =SOUL.md= and =AGENTS.md= without a model call, chat reset, or daemon restart. New, changed, and removed skills apply on the next model turn. A running model call and queued messages are left alone. Code, =config.json=, provider, and environment changes still need a daemon restart. Telegram does not support =/reload= yet because its channel library has no custom-command hook.
+The terminal client and =june ask "/reload"= also support =/reload=. It rescans the configured skill directories and finds and rereads =SOUL.org=, =MEMORY.org=, and =AGENTS.md= without a model call, chat reset, or daemon restart. New, changed, and removed skills apply on the next model turn. A running model call and queued messages are left alone. Code, =config.json=, provider, and environment changes still need a daemon restart. Telegram does not support =/reload= yet because its channel library has no custom-command hook.
 
 There is one conversation, so =/new= and =/compact= from any surface affect all of them. Command replies are not part of the conversation; in the terminal they disappear on reconnect, as Telegram's replies sit only in the chat. Detaching or losing the connection never stops work, and the client reconnects by itself. From another host, run =ssh -t kit june= or =ssh kit june ask "..."=.
 
@@ -37,10 +37,10 @@ This repository holds code only. June reads configuration and identity in place 
 | Layer     | Directory                 | Kept in                  | Holds                                         |
 |-----------+---------------------------+--------------------------+-----------------------------------------------|
 | Harness   | =~/.agents/june/=          | Git (suderman/agents)    | =config.json= defaults, =AGENTS.md= conventions |
-| Personal  | =~/profile/june/=          | Syncthing                | =SOUL.md=, =config.json= with =daemonHost=       |
+| Personal  | =~/profile/june/=          | Syncthing                | =SOUL.org=, =MEMORY.org=, =config.json= with =daemonHost= |
 | Machine   | =$XDG_CONFIG_HOME/june/=   | this host only           | optional =config.json= overrides                |
 
-=config.json= files merge in path order: objects key by key, arrays and values replaced. =SOUL.md= and =AGENTS.md= come from the most specific directory that has them. Skill directories are configuration too (=skillDirs=); none are built in.
+=config.json= files merge in path order: objects key by key, arrays and values replaced. =SOUL.org= and =AGENTS.md= come from the most specific directory that has them, and =MEMORY.org= is the file beside that =SOUL.org=, which June creates when she first remembers something. =SOUL.md= is no longer read, and =june doctor= fails while one remains. Skill directories are configuration too (=skillDirs=); none are built in.
 
 Runtime files stay on the daemon host and are never synced:
 
@@ -80,6 +80,14 @@ Keys, with the defaults that apply when no layer sets them:
 - =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an existing agent on this host.
 - =telegram= turns the channel on. Leave it out to run without Telegram. The allowed user id is personal, so it belongs in =~/profile/june/config.json=.
 
+* Shell and files
+
+June has Pi Durable's =bash=, =read=, =edit=, and =write= tools. They run on the daemon host, kit, whichever client Jon uses, as his user; other hosts are reached with =ssh=. Commands start in the home directory and stop after 120 seconds unless the call passes a longer =timeout=. Output keeps the last 2000 lines or 50 KB, with the full output spilled to a temporary file. =/stop= kills a running command. None of these tools is replay-safe: a call a restart interrupts comes back to the model as interrupted rather than running again. =edit= fails when the text it replaces has changed, so concurrent edits from Emacs or Syncthing are not overwritten silently. The tools grant capability, not permission: when to delegate, and what needs Jon's approval, are set by =AGENTS.md=. The shell can read provider keys in the service environment and =~/.pi/agent/.env=; =AGENTS.md= forbids printing them.
+
+* Personal memory
+
+=SOUL.org= is June's identity and =MEMORY.org= what she has learned across conversations: Jon's preferences and corrections, and lessons from her mistakes. Both are ordinary Org files in the personal layer, which Syncthing shares; no memory service or database is involved. Both are in the system prompt. A changed file is reread on the next model turn, and =/reload= also finds files added or moved since startup. June keeps them with =read= and =edit= under the rules in =AGENTS.md=. Jon's Org records stay authoritative for tasks, schedules, and project facts, and neither file is an agenda file. Syncthing conflict copies of either file are named in the prompt so June tells Jon instead of picking one.
+
 * Filing new tasks
 
 June honors an explicit destination. Otherwise she uses =org_projects= to find an existing project under =~/org/work= by its preamble and repository links before choosing a new path. For a new GitHub repo project, owner/repo guides =work/<owner>/<repo>/<repo>.org=. Unmatched work and clear one-offs go under =work/june/<name>/<name>.org=, not the June software project's file.
@@ -112,7 +120,7 @@ JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june
 JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june
 #+end_src
 
-On kit, the =june= command from Jon's NixOS module runs this checkout instead of the pinned package whenever =src/cli.ts= and =node_modules= exist here, the service included. Edit, then =systemctl --user restart june= for daemon changes, or rerun the client; =june status= shows the code path in use. =JUNE_SOURCE=none= forces the package, and =JUNE_SOURCE=<dir>= picks another checkout. Remove =node_modules= or set =JUNE_SOURCE=none= in the service before leaving a half-finished change, since a daemon that cannot start leaves June down. Configuration, =SOUL.md=, =AGENTS.md=, and skills are read live in either case.
+On kit, the =june= command from Jon's NixOS module runs this checkout instead of the pinned package whenever =src/cli.ts= and =node_modules= exist here, the service included. Edit, then =systemctl --user restart june= for daemon changes, or rerun the client; =june status= shows the code path in use. =JUNE_SOURCE=none= forces the package, and =JUNE_SOURCE=<dir>= picks another checkout. Remove =node_modules= or set =JUNE_SOURCE=none= in the service before leaving a half-finished change, since a daemon that cannot start leaves June down. Configuration, =SOUL.org=, =MEMORY.org=, =AGENTS.md=, and skills are read live in either case.
 
 Unix socket paths are limited to 108 bytes, so keep =JUNE_RUNTIME_DIR= short. Tests use pi-ai's faux model and a fake Telegram port; they never call a provider or Telegram. =nix build= typechecks and produces =result/bin/june=. After changing dependencies, update =npmDepsHash= in =nix/package.nix=.
 

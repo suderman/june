@@ -18,6 +18,7 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 		envFiles: [],
 		contextCap: 100_000,
 		soulFile: undefined,
+		memoryFile: undefined,
 		instructionsFile: undefined,
 		daemonHost: undefined,
 		skillDirs: [],

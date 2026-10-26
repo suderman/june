@@ -1,5 +1,5 @@
-// Read-only Org tools. Search runs ripgrep; context comes from heading lines alone. June never parses or writes Org
-// structure itself: changes go through org-edit and org-dispatch, which run Org in Emacs.
+// Read-only Org tools. Search runs ripgrep; context comes from heading lines alone. These tools never parse or write
+// Org structure themselves: changes go through org-edit and org-dispatch, which run Org in Emacs.
 import { readdir, readFile, realpath } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { Type } from "@earendil-works/pi-ai";

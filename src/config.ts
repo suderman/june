@@ -1,9 +1,9 @@
 // Paths and runtime configuration. Configuration is read in place from layered directories, least specific first,
 // such as harness defaults in Git, personal files, and this machine's overrides. Each may hold config.json (merged),
-// AGENTS.md, and SOUL.md (most specific wins).
+// AGENTS.md, and SOUL.org (most specific wins). MEMORY.org sits beside the SOUL.org in use.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export type HerdrHost = { readonly ssh?: string };
 
@@ -14,8 +14,9 @@ export type Config = {
 	/** dotenv files read for provider keys at startup; values never reach the model. Empty under systemd. */
 	readonly envFiles: readonly string[];
 	readonly contextCap: number;
-	/** SOUL.md and AGENTS.md from the most specific layer that has them. */
+	/** SOUL.org and AGENTS.md from the most specific layer that has them; MEMORY.org beside SOUL.org, maybe not yet made. */
 	readonly soulFile: string | undefined;
+	readonly memoryFile: string | undefined;
 	readonly instructionsFile: string | undefined;
 	/** The host that runs the daemon; elsewhere the client commands run there over SSH. */
 	readonly daemonHost: string | undefined;
@@ -110,7 +111,6 @@ export function readLayers(p: Paths): Record<string, any> {
 export function loadConfig(p: Paths = paths()): Config {
 	const raw = readLayers(p);
 	if (!raw.model?.provider || !raw.model?.modelId) throw new Error(`No model configured in ${p.layers.join(", ")}`);
-	const layerFile = (name: string) => [...p.layers].reverse().map((dir) => join(dir, name)).find((f) => existsSync(f));
 	const herdr = { ...DEFAULTS.herdr, ...raw.herdr };
 	const org = { ...DEFAULTS.org, ...raw.org };
 	return {
@@ -118,8 +118,7 @@ export function loadConfig(p: Paths = paths()): Config {
 		providersFile: expandHome(raw.providersFile ?? DEFAULTS.providersFile),
 		envFiles: (raw.envFiles ?? DEFAULTS.envFiles).map(expandHome),
 		contextCap: raw.contextCap ?? DEFAULTS.contextCap,
-		soulFile: layerFile("SOUL.md"),
-		instructionsFile: layerFile("AGENTS.md"),
+		...promptFiles(p.layers),
 		daemonHost: raw.daemonHost,
 		skillDirs: (raw.skillDirs ?? DEFAULTS.skillDirs).map(expandHome),
 		org: { root: expandHome(org.root), agendaFiles: expandHome(org.agendaFiles) },
@@ -138,6 +137,19 @@ export function loadConfig(p: Paths = paths()): Config {
 					},
 				}
 			: {}),
+	};
+}
+
+export type PromptFiles = Pick<Config, "soulFile" | "memoryFile" | "instructionsFile">;
+
+/** The prompt files the layers select now; /reload calls this again so moved or new files are picked up. */
+export function promptFiles(layers: readonly string[]): PromptFiles {
+	const layerFile = (name: string) => [...layers].reverse().map((dir) => join(dir, name)).find((f) => existsSync(f));
+	const soulFile = layerFile("SOUL.org");
+	return {
+		soulFile,
+		memoryFile: soulFile === undefined ? undefined : join(dirname(soulFile), "MEMORY.org"),
+		instructionsFile: layerFile("AGENTS.md"),
 	};
 }
 

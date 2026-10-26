@@ -1,15 +1,18 @@
-// June's system prompt: SOUL.md, harness rules, AGENTS.md, and the skills, all read in place.
+// June's system prompt: SOUL.org, harness rules, AGENTS.md, MEMORY.org, and the skills, all read in place.
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension, section } from "@earendil-works/pi-durable";
-import type { Config } from "./config.ts";
+import { type Config, type PromptFiles, promptFiles } from "./config.ts";
+import { DEFAULT_BASH_TIMEOUT } from "./tools/coding.ts";
 
 // Harness mechanics only. The user's conventions (Org, Herdr, task states) come from AGENTS.md in the config layers.
-const HARNESS = `How this harness works:
+const harness = (host: string) => `How this harness works:
 - The user reaches you from a terminal client and from Telegram. Talk to them directly, never about them in the third person. It is one conversation. Terminal messages start with [kitty] or [cli]; untagged messages come from Telegram, where answers should stay compact Markdown without tables.
 - Messages starting with [follow] come from your own checks on tasks you queued; nobody typed them. Do what they say and tell the user briefly; do not repeat the check yourself.
-- You have only the tools listed and no shell. A missing direct tool does not rule out delegation: use the available task tools under the user's instructions when an agent can do the requested work. Ask the user to act only when no permitted tool or agent can proceed, or their input or approval is required.
+- bash, read, edit, and write act on ${host}, where you run, whichever client the user writes from. Commands start in the home directory and stop after ${DEFAULT_BASH_TIMEOUT} seconds unless you pass a timeout; reach other hosts explicitly and name the host in what you report. Do quick checks and small bounded tasks yourself. Whether to hand work to an agent through the task tools is your judgment: sustained coding, debugging, and larger changes usually belong with one. Ask the user to act only when no permitted tool or agent can proceed, or their input or approval is required.
+- Having a tool is not permission. The user's rules on approval, destructive or external actions, and changes outside the request apply to commands and file edits as they do to everything else.
+- Change an existing file with edit, after reading it, so a concurrent change makes the edit fail instead of being overwritten; use write only for a new file. When a Syncthing conflict copy (*.sync-conflict-*) sits beside a file, tell the user instead of choosing a copy.
 - Never claim an edit, message, or prompt happened until its tool result confirms it. A tool call interrupted by a restart may already have taken effect, so check the current state before repeating it.`;
 
 /** `render` re-reads `path` only when its size or mtime changes, so the prompt text stays stable for caching. */
@@ -67,14 +70,36 @@ export async function findSkills(roots: readonly string[]): Promise<Skill[]> {
 function skillsSection(skills: readonly Skill[]): string {
 	if (skills.length === 0) return "No skills are installed.";
 	return [
-		"The user's skills describe their conventions and procedures. When a request matches one, read it with skill_read first and follow what applies. They were written for agents with a shell, so use only the tools you have and say when a step needs one you lack.",
+		"The user's skills describe their conventions and procedures. When a request matches one, read it with skill_read first and follow what applies.",
 		...skills.map((skill) => `- ${skill.name}: ${skill.description}`),
 	].join("\n");
 }
 
-export function createPromptExtension(config: Config): { extension: Extension; reload(): Promise<number> } {
-	const soul = cachedFile(config.soulFile, "You are June, a personal assistant.");
-	const instructions = cachedFile(config.instructionsFile, "");
+/** Where June keeps herself, MEMORY.org's text, and any Syncthing conflict copies of either file. */
+async function personalSection(files: PromptFiles, memory: () => Promise<string>): Promise<string | undefined> {
+	if (files.soulFile === undefined || files.memoryFile === undefined) return undefined;
+	const dir = dirname(files.soulFile);
+	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY)\.sync-conflict-.*\.org$/.test(name)).sort();
+	return [
+		`Your own files, which you keep with read and edit: ${files.soulFile} (identity, shown first in this prompt) and ${files.memoryFile} (what you have learned across conversations, below). Changes apply from your next turn.`,
+		...(conflicts.length > 0 ? [`Syncthing conflict copies in ${dir}: ${conflicts.join(", ")}. Tell the user and leave both copies until they decide.`] : []),
+		"",
+		(await memory()) || `${basename(files.memoryFile)} is empty or does not exist yet.`,
+	].join("\n");
+}
+
+/** `layers` are searched again on reload, so a file added, moved, or renamed since startup is found. */
+export function createPromptExtension(
+	config: Config,
+	layers?: readonly string[],
+): { extension: Extension; reload(): Promise<number> } {
+	let files: PromptFiles = config;
+	const open = (f: PromptFiles) => ({
+		soul: cachedFile(f.soulFile, "You are June, a personal assistant."),
+		memory: cachedFile(f.memoryFile, ""),
+		instructions: cachedFile(f.instructionsFile, ""),
+	});
+	let read = open(files);
 	let skills: Promise<Skill[]> | undefined;
 	const loadSkills = () => (skills ??= findSkills(config.skillDirs));
 
@@ -117,9 +142,10 @@ export function createPromptExtension(config: Config): { extension: Extension; r
 	const extension = defineExtension({
 		name: "june",
 		sections: [
-			section("soul", () => soul(), { tag: false }),
-			section("harness", () => HARNESS, { tag: false }),
-			section("agents", async () => (await instructions()) || undefined, { tag: false }),
+			section("soul", () => read.soul(), { tag: false }),
+			section("harness", () => harness(config.herdr.host), { tag: false }),
+			section("agents", async () => (await read.instructions()) || undefined, { tag: false }),
+			section("memory", () => personalSection(files, read.memory)),
 			section("skills", async () => skillsSection(await loadSkills())),
 			section("today", () => today()),
 		],
@@ -129,7 +155,10 @@ export function createPromptExtension(config: Config): { extension: Extension; r
 		extension,
 		reload: async () => {
 			const refreshed = await findSkills(config.skillDirs);
-			await Promise.all([soul(true), instructions(true)]);
+			if (layers !== undefined) files = promptFiles(layers);
+			const next = open(files);
+			await Promise.all([next.soul(true), next.memory(true), next.instructions(true)]);
+			read = next;
 			skills = Promise.resolve(refreshed);
 			return refreshed.length;
 		},
