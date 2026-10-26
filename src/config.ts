@@ -90,8 +90,8 @@ export function merge(base: Record<string, any>, over: Record<string, any>): Rec
 	return out;
 }
 
-/** The layers' config.json files merged over the defaults. Missing files are skipped. */
-export function loadConfig(p: Paths = paths()): Config {
+/** The layers' config.json files merged, without defaults or checks. Missing files are skipped. */
+export function readLayers(p: Paths): Record<string, any> {
 	let raw: Record<string, any> = {};
 	for (const dir of p.layers) {
 		const file = join(dir, "config.json");
@@ -101,6 +101,12 @@ export function loadConfig(p: Paths = paths()): Config {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error(`${file}: ${(error as Error).message}`);
 		}
 	}
+	return raw;
+}
+
+/** The merged layers over the defaults. */
+export function loadConfig(p: Paths = paths()): Config {
+	const raw = readLayers(p);
 	if (!raw.model?.provider || !raw.model?.modelId) throw new Error(`No model configured in ${p.layers.join(", ")}`);
 	const layerFile = (name: string) => [...p.layers].reverse().map((dir) => join(dir, name)).find((f) => existsSync(f));
 	const herdr = { ...DEFAULTS.herdr, ...raw.herdr };

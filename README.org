@@ -23,7 +23,7 @@ This repository holds code only. June reads configuration and identity in place 
 | Layer     | Directory                 | Kept in                  | Holds                                         |
 |-----------+---------------------------+--------------------------+-----------------------------------------------|
 | Harness   | =~/.agents/june/=          | Git (suderman/agents)    | =config.json= defaults, =AGENTS.md= conventions |
-| Personal  | =~/profile/june/=          | Syncthing                | =SOUL.md=, personal =config.json=               |
+| Personal  | =~/profile/june/=          | Syncthing                | =SOUL.md=, =config.json= with =daemonHost=       |
 | Machine   | =$XDG_CONFIG_HOME/june/=   | this host only           | optional =config.json= overrides                |
 
 =config.json= files merge in path order: objects key by key, arrays and values replaced. =SOUL.md= and =AGENTS.md= come from the most specific directory that has them. Skill directories are configuration too (=skillDirs=); none are built in.
@@ -58,7 +58,7 @@ Keys, with the defaults that apply when no layer sets them:
 
 - =model.provider= names a provider in =providersFile=, Pi's own =models.json=. Its =apiKey= must be a =$VARIABLE=.
 - =envFiles= are dotenv files read for keys at startup, for development. The service gets keys from its =EnvironmentFile=.
-- =daemonHost= is the machine that runs June. On any other machine, =june=, =june ask=, and =june status= run there over SSH when no local daemon answers. =JUNE_LOCAL=1= disables that.
+- =daemonHost= is the machine that runs June. Keep it in a layer every host has, such as a synced one. On any other machine, =june=, =june ask=, and =june status= run there over SSH when no local daemon answers. =JUNE_LOCAL=1= disables that.
 - =skillDirs= are read in place; =skill_read= only reads inside a listed skill's directory.
 - =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"cog": {}, "lux": {}}=; ={"ssh": "target"}= overrides the SSH destination.
 - =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an existing agent on this host.

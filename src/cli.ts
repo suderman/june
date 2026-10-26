@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { createLogger } from "pi-durable-telegram";
-import { loadConfig, paths, readEnvFiles, shortHostname } from "./config.ts";
+import { loadConfig, paths, readEnvFiles, readLayers, shortHostname } from "./config.ts";
 import { startDaemon } from "./daemon.ts";
 import { createJuneModels, providerFromPiModels } from "./models.ts";
 import { findSkills } from "./prompt.ts";
@@ -55,9 +55,10 @@ async function main(argv: string[]): Promise<number> {
 /** The daemon host when it is another machine and no daemon answers here; undefined to run locally. */
 function remoteHost(p: ReturnType<typeof paths>): string | undefined {
 	if (process.env.JUNE_LOCAL === "1" || existsSync(p.socket)) return undefined;
+	// Only daemonHost is needed here; a client-only host may lack the rest of the configuration.
 	let host: string | undefined;
 	try {
-		host = loadConfig(p).daemonHost;
+		host = readLayers(p).daemonHost;
 	} catch {
 		return undefined;
 	}
