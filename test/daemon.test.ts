@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
-import { Client, type Reply } from "../src/protocol.ts";
+import { Client, parseCommand, type Reply } from "../src/protocol.ts";
 import { ask, fakeTelegram, openTestDaemon, tempDir, until } from "./helpers.ts";
 
 test("ask answers over the socket, and a repeated request id is the same submission", async (t) => {
@@ -143,4 +143,57 @@ test("an empty or malformed request gets an error, not a crash", async (t) => {
 	const reply = await client.request({ op: "submit", requestId: "x", text: "  ", source: "cli" });
 	assert.equal(reply.type, "error");
 	assert.equal((await daemon.status()).ok, true);
+});
+
+async function command(socket: string, name: string, args = "") {
+	const client = await Client.open(socket);
+	try {
+		return await client.request({ op: "command", requestId: randomUUID(), name, args });
+	} finally {
+		client.close();
+	}
+}
+
+test("slash commands match Telegram: /stop keeps the queue, /new resets, /compact and /status report", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const faux = fauxProvider({ tokensPerSecond: 20 });
+	faux.setResponses([fauxAssistantMessage(`${"slow ".repeat(200)}end`), fauxAssistantMessage("queued answer"), fauxAssistantMessage("another long one ".repeat(100))]);
+	const daemon = await openTestDaemon({ ...tmp, faux });
+	t.after(() => daemon.close());
+
+	const idle = await command(tmp.paths.socket, "stop");
+	assert.equal(idle.type === "reply" && idle.text, "Nothing is running.");
+
+	const client = await Client.open(tmp.paths.socket);
+	t.after(() => client.close());
+	await client.request({ op: "submit", requestId: "a", text: "first", source: "kitty" });
+	await until(async () => (await daemon.status()).busy);
+	const queued = ask(tmp.paths.socket, "second", "b", "kitty");
+	await until(async () => (await daemon.status()).queued === 1);
+	const stopped = await command(tmp.paths.socket, "stop");
+	assert.equal(stopped.type === "reply" && stopped.text, "Stopped. 1 queued message(s) will continue.");
+	assert.equal((await queued).text, "queued answer");
+
+	await client.request({ op: "submit", requestId: "c", text: "third", source: "kitty" });
+	await until(async () => (await daemon.status()).busy);
+	const fresh = await command(tmp.paths.socket, "new");
+	assert.equal(fresh.type === "reply" && fresh.text, "New context. Old history is kept.\nThe request in progress was stopped.");
+	const kinds = (await daemon.root.context(BG)).entries.map((e) => e.kind);
+	assert.equal(kinds[0], "pi.reset", "the model sees nothing before the reset");
+
+	const compact = await command(tmp.paths.socket, "compact");
+	assert.equal(compact.type === "reply" && compact.text, "Nothing to compact.");
+	const status = await command(tmp.paths.socket, "status");
+	assert.match(status.type === "reply" ? status.text : "", /^June .*\nModel: faux\/faux-1, thinking off\nState: idle, queued: 0\nContext: /);
+	const help = await command(tmp.paths.socket, "help");
+	assert.match(help.type === "reply" ? help.text : "", /^\/new - Start a fresh context/);
+	assert.equal((await command(tmp.paths.socket, "nope")).type, "error");
+});
+
+test("command parsing accepts Telegram's forms and leaves other text alone", () => {
+	assert.deepEqual(parseCommand("/compact keep test names"), { name: "compact", args: "keep test names" });
+	assert.deepEqual(parseCommand("/new@june_bot"), { name: "new", args: "" });
+	assert.equal(parseCommand("/usr/bin is a path"), undefined);
+	assert.equal(parseCommand("please /stop"), undefined);
 });

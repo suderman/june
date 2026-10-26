@@ -25,6 +25,7 @@ import {
 	type TelegramChannel,
 	type TelegramPort,
 } from "pi-durable-telegram";
+import { type CommandScope, runCommand } from "./commands.ts";
 import type { Config, Paths } from "./config.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { readLines, type Reply, type Request, type Status, writeLine } from "./protocol.ts";
@@ -153,7 +154,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
 			socket.once("close", () => clients.delete(socket));
-			serve(socket, { harness, root, status, log });
+			serve(socket, { harness, root, models: options.models, status, log });
 		});
 		log.info("june_started", { pid: process.pid, socket: paths.socket, conversation: root.id, telegram: telegramState });
 
@@ -211,7 +212,7 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 	});
 }
 
-type Scope = { harness: Harness; root: Conversation; status: () => Promise<Status>; log: Logger };
+type Scope = CommandScope & { log: Logger };
 
 function serve(socket: Socket, scope: Scope): void {
 	const abort = new AbortController();
@@ -276,9 +277,10 @@ function serve(socket: Socket, scope: Scope): void {
 					...(settled.status === "unanswered" ? { reason: settled.reason } : {}),
 				});
 			}
-			case "abort":
-				await scope.root.abort(context);
-				return send({ type: "ok", requestId: request.requestId });
+			case "command": {
+				const text = await runCommand(scope, request.name, request.args ?? "", request.requestId, context);
+				return send({ type: "reply", requestId: request.requestId, text });
+			}
 			default:
 				throw new Error(`Unknown op ${(request as { op?: string }).op}`);
 		}

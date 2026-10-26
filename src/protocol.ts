@@ -5,11 +5,27 @@ import type { AgentEvent, SnapshotEvent } from "@earendil-works/pi-durable";
 
 export type Source = "kitty" | "cli";
 
+/** The same commands, in the same order and words, as pi-durable-telegram's bot menu. */
+export const COMMANDS = [
+	{ name: "new", description: "Start a fresh context (history is kept)" },
+	{ name: "stop", description: "Stop the current run; queued messages continue" },
+	{ name: "compact", description: "Compact the context, optionally with instructions" },
+	{ name: "status", description: "Model, context, spend and queue" },
+	{ name: "help", description: "What this bot does" },
+] as const;
+
+/** `/name args` when `text` is one of the commands; undefined for ordinary text. */
+export function parseCommand(text: string): { name: string; args: string } | undefined {
+	const match = /^\/([a-z]+)(?:@\S+)?(?:\s+([\s\S]*))?$/.exec(text.trim());
+	if (match === null || !COMMANDS.some((c) => c.name === match[1])) return undefined;
+	return { name: match[1]!, args: (match[2] ?? "").trim() };
+}
+
 export type Request =
 	| { op: "status"; requestId: string }
 	| { op: "attach"; requestId: string }
 	| { op: "submit"; requestId: string; text: string; source: Source; whenBusy?: "steer" | "followUp"; wait?: boolean }
-	| { op: "abort"; requestId: string };
+	| { op: "command"; requestId: string; name: string; args?: string };
 
 export type Status = {
 	ok: true;
@@ -32,7 +48,7 @@ export type Reply =
 	| { type: "events"; events: readonly AgentEvent[] }
 	| { type: "accepted"; requestId: string; submissionId: number }
 	| { type: "settled"; requestId: string; status: "done" | "unanswered"; text?: string; reason?: string }
-	| { type: "ok"; requestId: string }
+	| { type: "reply"; requestId: string; text: string }
 	| { type: "error"; requestId?: string; message: string };
 
 /** Split a stream into JSON lines; malformed lines go to `onBad`. */

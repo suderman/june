@@ -14,7 +14,19 @@ june doctor          # configuration and dependency checks
 june serve           # the daemon
 #+end_src
 
-Exit codes: 0 answered, 1 unanswered or failed, 2 usage, 3 daemon not running. In the client, Enter sends (as a steer while June is working), Alt+Enter queues a follow-up, Esc interrupts the run, Ctrl+D detaches. Detaching or losing the connection never stops work, and the client reconnects by itself. From another host, run =ssh -t kit june= or =ssh kit june ask "..."=.
+Exit codes: 0 answered, 1 unanswered or failed, 2 usage, 3 daemon not running. In the client, Enter sends (as a steer while June is working), Alt+Enter queues a follow-up, Esc runs =/stop=, Ctrl+D detaches.
+
+The terminal client, =june ask=, and Telegram share the same slash commands, with the same meanings and replies:
+
+| Command                  | Effect                                                         |
+|--------------------------+----------------------------------------------------------------|
+| =/new=                   | Stop the run, drop queued messages, start a fresh context. History stays in storage. |
+| =/stop=                  | Stop the current run; queued messages continue.                |
+| =/compact [instructions]= | Compact the context now.                                      |
+| =/status=                | Model, state, queue, context use, and spend.                   |
+| =/help=                  | List the commands.                                             |
+
+There is one conversation, so =/new= and =/compact= from any surface affect all of them. Command replies are not part of the conversation; in the terminal they disappear on reconnect, as Telegram's replies sit only in the chat. Detaching or losing the connection never stops work, and the client reconnects by itself. From another host, run =ssh -t kit june= or =ssh kit june ask "..."=.
 
 * Files
 

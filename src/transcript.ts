@@ -7,7 +7,8 @@ export type Item =
 	| { kind: "user"; id: string; source: string; text: string }
 	| { kind: "assistant"; id: string; blocks: Block[]; streaming: boolean; error?: string }
 	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; output: string }
-	| { kind: "note"; id: string; text: string };
+	| { kind: "note"; id: string; text: string }
+	| { kind: "reply"; id: string; command: string; text: string };
 
 export class Transcript {
 	items: Item[] = [];
@@ -36,6 +37,11 @@ export class Transcript {
 			if (slot?.toolCallId && !this.#tools.has(slot.toolCallId))
 				this.#tool(slot.toolCallId, slot.toolName ?? slot.name ?? "tool", slot.args);
 		}
+	}
+
+	/** A command's reply. Like a Telegram command reply, it is not part of the conversation; a reconnect drops it. */
+	reply(command: string, text: string): void {
+		this.items.push({ kind: "reply", id: `reply:${this.items.length}`, command, text });
 	}
 
 	apply(events: readonly AgentEvent[]): void {
@@ -139,9 +145,13 @@ export class Transcript {
 			case "june.input":
 				this.items.push({ kind: "user", id, source: entry.data?.source ?? "?", text: entry.data?.text ?? "" });
 				return;
-			case "pi.user":
-				this.items.push({ kind: "user", id, source: "telegram", text: textOf(message?.content) });
+			case "pi.user": {
+				const text = textOf(message?.content);
+				// /stop, from either surface, writes this boundary so queued messages can be placed.
+				if (text === "[/stop]") this.items.push({ kind: "note", id, text: "stopped" });
+				else this.items.push({ kind: "user", id, source: "telegram", text });
 				return;
+			}
 			case "pi.assistant": {
 				const content: Block[] = message?.content ?? [];
 				for (const b of content) if (b.type === "toolCall" && b.id) this.#calls.set(b.id, summarize(b.arguments));

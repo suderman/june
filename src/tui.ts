@@ -2,6 +2,7 @@
 // input. Closing it never touches running work; it reconnects on its own when the daemon restarts.
 import { randomUUID } from "node:crypto";
 import {
+	CombinedAutocompleteProvider,
 	type Component,
 	Container,
 	Editor,
@@ -16,7 +17,7 @@ import {
 	VStack,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { Client, type Reply } from "./protocol.ts";
+import { Client, COMMANDS, parseCommand, type Reply } from "./protocol.ts";
 import { type Item, Transcript } from "./transcript.ts";
 
 const esc = (code: string, off: string) => (s: string) => `\x1b[${code}m${s}\x1b[${off}m`;
@@ -106,6 +107,8 @@ function component(item: Item): Component[] {
 		}
 		case "note":
 			return [new Line(c.muted(`── ${item.text}`))];
+		case "reply":
+			return [new Line(), new Wrapped(c.muted(item.text), c.muted(`/${item.command} `))];
 	}
 }
 
@@ -124,7 +127,7 @@ export async function runTui(socketPath: string): Promise<void> {
 	const view = new TranscriptView();
 	const status = new Line();
 	const editor = new Editor(tui, editorTheme, { paddingX: 1 });
-	const footer = new Line(c.muted("enter send · alt+enter queue while busy · esc interrupt · ctrl+d detach"));
+	const footer = new Line(c.muted("enter send · alt+enter queue while busy · esc /stop · /help · ctrl+d detach"));
 	tui.setLayoutRoot(
 		new VStack([
 			{ component: header, basis: "auto" },
@@ -169,11 +172,26 @@ export async function runTui(socketPath: string): Promise<void> {
 			return redraw();
 		}
 		flash = undefined;
+		const command = parseCommand(text);
+		if (command !== undefined) return run(command.name, command.args);
 		const reply = await client.request({ op: "submit", requestId: randomUUID(), text, source: "kitty", whenBusy });
 		if (reply.type === "error") {
 			flash = reply.message;
 			redraw();
 		}
+	};
+
+	const run = async (name: string, args = "") => {
+		if (client === undefined) return;
+		if (name === "compact") {
+			flash = "compacting…";
+			redraw();
+		}
+		const reply = await client.request({ op: "command", requestId: randomUUID(), name, args });
+		flash = undefined;
+		if (reply.type === "reply") transcript.reply(name, reply.text);
+		else if (reply.type === "error") flash = reply.message;
+		redraw();
 	};
 
 	editor.onSubmit = (text) => {
@@ -191,7 +209,7 @@ export async function runTui(socketPath: string): Promise<void> {
 			return { consume: true };
 		}
 		if (matchesKey(data, "escape") && !editor.isShowingAutocomplete()) {
-			if (transcript.running && client) void client.request({ op: "abort", requestId: randomUUID() });
+			if (transcript.running) void run("stop");
 			return { consume: true };
 		}
 		if (matchesKey(data, "alt+enter")) {
@@ -202,6 +220,7 @@ export async function runTui(socketPath: string): Promise<void> {
 		}
 		return undefined;
 	});
+	editor.setAutocompleteProvider(new CombinedAutocompleteProvider([...COMMANDS], process.cwd()));
 	tui.setFocus(editor);
 	tui.start();
 	redraw();

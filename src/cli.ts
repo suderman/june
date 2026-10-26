@@ -7,7 +7,7 @@ import { loadConfig, paths, readEnvFiles, readLayers, shortHostname } from "./co
 import { startDaemon } from "./daemon.ts";
 import { createJuneModels, providerFromPiModels } from "./models.ts";
 import { findSkills } from "./prompt.ts";
-import { Client, DaemonUnavailable, type Reply, type Status } from "./protocol.ts";
+import { Client, DaemonUnavailable, parseCommand, type Reply, type Status } from "./protocol.ts";
 import { runProcess } from "./tools/herdr.ts";
 
 const USAGE = `usage:
@@ -115,6 +115,17 @@ async function ask(socket: string, args: string[], json: boolean): Promise<numbe
 	const client = await connect(socket);
 	if (client === undefined) return 3;
 	const requestId = randomUUID();
+	const command = parseCommand(text);
+	if (command !== undefined) {
+		const reply = await client.request({ op: "command", requestId, ...command });
+		client.close();
+		if (reply.type !== "reply") {
+			console.error(reply.type === "error" ? reply.message : "unexpected reply");
+			return 1;
+		}
+		console.log(json ? JSON.stringify({ requestId, command: command.name, text: reply.text }) : reply.text);
+		return 0;
+	}
 	const settled = new Promise<Extract<Reply, { type: "settled" }>>((resolve) =>
 		client.on((reply) => {
 			if (reply.type === "settled" && reply.requestId === requestId) resolve(reply);
