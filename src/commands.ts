@@ -1,5 +1,5 @@
-// Slash commands for the terminal client, with the same names, meanings, and replies as pi-durable-telegram's, so
-// /new in Kitty does what /new does in Telegram. That package does not export its command handlers.
+// Terminal slash commands. Shared commands match pi-durable-telegram; /reload is terminal-only.
+// That package exports neither its command handlers nor a custom-command hook.
 import type { Context } from "@earendil-works/chord";
 import type { Message, Models, Usage } from "@earendil-works/pi-ai";
 import { estimateContextTokens } from "@earendil-works/pi-ai/utils/estimate";
@@ -11,6 +11,7 @@ export type CommandScope = {
 	readonly root: Conversation;
 	readonly models: Models;
 	readonly status: () => Promise<Status>;
+	readonly reload: () => Promise<number>;
 };
 
 export async function runCommand(scope: CommandScope, name: string, args: string, requestId: string, context: Context) {
@@ -23,6 +24,8 @@ export async function runCommand(scope: CommandScope, name: string, args: string
 			return runCompact(scope, args, context);
 		case "status":
 			return runStatus(scope, context);
+		case "reload":
+			return `Reloaded prompt files and skills (${await scope.reload()}). Chat kept. Applies on the next model turn; code and config changes need a restart.`;
 		case "help":
 			return COMMANDS.map((c) => `/${c.name} - ${c.description}`).join("\n");
 		default:

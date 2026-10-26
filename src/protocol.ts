@@ -5,12 +5,13 @@ import type { AgentEvent, SnapshotEvent } from "@earendil-works/pi-durable";
 
 export type Source = "kitty" | "cli" | "follow";
 
-/** The same commands, in the same order and words, as pi-durable-telegram's bot menu. */
+/** Terminal commands. All except /reload match pi-durable-telegram's bot menu. */
 export const COMMANDS = [
 	{ name: "new", description: "Start a fresh context (history is kept)" },
 	{ name: "stop", description: "Stop the current run; queued messages continue" },
 	{ name: "compact", description: "Compact the context, optionally with instructions" },
 	{ name: "status", description: "Model, context, spend and queue" },
+	{ name: "reload", description: "Reload prompt files and skills; keep the chat" },
 	{ name: "help", description: "What this bot does" },
 ] as const;
 

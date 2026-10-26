@@ -93,7 +93,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			createHerdrExtension(config, herdr),
 			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, herdr, instanceId(paths.state))] : []),
 		];
-		for (const extension of [createPromptExtension(config), ...extensions]) registry.install(extension);
+		const prompt = createPromptExtension(config);
+		for (const extension of [prompt.extension, ...extensions]) registry.install(extension);
 
 		const telegram = createTelegram(options, model, log);
 		if (telegram !== undefined) registry.install(telegram.extension);
@@ -163,7 +164,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
 			socket.once("close", () => clients.delete(socket));
-			serve(socket, { harness, root, models: options.models, status, log });
+			serve(socket, { harness, root, models: options.models, status, reload: prompt.reload, log });
 		});
 		log.info("june_started", { pid: process.pid, socket: paths.socket, conversation: root.id, telegram: telegramState });
 

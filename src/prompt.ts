@@ -13,13 +13,13 @@ const HARNESS = `How this harness works:
 - Never claim an edit, message, or prompt happened until its tool result confirms it. A tool call interrupted by a restart may already have taken effect, so check the current state before repeating it.`;
 
 /** `render` re-reads `path` only when its size or mtime changes, so the prompt text stays stable for caching. */
-function cachedFile(path: string | undefined, missing: string): () => Promise<string> {
+function cachedFile(path: string | undefined, missing: string): (force?: boolean) => Promise<string> {
 	let cached: { stamp: string; text: string } | undefined;
-	return async () => {
+	return async (force = false) => {
 		const info = path === undefined ? undefined : await stat(path).catch(() => undefined);
 		if (info === undefined) return missing;
 		const stamp = `${info.mtimeMs}:${info.size}`;
-		if (cached?.stamp !== stamp) cached = { stamp, text: (await readFile(path!, "utf8")).trim() };
+		if (force || cached?.stamp !== stamp) cached = { stamp, text: (await readFile(path!, "utf8")).trim() };
 		return cached.text;
 	};
 }
@@ -72,7 +72,7 @@ function skillsSection(skills: readonly Skill[]): string {
 	].join("\n");
 }
 
-export function createPromptExtension(config: Config): Extension {
+export function createPromptExtension(config: Config): { extension: Extension; reload(): Promise<number> } {
 	const soul = cachedFile(config.soulFile, "You are June, a personal assistant.");
 	const instructions = cachedFile(config.instructionsFile, "");
 	let skills: Promise<Skill[]> | undefined;
@@ -114,7 +114,7 @@ export function createPromptExtension(config: Config): Extension {
 		}),
 	});
 
-	return defineExtension({
+	const extension = defineExtension({
 		name: "june",
 		sections: [
 			section("soul", () => soul(), { tag: false }),
@@ -125,6 +125,15 @@ export function createPromptExtension(config: Config): Extension {
 		],
 		tools: [skillRead, clock],
 	});
+	return {
+		extension,
+		reload: async () => {
+			const refreshed = await findSkills(config.skillDirs);
+			await Promise.all([soul(true), instructions(true)]);
+			skills = Promise.resolve(refreshed);
+			return refreshed.length;
+		},
+	};
 }
 
 /** The date changes the prompt once a day; the exact time comes from the clock tool. Both use the system zone. */

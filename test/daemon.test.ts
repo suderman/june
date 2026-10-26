@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { mkdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
-import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { Client, parseCommand, type Reply } from "../src/protocol.ts";
 import { ask, fakeTelegram, openTestDaemon, tempDir, until } from "./helpers.ts";
 
@@ -171,6 +173,9 @@ test("slash commands match Telegram: /stop keeps the queue, /new resets, /compac
 	await until(async () => (await daemon.status()).busy);
 	const queued = ask(tmp.paths.socket, "second", "b", "kitty");
 	await until(async () => (await daemon.status()).queued === 1);
+	assert.equal((await command(tmp.paths.socket, "reload")).type, "reply");
+	assert.equal((await daemon.status()).busy, true, "reload leaves the current run alone");
+	assert.equal((await daemon.status()).queued, 1, "reload leaves queued inputs alone");
 	const stopped = await command(tmp.paths.socket, "stop");
 	assert.equal(stopped.type === "reply" && stopped.text, "Stopped. 1 queued message(s) will continue.");
 	assert.equal((await queued).text, "queued answer");
@@ -191,9 +196,89 @@ test("slash commands match Telegram: /stop keeps the queue, /new resets, /compac
 	assert.equal((await command(tmp.paths.socket, "nope")).type, "error");
 });
 
+test("/reload refreshes prompt files and skill discovery without a model call or chat reset", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const skills = join(tmp.dir, "skills");
+	const oldSkill = join(skills, "old");
+	const newSkill = join(skills, "new");
+	const soul = join(tmp.dir, "SOUL.md");
+	const instructions = join(tmp.dir, "AGENTS.md");
+	await mkdir(oldSkill, { recursive: true });
+	await writeFile(join(oldSkill, "SKILL.md"), "---\nname: old\ndescription: Old skill\n---\nOld body.");
+	await writeFile(soul, "Soul before.");
+	await writeFile(instructions, "Rules before.");
+	const stamp = await stat(soul);
+	const faux = fauxProvider();
+	// Durable keeps system updates in the transcript; later sections replace earlier ones by name.
+	const prompt = (ctx: TranscriptContext) => JSON.stringify(Object.assign({}, ...ctx.messages.filter((m) => m.role === "system").map((m) => m.sections)));
+	faux.setResponses([
+		(ctx) => {
+			assert.match(prompt(ctx), /Soul before\./);
+			assert.match(prompt(ctx), /Rules before\./);
+			assert.match(prompt(ctx), /old: Old skill/);
+			return fauxAssistantMessage("Before reload.");
+		},
+	]);
+	const daemon = await openTestDaemon({ ...tmp, faux, config: { soulFile: soul, instructionsFile: instructions, skillDirs: [skills] } });
+	t.after(() => daemon.close());
+	await ask(tmp.paths.socket, "before");
+
+	await rm(oldSkill, { recursive: true });
+	await mkdir(newSkill);
+	await writeFile(join(newSkill, "SKILL.md"), "---\nname: new\ndescription: New skill\n---\nNew body.");
+	await writeFile(soul, "Soul after!."); // Same size and mtime: /reload must bypass the file cache.
+	await utimes(soul, stamp.atime, stamp.mtime);
+	await writeFile(instructions, "Rules after.");
+	const before = (await daemon.root.context(BG)).entries;
+	const conversation = (await daemon.status()).conversation;
+	const reloaded = await command(tmp.paths.socket, "reload");
+	assert.match(reloaded.type === "reply" ? reloaded.text : "", /^Reloaded prompt files and skills \(1\)\. Chat kept\./);
+	assert.equal(faux.state.callCount, 1, "reload never calls the model");
+	assert.deepEqual((await daemon.root.context(BG)).entries, before, "reload adds no entries and drops no history");
+	assert.equal((await daemon.status()).conversation, conversation);
+
+	faux.setResponses([
+		(ctx) => {
+			assert.match(prompt(ctx), /Soul after!\./);
+			assert.match(prompt(ctx), /Rules after\./);
+			assert.match(prompt(ctx), /new: New skill/);
+			assert.doesNotMatch(prompt(ctx), /old: Old skill/);
+			return fauxAssistantMessage([fauxToolCall("skill_read", { name: "new" })], { stopReason: "toolUse" });
+		},
+		(ctx) => {
+			assert.match(JSON.stringify(ctx.messages.at(-1)), /New body\./);
+			return fauxAssistantMessage([fauxToolCall("skill_read", { name: "old" })], { stopReason: "toolUse" });
+		},
+		(ctx) => {
+			assert.match(JSON.stringify(ctx.messages.at(-1)), /No skill named old/);
+			return fauxAssistantMessage("After reload.");
+		},
+	]);
+	assert.equal((await ask(tmp.paths.socket, "after")).text, "After reload.");
+
+	await writeFile(join(newSkill, "SKILL.md"), "---\nname: new\ndescription: Changed description\n---\nChanged body.");
+	await command(tmp.paths.socket, "reload");
+	faux.setResponses([
+		(ctx) => {
+			assert.match(prompt(ctx), /new: Changed description/);
+			assert.doesNotMatch(prompt(ctx), /new: New skill/);
+			return fauxAssistantMessage([fauxToolCall("skill_read", { name: "new" })], { stopReason: "toolUse" });
+		},
+		(ctx) => {
+			assert.match(JSON.stringify(ctx.messages.at(-1)), /Changed body\./);
+			return fauxAssistantMessage("Changed.");
+		},
+	]);
+	assert.equal((await ask(tmp.paths.socket, "changed")).text, "Changed.");
+	const help = await command(tmp.paths.socket, "help");
+	assert.match(help.type === "reply" ? help.text : "", /\/reload - Reload prompt files and skills/);
+});
+
 test("command parsing accepts Telegram's forms and leaves other text alone", () => {
 	assert.deepEqual(parseCommand("/compact keep test names"), { name: "compact", args: "keep test names" });
 	assert.deepEqual(parseCommand("/new@june_bot"), { name: "new", args: "" });
+	assert.deepEqual(parseCommand("/reload"), { name: "reload", args: "" });
 	assert.equal(parseCommand("/usr/bin is a path"), undefined);
 	assert.equal(parseCommand("please /stop"), undefined);
 });
