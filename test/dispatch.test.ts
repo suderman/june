@@ -73,6 +73,8 @@ test("the nudge starts the dispatcher unit and reports its scan", async (t) => {
 	t.after(f.cleanup);
 	assert.match(await f.dispatch.nudge(), /settling/);
 	assert.deepEqual(f.runs[0], ["systemctl", "--user", "start", "org-dispatch.service"]);
+	await f.dispatch.kick();
+	assert.deepEqual(f.runs.at(-1), ["systemctl", "--user", "start", "--no-block", "org-dispatch.service"], "queueing does not wait for the launch");
 });
 
 test("the body always has the same shape, whatever the model sends", () => {

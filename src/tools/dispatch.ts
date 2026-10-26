@@ -137,6 +137,11 @@ export class Dispatch {
 		const scan = await this.#run(["org-dispatch", "scan"], 60_000);
 		return scan.trim() || "Nothing waiting to launch.";
 	}
+
+	/** Start this host's dispatcher without waiting for it, so a task June just wrote launches now. */
+	async kick(): Promise<void> {
+		await this.#run(["systemctl", "--user", "start", "--no-block", "org-dispatch.service"], 30_000);
+	}
 }
 
 /** One id per state directory, so request keys stay unique if the database is ever recreated. */
@@ -163,7 +168,7 @@ export function createDispatchExtension(
 		tools: [
 			defineTool({
 				name: "org_queue_task",
-				description: `Queue new work for an unattended Pi agent: write a new AUTO heading with one host tag (${hosts.join(", ")}) into an Org agenda file. The dispatcher on that host launches it about two minutes after the text last changed, and the agent ends at EVAL for the user's review unless review is false. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task first. The tool writes the body from reason, scope, and checklist.`,
+				description: `Queue new work for an unattended Pi agent: write a new AUTO heading with one host tag (${hosts.join(", ")}) into an Org agenda file. The dispatcher on that host launches it, and this tool starts the one on this host right away, and the agent ends at EVAL for the user's review unless review is false. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task first. The tool writes the body from reason, scope, and checklist.`,
 				parameters: Type.Object({
 					file: Type.String({ description: "Org file under ~/org, usually the project's <project>.org" }),
 					title: Type.String({ description: "Concise verb-led heading title, without keyword or tags" }),
@@ -189,13 +194,20 @@ export function createDispatchExtension(
 						const input = { id: result.id, title: args.title, host: args.host, queuedAt: Date.now() };
 						await api.commit((tx) => follow(tx, followTask, input, api.conversationId as unknown as number), context);
 					}
-					const note = "You are following this task and will get [follow] messages when it fails to launch, blocks, holds, or finishes. Tell the user you will report back.";
+					// The dispatcher launches headings June wrote without settling, so start it now instead of waiting a minute.
+					let started = "";
+					if (result.written && args.host === config.herdr.host)
+						started = await dispatch.kick().then(
+							() => " The dispatcher was started and launches it now.",
+							(error: Error) => ` Starting the dispatcher failed (${error.message}); its timer runs within a minute.`,
+						);
+					const note = `You are following this task and will get [follow] messages when it fails to launch, blocks, holds, or finishes.${started} Tell the user you will report back.`;
 					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\n${note}` }] };
 				},
 			}),
 			defineTool({
 				name: "org_dispatch_now",
-				description: `Run the dispatcher on ${config.herdr.host} now instead of waiting for its one-minute timer, then show what it would launch. A task still settling launches once its text has been unchanged for two minutes.`,
+				description: `Run the dispatcher on ${config.herdr.host} now and show what it would launch. Queueing already starts it; use this to retry a task that did not launch.`,
 				parameters: Type.Object({}),
 				// Starting the dispatcher twice is harmless: it holds a lock and skips running tasks.
 				replay: "safe",
