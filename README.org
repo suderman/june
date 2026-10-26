@@ -74,9 +74,15 @@ Keys, with the defaults that apply when no layer sets them:
 - =daemonHost= is the machine that runs June. Keep it in a layer every host has, such as a synced one. On any other machine, =june=, =june ask=, and =june status= run there over SSH when no local daemon answers. =JUNE_LOCAL=1= disables that.
 - =skillDirs= are read in place; =skill_read= only reads inside a listed skill's directory.
 - =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"cog": {}, "lux": {}}=; ={"ssh": "target"}= overrides the SSH destination.
-- =dispatch.hosts= are the machines June may queue AUTO tasks for; the first is the default. Empty, the default, leaves out =org_queue_task= and =org_dispatch_now=.
+- =dispatch.hosts= are the machines June may queue AUTO tasks for; the first is the default. Empty, the default, leaves out =org_queue_task=, =org_resume_task=, and =org_dispatch_now=.
 - =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an existing agent on this host.
 - =telegram= turns the channel on. Leave it out to run without Telegram. The allowed user id is personal, so it belongs in =~/profile/june/config.json=.
+
+* Resuming existing tasks
+
+When the user explicitly asks to start or resume an existing TODO, EVAL, or HOLD task, June can use =org_resume_task=. It uses the shared =org-edit= command with an expected-state check and a replay key, records the user's instruction in Dialog, selects one host, sets review on and deploy off, and preserves the task ID, scope, history, other properties, and schedule. A missing ID is created. A working or blocked linked agent prevents the change. June starts this host's dispatcher, and a new follow watches this run even if a previous run already reached EVAL. Other hosts use their dispatcher timer; existing SCHEDULED dates still apply.
+
+This needs the =org-edit= resume options from =suderman/agents=. Coding workers still must not set AUTO. That distinction is an instruction rule, not a security boundary.
 
 * Telegram setup
 

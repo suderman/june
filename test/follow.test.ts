@@ -76,6 +76,58 @@ test("a queued task is followed through the daemon until it reaches EVAL", async
 	assert.equal(inspection.tasks.filter((task) => task.record.kind === "june.follow").length, 0);
 });
 
+test("resuming after EVAL and HOLD follows each new run without duplicate reports", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "org");
+	const file = join(root, "todo.org");
+	await mkdir(root, { recursive: true });
+	await writeFile(file, "#+TITLE: Todo\n");
+	await writeFile(join(tmp.dir, "agenda"), `${file}\n`);
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda") }, dispatch: { hosts: ["kit"] } };
+	let kicks = 0;
+	const extension = createDispatchExtension(config, new Org(root), new Herdr(config.herdr, async () => "{}"), "inst", async (args) => {
+		if (args[0] === "systemctl") { kicks++; return ""; }
+		assert.equal(args[0], "org-edit");
+		const text = await readFile(file, "utf8");
+		const expected = args[args.indexOf("--expect") + 1]!;
+		assert.ok(text.includes(`* ${expected} Check docs`));
+		const key = args[args.indexOf("--request") + 1]!;
+		await writeFile(file, text.replace(`* ${expected} Check docs`, "* AUTO Check docs").replace(/:JUNE_REQUEST: .+/, `:JUNE_REQUEST: ${key}`));
+		const id = /^:ID: (.+)$/m.exec(text)![1]!;
+		return JSON.stringify({ id, title: "Check docs", host: "kit", written: true });
+	}, { intervalMs: 40, launchMs: 60_000, maxMs: 3_600_000 });
+	const faux = fauxProvider();
+	const resume = (expected: "EVAL" | "HOLD") => fauxAssistantMessage([fauxToolCall("org_resume_task", {
+		file: "todo.org", heading: "Check docs", expected, host: "kit", note: "Jon asked for another pass.",
+	})], { stopReason: "toolUse" });
+	faux.setResponses([
+		fauxAssistantMessage([fauxToolCall("org_queue_task", { file: "todo.org", title: "Check docs", reason: "Jon asked.", scope: "Check docs.", checklist: ["Compare"], host: "kit" })], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Queued."), fauxAssistantMessage("Ready for review."),
+		resume("EVAL"), fauxAssistantMessage("Resumed."), fauxAssistantMessage("The agent has a question."),
+		resume("HOLD"), fauxAssistantMessage("Resumed again."), fauxAssistantMessage("Finished."),
+	]);
+	const daemon = await openTestDaemon({ ...tmp, faux, config, extensions: [extension] });
+	t.after(() => daemon.close());
+	const reports = async () => (await daemon.root.context(BG)).entries.filter((e) => (e.data as { source?: string })?.source === "follow");
+	await ask(tmp.paths.socket, "queue it");
+	const originalId = /^:ID: (.+)$/m.exec(await readFile(file, "utf8"))![1];
+	for (const [index, state] of ["EVAL", "HOLD", "DONE"].entries()) {
+		if (index > 0) await ask(tmp.paths.socket, "resume it");
+		await writeFile(file, (await readFile(file, "utf8")).replace("* AUTO Check docs", `* ${state} Check docs`));
+		await until(async () => (await reports()).length === index + 1 && !(await daemon.status()).busy && faux.state.callCount === (index + 1) * 3);
+		assert.match(JSON.stringify((await reports()).at(-1)!.data), new RegExp(state));
+	}
+	await new Promise((resolve) => setTimeout(resolve, 150));
+	assert.equal((await reports()).length, 3);
+	assert.equal(kicks, 3, "each queue or resume nudges dispatcher");
+	const final = await readFile(file, "utf8");
+	assert.equal(/^:ID: (.+)$/m.exec(final)![1], originalId);
+	assert.equal(final.match(/^\* /gm)?.length, 1, "resume never creates another task");
+	const inspection = await daemon.harness.inspect(BG);
+	assert.equal(inspection.tasks.filter((task) => task.record.kind === "june.follow").length, 0, "superseded HOLD watcher also ended");
+});
+
 test("following survives a daemon restart", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);

@@ -1,11 +1,10 @@
 // Follow the tasks June queued: a durable background task per heading checks Org and Herdr on a timer, without a
 // model call, and tells June only when something changed that the user would want to hear.
-import type { Context } from "@earendil-works/chord";
 import { defineDoc, defineTask, type Tx } from "@earendil-works/pi-durable";
 import type { Herdr } from "./herdr.ts";
 import type { Org } from "./org.ts";
 
-export type FollowInput = { id: string; title: string; host: string; queuedAt: number };
+export type FollowInput = { id: string; title: string; host: string; queuedAt: number; request?: string };
 type FollowState = { phase: "watch"; due: number; checks: number; last: string };
 
 /** Org ID → follow task, so a task is followed once however often it is queued or replayed. */
@@ -93,6 +92,13 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 				const { due, checks, last } = task.state.checkpoint;
 				// The due time is in the checkpoint, so a restart keeps the schedule instead of starting it over.
 				if (runtime.now() < due) await runtime.sleep(due, context);
+				let superseded = false;
+				await runtime.commit(async (tx) => {
+					const doc = await tx.doc(Follows);
+					superseded = doc.ids[task.input.id] !== Number(task.id);
+					return superseded ? { status: "terminal", outcome: { status: "completed", result: null } } : undefined;
+				}, context);
+				if (superseded) return;
 				const seen = await observe(task.input).catch((error: Error) => {
 					runtime.report(error);
 					return undefined;
@@ -105,7 +111,7 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 					await conversation?.submit(
 						{
 							type: "input",
-							requestId: `follow:${task.input.id}:${next.signal}:${checks}`,
+							requestId: `follow:${task.input.request ?? task.input.id}:${next.signal}:${checks}`,
 							content: `[follow] ${next.say}`,
 							entry: { kind: "june.input", data: { source: "follow", text: next.say } },
 						},
@@ -127,12 +133,16 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 
 export type FollowTask = ReturnType<typeof createFollowTask>;
 
-/** Start following `input.id` unless a follow task already exists for it. */
+/** One follow per queue request. Resuming replaces a previous run's watcher, even after it ended. */
 export async function follow(tx: Tx, task: FollowTask, input: FollowInput, conversationId: number): Promise<number> {
 	const doc = await tx.doc(Follows);
 	const known = doc.ids[input.id];
-	if (known !== undefined) return known;
+	if (known !== undefined) {
+		const previous = await tx.task(known as never);
+		// This document only records june.follow tasks, whose input is FollowInput.
+		if (previous && (previous.input as FollowInput).request === input.request) return known;
+	}
 	const id = await tx.createTask(task, input, { ownership: { kind: "conversation" }, background: true, conversationId: conversationId as never });
-	doc.ids[input.id] = id as unknown as number;
+	doc.ids[input.id] = Number(id);
 	return doc.ids[input.id]!;
 }

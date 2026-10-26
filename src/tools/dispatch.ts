@@ -1,5 +1,5 @@
 // Queue new AUTO tasks for org-dispatch, and nudge this host's dispatcher. June writes the heading as text, as agents
-// do; states and dates on existing headings stay with org-edit. The dispatcher, not June, launches the work.
+// do; resuming existing headings goes through org-edit. The dispatcher, not June, launches the work.
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
@@ -72,6 +72,15 @@ export function insertAfterPreamble(content: string, text: string): string {
 	return `${before ? `${before}\n\n` : ""}${text}\n${content.slice(first.index)}`;
 }
 
+export type ResumeRequest = {
+	file: string;
+	heading: string;
+	expected: "TODO" | "EVAL" | "HOLD";
+	host: string;
+	note: string;
+	key: string;
+};
+
 export class Dispatch {
 	readonly #org: Org;
 	readonly #config: Config;
@@ -122,6 +131,34 @@ export class Dispatch {
 			return { file: this.#org.rel(path), written: true, id, heading: `AUTO ${request.title} :${request.host}:` };
 		}
 		throw new Error(`${this.#org.rel(path)} kept changing; try again shortly`);
+	}
+
+	/** Resume the same heading, with Org applying the state, tags, and Dialog entry in one save. */
+	async resume(request: ResumeRequest, herdr: Herdr) {
+		if (!this.#config.dispatch.hosts.includes(request.host)) throw new Error(`No allowed dispatcher on ${request.host}`);
+		if (!["TODO", "EVAL", "HOLD"].includes(request.expected)) throw new Error("Only TODO, EVAL, or HOLD tasks can resume");
+		if (!request.note.trim() || /[\n\r]/.test(request.note)) throw new Error("note must be one non-empty line recording Jon's instruction");
+		const path = await this.#target(request.file);
+		const task = await this.#org.read(request.file, request.heading);
+		const properties = task.text.split(/\n\*+ /, 1)[0]!;
+		const replay = properties.split("\n").some((line) => line.trim() === `:JUNE_REQUEST: ${request.key}`);
+		if (!replay) {
+			for (const host of new Set(task.herdrSessions.map((session) => session.host))) {
+				const agents = await herdr.agents(host);
+				if (agents.some((agent) => ["working", "blocked"].includes(agent.status) && task.herdrSessions.some((session) => session.host === host && session.session === agent.session)))
+					throw new Error(`The task still has an active agent on ${host}; wait for it to finish`);
+			}
+		}
+		const out = await this.#run([
+			"org-edit", "todo", path, request.heading, "AUTO", "--expect", request.expected,
+			"--request", request.key, "--host", request.host, "--note", request.note.trim(),
+		], 60_000);
+		try {
+			const result = JSON.parse(out) as { id: string; title: string; host: string; written: boolean };
+			return { ...result, file: this.#org.rel(path) };
+		} catch (cause) {
+			throw new Error("org-edit did not return a resume result; check the installed org-edit version", { cause });
+		}
 	}
 
 	#located(content: string, index: number) {
@@ -192,7 +229,7 @@ export function createDispatchExtension(
 					// Follow it, once, whether this call wrote the heading or a replay found it.
 					if (result.id !== undefined) {
 						const input = { id: result.id, title: args.title, host: args.host, queuedAt: Date.now() };
-						await api.commit((tx) => follow(tx, followTask, input, api.conversationId as unknown as number), context);
+						await api.commit((tx) => follow(tx, followTask, input, Number(api.conversationId)), context);
 					}
 					// The dispatcher launches headings June wrote without settling, so start it now instead of waiting a minute.
 					let started = "";
@@ -203,6 +240,33 @@ export function createDispatchExtension(
 						);
 					const note = `You are following this task and will get [follow] messages when it fails to launch, blocks, holds, or finishes.${started} Tell the user you will report back.`;
 					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\n${note}` }] };
+				},
+			}),
+			defineTool({
+				name: "org_resume_task",
+				description: "When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and deploy off, and select one host. Refuse an active agent. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work.",
+				parameters: Type.Object({
+					file: Type.String({ description: "Org agenda file under ~/org" }),
+					heading: Type.String({ description: "Exact title or id:UUID, as org_read_task accepts" }),
+					expected: Type.Union([Type.Literal("TODO"), Type.Literal("EVAL"), Type.Literal("HOLD")], { description: "Current state just read; a stale request is refused" }),
+					host: Type.String({ description: `Keep the existing host unless the user changes it; otherwise default ${hosts[0]}. Allowed: ${hosts.join(", ")}` }),
+					note: Type.String({ description: "One line recording Jon's request and any answer or revised scope, naming Jon rather than writing you" }),
+				}),
+				replay: "safe",
+				execute: async (args, api, context) => {
+					const key = `${instance}:${api.taskId}`;
+					const result = await dispatch.resume({ ...args, key }, herdr);
+					await api.commit((tx) => follow(tx, followTask, {
+						id: result.id, title: result.title, host: result.host, queuedAt: Date.now(), request: key,
+					}, Number(api.conversationId)), context);
+					// A repeated kick is harmless, including recovery after a crash between the save and kick.
+					const started = args.host === config.herdr.host
+						? await dispatch.kick().then(
+							() => " The dispatcher was started; it launches when eligible.",
+							(error: Error) => ` Starting the dispatcher failed (${error.message}); its timer will retry.`,
+						)
+						: " That host's dispatcher will pick it up on its timer.";
+					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\nYou are following this task and will get [follow] reports.${started} Tell the user you will report back. Existing SCHEDULED dates still apply.` }] };
 				},
 			}),
 			defineTool({
