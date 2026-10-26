@@ -57,6 +57,43 @@ const editorTheme: EditorTheme = {
 	},
 };
 
+// What June is up to while the old conversation is summarized and her memory reviewed. One phrase every six seconds.
+const CHORES = [
+	"boiling the billy",
+	"rolling up the swag",
+	"tidying the paddock",
+	"sorting the yarns worth keeping",
+	"jotting the good bits in MEMORY.org",
+	"packing the esky",
+	"herding the loose ends",
+	"folding the old chat neatly",
+	"checking what's worth remembering",
+	"shooing the drop bears out of the context",
+];
+const LATE = ["nearly there, reckon", "still at it, don't rush me", "this one's a big swag"];
+const TRACK = 8;
+
+/**
+ * A kangaroo hopping along a track, a chore, and the time so far. Past a minute she gets a touch defensive. Noto's
+ * kangaroo faces left and a terminal cannot mirror a glyph, so she hops right to left, footprints behind her, and starts
+ * again from the right.
+ */
+export function compactingStatus(elapsedMs: number): string {
+	const at = TRACK - 1 - (Math.floor(elapsedMs / 250) % TRACK);
+	const track = Array.from({ length: TRACK }, (_, i) => (i === at ? "🦘" : i > at ? "·" : " ")).join("");
+	const seconds = Math.floor(elapsedMs / 1000);
+	const phrases = seconds >= 60 ? LATE : CHORES;
+	const chore = phrases[Math.floor(seconds / 6) % phrases.length]!;
+	const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+	return `${c.accent(track)} ${c.italic(`${chore}…`)} ${c.muted(clock)}`;
+}
+
+/** m:ss for a finished compaction. */
+const took = (ms: number) => {
+	const seconds = Math.round(ms / 1000);
+	return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+};
+
 class Line implements Component {
 	text: string;
 	constructor(text = "") {
@@ -141,6 +178,9 @@ export async function runTui(socketPath: string): Promise<void> {
 	let client: Client | undefined;
 	let connection: "connecting" | "online" | "offline" = "connecting";
 	let flash: string | undefined;
+	// /compact's own start, before the daemon's compaction event arrives; the transcript's wins once it does.
+	let compactStarted: number | undefined;
+	let ticker: ReturnType<typeof setInterval> | undefined;
 	let done!: () => void;
 	const finished = new Promise<void>((resolve) => (done = resolve));
 
@@ -153,12 +193,20 @@ export async function runTui(socketPath: string): Promise<void> {
 		if (transcript.queued) parts.push(c.muted(`${transcript.queued} queued`));
 		if (transcript.notice) parts.push(c.err(transcript.notice));
 		if (flash) parts.push(c.err(flash));
+		const since = transcript.compacting ?? compactStarted;
+		if (since !== undefined) parts.push(compactingStatus(Date.now() - since));
+		if (since !== undefined && ticker === undefined) ticker = setInterval(redraw, 250);
+		if (since === undefined && ticker !== undefined) {
+			clearInterval(ticker);
+			ticker = undefined;
+		}
 		status.text = parts.join(c.muted(" · "));
 		view.update(transcript);
 		tui.requestRender();
 	};
 
 	const exit = () => {
+		clearInterval(ticker);
 		client?.close();
 		tui.stop();
 		done();
@@ -184,12 +232,17 @@ export async function runTui(socketPath: string): Promise<void> {
 	const run = async (name: string, args = "") => {
 		if (client === undefined) return;
 		if (name === "compact") {
-			flash = "compacting…";
+			compactStarted = Date.now();
 			redraw();
 		}
-		const reply = await client.request({ op: "command", requestId: randomUUID(), name, args });
+		const started = compactStarted;
+		const reply = await client.request({ op: "command", requestId: randomUUID(), name, args }).finally(() => {
+			if (name === "compact") compactStarted = undefined;
+		});
 		flash = undefined;
-		if (reply.type === "reply") transcript.reply(name, reply.text);
+		// A compaction that did real work takes seconds; an instant reply needs no stopwatch.
+		const elapsed = started === undefined ? 0 : Date.now() - started;
+		if (reply.type === "reply") transcript.reply(name, elapsed < 1000 ? reply.text : `${reply.text} (${took(elapsed)})`);
 		else if (reply.type === "error") flash = reply.message;
 		redraw();
 	};

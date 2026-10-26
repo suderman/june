@@ -1,0 +1,35 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { visibleWidth } from "@earendil-works/pi-tui";
+import { Transcript } from "../src/transcript.ts";
+import { compactingStatus } from "../src/tui.ts";
+
+test("the compaction line hops, changes chores, counts time, and keeps its width", () => {
+	const plain = (ms: number) => compactingStatus(ms).replace(/\x1b\[[0-9;]*m/g, "");
+	const frames = [0, 250, 500, 750, 1000, 1250, 1500, 1750].map(plain);
+	assert.equal(new Set(frames).size, 8, "the kangaroo moves every frame");
+	const columns = frames.map((f) => f.indexOf("🦘"));
+	assert.ok(columns.every((at, i) => i === 0 || at < columns[i - 1]!), "she only hops left, the way she faces");
+	assert.equal(plain(2000).indexOf("🦘"), columns[0], "then she starts again from the right");
+	assert.equal(new Set([0, 250, 1750].map((ms) => visibleWidth(compactingStatus(ms)))).size, 1, "the line does not jitter");
+	assert.match(compactingStatus(42_000), /0:42/);
+	const chore = (ms: number) => /🦘[· ]* (.+)…/.exec(plain(ms))?.[1];
+	assert.ok(chore(1000) && chore(7000) && chore(1000) !== chore(7000), "the chore changes every six seconds");
+	assert.match(compactingStatus(65_000), /1:05/);
+	assert.match(compactingStatus(65_000), /nearly there|don't rush me|big swag/, "past a minute she gets defensive");
+});
+
+test("the transcript knows while a compaction runs, from events or a reconnect snapshot", () => {
+	const transcript = new Transcript();
+	assert.equal(transcript.compacting, undefined);
+	transcript.apply([{ type: "compaction_start", taskId: 1, reason: "manual", blocking: false } as never]);
+	const since = transcript.compacting;
+	assert.ok(since !== undefined && since <= Date.now());
+	transcript.apply([{ type: "compaction_start", taskId: 2, reason: "threshold", blocking: true } as never]);
+	assert.equal(transcript.compacting, since, "a second start keeps the first time");
+	transcript.apply([{ type: "compaction_end", taskId: 1, reason: "manual" } as never]);
+	assert.equal(transcript.compacting, undefined);
+	const snapshot = { entries: [], inbox: [], tools: [], compactions: [{ taskId: 3 }], agent: {} } as never;
+	transcript.load(snapshot);
+	assert.ok(transcript.compacting !== undefined, "a client that attaches mid-compaction shows it too");
+});

@@ -17,6 +17,8 @@ export class Transcript {
 	omitted = 0;
 	model = "";
 	notice: string | undefined;
+	/** When the running compaction started, as this client first saw it; undefined when none runs. */
+	compacting: number | undefined;
 	#entries = new Set<string>();
 	#live: Extract<Item, { kind: "assistant" }> | undefined;
 	#tools = new Map<string, Extract<Item, { kind: "tool" }>>();
@@ -31,6 +33,7 @@ export class Transcript {
 		for (const entry of snapshot.entries) this.#entry(entry);
 		this.running = snapshot.run !== undefined;
 		this.queued = snapshot.inbox.length;
+		this.compacting = snapshot.compactions.length > 0 ? (this.compacting ?? Date.now()) : undefined;
 		this.#model(snapshot.agent);
 		if (snapshot.generation?.message) this.#startLive(snapshot.generation.message);
 		for (const slot of snapshot.tools as readonly any[]) {
@@ -111,6 +114,12 @@ export class Transcript {
 				return;
 			case "agent_changed":
 				return this.#model(event.agent);
+			case "compaction_start":
+				this.compacting ??= Date.now();
+				return;
+			case "compaction_end":
+				this.compacting = undefined;
+				return;
 		}
 	}
 
