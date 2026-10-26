@@ -1,6 +1,6 @@
-// Paths and runtime configuration. Configuration is read in place from layered directories, least specific first:
-// harness defaults (~/.agents/june, in Git), personal files (~/profile/june, synced), and this machine's
-// $XDG_CONFIG_HOME/june. Each may hold config.json (merged), AGENTS.md, and SOUL.md (most specific wins).
+// Paths and runtime configuration. Configuration is read in place from layered directories, least specific first,
+// such as harness defaults in Git, personal files, and this machine's overrides. Each may hold config.json (merged),
+// AGENTS.md, and SOUL.md (most specific wins).
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
@@ -33,7 +33,7 @@ export type Config = {
 };
 
 export type Paths = {
-	/** Least specific first; the last one is this machine's. */
+	/** Configuration directories, least specific first. */
 	readonly layers: readonly string[];
 	readonly config: string;
 	readonly state: string;
@@ -58,11 +58,8 @@ export function paths(env: NodeJS.ProcessEnv = process.env): Paths {
 	const config = env.JUNE_CONFIG_DIR ?? join(xdg("XDG_CONFIG_HOME", ".config"), "june");
 	const state = env.JUNE_STATE_DIR ?? join(xdg("XDG_STATE_HOME", ".local/state"), "june");
 	const runtime = env.JUNE_RUNTIME_DIR ?? join(env.XDG_RUNTIME_DIR ?? join(state, "run"), "june");
-	const layers = [
-		env.JUNE_AGENTS_DIR ?? join(home(), ".agents/june"),
-		env.JUNE_PROFILE_DIR ?? join(home(), "profile/june"),
-		config,
-	];
+	// JUNE_CONFIG_PATH lists the layers, least specific first, like PATH; without it, only the XDG directory.
+	const layers = env.JUNE_CONFIG_PATH ? env.JUNE_CONFIG_PATH.split(":").filter(Boolean).map(expandHome) : [config];
 	return {
 		layers,
 		config,

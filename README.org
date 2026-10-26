@@ -18,7 +18,7 @@ Exit codes: 0 answered, 1 unanswered or failed, 2 usage, 3 daemon not running. I
 
 * Files
 
-This repository holds code only. Configuration and identity are read in place from three layers, least specific first:
+This repository holds code only. June reads configuration and identity in place from the directories in =JUNE_CONFIG_PATH=, colon-separated, least specific first. Without it she reads only =$XDG_CONFIG_HOME/june/=. Jon's NixOS module sets three layers:
 
 | Layer     | Directory                 | Kept in                  | Holds                                         |
 |-----------+---------------------------+--------------------------+-----------------------------------------------|
@@ -26,7 +26,7 @@ This repository holds code only. Configuration and identity are read in place fr
 | Personal  | =~/profile/june/=          | Syncthing                | =SOUL.md=, personal =config.json=               |
 | Machine   | =$XDG_CONFIG_HOME/june/=   | this host only           | optional =config.json= overrides                |
 
-=config.json= files merge in that order: objects key by key, arrays and values replaced. =SOUL.md= and =AGENTS.md= come from the most specific layer that has them. =JUNE_AGENTS_DIR=, =JUNE_PROFILE_DIR=, and =JUNE_CONFIG_DIR= move the layers.
+=config.json= files merge in path order: objects key by key, arrays and values replaced. =SOUL.md= and =AGENTS.md= come from the most specific directory that has them. Skill directories are configuration too (=skillDirs=); none are built in.
 
 Runtime files stay on the daemon host and are never synced:
 
