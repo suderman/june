@@ -58,7 +58,7 @@ Keys, with the defaults that apply when no layer sets them:
 
 #+begin_src json
 {
-  "model": { "provider": "(required)", "modelId": "(required)", "thinkingLevel": "medium" },
+  "model": { "provider": "(required)", "modelId": "(required)", "thinkingLevel": "medium", "focus": null },
   "providersFile": "~/.pi/agent/models.json",
   "envFiles": [],
   "contextCap": 200000,
@@ -72,6 +72,7 @@ Keys, with the defaults that apply when no layer sets them:
 #+end_src
 
 - =model.provider= names a provider in =providersFile=, Pi's own =models.json=. Its =apiKey= must be a =$VARIABLE=.
+- =model.focus= is the model June uses when she focuses, such as ={"modelId": "gpt-6.1-sol"}=; =provider= and =thinkingLevel= default to the main model's. Without it she has no =focus= tool.
 - =envFiles= are dotenv files read for keys at startup, for development. The service gets keys from its =EnvironmentFile=.
 - =daemonHost= is the machine that runs June. Keep it in a layer every host has, such as a synced one. On any other machine, =june=, =june ask=, and =june status= run there over SSH when no local daemon answers. =JUNE_LOCAL=1= disables that.
 - =skillDirs= are read in place; =skill_read= only reads inside a listed skill's directory.
@@ -83,6 +84,12 @@ Keys, with the defaults that apply when no layer sets them:
 * Shell and files
 
 June has Pi Durable's =bash=, =read=, =edit=, and =write= tools. They run on the daemon host, kit, whichever client Jon uses, as his user; other hosts are reached with =ssh=. Commands start in the home directory and stop after 120 seconds unless the call passes a longer =timeout=. Output keeps the last 2000 lines or 50 KB, with the full output spilled to a temporary file. =/stop= kills a running command. None of these tools is replay-safe: a call a restart interrupts comes back to the model as interrupted rather than running again. =edit= fails when the text it replaces has changed, so concurrent edits from Emacs or Syncthing are not overwritten silently. The tools grant capability, not permission: when to delegate, and what needs Jon's approval, are set by =AGENTS.md=. The shell can read provider keys in the service environment and =~/.pi/agent/.env=; =AGENTS.md= forbids printing them.
+
+* Working context and focus
+
+June has her own working context for work she does herself. The =work= tool runs a self-contained brief in a child conversation that the call owns, with her tools and identity but without =work= itself, the task-queueing tools, Telegram, or the memory review. Only its final report comes back, so shell output, file contents, and dead ends stay out of the main thread and its compactions. The user sees one =work= tool call and June's answer. The child cannot ask the user anything; a decision or approval it needs comes back in the report. The tool is replay-safe: after a restart it finds the same child and the same submitted brief, so nothing runs twice. =/stop= aborts the child with the call.
+
+Focus is hers to manage, like tying her hair up for heads-down work. The =focus= tool switches the main conversation to =model.focus= or back from its next model request, and a prompt section tells her which she is in and to relax when the careful work is done. A brief can run focused on its own with =work= and =focus: true=, leaving the main thread relaxed. There is no command or setting for it; ask her to focus or relax. A restart and =/new= always start relaxed.
 
 * Personal memory
 

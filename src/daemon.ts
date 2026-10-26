@@ -34,6 +34,7 @@ import { readLines, type Reply, type Request, type Status, writeLine } from "./p
 import { createCodingExtension } from "./tools/coding.ts";
 import { createHerdrExtension, Herdr } from "./tools/herdr.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
+import { createWorkExtension } from "./tools/work.ts";
 import { createOrgExtension, Org } from "./tools/org.ts";
 
 export const VERSION = "0.1.0";
@@ -97,9 +98,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, herdr, instanceId(paths.state))] : []),
 		];
 		const prompt = createPromptExtension(config, paths.layers);
-		for (const extension of [prompt.extension, createMemoryExtension(prompt.files, () => harness), ...extensions]) registry.install(extension);
-
+		const memory = createMemoryExtension(prompt.files, () => harness);
 		const telegram = createTelegram(options, model, log);
+		// June's working context does the work only: no memory review, task queueing, or messages to the user.
+		const childless = [memory, ...extensions.filter((e) => e.name === "dispatch"), ...(telegram ? [telegram.extension] : [])];
+		const work = createWorkExtension(config, () => childless);
+		for (const extension of [prompt.extension, memory, work, ...extensions]) registry.install(extension);
 		if (telegram !== undefined) registry.install(telegram.extension);
 
 		const workdir = `${paths.state}/files`;
@@ -116,7 +120,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			BG,
 		);
 
-		// Commands and relative paths start in the home directory; Telegram downloads stay in the workdir.
+		// Commands and relative paths start in the home directory; Telegram downloads stay in the workdir. A restart also
+		// lets June's hair down: she always starts in default mode.
 		const agent = { model, thinkingLevel: config.model.thinkingLevel as never, cwd: expandHome("~") };
 		const root = await harness.root(BG, { agent });
 		const current = await root.agent(BG);
@@ -173,7 +178,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
 			socket.once("close", () => clients.delete(socket));
-			serve(socket, { harness, root, models: options.models, status, reload: prompt.reload, log });
+			const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
+			serve(socket, { harness, root, models: options.models, status, reload: prompt.reload, relax, log });
 		});
 		log.info("june_started", { pid: process.pid, socket: paths.socket, conversation: root.id, telegram: telegramState });
 

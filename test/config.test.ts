@@ -24,4 +24,8 @@ test("config layers merge, and SOUL.org and AGENTS.md come from the most specifi
 	assert.equal(config.memoryFile, join(profile!, "MEMORY.org"), "chosen even before it exists");
 	assert.equal(config.instructionsFile, join(agents!, "AGENTS.md"));
 	assert.throws(() => loadConfig({ ...tmp.paths, layers: [profile!] }), /No model configured/);
+	await writeFile(join(machine!, "config.json"), JSON.stringify({ model: { modelId: "local", focus: { modelId: "careful" } } }));
+	const focused = loadConfig({ ...tmp.paths, layers: [agents!, machine!] });
+	assert.deepEqual(focused.model.focus, { provider: "p", thinkingLevel: "medium", modelId: "careful" }, "focus inherits what it leaves out");
+	assert.equal(config.model.focus, undefined, "no focus unless configured");
 });

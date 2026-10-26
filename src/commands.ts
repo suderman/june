@@ -13,6 +13,8 @@ export type CommandScope = {
 	readonly models: Models;
 	readonly status: () => Promise<Status>;
 	readonly reload: () => Promise<number>;
+	/** Back to default mode; a fresh context starts relaxed. */
+	readonly relax?: () => Promise<unknown>;
 };
 
 export async function runCommand(scope: CommandScope, name: string, args: string, requestId: string, context: Context) {
@@ -35,12 +37,13 @@ export async function runCommand(scope: CommandScope, name: string, args: string
 }
 
 /** Abort the run and queued inputs, then start a fresh context; the transcript stays in storage. */
-async function runNew({ harness, root }: CommandScope, context: Context): Promise<string> {
+async function runNew({ harness, root, relax }: CommandScope, context: Context): Promise<string> {
 	const live = await harness.snapshot(LiveDoc, root.id, context);
 	const inbox = await harness.snapshot(InboxDoc, root.id, context);
 	const queued = (inbox?.items ?? []).flatMap((item) => (item.mode === "write" ? [] : [startOf(item.content)]));
 	await root.abort(context);
 	await root.reset(undefined, context);
+	await relax?.();
 	const lines = ["New context. Old history is kept."];
 	if (live?.run !== undefined) lines.push("The request in progress was stopped.");
 	if (queued.length > 0) {

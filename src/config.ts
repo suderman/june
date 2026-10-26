@@ -7,8 +7,13 @@ import { dirname, join, resolve } from "node:path";
 
 export type HerdrHost = { readonly ssh?: string };
 
+export type ModelChoice = { readonly provider: string; readonly modelId: string; readonly thinkingLevel: string };
+
 export type Config = {
-	readonly model: { readonly provider: string; readonly modelId: string; readonly thinkingLevel: string };
+	readonly model: ModelChoice & {
+		/** Focus mode, for careful heads-down work; fields it leaves out come from the default model. */
+		readonly focus?: ModelChoice;
+	};
 	/** Pi's models.json, read for the configured provider so codex-lb is defined in one place. */
 	readonly providersFile: string;
 	/** dotenv files read for provider keys at startup; values never reach the model. Empty under systemd. */
@@ -114,7 +119,7 @@ export function loadConfig(p: Paths = paths()): Config {
 	const herdr = { ...DEFAULTS.herdr, ...raw.herdr };
 	const org = { ...DEFAULTS.org, ...raw.org };
 	return {
-		model: { thinkingLevel: "medium", ...raw.model },
+		model: withFocus({ thinkingLevel: "medium", ...raw.model }),
 		providersFile: expandHome(raw.providersFile ?? DEFAULTS.providersFile),
 		envFiles: (raw.envFiles ?? DEFAULTS.envFiles).map(expandHome),
 		contextCap: raw.contextCap ?? DEFAULTS.contextCap,
@@ -138,6 +143,13 @@ export function loadConfig(p: Paths = paths()): Config {
 				}
 			: {}),
 	};
+}
+
+function withFocus(model: Record<string, any>): Config["model"] {
+	const { focus, ...normal } = model;
+	if (focus === undefined) return normal as Config["model"];
+	if (!focus.modelId) throw new Error("model.focus needs a modelId");
+	return { ...normal, focus: { provider: normal.provider, thinkingLevel: normal.thinkingLevel, ...focus } } as Config["model"];
 }
 
 export type PromptFiles = Pick<Config, "soulFile" | "memoryFile" | "instructionsFile">;

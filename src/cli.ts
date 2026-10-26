@@ -203,10 +203,15 @@ async function doctor(): Promise<number> {
 		models.setProvider(providerFromPiModels(config!.providersFile, config!.model.provider));
 		const { provider, modelId } = config!.model;
 		if (models.getModel(provider, modelId) === undefined) throw new Error(`${provider}/${modelId} is not in ${config!.providersFile}`);
+		const focus = config!.model.focus;
+		if (focus !== undefined && focus.provider !== provider) models.setProvider(providerFromPiModels(config!.providersFile, focus.provider));
+		if (focus !== undefined && models.getModel(focus.provider, focus.modelId) === undefined)
+			throw new Error(`focus model ${focus.provider}/${focus.modelId} is not in ${config!.providersFile}`);
 		const auth = await models.getAuth(provider);
 		// The service reads keys from its EnvironmentFile, which an ordinary shell does not have.
-		if (auth === undefined) return `${provider}/${modelId}; no key in this shell, the service has its own`;
-		return `${provider}/${modelId}, key from ${auth.source ?? "?"}`;
+		const both = focus === undefined ? `${provider}/${modelId}` : `${provider}/${modelId}, focus ${focus.provider}/${focus.modelId} ${focus.thinkingLevel}`;
+		if (auth === undefined) return `${both}; no key in this shell, the service has its own`;
+		return `${both}, key from ${auth.source ?? "?"}`;
 	});
 	check("daemon", async () => {
 		const client = await Client.open(p.socket);
