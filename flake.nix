@@ -23,7 +23,5 @@
         packages = [pkgs.nodejs_22 pkgs.ripgrep];
       };
     });
-
-    homeModules.default = import ./nix/home.nix self;
   };
 }

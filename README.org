@@ -18,28 +18,38 @@ Exit codes: 0 answered, 1 unanswered or failed, 2 usage, 3 daemon not running. I
 
 * Files
 
-| What                     | Where                                       |
-|--------------------------+---------------------------------------------|
-| Configuration            | =$XDG_CONFIG_HOME/june/config.json=          |
-| Identity                 | =$XDG_CONFIG_HOME/june/SOUL.md=              |
-| Durable state            | =$XDG_STATE_HOME/june/june.sqlite=           |
-| Telegram attachments     | =$XDG_STATE_HOME/june/files/inbox/=          |
-| Socket                   | =$XDG_RUNTIME_DIR/june/june.sock=            |
+This repository holds code only. Configuration and identity are read in place from three layers, least specific first:
 
-=JUNE_CONFIG_DIR=, =JUNE_STATE_DIR=, =JUNE_RUNTIME_DIR=, and =JUNE_SOCKET= override these, which is how a development daemon runs beside the real one.
+| Layer     | Directory                 | Kept in                  | Holds                                         |
+|-----------+---------------------------+--------------------------+-----------------------------------------------|
+| Harness   | =~/.agents/june/=          | Git (suderman/agents)    | =config.json= defaults, =AGENTS.md= conventions |
+| Personal  | =~/profile/june/=          | Syncthing                | =SOUL.md=, personal =config.json=               |
+| Machine   | =$XDG_CONFIG_HOME/june/=   | this host only           | optional =config.json= overrides                |
+
+=config.json= files merge in that order: objects key by key, arrays and values replaced. =SOUL.md= and =AGENTS.md= come from the most specific layer that has them. =JUNE_AGENTS_DIR=, =JUNE_PROFILE_DIR=, and =JUNE_CONFIG_DIR= move the layers.
+
+Runtime files stay on the daemon host and are never synced:
+
+| What                 | Where                                |
+|----------------------+--------------------------------------|
+| Durable state        | =$XDG_STATE_HOME/june/june.sqlite=    |
+| Telegram attachments | =$XDG_STATE_HOME/june/files/inbox/=   |
+| Socket               | =$XDG_RUNTIME_DIR/june/june.sock=     |
+
+=JUNE_STATE_DIR=, =JUNE_RUNTIME_DIR=, and =JUNE_SOCKET= override these, which is how a development daemon runs beside the real one. Never put the state directory in Syncthing: copying a live SQLite database with its WAL corrupts it.
 
 * Configuration
 
-Every key is optional. Defaults:
+Keys, with the defaults that apply when no layer sets them:
 
 #+begin_src json
 {
-  "model": { "provider": "codex-lb", "modelId": "gpt-6-luna", "thinkingLevel": "medium" },
+  "model": { "provider": "(required)", "modelId": "(required)", "thinkingLevel": "medium" },
   "providersFile": "~/.pi/agent/models.json",
   "envFiles": [],
   "contextCap": 200000,
-  "soulFile": "SOUL.md",
-  "skillDirs": ["~/profile/skills", "~/.agents/skills"],
+  "daemonHost": null,
+  "skillDirs": [],
   "org": { "root": "~/org" },
   "herdr": { "session": "default", "host": "<hostname>", "hosts": {}, "allowPrompt": false },
   "telegram": { "tokenEnv": "JUNE_TELEGRAM_BOT_TOKEN", "allowedUserIds": [] }
@@ -47,10 +57,12 @@ Every key is optional. Defaults:
 #+end_src
 
 - =model.provider= names a provider in =providersFile=, Pi's own =models.json=. Its =apiKey= must be a =$VARIABLE=.
-- =envFiles= are dotenv files read for keys at startup, for development. Under systemd, use the module's =environmentFiles=.
+- =envFiles= are dotenv files read for keys at startup, for development. The service gets keys from its =EnvironmentFile=.
+- =daemonHost= is the machine that runs June. On any other machine, =june=, =june ask=, and =june status= run there over SSH when no local daemon answers. =JUNE_LOCAL=1= disables that.
+- =skillDirs= are read in place; =skill_read= only reads inside a listed skill's directory.
 - =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"cog": {}, "lux": {}}=; ={"ssh": "target"}= overrides the SSH destination.
 - =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an existing agent on this host.
-- =telegram= turns the channel on. Leave it out to run without Telegram.
+- =telegram= turns the channel on. Leave it out to run without Telegram. The allowed user id is personal, so it belongs in =~/profile/june/config.json=.
 
 * Telegram setup
 
@@ -76,30 +88,13 @@ Unix socket paths are limited to 108 bytes, so keep =JUNE_RUNTIME_DIR= short. Te
 
 * Deployment
 
-The flake exports =packages.<system>.default= and =homeModules.default=. On the daemon host (kit):
-
-#+begin_src nix
-services.june = {
-  enable = true;
-  settings = {
-    envFiles = [];
-    herdr.hosts = { cog = {}; lux = {}; };
-    telegram.allowedUserIds = [ /* Jon's id */ ];
-  };
-  daemon = {
-    enable = true;
-    environmentFiles = [ "%h/.pi/agent/.env" config.age.secrets.june-telegram.path ];
-  };
-};
-#+end_src
-
-Other hosts set only =services.june.enable= to get the client, which then reaches kit's daemon over =ssh -t kit june=. The service persists =~/.local/state/june= through impermanence when the =persist= option exists. Logs go to the journal as =level event key=value= lines with secrets redacted: =journalctl --user -u june=. June and the Hermes June can run side by side until Jon cuts over.
+The flake exports =packages.<system>.default=. The Home Manager module lives in [[https://github.com/suderman/nixos][suderman/nixos]] as =programs.june=, following that repository's conventions: =programs.june.enable= puts =june= on PATH, and =programs.june.daemon.enable= on kit runs =june serve= as a user service, persists =~/.local/state/june=, and reads provider keys from Pi's agenix-generated =~/.pi/agent/.env=. Logs go to the journal as =level event key=value= lines with secrets redacted: =journalctl --user -u june=. June and the Hermes June can run side by side until Jon cuts over.
 
 * Roadmap
 
 Short technical list until this moves into the Org project.
 
-1. Telegram with a real bot token on kit; then the service in the NixOS flake.
+1. Telegram with a real bot token on kit.
 2. Safe Org writes through =org-edit=: capture to the inbox, add a note to a task, change state, schedule. Idempotency keys, a check of the current state before retrying, and refusal of =asana.org= and conflict copies.
 3. Herdr follow-up prompts on by default once tested, with a confirmation rule for agents that are blocked on an approval.
 4. A bounded supervision check from a systemd timer: deterministic Herdr and Org scans, silence when nothing changed, a small ledger of notified and acknowledged events, and a separate background conversation for judgment.

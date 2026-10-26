@@ -1,8 +1,9 @@
 // june: the daemon (`serve`) and its clients (`june`, `ask`, `status`, `doctor`).
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { createLogger } from "pi-durable-telegram";
-import { loadConfig, paths, readEnvFiles } from "./config.ts";
+import { loadConfig, paths, readEnvFiles, shortHostname } from "./config.ts";
 import { startDaemon } from "./daemon.ts";
 import { createJuneModels, providerFromPiModels } from "./models.ts";
 import { findSkills } from "./prompt.ts";
@@ -22,6 +23,10 @@ async function main(argv: string[]): Promise<number> {
 	const json = rest.includes("--json");
 	const args = rest.filter((a) => a !== "--json");
 	const p = paths();
+	if (["tui", "ask", "status"].includes(command)) {
+		const remote = remoteHost(p);
+		if (remote !== undefined) return overSsh(remote, command, argv);
+	}
 	switch (command) {
 		case "tui": {
 			const { runTui } = await import("./tui.ts");
@@ -45,6 +50,34 @@ async function main(argv: string[]): Promise<number> {
 			console.error(USAGE);
 			return 2;
 	}
+}
+
+/** The daemon host when it is another machine and no daemon answers here; undefined to run locally. */
+function remoteHost(p: ReturnType<typeof paths>): string | undefined {
+	if (process.env.JUNE_LOCAL === "1" || existsSync(p.socket)) return undefined;
+	let host: string | undefined;
+	try {
+		host = loadConfig(p).daemonHost;
+	} catch {
+		return undefined;
+	}
+	return host !== undefined && host !== shortHostname() ? host : undefined;
+}
+
+/** Run the same june command on `host`. Arguments are quoted for the remote shell; stdin and the terminal pass through. */
+function overSsh(host: string, command: string, argv: readonly string[]): Promise<number> {
+	const quote = (arg: string) => `'${arg.replaceAll("'", "'\\''")}'`;
+	const tty = command === "tui" ? ["-t"] : [];
+	const child = spawn("ssh", [...tty, "-o", "ConnectTimeout=10", host, "JUNE_LOCAL=1", "june", ...argv.map(quote)], {
+		stdio: "inherit",
+	});
+	return new Promise((resolve) => {
+		child.once("error", (error) => {
+			console.error(`ssh ${host}: ${error.message}`);
+			resolve(3);
+		});
+		child.once("exit", (code) => resolve(code === 255 ? 3 : (code ?? 1)));
+	});
 }
 
 async function serve(): Promise<number> {
@@ -139,11 +172,13 @@ async function doctor(): Promise<number> {
 	const check = (name: string, run: () => string | Promise<string>) => checks.push([name, run]);
 	check("config", () => {
 		config = loadConfig(p);
-		return existsSync(`${p.config}/config.json`) ? `${p.config}/config.json` : "defaults (no config.json)";
+		const found = p.layers.map((dir) => `${dir}/config.json`).filter((file) => existsSync(file));
+		return found.join(", ");
 	});
 	check("identity", () => {
+		if (config!.soulFile === undefined) throw new Error(`no SOUL.md in ${p.layers.join(", ")}`);
 		accessSync(config!.soulFile, constants.R_OK);
-		return config!.soulFile;
+		return `${config!.soulFile}; instructions ${config!.instructionsFile ?? "none"}`;
 	});
 	check("model", async () => {
 		const secrets = readEnvFiles(config!.envFiles);
@@ -152,7 +187,8 @@ async function doctor(): Promise<number> {
 		const { provider, modelId } = config!.model;
 		if (models.getModel(provider, modelId) === undefined) throw new Error(`${provider}/${modelId} is not in ${config!.providersFile}`);
 		const auth = await models.getAuth(provider);
-		if (auth === undefined) throw new Error(`no credential for ${provider}`);
+		// The service reads keys from its EnvironmentFile, which an ordinary shell does not have.
+		if (auth === undefined) return `${provider}/${modelId}; no key in this shell, the service has its own`;
 		return `${provider}/${modelId}, key from ${auth.source ?? "?"}`;
 	});
 	check("daemon", async () => {

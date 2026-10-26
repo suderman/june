@@ -51,8 +51,10 @@ Pi's =thinkingLevelMap= for gpt-6-luna maps =low= to =light=, which codex-lb rej
 ** Restricted tools only
 No =read=, =write=, =edit=, or =bash=. Org tools are read-only: ripgrep for search, heading lines for context, path checks that keep reads inside =~/org=, and =org-dispatch scan= for what AUTO would launch. Org writes, when added, go through =org-edit= and =org-dispatch=, which run Org in Emacs; June does not edit Org structure itself. Herdr tools call the herdr CLI with argv arrays. Other hosts are reached with =ssh host herdr ...= using token-only arguments, and only for reads. =herdr_prompt_agent= exists but is off unless =herdr.allowPrompt= is true. Every read tool is =replay: "safe"=; the prompt tool is not, so a restart never repeats it.
 
-** Identity outside the repository
-=SOUL.md= lives in =$XDG_CONFIG_HOME/june/=, adapted from the Hermes June profile (=~/.local/share/hermes/profiles/june/SOUL.md=) with Hermes runtime directives removed. Skills are read in place from =~/profile/skills= and =~/.agents/skills= through =skill_read=, confined to each skill's directory. Nothing personal is committed.
+** Configuration and identity outside the repository
+The repository is code only, and public. June reads three layers in place, least specific first: =~/.agents/june/= (harness defaults and =AGENTS.md= operating conventions, in the public agents repository beside Pi's and Claude's configuration), =~/profile/june/= (=SOUL.md= and personal settings, synced by Syncthing between kit, cog, lux, and gem), and =$XDG_CONFIG_HOME/june/= (machine overrides). =config.json= merges in that order; =SOUL.md= and =AGENTS.md= come from the most specific layer that has them. There is no bootstrap or copy step, as Pi reads skills in place. Harness mechanics that do not depend on Jon's environment (source tags, the tools-only rule, side-effect honesty) stay in code. =SOUL.md= is adapted from the Hermes June profile (=~/.local/share/hermes/profiles/june/SOUL.md=) with Hermes runtime directives removed. Skills are read in place from the configured =skillDirs= (=~/.agents/skills= and =~/profile/skills=) through =skill_read=, confined to each skill's directory. Bundled skills can become another root if June ever ships any.
+
+Runtime state stays out of every synced or versioned tree: =~/.local/state/june= on kit, persisted by impermanence as storage. A SQLite database with a WAL must not be copied by Syncthing while open.
 
 ** No memory store
 The Durable transcript is short-term continuity. Long-term facts belong in Org. Hermes memories are reviewed in the Org project, not copied.
@@ -61,6 +63,8 @@ The Durable transcript is short-term continuity. Long-term facts belong in Org. 
 Pi Durable needs Node 22.19 or later and uses =node:sqlite=. The NixOS repository pins Camofox to Node 22 because Node 24 aborts when GC collects =node:sqlite= objects (nodejs/node#65446). June builds with =nodejs_22=. Node 22.18 and later strip TypeScript types by default, so the package ships =src/*.ts= and has no build step beyond a typecheck.
 
 ** Deployment: a user service on kit
+The Home Manager module lives in the NixOS repository (=programs.june=), which pins this flake as an input. Provider keys come from Pi's agenix-generated =~/.pi/agent/.env=, as Recall's nightly service already does, because June uses Pi's provider definitions. On other hosts the CLI runs the client commands on =daemonHost= over SSH.
+
 kit runs Herdr's default session, org-dispatch, and most work, and is always on. June needs Jon's Herdr socket, his Org files, his SSH agent for other hosts, and the =org-dispatch= that loads his Emacs config. A dedicated system account would need all of that shared with it, which Herdr does not support cleanly, so June runs as Jon's lingering user service. Hardening is limited to =NoNewPrivileges= and =UMask=0077=: in a user unit =PrivateTmp= and =ProtectSystem= create a user namespace in which store-owned files appear owned by nobody, and ssh then refuses =~/.ssh/config=. The real boundary is the tool list.
 
 * Verified behaviour

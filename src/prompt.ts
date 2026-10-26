@@ -1,27 +1,24 @@
-// June's system prompt: SOUL.md, operating rules, and the shared skills, read in place from Jon's skill directories.
+// June's system prompt: SOUL.md, harness rules, AGENTS.md, and the skills, all read in place.
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension, section } from "@earendil-works/pi-durable";
 import type { Config } from "./config.ts";
 
-const OPERATING = `How you work:
+// Harness mechanics only. Jon's conventions (Org, Herdr, task states) come from AGENTS.md in the config layers.
+const HARNESS = `How this harness works:
 - Jon reaches you from a terminal client and from Telegram. It is one conversation. Terminal messages start with [kitty] or [cli]; untagged messages come from Telegram, where answers should stay compact Markdown without tables.
-- Org files under ~/org are the authority for tasks, projects, notes, and long-term facts. Herdr is the authority for live agent sessions. This transcript is short-term continuity only, so look facts up with your tools instead of trusting memory, and verify anything with a date against Org.
-- Task states are TODO (not started), PROG (in progress), EVAL (waiting for Jon's review), HOLD (blocked or waiting), and DONE. AUTO marks a task for the org-dispatch dispatcher, which starts a Pi agent in Herdr on the host named by the task's tag (kit, cog, or lux). Only Jon sets AUTO.
-- To answer what an agent is doing, inspect Herdr. To start new work, find or describe the Org task and ask Jon to queue it; do not invent a second dispatcher.
-- A Herdr status of idle or done means the terminal settled, not that the task succeeded. Read the output and the task's Org state before reporting success.
 - You have only the tools listed. You have no shell. When a tool cannot do something, say so and suggest how Jon can.
 - Never claim an edit, message, or prompt happened until its tool result confirms it. A tool call interrupted by a restart may already have taken effect, so check the current state before repeating it.`;
 
 /** `render` re-reads `path` only when its size or mtime changes, so the prompt text stays stable for caching. */
-function cachedFile(path: string, missing: string): () => Promise<string> {
+function cachedFile(path: string | undefined, missing: string): () => Promise<string> {
 	let cached: { stamp: string; text: string } | undefined;
 	return async () => {
-		const info = await stat(path).catch(() => undefined);
+		const info = path === undefined ? undefined : await stat(path).catch(() => undefined);
 		if (info === undefined) return missing;
 		const stamp = `${info.mtimeMs}:${info.size}`;
-		if (cached?.stamp !== stamp) cached = { stamp, text: (await readFile(path, "utf8")).trim() };
+		if (cached?.stamp !== stamp) cached = { stamp, text: (await readFile(path!, "utf8")).trim() };
 		return cached.text;
 	};
 }
@@ -75,7 +72,8 @@ function skillsSection(skills: readonly Skill[]): string {
 }
 
 export function createPromptExtension(config: Config): Extension {
-	const soul = cachedFile(config.soulFile, "You are June, Jon's personal assistant.");
+	const soul = cachedFile(config.soulFile, "You are June, a personal assistant.");
+	const instructions = cachedFile(config.instructionsFile, "");
 	let skills: Promise<Skill[]> | undefined;
 	const loadSkills = () => (skills ??= findSkills(config.skillDirs));
 
@@ -102,14 +100,14 @@ export function createPromptExtension(config: Config): Extension {
 
 	const clock = defineTool({
 		name: "clock",
-		description: "The current local date and time in Calgary.",
+		description: "The current local date and time.",
 		parameters: Type.Object({}),
 		replay: "safe",
 		execute: async () => ({
 			output: [
 				{
 					type: "text",
-					text: new Date().toLocaleString("en-CA", { timeZone: "America/Edmonton", dateStyle: "full", timeStyle: "long" }),
+					text: new Date().toLocaleString("en-CA", { dateStyle: "full", timeStyle: "long" }),
 				},
 			],
 		}),
@@ -119,7 +117,8 @@ export function createPromptExtension(config: Config): Extension {
 		name: "june",
 		sections: [
 			section("soul", () => soul(), { tag: false }),
-			section("operating", () => OPERATING, { tag: false }),
+			section("harness", () => HARNESS, { tag: false }),
+			section("agents", async () => (await instructions()) || undefined, { tag: false }),
 			section("skills", async () => skillsSection(await loadSkills())),
 			section("today", () => today()),
 		],
@@ -127,14 +126,13 @@ export function createPromptExtension(config: Config): Extension {
 	});
 }
 
-/** The date changes the prompt once a day; the exact time comes from the clock tool. */
+/** The date changes the prompt once a day; the exact time comes from the clock tool. Both use the system zone. */
 function today(): string {
 	const date = new Intl.DateTimeFormat("en-CA", {
-		timeZone: "America/Edmonton",
 		weekday: "long",
 		year: "numeric",
 		month: "2-digit",
 		day: "2-digit",
 	}).format(new Date());
-	return `${date}, America/Edmonton`;
+	return `${date}, ${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
 }

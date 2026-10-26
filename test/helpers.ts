@@ -16,7 +16,9 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 		providersFile: "/nonexistent",
 		envFiles: [],
 		contextCap: 100_000,
-		soulFile: join(dir, "SOUL.md"),
+		soulFile: undefined,
+		instructionsFile: undefined,
+		daemonHost: undefined,
 		skillDirs: [],
 		org: { root: join(dir, "org"), agendaFiles: join(dir, "agenda") },
 		herdr: { session: "default", host: "kit", hosts: {}, allowPrompt: false },
@@ -28,6 +30,7 @@ export async function tempDir(): Promise<{ dir: string; paths: Paths; cleanup():
 	// Short base: Unix socket paths are limited to 108 bytes.
 	const dir = await mkdtemp(join(tmpdir(), "june-"));
 	const paths: Paths = {
+		layers: [dir],
 		config: dir,
 		state: join(dir, "state"),
 		runtime: join(dir, "run"),
