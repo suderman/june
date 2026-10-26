@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { Dispatch, insertAfterPreamble } from "../src/tools/dispatch.ts";
+import { Dispatch, insertAfterPreamble, taskBody } from "../src/tools/dispatch.ts";
 import { Org } from "../src/tools/org.ts";
 import { tempDir, testConfig } from "./helpers.ts";
 
@@ -73,6 +73,22 @@ test("the nudge starts the dispatcher unit and reports its scan", async (t) => {
 	t.after(f.cleanup);
 	assert.match(await f.dispatch.nudge(), /settling/);
 	assert.deepEqual(f.runs[0], ["systemctl", "--user", "start", "org-dispatch.service"]);
+});
+
+test("the body always has the same shape, whatever the model sends", () => {
+	assert.equal(
+		taskBody({ reason: "Jon asked for a docs check.", scope: "Check the docs.\n\n\n\nReport only.", checklist: ["Compare docs", "- [ ] Report findings", "- Leave files alone"] }),
+		"Queued by June: Jon asked for a docs check.\n\n** Scope\nCheck the docs.\n\nReport only.\n\n** Checklist\n- [ ] Compare docs\n- [ ] Report findings\n- [ ] Leave files alone",
+	);
+	assert.throws(() => taskBody({ reason: "two\nlines", scope: "x", checklist: ["a"] }), /reason is one non-empty line/);
+	assert.throws(() => taskBody({ reason: "r", scope: "x", checklist: [] }), /at least one item/);
+});
+
+test("queueing refuses a working directory that does not exist", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	await assert.rejects(f.dispatch.queue({ ...request, body, dir: join(f.dir, "nope") }), /not a directory/);
+	assert.equal((await f.dispatch.queue({ ...request, body, dir: f.dir })).written, true);
 });
 
 test("insertion keeps a file without headings and one that starts with a heading valid", () => {

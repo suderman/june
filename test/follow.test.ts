@@ -47,7 +47,7 @@ test("a queued task is followed through the daemon until it reaches EVAL", async
 	});
 
 	const faux = fauxProvider();
-	const queue = { file: "todo.org", title: "Check docs", body: "June queued this because Jon asked.", host: "kit" };
+	const queue = { file: "todo.org", title: "Check docs", reason: "Jon asked for a docs check.", scope: "Check the docs.", checklist: ["Compare docs and code"], host: "kit" };
 	faux.setResponses([
 		fauxAssistantMessage([fauxToolCall("org_queue_task", queue)], { stopReason: "toolUse" }),
 		fauxAssistantMessage("Queued it; I'll tell you when it lands."),
@@ -91,7 +91,7 @@ test("following survives a daemon restart", async (t) => {
 			launchMs: 60_000,
 			maxMs: 3_600_000,
 		});
-	const queue = { file: "todo.org", title: "Check docs", body: "June queued this.", host: "kit" };
+	const queue = { file: "todo.org", title: "Check docs", reason: "Jon asked.", scope: "Check the docs.", checklist: ["Compare"], host: "kit" };
 	const before = fauxProvider();
 	before.setResponses([fauxAssistantMessage([fauxToolCall("org_queue_task", queue)], { stopReason: "toolUse" }), fauxAssistantMessage("Queued.")]);
 	let daemon = await openTestDaemon({ ...tmp, faux: before, config, extensions: [extension()] });

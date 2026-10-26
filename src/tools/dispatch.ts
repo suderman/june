@@ -6,7 +6,7 @@ import { readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
-import type { Config } from "../config.ts";
+import { type Config, expandHome } from "../config.ts";
 import { type Run, runProcess } from "./herdr.ts";
 import { createFollowTask, FOLLOW_DEFAULTS, type FollowOptions, follow } from "./follow.ts";
 import type { Herdr } from "./herdr.ts";
@@ -43,6 +43,25 @@ export function checkRequest(request: QueueRequest, hosts: readonly string[]): v
 	if (/^\s*:(PROPERTIES|END):/m.test(request.body)) throw new Error("The body must not contain a property drawer");
 	if (request.dir !== undefined && !request.dir.startsWith("/") && !request.dir.startsWith("~/"))
 		throw new Error("dir is an absolute or ~/ path");
+}
+
+export type TaskParts = { reason: string; scope: string; checklist: readonly string[] };
+
+/**
+ * The body June writes, built here rather than by the model so it always has the same shape: who queued it and why
+ * (the dispatcher tells the agent the user set the AUTO), then Scope and a checkbox Checklist.
+ */
+export function taskBody(parts: TaskParts): string {
+	const line = (text: string, what: string) => {
+		const flat = text.trim();
+		if (flat === "" || /[\n\r]/.test(flat)) throw new Error(`${what} is one non-empty line`);
+		return flat;
+	};
+	const scope = parts.scope.trim().replace(/\n{3,}/g, "\n\n");
+	if (scope === "") throw new Error("scope is required");
+	if (parts.checklist.length === 0) throw new Error("checklist needs at least one item");
+	const items = parts.checklist.map((item) => `- [ ] ${line(item, "Each checklist item").replace(/^-\s*(\[[ X]\]\s*)?/, "")}`);
+	return [`Queued by June: ${line(parts.reason, "reason")}`, "", "** Scope", scope, "", "** Checklist", ...items].join("\n");
 }
 
 /** Insert `text` before the first heading, newest first, as project files keep their threads. */
@@ -83,6 +102,10 @@ export class Dispatch {
 	/** Write the task once. A replay with the same key returns the heading it already wrote. */
 	async queue(request: QueueRequest) {
 		checkRequest(request, this.#config.dispatch.hosts);
+		if (request.dir !== undefined) {
+			const dir = await stat(expandHome(request.dir)).catch(() => undefined);
+			if (!dir?.isDirectory()) throw new Error(`dir ${request.dir} is not a directory; use one of the project's repository links`);
+		}
 		const path = await this.#target(request.file);
 		for (let attempt = 0; attempt < 3; attempt++) {
 			const before = await stat(path);
@@ -140,20 +163,24 @@ export function createDispatchExtension(
 		tools: [
 			defineTool({
 				name: "org_queue_task",
-				description: `Queue new work for an unattended Pi agent: write a new AUTO heading with one host tag (${hosts.join(", ")}) into an Org agenda file. The dispatcher on that host launches it about two minutes after the text last changed, and the agent ends at EVAL for the user's review unless review is false. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task first. Write the body in Org: a short note that you queued it and why, then ** Scope and ** Checklist sections.`,
+				description: `Queue new work for an unattended Pi agent: write a new AUTO heading with one host tag (${hosts.join(", ")}) into an Org agenda file. The dispatcher on that host launches it about two minutes after the text last changed, and the agent ends at EVAL for the user's review unless review is false. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task first. The tool writes the body from reason, scope, and checklist.`,
 				parameters: Type.Object({
 					file: Type.String({ description: "Org file under ~/org, usually the project's <project>.org" }),
 					title: Type.String({ description: "Concise verb-led heading title, without keyword or tags" }),
-					body: Type.String({ description: "Org text under the heading; one physical line per paragraph or list item" }),
+					reason: Type.String({ description: 'One line: why you queued it, naming the user rather than writing "you"' }),
+					scope: Type.String({ description: "Outcome, constraints, and success criteria in Org; one physical line per paragraph" }),
+					checklist: Type.Array(Type.String(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
 					host: Type.String({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${hosts[0]}` }),
-					dir: Type.Optional(Type.String({ description: "Working directory, when not the project's single repository" })),
+					dir: Type.Optional(Type.String({ description: "Working directory when the project file links several repositories: one of its local links, exactly" })),
 					review: Type.Optional(Type.Boolean({ description: "Default true: the agent stops at EVAL" })),
 				}),
 				// Idempotent by key: a rerun after a restart finds the heading it wrote.
 				replay: "safe",
 				execute: async (args, api, context) => {
+					const { reason, scope, checklist, ...rest } = args;
 					const result = await dispatch.queue({
-						...args,
+						...rest,
+						body: taskBody({ reason, scope, checklist }),
 						review: args.review ?? true,
 						key: `${instance}:${api.taskId}`,
 					});
@@ -162,7 +189,8 @@ export function createDispatchExtension(
 						const input = { id: result.id, title: args.title, host: args.host, queuedAt: Date.now() };
 						await api.commit((tx) => follow(tx, followTask, input, api.conversationId as unknown as number), context);
 					}
-					return { output: [{ type: "text", text: JSON.stringify({ ...result, following: result.id !== undefined }, null, 1) }] };
+					const note = "You are following this task and will get [follow] messages when it fails to launch, blocks, holds, or finishes. Tell the user you will report back.";
+					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\n${note}` }] };
 				},
 			}),
 			defineTool({
