@@ -41,7 +41,8 @@ export const FOLLOW_DEFAULTS: FollowOptions = { intervalMs: 60_000, launchMs: 7 
 export function decide(input: FollowInput, seen: Observation, last: string, now: number, options: FollowOptions) {
 	const where = seen.file ? ` (${seen.file})` : "";
 	const name = `the task «${input.title}»${where} you queued`;
-	if (seen.missing) return { signal: "missing", done: true, say: `${name} is no longer in Org; it was moved, archived, or deleted. You are no longer following it.` };
+	const Name = name[0]!.toUpperCase() + name.slice(1);
+	if (seen.missing) return { signal: "missing", done: true, say: `${Name} is no longer in Org; it was moved, archived, or deleted. You are no longer following it.` };
 	if (now - input.queuedAt > options.maxMs) return { signal: "expired", done: true, say: undefined };
 	switch (seen.state) {
 		case "EVAL":
@@ -49,16 +50,16 @@ export function decide(input: FollowInput, seen: Observation, last: string, now:
 			return {
 				signal: seen.state,
 				done: true,
-				say: `${name} is now ${seen.state}. Read it with org_read_task and tell the user in a line or two what came of it${seen.state === "EVAL" ? " and what they should review" : ""}.`,
+				say: `${Name} is now ${seen.state}. Read it with org_read_task and tell the user in a line or two what came of it${seen.state === "EVAL" ? " and what they should review" : ""}.`,
 			};
 		case "HOLD":
-			return { signal: "HOLD", done: false, say: `${name} is on HOLD. Read its Dialog with org_read_task and pass the agent's question to the user.` };
+			return { signal: "HOLD", done: false, say: `${Name} is on HOLD. Read its Dialog with org_read_task and pass the agent's question to the user.` };
 		case "TODO":
 			// The user took it back; nothing to report.
 			return { signal: "TODO", done: true, say: undefined };
 		case "AUTO":
 			if (now - input.queuedAt > options.launchMs && last !== "stalled")
-				return { signal: "stalled", done: false, say: `${name} has not launched ${Math.round((now - input.queuedAt) / 60_000)} minutes after queueing. Check org_dispatch_scan and tell the user what is holding it.` };
+				return { signal: "stalled", done: false, say: `${Name} has not launched ${Math.round((now - input.queuedAt) / 60_000)} minutes after queueing. Check org_dispatch_scan and tell the user what is holding it.` };
 			return { signal: last === "stalled" ? "stalled" : "AUTO", done: false, say: undefined };
 		case "PROG":
 			if (seen.agent === "blocked")
