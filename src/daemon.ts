@@ -29,6 +29,7 @@ import {
 import { type CommandScope, runCommand } from "./commands.ts";
 import { type Config, expandHome, type Paths } from "./config.ts";
 import { createPromptExtension } from "./prompt.ts";
+import { createMemoryExtension } from "./memory.ts";
 import { readLines, type Reply, type Request, type Status, writeLine } from "./protocol.ts";
 import { createCodingExtension } from "./tools/coding.ts";
 import { createHerdrExtension, Herdr } from "./tools/herdr.ts";
@@ -96,7 +97,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, herdr, instanceId(paths.state))] : []),
 		];
 		const prompt = createPromptExtension(config, paths.layers);
-		for (const extension of [prompt.extension, ...extensions]) registry.install(extension);
+		for (const extension of [prompt.extension, createMemoryExtension(prompt.files, () => harness), ...extensions]) registry.install(extension);
 
 		const telegram = createTelegram(options, model, log);
 		if (telegram !== undefined) registry.install(telegram.extension);

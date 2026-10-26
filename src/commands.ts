@@ -5,6 +5,7 @@ import type { Message, Models, Usage } from "@earendil-works/pi-ai";
 import { estimateContextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { type Conversation, type Harness, InboxDoc, LiveDoc, UsageDoc, type UsageState, UserEntry } from "@earendil-works/pi-durable";
 import { COMMANDS, type Status } from "./protocol.ts";
+import { MemoryReview } from "./memory.ts";
 
 export type CommandScope = {
 	readonly harness: Harness;
@@ -72,11 +73,16 @@ async function runCompact({ harness, root }: CommandScope, instructions: string,
 	const { outcome } = (await harness.waitForTask(task, context)).state;
 	if (outcome.status === "aborted") return "Compaction cancelled.";
 	if (outcome.status !== "completed") return "Compaction failed.";
-	if (outcome.result.entryId !== undefined) return "Compacted.";
+	const memory = await harness.snapshot(MemoryReview, root.id, context);
+	if (memory?.failure?.task === Number(task)) return `Compaction skipped: ${memory.failure.message}. Old context kept.`;
+	const done = memory?.last?.task === Number(task)
+		? `Compacted. Memory reviewed${memory.last.changed ? " and updated" : "; no changes needed"}.`
+		: "Compacted.";
+	if (outcome.result.entryId !== undefined) return done;
 	if (outcome.result.submissionId === undefined) return "Nothing to compact.";
 	const placed = await (await harness.submission(outcome.result.submissionId, context))?.wait(context);
 	if (placed === undefined || placed.type !== "write") return "Compaction result unavailable.";
-	if (placed.status === "done") return "Compacted.";
+	if (placed.status === "done") return done;
 	return placed.reason === "stale" ? "Compaction summary discarded: the context changed meanwhile." : "Compaction summary was not applied.";
 }
 

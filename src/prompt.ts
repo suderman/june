@@ -92,7 +92,7 @@ async function personalSection(files: PromptFiles, memory: () => Promise<string>
 export function createPromptExtension(
 	config: Config,
 	layers?: readonly string[],
-): { extension: Extension; reload(): Promise<number> } {
+): { extension: Extension; files(): PromptFiles; reload(): Promise<number> } {
 	let files: PromptFiles = config;
 	const open = (f: PromptFiles) => ({
 		soul: cachedFile(f.soulFile, "You are June, a personal assistant."),
@@ -153,6 +153,7 @@ export function createPromptExtension(
 	});
 	return {
 		extension,
+		files: () => files,
 		reload: async () => {
 			const refreshed = await findSkills(config.skillDirs);
 			if (layers !== undefined) files = promptFiles(layers);
