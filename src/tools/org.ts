@@ -176,6 +176,19 @@ export class Org {
 		};
 	}
 
+	/** The heading that owns `:ID: id`, with its state and subtree; undefined when no live Org file has it. */
+	async byId(id: string) {
+		if (!/^[0-9A-Za-z-]{8,64}$/.test(id)) throw new Error("Invalid Org ID");
+		const [hit] = await this.grep(`^\\s*:ID:\\s+${id}\\s*$`, { fixed: false, limit: 1 });
+		if (hit === undefined) return undefined;
+		const lines = await this.lines(hit.path);
+		const heading = outline(lines, hit.line).at(-1);
+		if (heading === undefined) return undefined;
+		const { start, end } = subtree(lines, heading.line);
+		const text = lines.slice(start - 1, end).join("\n");
+		return { file: this.rel(hit.path), line: start, state: heading.state, title: heading.title, herdrSessions: herdrLinks(text) };
+	}
+
 	/** Org headings that link a Herdr session id. */
 	async sessionTasks(session: string) {
 		if (!/^[0-9a-f-]{8,36}$/.test(session)) throw new Error("Session id must be hex");

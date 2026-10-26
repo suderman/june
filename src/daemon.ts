@@ -30,14 +30,14 @@ import { type CommandScope, runCommand } from "./commands.ts";
 import type { Config, Paths } from "./config.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { readLines, type Reply, type Request, type Status, writeLine } from "./protocol.ts";
-import { createHerdrExtension } from "./tools/herdr.ts";
+import { createHerdrExtension, Herdr } from "./tools/herdr.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
 import { createOrgExtension, Org } from "./tools/org.ts";
 
 export const VERSION = "0.1.0";
 const SNAPSHOT_ENTRIES = 200;
 
-// pi-durable-telegram keeps its chat → conversation map in these documents. June writes the same kinds so Jon's
+// pi-durable-telegram keeps its chat → conversation map in these documents. June writes the same kinds so the user's
 // private chat lands in the primary conversation instead of a new one. Keep in step with its src/channel/docs.ts.
 const ChatMap = defineDoc<{ chats: Record<string, number> }>({
 	kind: "tg.chats",
@@ -87,10 +87,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
 		const registry = createRegistry();
 		const org = new Org(config.org.root);
+		const herdr = new Herdr(config.herdr);
 		const extensions = options.extensions ?? [
 			createOrgExtension(config, org),
-			createHerdrExtension(config),
-			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, instanceId(paths.state))] : []),
+			createHerdrExtension(config, herdr),
+			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, herdr, instanceId(paths.state))] : []),
 		];
 		for (const extension of [createPromptExtension(config), ...extensions]) registry.install(extension);
 

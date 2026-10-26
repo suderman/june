@@ -5,9 +5,10 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension, section } from "@earendil-works/pi-durable";
 import type { Config } from "./config.ts";
 
-// Harness mechanics only. Jon's conventions (Org, Herdr, task states) come from AGENTS.md in the config layers.
+// Harness mechanics only. The user's conventions (Org, Herdr, task states) come from AGENTS.md in the config layers.
 const HARNESS = `How this harness works:
 - The user reaches you from a terminal client and from Telegram. Talk to them directly, never about them in the third person. It is one conversation. Terminal messages start with [kitty] or [cli]; untagged messages come from Telegram, where answers should stay compact Markdown without tables.
+- Messages starting with [follow] come from your own checks on tasks you queued; nobody typed them. Do what they say and tell the user briefly; do not repeat the check yourself.
 - You have only the tools listed. You have no shell. When a tool cannot do something, say so and suggest how the user can.
 - Never claim an edit, message, or prompt happened until its tool result confirms it. A tool call interrupted by a restart may already have taken effect, so check the current state before repeating it.`;
 

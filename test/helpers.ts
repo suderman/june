@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createModels, fauxProvider } from "@earendil-works/pi-ai";
+import type { Extension } from "@earendil-works/pi-durable";
 import { createLogger, type TelegramPort } from "pi-durable-telegram";
 import type { Config, Paths } from "../src/config.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -48,6 +49,7 @@ export async function openTestDaemon(options: {
 	config?: Partial<Config>;
 	telegramPort?: TelegramPort;
 	secrets?: Record<string, string>;
+	extensions?: Extension[];
 }): Promise<Daemon> {
 	const models = createModels();
 	models.setProvider(options.faux.provider);
@@ -56,7 +58,7 @@ export async function openTestDaemon(options: {
 		paths: options.paths,
 		models,
 		log: createLogger({ sink: () => {} }),
-		extensions: [],
+		extensions: options.extensions ?? [],
 		...(options.telegramPort ? { telegramPort: options.telegramPort } : {}),
 		...(options.secrets ? { secrets: options.secrets } : {}),
 	});

@@ -8,6 +8,8 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import type { Config } from "../config.ts";
 import { type Run, runProcess } from "./herdr.ts";
+import { createFollowTask, FOLLOW_DEFAULTS, type FollowOptions, follow } from "./follow.ts";
+import type { Herdr } from "./herdr.ts";
 import type { Org } from "./org.ts";
 
 export type QueueRequest = {
@@ -43,7 +45,7 @@ export function checkRequest(request: QueueRequest, hosts: readonly string[]): v
 		throw new Error("dir is an absolute or ~/ path");
 }
 
-/** Insert `text` before the first heading, newest first, as Jon's project files keep their threads. */
+/** Insert `text` before the first heading, newest first, as project files keep their threads. */
 export function insertAfterPreamble(content: string, text: string): string {
 	const first = /^\* /m.exec(content);
 	if (first === null) return `${content.replace(/\n*$/, "\n\n")}${text}`;
@@ -70,7 +72,7 @@ export class Dispatch {
 			throw new Error(`June does not write ${rel}`);
 		const siblings = await readdir(dirname(path));
 		if (siblings.some((f) => f.startsWith(name.replace(/\.org$/, ".sync-conflict-"))))
-			throw new Error(`${rel} has a Syncthing conflict copy beside it; Jon should resolve it first`);
+			throw new Error(`${rel} has a Syncthing conflict copy beside it; the user should resolve it first`);
 		const agenda = await readFile(this.#config.org.agendaFiles, "utf8").catch(() => {
 			throw new Error(`No agenda list at ${this.#config.org.agendaFiles}; the dispatcher has not run on this host`);
 		});
@@ -121,15 +123,24 @@ export function instanceId(stateDir: string): string {
 	return readFileSync(file, "utf8").trim();
 }
 
-export function createDispatchExtension(config: Config, org: Org, instance: string, run: Run = runProcess): Extension {
+export function createDispatchExtension(
+	config: Config,
+	org: Org,
+	herdr: Herdr,
+	instance: string,
+	run: Run = runProcess,
+	followOptions: FollowOptions = FOLLOW_DEFAULTS,
+): Extension {
 	const dispatch = new Dispatch(org, config, run);
+	const followTask = createFollowTask(org, herdr, followOptions);
 	const hosts = config.dispatch.hosts;
 	return defineExtension({
 		name: "dispatch",
+		tasks: [followTask],
 		tools: [
 			defineTool({
 				name: "org_queue_task",
-				description: `Queue new work for an unattended Pi agent: write a new AUTO heading with one host tag (${hosts.join(", ")}) into an Org agenda file. The dispatcher on that host launches it about two minutes after the text last changed, and the agent ends at EVAL for Jon's review unless review is false. Search for an existing task first. Write the body in Org: a short note that June queued it and why, then ** Scope and ** Checklist sections.`,
+				description: `Queue new work for an unattended Pi agent: write a new AUTO heading with one host tag (${hosts.join(", ")}) into an Org agenda file. The dispatcher on that host launches it about two minutes after the text last changed, and the agent ends at EVAL for the user's review unless review is false. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task first. Write the body in Org: a short note that you queued it and why, then ** Scope and ** Checklist sections.`,
 				parameters: Type.Object({
 					file: Type.String({ description: "Org file under ~/org, usually the project's <project>.org" }),
 					title: Type.String({ description: "Concise verb-led heading title, without keyword or tags" }),
@@ -140,13 +151,18 @@ export function createDispatchExtension(config: Config, org: Org, instance: stri
 				}),
 				// Idempotent by key: a rerun after a restart finds the heading it wrote.
 				replay: "safe",
-				execute: async (args, api) => {
+				execute: async (args, api, context) => {
 					const result = await dispatch.queue({
 						...args,
 						review: args.review ?? true,
 						key: `${instance}:${api.taskId}`,
 					});
-					return { output: [{ type: "text", text: JSON.stringify(result, null, 1) }] };
+					// Follow it, once, whether this call wrote the heading or a replay found it.
+					if (result.id !== undefined) {
+						const input = { id: result.id, title: args.title, host: args.host, queuedAt: Date.now() };
+						await api.commit((tx) => follow(tx, followTask, input, api.conversationId as unknown as number), context);
+					}
+					return { output: [{ type: "text", text: JSON.stringify({ ...result, following: result.id !== undefined }, null, 1) }] };
 				},
 			}),
 			defineTool({

@@ -3,7 +3,7 @@
 import { connect, type Socket } from "node:net";
 import type { AgentEvent, SnapshotEvent } from "@earendil-works/pi-durable";
 
-export type Source = "kitty" | "cli";
+export type Source = "kitty" | "cli" | "follow";
 
 /** The same commands, in the same order and words, as pi-durable-telegram's bot menu. */
 export const COMMANDS = [
