@@ -167,7 +167,7 @@ export function createDispatchExtension(
 				parameters: Type.Object({
 					file: Type.String({ description: "Org file under ~/org, usually the project's <project>.org" }),
 					title: Type.String({ description: "Concise verb-led heading title, without keyword or tags" }),
-					reason: Type.String({ description: 'One line: why you queued it, naming the user rather than writing "you"' }),
+					reason: Type.String({ description: 'One line, written after "Queued by June: ": the reason itself, naming the user rather than writing "you", such as "Jon asked for a read-only docs check."' }),
 					scope: Type.String({ description: "Outcome, constraints, and success criteria in Org; one physical line per paragraph" }),
 					checklist: Type.Array(Type.String(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
 					host: Type.String({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${hosts[0]}` }),
