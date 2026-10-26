@@ -203,7 +203,7 @@ export function createOrgExtension(config: Config, org = new Org(config.org.root
 			defineTool({
 				name: "org_search",
 				description:
-					"Search Jon's Org files (not archives) for text. Returns each matching heading with its outline path, TODO state, tags, and matching lines.",
+					"Search the user's Org files (not archives) for text. Returns each matching heading with its outline path, TODO state, tags, and matching lines.",
 				parameters: Type.Object({
 					query: Type.String({ minLength: 2 }),
 					scope,

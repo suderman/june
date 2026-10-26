@@ -163,7 +163,7 @@ export function createHerdrExtension(config: Config, herdr = new Herdr(config.he
 		tools.push(
 			defineTool({
 				name: "herdr_prompt_agent",
-				description: `Send a follow-up prompt to an existing agent on ${config.herdr.host}. Use only when Jon asked for this message to be sent to that agent. It types into the agent's terminal; it is not repeated after a restart.`,
+				description: `Send a follow-up prompt to an existing agent on ${config.herdr.host}. Use only when the user asked for this message to be sent to that agent. It types into the agent's terminal; it is not repeated after a restart.`,
 				parameters: Type.Object({ target: Type.String(), text: Type.String({ minLength: 1, maxLength: 4000 }) }),
 				execute: async (args) => json((await herdr.prompt(args.target, args.text)).result ?? { sent: true }),
 			}) as never,

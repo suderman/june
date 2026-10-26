@@ -7,8 +7,8 @@ import type { Config } from "./config.ts";
 
 // Harness mechanics only. Jon's conventions (Org, Herdr, task states) come from AGENTS.md in the config layers.
 const HARNESS = `How this harness works:
-- Jon reaches you from a terminal client and from Telegram. It is one conversation. Terminal messages start with [kitty] or [cli]; untagged messages come from Telegram, where answers should stay compact Markdown without tables.
-- You have only the tools listed. You have no shell. When a tool cannot do something, say so and suggest how Jon can.
+- The user reaches you from a terminal client and from Telegram. Talk to them directly, never about them in the third person. It is one conversation. Terminal messages start with [kitty] or [cli]; untagged messages come from Telegram, where answers should stay compact Markdown without tables.
+- You have only the tools listed. You have no shell. When a tool cannot do something, say so and suggest how the user can.
 - Never claim an edit, message, or prompt happened until its tool result confirms it. A tool call interrupted by a restart may already have taken effect, so check the current state before repeating it.`;
 
 /** `render` re-reads `path` only when its size or mtime changes, so the prompt text stays stable for caching. */
@@ -66,7 +66,7 @@ export async function findSkills(roots: readonly string[]): Promise<Skill[]> {
 function skillsSection(skills: readonly Skill[]): string {
 	if (skills.length === 0) return "No skills are installed.";
 	return [
-		"Jon's skills describe his conventions and procedures. When a request matches one, read it with skill_read first and follow what applies. They were written for agents with a shell, so use only the tools you have and tell Jon when a step needs one you lack.",
+		"The user's skills describe their conventions and procedures. When a request matches one, read it with skill_read first and follow what applies. They were written for agents with a shell, so use only the tools you have and say when a step needs one you lack.",
 		...skills.map((skill) => `- ${skill.name}: ${skill.description}`),
 	].join("\n");
 }
@@ -79,7 +79,7 @@ export function createPromptExtension(config: Config): Extension {
 
 	const skillRead = defineTool({
 		name: "skill_read",
-		description: "Read one of Jon's skills: its SKILL.md, or another file inside that skill's directory.",
+		description: "Read one of the user's skills: its SKILL.md, or another file inside that skill's directory.",
 		parameters: Type.Object({
 			name: Type.String({ description: "Skill name from the skills list" }),
 			file: Type.Optional(Type.String({ description: "Path relative to the skill directory; default SKILL.md" })),
