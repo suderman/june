@@ -63,6 +63,7 @@ Keys, with the defaults that apply when no layer sets them:
   "daemonHost": null,
   "skillDirs": [],
   "org": { "root": "~/org" },
+  "dispatch": { "hosts": [] },
   "herdr": { "session": "default", "host": "<hostname>", "hosts": {}, "allowPrompt": false },
   "telegram": { "tokenEnv": "JUNE_TELEGRAM_BOT_TOKEN", "allowedUserIds": [] }
 }
@@ -73,6 +74,7 @@ Keys, with the defaults that apply when no layer sets them:
 - =daemonHost= is the machine that runs June. Keep it in a layer every host has, such as a synced one. On any other machine, =june=, =june ask=, and =june status= run there over SSH when no local daemon answers. =JUNE_LOCAL=1= disables that.
 - =skillDirs= are read in place; =skill_read= only reads inside a listed skill's directory.
 - =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"cog": {}, "lux": {}}=; ={"ssh": "target"}= overrides the SSH destination.
+- =dispatch.hosts= are the machines June may queue AUTO tasks for; the first is the default. Empty, the default, leaves out =org_queue_task= and =org_dispatch_now=.
 - =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an existing agent on this host.
 - =telegram= turns the channel on. Leave it out to run without Telegram. The allowed user id is personal, so it belongs in =~/profile/june/config.json=.
 

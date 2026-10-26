@@ -21,6 +21,7 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 		daemonHost: undefined,
 		skillDirs: [],
 		org: { root: join(dir, "org"), agendaFiles: join(dir, "agenda") },
+		dispatch: { hosts: [] },
 		herdr: { session: "default", host: "kit", hosts: {}, allowPrompt: false },
 		...extra,
 	};

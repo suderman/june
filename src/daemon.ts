@@ -30,7 +30,8 @@ import type { Config, Paths } from "./config.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { readLines, type Reply, type Request, type Status, writeLine } from "./protocol.ts";
 import { createHerdrExtension } from "./tools/herdr.ts";
-import { createOrgExtension } from "./tools/org.ts";
+import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
+import { createOrgExtension, Org } from "./tools/org.ts";
 
 export const VERSION = "0.1.0";
 const SNAPSHOT_ENTRIES = 200;
@@ -84,7 +85,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		if (resolved === undefined) throw new Error(`Unknown model ${model.provider}/${model.modelId}`);
 
 		const registry = createRegistry();
-		const extensions = options.extensions ?? [createOrgExtension(config), createHerdrExtension(config)];
+		const org = new Org(config.org.root);
+		const extensions = options.extensions ?? [
+			createOrgExtension(config, org),
+			createHerdrExtension(config),
+			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, instanceId(paths.state))] : []),
+		];
 		for (const extension of [createPromptExtension(config), ...extensions]) registry.install(extension);
 
 		const telegram = createTelegram(options, model, log);

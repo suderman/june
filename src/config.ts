@@ -21,6 +21,8 @@ export type Config = {
 	readonly daemonHost: string | undefined;
 	readonly skillDirs: readonly string[];
 	readonly org: { readonly root: string; readonly agendaFiles: string };
+	/** Hosts June may queue AUTO tasks for; empty turns the dispatch tools off. The first is the default. */
+	readonly dispatch: { readonly hosts: readonly string[] };
 	readonly herdr: {
 		readonly session: string;
 		/** This machine's name, as Org host tags and herdr: links use it. */
@@ -121,6 +123,7 @@ export function loadConfig(p: Paths = paths()): Config {
 		daemonHost: raw.daemonHost,
 		skillDirs: (raw.skillDirs ?? DEFAULTS.skillDirs).map(expandHome),
 		org: { root: expandHome(org.root), agendaFiles: expandHome(org.agendaFiles) },
+		dispatch: { hosts: raw.dispatch?.hosts ?? [] },
 		herdr: {
 			session: herdr.session,
 			host: herdr.host ?? shortHostname(),
