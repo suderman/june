@@ -98,6 +98,8 @@ JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june
 JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june
 #+end_src
 
+On kit, the =june= command from Jon's NixOS module runs this checkout instead of the pinned package whenever =src/cli.ts= and =node_modules= exist here, the service included. Edit, then =systemctl --user restart june= for daemon changes, or rerun the client; =june status= shows the code path in use. =JUNE_SOURCE=none= forces the package, and =JUNE_SOURCE=<dir>= picks another checkout. Remove =node_modules= or set =JUNE_SOURCE=none= in the service before leaving a half-finished change, since a daemon that cannot start leaves June down. Configuration, =SOUL.md=, =AGENTS.md=, and skills are read live in either case.
+
 Unix socket paths are limited to 108 bytes, so keep =JUNE_RUNTIME_DIR= short. Tests use pi-ai's faux model and a fake Telegram port; they never call a provider or Telegram. =nix build= typechecks and produces =result/bin/june=. After changing dependencies, update =npmDepsHash= in =nix/package.nix=.
 
 * Deployment
