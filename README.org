@@ -74,9 +74,15 @@ Keys, with the defaults that apply when no layer sets them:
 - =daemonHost= is the machine that runs June. Keep it in a layer every host has, such as a synced one. On any other machine, =june=, =june ask=, and =june status= run there over SSH when no local daemon answers. =JUNE_LOCAL=1= disables that.
 - =skillDirs= are read in place; =skill_read= only reads inside a listed skill's directory.
 - =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"cog": {}, "lux": {}}=; ={"ssh": "target"}= overrides the SSH destination.
-- =dispatch.hosts= are the machines June may queue AUTO tasks for; the first is the default. Empty, the default, leaves out =org_queue_task=, =org_resume_task=, and =org_dispatch_now=.
+- =dispatch.hosts= are the machines June may queue AUTO tasks for; the first is the default. Empty, the default, leaves out =org_create_project=, =org_queue_task=, =org_resume_task=, =org_complete_task=, and =org_dispatch_now=.
 - =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an existing agent on this host.
 - =telegram= turns the channel on. Leave it out to run without Telegram. The allowed user id is personal, so it belongs in =~/profile/june/config.json=.
+
+* Filing new tasks
+
+June honors an explicit destination. Otherwise she uses =org_projects= to find an existing project under =~/org/work= by its preamble and repository links before choosing a new path. For a new GitHub repo project, owner/repo guides =work/<owner>/<repo>/<repo>.org=. Unmatched work and clear one-offs go under =work/june/<name>/<name>.org=, not the June software project's file.
+
+=org_create_project= creates the title, category, and optional local and GitHub repository links without overwriting an existing file. It refreshes the dispatcher's agenda with a read-only scan and confirms the file is listed before June queues work there. A failed discovery leaves only the metadata record for retry; it does not write an AUTO task or bypass the agenda check. =org_queue_task= then writes and follows the task as usual. Without a local repository link or a =dir= override, the dispatcher uses the new project directory as the working directory. Review stays on unless Jon explicitly waives it, including for read-only lookups. The worker leaves EVAL; June then reads the outcome and verification evidence. For a task she created, she uses =org_complete_task= to mark it DONE when the request is satisfied and no Jon decision, approval, or review remains, then reports the reviewed result. Tasks needing Jon's review or with incomplete evidence stay EVAL. Resuming Jon's task does not make it hers to close. Completion uses =org-edit= with an EVAL expected-state check; an already DONE task is unchanged on replay. Normal Org archiving handles finished tasks.
 
 * Resuming existing tasks
 

@@ -2,15 +2,15 @@
 // do; resuming existing headings goes through org-edit. The dispatcher, not June, launches the work.
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { mkdir, readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, join, relative } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import { type Config, expandHome } from "../config.ts";
 import { type Run, runProcess } from "./herdr.ts";
 import { createFollowTask, FOLLOW_DEFAULTS, type FollowOptions, follow } from "./follow.ts";
 import type { Herdr } from "./herdr.ts";
-import type { Org } from "./org.ts";
+import { type Org, parseHeading } from "./org.ts";
 
 export type QueueRequest = {
 	file: string;
@@ -72,6 +72,14 @@ export function insertAfterPreamble(content: string, text: string): string {
 	return `${before ? `${before}\n\n` : ""}${text}\n${content.slice(first.index)}`;
 }
 
+export type ProjectRequest = {
+	domain: string;
+	project: string;
+	title: string;
+	github?: string;
+	dir?: string;
+};
+
 export type ResumeRequest = {
 	file: string;
 	heading: string;
@@ -106,6 +114,55 @@ export class Dispatch {
 		});
 		if (!agenda.split("\n").includes(path)) throw new Error(`${rel} is not an agenda file, so the dispatcher would never see the task`);
 		return path;
+	}
+
+	/** Create metadata only, then refresh the dispatcher's agenda before any task can be queued here. */
+	async createProject(request: ProjectRequest) {
+		// Some model calls send empty strings for omitted optional fields.
+		request = { ...request, github: request.github || undefined, dir: request.dir || undefined };
+		for (const segment of [request.domain, request.project]) {
+			if (!/^[a-z0-9][a-z0-9._-]*$/i.test(segment) || segment === "archive" || segment.includes(".sync-conflict-"))
+				throw new Error("domain and project must be plain directory names, not archive or conflict paths");
+		}
+		if (!request.title.trim() || /[\n\r]/.test(request.title)) throw new Error("Project title is one non-empty line");
+		if (request.github !== undefined && !/^https:\/\/github\.com\/[\w-]+\/[\w.-]+$/.test(request.github))
+			throw new Error("github must be https://github.com/owner/repo without .git");
+		if (request.github?.endsWith(".git")) throw new Error("Omit .git from github");
+		if (request.dir !== undefined) {
+			if ((!request.dir.startsWith("/") && !request.dir.startsWith("~/")) || /[\n\r\[\]]/.test(request.dir))
+				throw new Error("dir must be an absolute or ~/ path usable in an Org link");
+			if (!(await stat(expandHome(request.dir)).catch(() => undefined))?.isDirectory())
+				throw new Error(`dir ${request.dir} is not a directory`);
+		}
+		const root = await realpath(this.#config.org.root);
+		let directory = root;
+		for (const segment of ["work", request.domain, request.project]) {
+			directory = join(directory, segment);
+			await mkdir(directory).catch((error: NodeJS.ErrnoException) => {
+				if (error.code !== "EEXIST") throw error;
+			});
+			directory = await realpath(directory);
+			if (relative(root, directory).startsWith("..")) throw new Error("Project directory leaves the Org root");
+		}
+		const file = join("work", request.domain, request.project, `${request.project}.org`);
+		const path = join(directory, `${request.project}.org`);
+		const siblings = await readdir(directory);
+		if (siblings.some((name) => name.startsWith(`${request.project}.sync-conflict-`)))
+			throw new Error(`${file} has a Syncthing conflict copy beside it; the user should resolve it first`);
+		const links = [
+			...(request.dir ? [`[[file:${request.dir.replace(/\/$/, "")}/][local]]`] : []),
+			...(request.github ? [`[[${request.github}][GitHub]]`] : []),
+		];
+		const preamble = `#+TITLE: ${request.title.trim()}\n#+CATEGORY: ${request.project.slice(0, 10)}\n`
+			+ (links.length ? `\nRepositories:\n- ${request.project}: ${links.join(" | ")}\n` : "");
+		const created = await writeFile(path, preamble, { flag: "wx" }).then(() => true, (error: NodeJS.ErrnoException) => {
+			if (error.code === "EEXIST") return false;
+			throw error;
+		});
+		// scan refreshes the cache without launching work. If discovery fails, keep the empty record for a retry.
+		await this.#run(["org-dispatch", "scan"], 60_000);
+		await this.#target(file);
+		return { file, created, directory: dirname(await this.#org.file(file)) };
 	}
 
 	/** Write the task once. A replay with the same key returns the heading it already wrote. */
@@ -161,6 +218,21 @@ export class Dispatch {
 		}
 	}
 
+	/** Close a task June created, after she reviews its outcome. Org supplies CLOSED and logging. */
+	async complete(file: string, heading: string) {
+		const path = await this.#target(file);
+		const task = await this.#org.read(file, heading);
+		const own = task.text.split(/\n\*+ /, 1)[0]!;
+		const id = /^:ID: (.+)$/m.exec(own)?.[1];
+		if (!id || !/^:JUNE_REQUEST: .+$/m.test(own) || !/^Queued by June: .+$/m.test(own))
+			throw new Error("June may close only tasks she created, not tasks she merely resumed");
+		const state = parseHeading(task.text.split("\n")[0]!, task.line)?.state;
+		if (state !== "EVAL" && state !== "DONE") throw new Error(`Expected EVAL, found ${state ?? "no state"}; read the task again`);
+		if (state === "DONE") return { file: task.file, id, state, written: false };
+		await this.#run(["org-edit", "todo", path, `id:${id}`, "DONE", "--expect", "EVAL"], 60_000);
+		return { file: task.file, id, state: "DONE", written: true };
+	}
+
 	#located(content: string, index: number) {
 		const head = content.slice(0, index).lastIndexOf("\n* ");
 		const line = content.slice(head + 1).split("\n")[0];
@@ -204,8 +276,21 @@ export function createDispatchExtension(
 		tasks: [followTask],
 		tools: [
 			defineTool({
+				name: "org_create_project",
+				description: "Create ~/org/work/<domain>/<project>/<project>.org with a title, category, and optional repository links, then confirm dispatcher agenda discovery. First use org_projects and search for an existing project. Honor a destination the user names. Otherwise GitHub owner/repo guides domain/project for a new repo project; unmatched work and clear one-offs go under domain june with a short descriptive project name. Never overwrite an existing record. This tool queues no work; use org_queue_task afterward.",
+				parameters: Type.Object({
+					domain: Type.String({ description: "Existing logical domain, GitHub owner for a new repo project, or june for unmatched work and one-offs" }),
+					project: Type.String({ description: "Short directory name; GitHub repository name when it fits" }),
+					title: Type.String({ description: "Human-readable project title, one line" }),
+					github: Type.Optional(Type.String({ description: "Repository this project actually concerns, as https://github.com/owner/repo without .git; omit or leave empty for unrelated one-offs" })),
+					dir: Type.Optional(Type.String({ description: "Existing checkout this project actually concerns, absolute or ~/ path; omit or leave empty for work without one" })),
+				}),
+				replay: "safe",
+				execute: async (args) => ({ output: [{ type: "text", text: JSON.stringify(await dispatch.createProject(args), null, 1) }] }),
+			}),
+			defineTool({
 				name: "org_queue_task",
-				description: `Queue new work for an unattended Pi agent: write a new AUTO heading with one host tag (${hosts.join(", ")}) into an Org agenda file. The dispatcher on that host launches it, and this tool starts the one on this host right away, and the agent ends at EVAL for the user's review unless review is false. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task first. The tool writes the body from reason, scope, and checklist.`,
+				description: `Queue new work for an unattended Pi agent: write a new AUTO heading with one host tag (${hosts.join(", ")}) into an Org agenda file. The dispatcher on that host launches it, and this tool starts the one on this host right away, and the agent ends at EVAL for review by you or the user unless review is explicitly waived. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task and use org_projects to find its project first. If no project fits, use org_create_project before queueing. The tool writes the body from reason, scope, and checklist.`,
 				parameters: Type.Object({
 					file: Type.String({ description: "Org file under ~/org, usually the project's <project>.org" }),
 					title: Type.String({ description: "Concise verb-led heading title, without keyword or tags" }),
@@ -213,8 +298,8 @@ export function createDispatchExtension(
 					scope: Type.String({ description: "Outcome, constraints, and success criteria in Org; one physical line per paragraph" }),
 					checklist: Type.Array(Type.String(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
 					host: Type.String({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${hosts[0]}` }),
-					dir: Type.Optional(Type.String({ description: "Working directory when the project file links several repositories: one of its local links, exactly" })),
-					review: Type.Optional(Type.Boolean({ description: "Default true: the agent stops at EVAL" })),
+					dir: Type.Optional(Type.String({ description: "Existing working directory override, usually one of the project's local repository links. Omit for one-offs without a checkout: the dispatcher uses the project directory" })),
+					review: Type.Optional(Type.Boolean({ description: "Default true: the worker stops at EVAL for human or agent review, including read-only lookups you will review yourself. Set false only when Jon explicitly waives review" })),
 				}),
 				// Idempotent by key: a rerun after a restart finds the heading it wrote.
 				replay: "safe",
@@ -268,6 +353,16 @@ export function createDispatchExtension(
 						: " That host's dispatcher will pick it up on its timer.";
 					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\nYou are following this task and will get [follow] reports.${started} Tell the user you will report back. Existing SCHEDULED dates still apply.` }] };
 				},
+			}),
+			defineTool({
+				name: "org_complete_task",
+				description: "After reading the whole task, outcome, and verification evidence, mark your own EVAL task DONE through org-edit. Use only when the request is satisfied and no decision, approval, or review from Jon remains. You must have created the task; merely resuming Jon's task does not make it yours. Leave incomplete or uncertain work, and work needing Jon's review, at EVAL and report what remains. Report the reviewed result to Jon after closing. Refuses other states; an already DONE task is unchanged on replay.",
+				parameters: Type.Object({
+					file: Type.String({ description: "Org agenda file under ~/org" }),
+					heading: Type.String({ description: "Exact title or id:UUID of the EVAL task you just reviewed" }),
+				}),
+				replay: "safe",
+				execute: async (args) => ({ output: [{ type: "text", text: JSON.stringify(await dispatch.complete(args.file, args.heading), null, 1) }] }),
 			}),
 			defineTool({
 				name: "org_dispatch_now",

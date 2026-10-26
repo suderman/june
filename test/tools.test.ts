@@ -61,6 +61,25 @@ test("org search groups matches by heading and skips archives", async (t) => {
 	assert.deepEqual(active.map((t) => t.state), ["PROG", "EVAL"]);
 });
 
+test("project discovery uses preambles and repository links, not task material or archives", async (t) => {
+	const { org, root, cleanup } = await orgFixture();
+	t.after(cleanup);
+	const file = "work/studio/portal/portal.org";
+	await writeFile(join(root, file), PROJECT.replace("#+CATEGORY: portal", "#+CATEGORY: portal\n\nRepositories:\n- secondary: [[https://github.com/elsewhere/secondary][GitHub]]"));
+	await mkdir(join(root, "work/studio/portal/2026-10-26-notes"));
+	await writeFile(join(root, "work/studio/portal/2026-10-26-notes/notes.org"), "#+TITLE: Not a project");
+	await writeFile(join(root, "work/studio/client.org"), "#+TITLE: Client");
+	await writeFile(join(root, "work/studio/archive/archive.org"), "#+TITLE: Old project");
+	const all = await org.projects();
+	assert.equal(all.total, 1);
+	assert.equal(all.projects[0]!.file, file);
+	assert.match(all.projects[0]!.preamble, /secondary/);
+	assert.doesNotMatch(all.projects[0]!.preamble, /Fix duplicate/);
+	assert.deepEqual(await org.projects("ELSEWHERE/secondary"), all);
+	assert.deepEqual(await org.projects("webhook"), { projects: [], total: 0 }, "task text is searched with org_search instead");
+	assert.deepEqual(await org.projects("", 0), { projects: [], total: 1 });
+});
+
 test("org read returns the subtree and its Herdr sessions without touching the file", async (t) => {
 	const { org, root, cleanup } = await orgFixture();
 	t.after(cleanup);

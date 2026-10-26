@@ -7,7 +7,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-work
 import { createDispatchExtension } from "../src/tools/dispatch.ts";
 import { decide, FOLLOW_DEFAULTS } from "../src/tools/follow.ts";
 import { Herdr } from "../src/tools/herdr.ts";
-import { Org } from "../src/tools/org.ts";
+import { createOrgExtension, Org } from "../src/tools/org.ts";
 import { ask, openTestDaemon, tempDir, testConfig, until } from "./helpers.ts";
 
 const input = { id: "abc12345", title: "Check docs", host: "kit", queuedAt: 0 };
@@ -30,7 +30,7 @@ test("follow reports each transition once and stays quiet otherwise", () => {
 	assert.equal(decide(input, { state: "PROG", missing: false }, "PROG", 8 * 24 * 60 * min, FOLLOW_DEFAULTS).done, true, "follows expire");
 });
 
-test("a queued task is followed through the daemon until it reaches EVAL", async (t) => {
+test("June reads and closes her own reviewed EVAL task before reporting through the daemon", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const root = join(tmp.dir, "org");
@@ -40,7 +40,14 @@ test("a queued task is followed through the daemon until it reaches EVAL", async
 	await writeFile(join(tmp.dir, "agenda"), `${file}\n`);
 	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda") }, dispatch: { hosts: ["kit"] } };
 	const herdr = new Herdr(config.herdr, async () => JSON.stringify({ result: { agent: { agent_status: "working" } } }));
-	const dispatch = createDispatchExtension(config, new Org(root), herdr, "inst", async () => "", {
+	const edits: string[][] = [];
+	const dispatch = createDispatchExtension(config, new Org(root), herdr, "inst", async (args) => {
+		if (args[0] === "org-edit") {
+			edits.push([...args]);
+			await writeFile(file, (await readFile(file, "utf8")).replace("* EVAL Check docs", "* DONE Check docs"));
+		}
+		return "";
+	}, {
 		intervalMs: 40,
 		launchMs: 60_000,
 		maxMs: 3_600_000,
@@ -51,9 +58,11 @@ test("a queued task is followed through the daemon until it reaches EVAL", async
 	faux.setResponses([
 		fauxAssistantMessage([fauxToolCall("org_queue_task", queue)], { stopReason: "toolUse" }),
 		fauxAssistantMessage("Queued it; I'll tell you when it lands."),
-		fauxAssistantMessage("The docs check reached EVAL."),
+		fauxAssistantMessage([fauxToolCall("org_read_task", { file: "todo.org", heading: "Check docs" })], { stopReason: "toolUse" }),
+		fauxAssistantMessage([fauxToolCall("org_complete_task", { file: "todo.org", heading: "Check docs" })], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Reviewed the docs check and closed it. Docs match the code."),
 	]);
-	const daemon = await openTestDaemon({ ...tmp, faux, config, extensions: [dispatch] });
+	const daemon = await openTestDaemon({ ...tmp, faux, config, extensions: [dispatch, createOrgExtension(config)] });
 	t.after(() => daemon.close());
 
 	const asked = await ask(tmp.paths.socket, "queue a docs check");
@@ -66,10 +75,14 @@ test("a queued task is followed through the daemon until it reaches EVAL", async
 	await writeFile(file, text.replace("* AUTO Check docs", "* PROG Check docs"));
 	await new Promise((r) => setTimeout(r, 200));
 	assert.equal((await follows()).length, 0, "launch and work are silent");
-	await writeFile(file, (await readFile(file, "utf8")).replace("* PROG Check docs", "* EVAL Check docs"));
+	assert.doesNotMatch(text, /^:REVIEW: no$/m, "review remains enabled by default");
+	await writeFile(file, (await readFile(file, "utf8")).replace("* PROG Check docs", "* EVAL Check docs") + "\n** Outcome\nDocs match the code. Verified by comparing the documented commands with their implementations.\n");
 	await until(async () => (await follows()).length === 1);
 	assert.match(JSON.stringify((await follows())[0]!.data), /is now EVAL/);
-	await until(async () => !(await daemon.status()).busy && faux.state.callCount === 3);
+	await until(async () => !(await daemon.status()).busy && faux.state.callCount === 5);
+	assert.equal(edits.length, 1);
+	assert.deepEqual(edits[0]!.slice(4), ["DONE", "--expect", "EVAL"]);
+	assert.match(await readFile(file, "utf8"), /^\* DONE Check docs/m);
 	await new Promise((r) => setTimeout(r, 200));
 	assert.equal((await follows()).length, 1, "reported once; the follow task ended");
 	const inspection = await daemon.harness.inspect(BG);

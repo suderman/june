@@ -9,7 +9,7 @@ import type { Config } from "./config.ts";
 const HARNESS = `How this harness works:
 - The user reaches you from a terminal client and from Telegram. Talk to them directly, never about them in the third person. It is one conversation. Terminal messages start with [kitty] or [cli]; untagged messages come from Telegram, where answers should stay compact Markdown without tables.
 - Messages starting with [follow] come from your own checks on tasks you queued; nobody typed them. Do what they say and tell the user briefly; do not repeat the check yourself.
-- You have only the tools listed. You have no shell. When a tool cannot do something, say so and suggest how the user can.
+- You have only the tools listed and no shell. A missing direct tool does not rule out delegation: use the available task tools under the user's instructions when an agent can do the requested work. Ask the user to act only when no permitted tool or agent can proceed, or their input or approval is required.
 - Never claim an edit, message, or prompt happened until its tool result confirms it. A tool call interrupted by a restart may already have taken effect, so check the current state before repeating it.`;
 
 /** `render` re-reads `path` only when its size or mtime changes, so the prompt text stays stable for caching. */

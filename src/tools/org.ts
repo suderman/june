@@ -1,6 +1,6 @@
 // Read-only Org tools. Search runs ripgrep; context comes from heading lines alone. June never parses or writes Org
 // structure itself: changes go through org-edit and org-dispatch, which run Org in Emacs.
-import { readFile, realpath } from "node:fs/promises";
+import { readdir, readFile, realpath } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
@@ -113,6 +113,31 @@ export class Org {
 		return (await readFile(path, "utf8")).split("\n");
 	}
 
+	/** Project records only, not client files, task material, or archives. Preambles include repository mappings. */
+	async projects(query = "", limit = 100) {
+		const work = join(this.#root, "work");
+		const results: { file: string; preamble: string }[] = [];
+		const domains = await readdir(work, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+			if (error.code === "ENOENT") return [];
+			throw error;
+		});
+		for (const domain of domains) {
+			if (!domain.isDirectory() || domain.name.startsWith(".") || domain.name === "archive") continue;
+			for (const project of await readdir(join(work, domain.name), { withFileTypes: true })) {
+				if (!project.isDirectory() || project.name.startsWith(".") || project.name === "archive") continue;
+				const file = join("work", domain.name, project.name, `${project.name}.org`);
+				if (file.includes(".sync-conflict-")) continue;
+				const path = await this.file(file).catch(() => undefined);
+				if (path === undefined) continue;
+				const content = await readFile(path, "utf8");
+				const preamble = content.split(/^\* /m, 1)[0]!.trim();
+				if (!`${file}\n${preamble}`.toLowerCase().includes(query.toLowerCase())) continue;
+				results.push({ file, preamble });
+			}
+		}
+		return { projects: results.slice(0, limit), total: results.length };
+	}
+
 	/** Matches grouped under their nearest enclosing heading. */
 	async search(query: string, scope: string, limit: number) {
 		const dir = scope === "all" ? this.#root : await this.file(scope).catch(() => join(this.#root, scope));
@@ -213,6 +238,16 @@ export function createOrgExtension(config: Config, org = new Org(config.org.root
 	return defineExtension({
 		name: "org",
 		tools: [
+			defineTool({
+				name: "org_projects",
+				description: "Find existing projects under ~/org/work before choosing where to file a task. Returns project paths and preambles, including local and GitHub repository links. Search by project name, repository, or topic; omit query to list projects. Does not scan task material or archives.",
+				parameters: Type.Object({
+					query: Type.Optional(Type.String()),
+					limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 300, description: "Default 100; total reports whether more match" })),
+				}),
+				replay: "safe",
+				execute: async (args) => json(await org.projects(args.query, args.limit)),
+			}),
 			defineTool({
 				name: "org_search",
 				description:
