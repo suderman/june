@@ -2,6 +2,7 @@
 // Unix socket that terminal clients attach to.
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
+import { dirname } from "node:path";
 import { BACKGROUND_CONTEXT as BG, withAbortSignal } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import {
@@ -153,6 +154,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				entries: view.entries.length,
 				telegram: telegramState,
 				tools: resolvedAgent.tools.map((tool) => tool.name),
+				source: dirname(import.meta.dirname),
 			};
 		};
 

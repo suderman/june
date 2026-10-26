@@ -40,6 +40,8 @@ export type Status = {
 	entries: number;
 	telegram: "off" | "polling" | "failed";
 	tools: string[];
+	/** The directory the daemon's code runs from: a checkout or the Nix store. */
+	source: string;
 };
 
 export type Reply =

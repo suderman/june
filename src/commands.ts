@@ -92,6 +92,7 @@ async function runStatus({ harness, root, models, status }: CommandScope, contex
 		`Context: ${formatTokens(tokens)}${window ? ` / ${formatTokens(window)}` : ""}${percent}`,
 		`Spend: ${usage(await harness.snapshot(UsageDoc, root.id, context))}`,
 		`Telegram: ${s.telegram}`,
+		`Code: ${s.source}`,
 	].join("\n");
 }
 

@@ -170,6 +170,7 @@ async function status(socket: string, json: boolean): Promise<number> {
 function formatStatus(s: Status): string {
 	return [
 		`June ${s.version}, pid ${s.pid}, up since ${s.startedAt}`,
+		`code ${s.source}`,
 		`model ${s.model} (${s.thinkingLevel})`,
 		`conversation ${s.conversation}: ${s.entries} entries, ${s.busy ? "working" : "idle"}${s.queued ? `, ${s.queued} queued` : ""}`,
 		`telegram ${s.telegram}`,
