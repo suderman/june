@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createModels, fauxProvider } from "@earendil-works/pi-ai";
 import type { Extension } from "@earendil-works/pi-durable";
 import { createLogger, type TelegramPort } from "pi-durable-telegram";
+import type { PatterTiming } from "../src/patter.ts";
 import type { Config, Paths } from "../src/config.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Client, type Reply } from "../src/protocol.ts";
@@ -13,7 +14,7 @@ export type Faux = ReturnType<typeof fauxProvider>;
 
 export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 	return {
-		model: { provider: "faux", modelId: "faux-1", thinkingLevel: "off" },
+		model: { chat: { provider: "faux", modelId: "faux-1", thinkingLevel: "off" } },
 		providersFile: "/nonexistent",
 		envFiles: [],
 		contextCap: 100_000,
@@ -51,9 +52,13 @@ export async function openTestDaemon(options: {
 	telegramPort?: TelegramPort;
 	secrets?: Record<string, string>;
 	extensions?: Extension[];
+	/** More providers, such as a separate one for patter so its requests never take June's scripted answers. */
+	providers?: Faux[];
+	patterTiming?: Partial<PatterTiming>;
 }): Promise<Daemon> {
 	const models = createModels();
 	models.setProvider(options.faux.provider);
+	for (const extra of options.providers ?? []) models.setProvider(extra.provider);
 	return startDaemon({
 		config: testConfig(options.dir, options.config),
 		paths: options.paths,
@@ -62,6 +67,7 @@ export async function openTestDaemon(options: {
 		extensions: options.extensions ?? [],
 		...(options.telegramPort ? { telegramPort: options.telegramPort } : {}),
 		...(options.secrets ? { secrets: options.secrets } : {}),
+		...(options.patterTiming ? { patterTiming: options.patterTiming } : {}),
 	});
 }
 

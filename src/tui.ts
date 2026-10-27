@@ -144,6 +144,9 @@ function component(item: Item): Component[] {
 		}
 		case "note":
 			return [new Line(c.muted(`── ${item.text}`))];
+		case "patter":
+			// June keeping you company while the work runs; styled apart from her real answers.
+			return [new Line(), new Wrapped(c.italic(c.muted(item.text)), c.muted("🦘 "))];
 		case "reply":
 			return [new Line(), new Wrapped(c.muted(item.text), c.muted(`/${item.command} `))];
 	}

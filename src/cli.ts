@@ -86,7 +86,7 @@ async function serve(): Promise<number> {
 	const config = loadConfig(p);
 	const secrets = readEnvFiles(config.envFiles);
 	const models = createJuneModels(secrets);
-	models.setProvider(providerFromPiModels(config.providersFile, config.model.provider));
+	models.setProvider(providerFromPiModels(config.providersFile, config.model.chat.provider));
 	const log = createLogger({ level: (process.env.JUNE_LOG_LEVEL as never) ?? "info" });
 	const daemon = await startDaemon({ config, paths: p, models, secrets, log });
 	await new Promise<void>((resolve) => {
@@ -200,16 +200,19 @@ async function doctor(): Promise<number> {
 	check("model", async () => {
 		const secrets = readEnvFiles(config!.envFiles);
 		const models = createJuneModels(secrets);
-		models.setProvider(providerFromPiModels(config!.providersFile, config!.model.provider));
-		const { provider, modelId } = config!.model;
+		models.setProvider(providerFromPiModels(config!.providersFile, config!.model.chat.provider));
+		const { provider, modelId } = config!.model.chat;
 		if (models.getModel(provider, modelId) === undefined) throw new Error(`${provider}/${modelId} is not in ${config!.providersFile}`);
-		const focus = config!.model.focus;
-		if (focus !== undefined && focus.provider !== provider) models.setProvider(providerFromPiModels(config!.providersFile, focus.provider));
-		if (focus !== undefined && models.getModel(focus.provider, focus.modelId) === undefined)
-			throw new Error(`focus model ${focus.provider}/${focus.modelId} is not in ${config!.providersFile}`);
+		const { focus, patter } = config!.model;
+		for (const [name, mode] of Object.entries({ focus, patter })) {
+			if (mode === undefined) continue;
+			if (mode.provider !== provider) models.setProvider(providerFromPiModels(config!.providersFile, mode.provider));
+			if (models.getModel(mode.provider, mode.modelId) === undefined) throw new Error(`${name} model ${mode.provider}/${mode.modelId} is not in ${config!.providersFile}`);
+		}
 		const auth = await models.getAuth(provider);
 		// The service reads keys from its EnvironmentFile, which an ordinary shell does not have.
-		const both = focus === undefined ? `${provider}/${modelId}` : `${provider}/${modelId}, focus ${focus.provider}/${focus.modelId} ${focus.thinkingLevel}`;
+		const modes = Object.entries({ focus, patter }).flatMap(([name, m]) => (m ? [`${name} ${m.provider}/${m.modelId} ${m.thinkingLevel}`] : []));
+		const both = [`chat ${provider}/${modelId} ${config!.model.chat.thinkingLevel}`, ...modes].join(", ");
 		if (auth === undefined) return `${both}; no key in this shell, the service has its own`;
 		return `${both}, key from ${auth.source ?? "?"}`;
 	});

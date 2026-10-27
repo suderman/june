@@ -14,7 +14,7 @@ const label = (m: ModelChoice) => `${m.provider}/${m.modelId}, ${m.thinkingLevel
 
 /** `childless` are extensions the working context must not have, read when a brief starts. */
 export function createWorkExtension(config: Config, childless: () => readonly Extension[]): Extension {
-	const normal = config.model;
+	const normal = config.model.chat;
 	const focus = config.model.focus;
 
 	const work = defineTool({
@@ -58,7 +58,7 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 		execute: async (args, api, context) => {
 			const model = args.on ? focus! : normal;
 			await api.commit((tx) => configure(tx, api.conversationId, agentOf(model)), context);
-			const text = args.on ? "Hair tied up: focus mode from your next request." : "Hair let down: default mode from your next request.";
+			const text = args.on ? "Hair tied up: focus mode from your next request." : "Hair let down: chat mode from your next request.";
 			return { output: [{ type: "text", text: `${text} (${label(model)})` }] };
 		},
 	});

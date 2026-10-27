@@ -15,7 +15,7 @@ const last = (ctx: TranscriptContext) => JSON.stringify(ctx.messages.findLast((m
 // Durable keeps earlier prompt updates in the transcript; later sections replace earlier ones by name.
 const sections = (ctx: TranscriptContext) => JSON.stringify(Object.assign({}, ...ctx.messages.filter((m) => m.role === "system").map((m) => m.sections)));
 const inWorker = (ctx: TranscriptContext) => system(ctx).includes("You are June's working context");
-const focusConfig = { model: { provider: "faux", modelId: "faux-1", thinkingLevel: "off", focus: { provider: "faux", modelId: "faux-2", thinkingLevel: "off" } } };
+const focusConfig = { model: { chat: { provider: "faux", modelId: "faux-1", thinkingLevel: "off" }, focus: { provider: "faux", modelId: "faux-2", thinkingLevel: "off" } } };
 const twoModels = (options = {}) => fauxProvider({ models: [{ id: "faux-1" }, { id: "faux-2" }], ...options });
 
 test("work runs a brief in its own context and only the report reaches the main thread", async (t) => {

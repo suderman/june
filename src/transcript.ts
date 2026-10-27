@@ -8,6 +8,7 @@ export type Item =
 	| { kind: "assistant"; id: string; blocks: Block[]; streaming: boolean; error?: string }
 	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; output: string }
 	| { kind: "note"; id: string; text: string }
+	| { kind: "patter"; id: string; text: string }
 	| { kind: "reply"; id: string; command: string; text: string };
 
 export class Transcript {
@@ -153,6 +154,9 @@ export class Transcript {
 		switch (entry.kind) {
 			case "june.input":
 				this.items.push({ kind: "user", id, source: entry.data?.source ?? "?", text: entry.data?.text ?? "" });
+				return;
+			case "june.patter":
+				this.items.push({ kind: "patter", id, text: entry.data?.text ?? "" });
 				return;
 			case "pi.user": {
 				const text = textOf(message?.content);

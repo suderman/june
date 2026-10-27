@@ -10,9 +10,14 @@ export type HerdrHost = { readonly ssh?: string };
 export type ModelChoice = { readonly provider: string; readonly modelId: string; readonly thinkingLevel: string };
 
 export type Config = {
-	readonly model: ModelChoice & {
-		/** Focus mode, for careful heads-down work; fields it leaves out come from the default model. */
+	/** June's three modes. Focus and patter take the provider they leave out from chat. */
+	readonly model: {
+		/** Everyday conversation, and where every conversation starts. */
+		readonly chat: ModelChoice;
+		/** Careful heads-down work; effort defaults to chat's. */
 		readonly focus?: ModelChoice;
+		/** The cheap model that keeps the user company during long waits; thinking defaults to off. */
+		readonly patter?: ModelChoice;
 	};
 	/** Pi's models.json, read for the configured provider so codex-lb is defined in one place. */
 	readonly providersFile: string;
@@ -115,11 +120,11 @@ export function readLayers(p: Paths): Record<string, any> {
 /** The merged layers over the defaults. */
 export function loadConfig(p: Paths = paths()): Config {
 	const raw = readLayers(p);
-	if (!raw.model?.provider || !raw.model?.modelId) throw new Error(`No model configured in ${p.layers.join(", ")}`);
+	if (!raw.model?.chat?.provider || !raw.model?.chat?.modelId) throw new Error(`No model.chat configured in ${p.layers.join(", ")}`);
 	const herdr = { ...DEFAULTS.herdr, ...raw.herdr };
 	const org = { ...DEFAULTS.org, ...raw.org };
 	return {
-		model: withFocus({ thinkingLevel: "medium", ...raw.model }),
+		model: withModes(raw.model),
 		providersFile: expandHome(raw.providersFile ?? DEFAULTS.providersFile),
 		envFiles: (raw.envFiles ?? DEFAULTS.envFiles).map(expandHome),
 		contextCap: raw.contextCap ?? DEFAULTS.contextCap,
@@ -145,11 +150,14 @@ export function loadConfig(p: Paths = paths()): Config {
 	};
 }
 
-function withFocus(model: Record<string, any>): Config["model"] {
-	const { focus, ...normal } = model;
-	if (focus === undefined) return normal as Config["model"];
-	if (!focus.modelId) throw new Error("model.focus needs a modelId");
-	return { ...normal, focus: { provider: normal.provider, thinkingLevel: normal.thinkingLevel, ...focus } } as Config["model"];
+function withModes({ chat: given, focus, patter }: Record<string, any>): Config["model"] {
+	for (const [name, mode] of Object.entries({ focus, patter })) if (mode !== undefined && !mode.modelId) throw new Error(`model.${name} needs a modelId`);
+	const chat = { thinkingLevel: "medium", ...given };
+	return {
+		chat,
+		...(focus ? { focus: { provider: chat.provider, thinkingLevel: chat.thinkingLevel, ...focus } } : {}),
+		...(patter ? { patter: { provider: chat.provider, thinkingLevel: "off", ...patter } } : {}),
+	} as Config["model"];
 }
 
 export type PromptFiles = Pick<Config, "soulFile" | "memoryFile" | "instructionsFile">;

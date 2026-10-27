@@ -30,6 +30,7 @@ import { type CommandScope, runCommand } from "./commands.ts";
 import { type Config, expandHome, type Paths } from "./config.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { createMemoryExtension } from "./memory.ts";
+import { createPatter, type PatterTiming } from "./patter.ts";
 import { readLines, type Reply, type Request, type Status, writeLine } from "./protocol.ts";
 import { createCodingExtension } from "./tools/coding.ts";
 import { createHerdrExtension, Herdr } from "./tools/herdr.ts";
@@ -67,6 +68,8 @@ export type DaemonOptions = {
 	readonly telegramPort?: TelegramPort;
 	/** Tests replace the infrastructure tools. */
 	readonly extensions?: readonly Extension[];
+	/** Tests shorten patter's waits. */
+	readonly patterTiming?: Partial<PatterTiming>;
 };
 
 export type Daemon = {
@@ -84,7 +87,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 	const lock = acquireDataDirLock(paths.state);
 	const startedAt = new Date().toISOString();
 	try {
-		const model = { provider: config.model.provider, modelId: config.model.modelId };
+		const model = { provider: config.model.chat.provider, modelId: config.model.chat.modelId };
 		const resolved = options.models.getModel(model.provider, model.modelId);
 		if (resolved === undefined) throw new Error(`Unknown model ${model.provider}/${model.modelId}`);
 
@@ -100,10 +103,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const prompt = createPromptExtension(config, paths.layers);
 		const memory = createMemoryExtension(prompt.files, () => harness);
 		const telegram = createTelegram(options, model, log);
-		// June's working context does the work only: no memory review, task queueing, or messages to the user.
-		const childless = [memory, ...extensions.filter((e) => e.name === "dispatch"), ...(telegram ? [telegram.extension] : [])];
+		const patter = config.model.patter
+			? createPatter({ models: options.models, model: config.model.patter, focus: config.model.focus, files: prompt.files, log, timing: options.patterTiming })
+			: undefined;
+		// June's working context does the work only: no memory review, task queueing, patter, or messages to the user.
+		const childless = [memory, ...extensions.filter((e) => e.name === "dispatch"), ...(telegram ? [telegram.extension] : []), ...(patter ? [patter.extension] : [])];
 		const work = createWorkExtension(config, () => childless);
-		for (const extension of [prompt.extension, memory, work, ...extensions]) registry.install(extension);
+		for (const extension of [prompt.extension, memory, work, ...(patter ? [patter.extension] : []), ...extensions]) registry.install(extension);
 		if (telegram !== undefined) registry.install(telegram.extension);
 
 		const workdir = `${paths.state}/files`;
@@ -122,7 +128,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
 		// Commands and relative paths start in the home directory; Telegram downloads stay in the workdir. A restart also
 		// lets June's hair down: she always starts in default mode.
-		const agent = { model, thinkingLevel: config.model.thinkingLevel as never, cwd: expandHome("~") };
+		const agent = { model, thinkingLevel: config.model.chat.thinkingLevel as never, cwd: expandHome("~") };
 		const root = await harness.root(BG, { agent });
 		const current = await root.agent(BG);
 		if (
@@ -151,6 +157,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 					harness.resume();
 				});
 		} else harness.resume();
+		const stopPatter = patter?.start(harness, root);
 
 		const status = async (): Promise<Status> => {
 			const inspection = await harness.inspect(BG);
@@ -191,6 +198,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				const closed = new Promise<void>((resolve) => server.close(() => resolve()));
 				for (const socket of clients) socket.destroy();
 				await closed;
+				stopPatter?.();
 				await telegram?.stop();
 				await harness.close(BG);
 				rmSync(paths.socket, { force: true });
@@ -216,7 +224,7 @@ function createTelegram(options: DaemonOptions, model: { provider: string; model
 		allowedUserIds: tg.allowedUserIds,
 		workdir: `${options.paths.state}/files`,
 		model,
-		thinkingLevel: options.config.model.thinkingLevel as never,
+		thinkingLevel: options.config.model.chat.thinkingLevel as never,
 		models: options.models,
 		log,
 		...(options.telegramPort ? { port: options.telegramPort, previewIntervalMs: 20 } : {}),
