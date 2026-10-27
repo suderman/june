@@ -16,7 +16,7 @@ export type Config = {
 		readonly chat: ModelChoice;
 		/** Careful heads-down work; effort defaults to chat's. */
 		readonly focus?: ModelChoice;
-		/** The cheap model that keeps the user company during long waits; thinking defaults to off. */
+		/** The cheap model that keeps the user company during long waits; thinking defaults to medium, which keeps its planning out of the line. */
 		readonly patter?: ModelChoice;
 	};
 	/** Pi's models.json, read for the configured provider so codex-lb is defined in one place. */
@@ -156,7 +156,7 @@ function withModes({ chat: given, focus, patter }: Record<string, any>): Config[
 	return {
 		chat,
 		...(focus ? { focus: { provider: chat.provider, thinkingLevel: chat.thinkingLevel, ...focus } } : {}),
-		...(patter ? { patter: { provider: chat.provider, thinkingLevel: "off", ...patter } } : {}),
+		...(patter ? { patter: { provider: chat.provider, thinkingLevel: "medium", ...patter } } : {}),
 	} as Config["model"];
 }
 

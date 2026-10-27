@@ -29,5 +29,5 @@ test("config layers merge, and SOUL.org and AGENTS.md come from the most specifi
 	assert.deepEqual(focused.model.focus, { provider: "p", thinkingLevel: "medium", modelId: "careful" }, "focus inherits what it leaves out");
 	assert.equal(config.model.focus, undefined, "no focus unless configured");
 	await writeFile(join(machine!, "config.json"), JSON.stringify({ model: { patter: { modelId: "chatty" } } }));
-	assert.deepEqual(loadConfig({ ...tmp.paths, layers: [agents!, machine!] }).model.patter, { provider: "p", thinkingLevel: "off", modelId: "chatty" }, "patter thinks not at all unless told");
+	assert.deepEqual(loadConfig({ ...tmp.paths, layers: [agents!, machine!] }).model.patter, { provider: "p", thinkingLevel: "medium", modelId: "chatty" }, "patter thinks a little unless told");
 });

@@ -14,16 +14,25 @@ const spoken = (ctx: TranscriptContext) => JSON.stringify(ctx.messages.filter((m
 const config = { model: { chat: { provider: "faux", modelId: "faux-1", thinkingLevel: "off" }, patter: { provider: "pf", modelId: "luna", thinkingLevel: "off" } } };
 const fast = { openAfterMs: 200, gapsMs: [400], tickMs: 50, timeoutMs: 2000 };
 
-/** A patter model that numbers its lines and keeps each request's digest. */
+type Heard = { said: string[]; update: string; all: string };
+
+/** A patter model that numbers its lines and keeps what each request told it. */
 function patterModel(reply?: (n: number) => ReturnType<typeof fauxAssistantMessage> | Promise<ReturnType<typeof fauxAssistantMessage>>) {
 	const faux = fauxProvider({ provider: "pf", models: [{ id: "luna" }] });
-	const digests: Record<string, unknown>[] = [];
+	const heard: Heard[] = [];
+	const text = (m: TranscriptContext["messages"][number]) =>
+		typeof m.content === "string" ? m.content : (m.content as { type: string; text?: string }[]).map((b) => b.text ?? "").join("");
 	const step = (ctx: TranscriptContext) => {
-		digests.push(JSON.parse(String(ctx.messages.at(-1)!.content)));
-		return reply ? reply(digests.length) : fauxAssistantMessage(`patter line ${digests.length}`);
+		const turns = ctx.messages.filter((m) => m.role !== "system");
+		heard.push({
+			said: turns.filter((m) => m.role === "assistant").map(text),
+			update: text(turns.at(-1)!),
+			all: turns.filter((m) => m.role === "user").map(text).join("\n\n"),
+		});
+		return reply ? reply(heard.length) : fauxAssistantMessage(`patter line ${heard.length}`);
 	};
 	faux.setResponses(Array.from({ length: 50 }, () => step));
-	return { faux, digests };
+	return { faux, heard };
 }
 
 test("a slow command gets patter in the transcript, never in a model context, and a hidden note afterwards", async (t) => {
@@ -50,10 +59,11 @@ test("a slow command gets patter in the transcript, never in a model context, an
 	const lines = (await daemon.root.context(BG)).entries.filter((e) => e.kind === "june.patter").map((e) => (e.data as { text: string }).text);
 	assert.ok(lines.length >= 2, `patter spoke during the wait: ${JSON.stringify(lines)}`);
 	assert.equal(lines[0], "patter line 1");
-	assert.match(String(patter.digests[0]!.moment), /just starting/, "the first line is the opener");
-	assert.equal(patter.digests[0]!.jonAsked, "build it");
-	assert.match(JSON.stringify(patter.digests.at(-1)), /sleep 1\.5/, "patter sees the real activity");
-	assert.deepEqual(patter.digests.at(-1)!.yourEarlierLines, lines.slice(0, -1), "and its own earlier lines");
+	assert.match(patter.heard[0]!.update, /just starting/, "the first line is the opener");
+	assert.match(patter.heard[0]!.update, /Jon just said: build it/);
+	assert.match(patter.heard.at(-1)!.all, /sleep 1\.5/, "patter sees the real activity");
+	assert.deepEqual(patter.heard.at(-1)!.said, lines.slice(0, -1), "and its own earlier lines, as its own turns");
+	assert.doesNotMatch(patter.heard.at(-1)!.all, /\d+ seconds/, "elapsed time comes in rough words");
 	assert.doesNotMatch(JSON.stringify((await daemon.root.context(BG)).messages), /patter line/);
 	const count = patter.faux.state.callCount;
 	assert.equal((await ask(tmp.paths.socket, "anything else?")).text, "Nothing new.");
@@ -91,8 +101,8 @@ test("a work brief starts patter at once with the brief, and patter failures cha
 	assert.equal((await ask(tmp.paths.socket, "check the census")).text, "Census is fine.");
 	const lines = (await daemon.root.context(BG)).entries.filter((e) => e.kind === "june.patter").map((e) => (e.data as { text: string }).text);
 	assert.deepEqual(lines, ["Right, sleeves up."], "the opener came at once and the failed lines were dropped");
-	assert.equal(patter.digests[0]!.brief, "Check the wombat census.");
-	assert.ok(patter.digests.length >= 2, "patter kept trying after a failure");
+	assert.match(patter.heard[0]!.update, /June handed this to her working self: Check the wombat census\./);
+	assert.ok(patter.heard.length >= 2, "patter kept trying after a failure");
 });
 
 test("a line still being written when the answer lands is dropped", async (t) => {
@@ -110,4 +120,29 @@ test("a line still being written when the answer lands is dropped", async (t) =>
 	await new Promise((r) => setTimeout(r, 1000));
 	assert.equal(patter.faux.state.callCount, 1, "patter started a line");
 	assert.deepEqual((await daemon.root.context(BG)).entries.filter((e) => e.kind === "june.patter"), [], "but never after the answer");
+});
+
+test("patter hears the recent conversation and new steps, but no results", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const patter = patterModel();
+	const faux = fauxProvider();
+	faux.setResponses([
+		call("bash", { command: "echo $((6*7))" }),
+		fauxAssistantMessage("The wombats are counted."),
+		call("bash", { command: "sleep 0.6; echo $((7*8))" }),
+		() => call("bash", { command: "sleep 0.6; echo $((8*9))" }),
+		() => fauxAssistantMessage("Both done."),
+	]);
+	const daemon = await openTestDaemon({ ...tmp, faux, config, providers: [patter.faux], extensions: [createCodingExtension()], patterTiming: fast });
+	t.after(() => daemon.close());
+	assert.equal((await ask(tmp.paths.socket, "count the wombats")).text, "The wombats are counted.");
+	assert.equal((await ask(tmp.paths.socket, "now the slow part")).text, "Both done.");
+	const opener = patter.heard[0]!.update;
+	assert.match(opener, /Recent conversation:\nJon: count the wombats\nJune: The wombats are counted\./);
+	assert.match(opener, /Jon just said: now the slow part/);
+	assert.doesNotMatch(patter.heard.map((h) => h.all).join("\n"), /\b(42|56)\b/, "results stay out");
+	const later = patter.heard.find((h) => /New since your last line:\n- bash command=sleep 0\.6; echo \$\(\(8\*9\)\)/.test(h.update));
+	assert.ok(later, `a later update names only the new step: ${JSON.stringify(patter.heard.map((h) => h.update))}`);
+	assert.doesNotMatch(later!.update, /7\*8/);
 });
