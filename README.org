@@ -37,10 +37,10 @@ This repository holds code only. June reads configuration and identity in place 
 | Layer     | Directory                 | Kept in                  | Holds                                         |
 |-----------+---------------------------+--------------------------+-----------------------------------------------|
 | Harness   | =~/.agents/june/=          | Git (suderman/agents)    | =config.json= defaults, =AGENTS.md= conventions |
-| Personal  | =~/profile/june/=          | Syncthing                | =SOUL.org=, =MEMORY.org=, =config.json= with =daemonHost= |
+| Personal  | =~/profile/june/=          | Syncthing                | =SOUL.org=, =MEMORY.org=, =JOURNAL.org=, =config.json= with =daemonHost= |
 | Machine   | =$XDG_CONFIG_HOME/june/=   | this host only           | optional =config.json= overrides                |
 
-=config.json= files merge in path order: objects key by key, arrays and values replaced. =SOUL.org= and =AGENTS.md= come from the most specific directory that has them, and =MEMORY.org= is the file beside that =SOUL.org=, which June creates when she first remembers something. =SOUL.md= is no longer read, and =june doctor= fails while one remains. Skill directories are configuration too (=skillDirs=); none are built in.
+=config.json= files merge in path order: objects key by key, arrays and values replaced. =SOUL.org= and =AGENTS.md= come from the most specific directory that has them, and =MEMORY.org= and =JOURNAL.org= are the files beside that =SOUL.org=, which June creates when she first writes to them. =SOUL.md= is no longer read, and =june doctor= fails while one remains. Skill directories are configuration too (=skillDirs=); none are built in.
 
 Runtime files stay on the daemon host and are never synced:
 
@@ -104,6 +104,8 @@ Patter is how June stays present during a long wait, the way someone beside you 
 * Personal memory
 
 =SOUL.org= is June's identity. =MEMORY.org= preserves how her understanding of Jon develops, including formative corrections, shared realizations, and explanations of why something matters. A useful lesson records what happened, what changed in her understanding, and how she should act differently, with dates and source references where available. Jon's words and June's interpretations stay distinct. Both are ordinary Org files in the personal layer, shared by Syncthing and read into the system prompt. Changed files apply on the next model turn; =/reload= also finds files added or moved since startup. June can maintain them during ordinary conversation with her file tools. Jon's Org records remain authoritative for tasks, schedules, and project facts.
+
+=JOURNAL.org= is June's own journal: a dated record of Jon, their days together, and what she notices about him, in her own voice. It is an Org date tree (year, month, day, then a timed entry), like Jon's =~/org/journal.org=, which is his and not hers. She writes it on her own judgment with the =journal= tool, which files an entry under today's date and time, and searches it like any file when she needs their past to make sense of the present. Compaction adds entries for anything in the old context she missed. Her working context has no journal tool. The journal is not part of her prompt.
 
 Before manual or automatic compaction, one model request produces both the working summary and a review against existing memory. Useful learning is saved before the summary replaces old context. An unchanged memory is a successful review; no lesson is required. The review reconciles corrections without duplicating lessons or discarding unrelated history. It never rewrites =SOUL.org=, prunes Jon's records, or grants new authority. No nightly job is involved.
 

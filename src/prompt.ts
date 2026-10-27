@@ -79,9 +79,10 @@ function skillsSection(skills: readonly Skill[]): string {
 async function personalSection(files: PromptFiles, memory: () => Promise<string>): Promise<string | undefined> {
 	if (files.soulFile === undefined || files.memoryFile === undefined) return undefined;
 	const dir = dirname(files.soulFile);
-	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY)\.sync-conflict-.*\.org$/.test(name)).sort();
+	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY|JOURNAL)\.sync-conflict-.*\.org$/.test(name)).sort();
 	return [
 		`Your own files, which you keep with read and edit: ${files.soulFile} (identity, shown first in this prompt) and ${files.memoryFile} (what you have learned across conversations, below). Changes apply from your next turn.`,
+		...(files.journalFile ? [`Your journal, ${files.journalFile}, is an Org date tree you write with the journal tool. When you need your past with Jon, search it rather than reading it whole: find a day by its heading (rg -n '^\\*\\*\\* YYYY-MM-DD') and read from that line, or search words with context (rg -i -C3).`] : []),
 		...(conflicts.length > 0 ? [`Syncthing conflict copies in ${dir}: ${conflicts.join(", ")}. Tell the user and leave both copies until they decide.`] : []),
 		"",
 		(await memory()) || `${basename(files.memoryFile)} is empty or does not exist yet.`,

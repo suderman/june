@@ -4,7 +4,7 @@ import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
-import { createModels, fauxAssistantMessage, fauxProvider, type TranscriptContext } from "@earendil-works/pi-ai";
+import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { createRegistry, Harness, UserEntry } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { runCommand } from "../src/commands.ts";
@@ -23,7 +23,8 @@ async function fixture(t: TestContext) {
 	const soul = join(tmp.dir, "SOUL.org");
 	const memory = join(tmp.dir, "MEMORY.org");
 	await writeFile(soul, "#+TITLE: June\nBe observant, not flattering.\n");
-	const config = testConfig(tmp.dir, { soulFile: soul, memoryFile: memory });
+	const journal = join(tmp.dir, "JOURNAL.org");
+	const config = testConfig(tmp.dir, { soulFile: soul, memoryFile: memory, journalFile: journal });
 	let harness: Harness;
 	let pause: (() => Promise<void>) | undefined;
 	const open = async (faux: Faux, automatic = false, policy: { reserveTokens?: number; backgroundTokens?: number } = {}) => {
@@ -53,7 +54,7 @@ async function fixture(t: TestContext) {
 		return { harness, root, append, compact, reload: prompt.reload };
 	};
 	t.after(() => harness?.close(BG));
-	return { ...tmp, memory, soul, config, open, pause: (fn: (() => Promise<void>) | undefined) => { pause = fn; } };
+	return { ...tmp, memory, soul, journal, config, open, pause: (fn: (() => Promise<void>) | undefined) => { pause = fn; } };
 }
 
 async function seed(f: Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>["open"]>>) {
@@ -386,4 +387,54 @@ test("overflow recovery also preserves memory before retrying the request", asyn
 	assert.equal((await (await f.root.submit({ type: "input", content: "Continue." }, BG)).wait(BG)).status, "done");
 	assert.equal(faux.state.callCount, 3);
 	assert.equal((await f.root.context(BG)).entries.some((e) => e.kind === "pi.compaction"), true);
+});
+
+test("compaction keeps topic threads and journals what the journal lacks, once", async (t) => {
+	const env = await fixture(t);
+	const entry = { date: "2026-10-26", title: "Rough morning", text: "Jon had a rough morning with the kids and wanted to vent, not fix it." };
+	const faux = fauxProvider();
+	faux.setResponses([
+		(ctx) => {
+			const source = JSON.parse(String(ctx.messages.at(-1)!.content));
+			assert.equal(source.journal, "", "a first review sees an empty journal");
+			assert.ok(source.timeZone, "and the local time zone, to date entries");
+			assert.match(String(ctx.messages[0]!.content), /by topic thread/);
+			return fauxAssistantMessage(JSON.stringify({ summary: "Threads.", memory: null, journal: [entry] }));
+		},
+		(ctx) => {
+			assert.match(JSON.parse(String(ctx.messages.at(-1)!.content)).journal, /Rough morning/, "a later review sees what is written");
+			return fauxAssistantMessage(JSON.stringify({ summary: "Threads again.", memory: null, journal: [entry] }));
+		},
+	]);
+	const f = await env.open(faux);
+	await seed(f);
+	await f.compact();
+	const written = await readFile(env.journal, "utf8");
+	assert.match(written, /^\* 2026\n\*\* 2026-10 October\n\*\*\* 2026-10-26 Monday\n\*\*\*\* Rough morning\nJon had a rough morning/m);
+	await seed(f);
+	await f.compact();
+	assert.equal(faux.state.callCount, 2, "both compactions reviewed");
+	assert.equal(await readFile(env.journal, "utf8"), written, "an entry already there is not written twice");
+});
+
+test("June writes her journal with a tool, under today's date", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const soul = join(tmp.dir, "SOUL.org");
+	const journal = join(tmp.dir, "JOURNAL.org");
+	await writeFile(soul, "* June\nBe observant.\n");
+	const faux = fauxProvider();
+	faux.setResponses([
+		(ctx) => {
+			assert.match(effectivePrompt(ctx), /Your journal, .*JOURNAL\.org/);
+			return fauxAssistantMessage([fauxToolCall("journal", { title: "Kids", text: "Jon vented about the school run.\nI listened." })], { stopReason: "toolUse" });
+		},
+		fauxAssistantMessage("that sounds rough"),
+	]);
+	const daemon = await openTestDaemon({ ...tmp, faux, config: { soulFile: soul, memoryFile: join(tmp.dir, "MEMORY.org"), journalFile: journal } });
+	t.after(() => daemon.close());
+	await (await daemon.root.submit({ type: "input", content: "ugh, the school run", requestId: "r1" }, BG)).wait(BG);
+	const today = new Date();
+	const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+	assert.match(await readFile(journal, "utf8"), new RegExp(`\\*\\*\\* ${date} \\w+\\n\\*\\*\\*\\* \\d\\d:\\d\\d Kids\\nJon vented about the school run\\. I listened\\.\\n?$`));
 });

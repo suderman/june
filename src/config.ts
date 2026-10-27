@@ -27,6 +27,8 @@ export type Config = {
 	/** SOUL.org and AGENTS.md from the most specific layer that has them; MEMORY.org beside SOUL.org, maybe not yet made. */
 	readonly soulFile: string | undefined;
 	readonly memoryFile: string | undefined;
+	/** JOURNAL.org beside SOUL.org: June's dated record of Jon and their days together. */
+	readonly journalFile: string | undefined;
 	readonly instructionsFile: string | undefined;
 	/** The host that runs the daemon; elsewhere the client commands run there over SSH. */
 	readonly daemonHost: string | undefined;
@@ -160,7 +162,7 @@ function withModes({ chat: given, focus, patter }: Record<string, any>): Config[
 	} as Config["model"];
 }
 
-export type PromptFiles = Pick<Config, "soulFile" | "memoryFile" | "instructionsFile">;
+export type PromptFiles = Pick<Config, "soulFile" | "memoryFile" | "journalFile" | "instructionsFile">;
 
 /** The prompt files the layers select now; /reload calls this again so moved or new files are picked up. */
 export function promptFiles(layers: readonly string[]): PromptFiles {
@@ -169,6 +171,7 @@ export function promptFiles(layers: readonly string[]): PromptFiles {
 	return {
 		soulFile,
 		memoryFile: soulFile === undefined ? undefined : join(dirname(soulFile), "MEMORY.org"),
+		journalFile: soulFile === undefined ? undefined : join(dirname(soulFile), "JOURNAL.org"),
 		instructionsFile: layerFile("AGENTS.md"),
 	};
 }
