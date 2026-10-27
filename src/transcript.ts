@@ -4,7 +4,7 @@ import type { AgentEvent, SnapshotEvent } from "@earendil-works/pi-durable";
 type Block = { type: string; text?: string; thinking?: string; name?: string; arguments?: unknown; id?: string };
 
 export type Item =
-	| { kind: "user"; id: string; source: string; text: string }
+	| { kind: "user"; id: string; source: string; text: string; telegram?: true }
 	| { kind: "assistant"; id: string; blocks: Block[]; streaming: boolean; error?: string }
 	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; output: string }
 	| { kind: "note"; id: string; text: string }
@@ -168,8 +168,11 @@ export class Transcript {
 			case "pi.user": {
 				const text = textOf(message?.content);
 				// /stop, from either surface, writes this boundary so queued messages can be placed.
+				const own = /^\[(work|follow|reminder)[\] ]\s*/.exec(text);
 				if (text.startsWith("[/stop]")) this.items.push({ kind: "note", id, text: "stopped" });
-				else this.items.push({ kind: "user", id, source: "telegram", text });
+				// A notice delivered through Telegram, which June relays there: one short line here, not the whole report.
+				else if (own) this.items.push({ kind: "user", id, source: own[1]!, text: clip(text.slice(own[0].length), 80), telegram: true });
+				else this.items.push({ kind: "user", id, source: "telegram", text, telegram: true });
 				return;
 			}
 			case "pi.assistant": {
@@ -221,4 +224,9 @@ function summarize(args: unknown): string {
 		.filter(([, v]) => typeof v === "string" || typeof v === "number")
 		.map(([k, v]) => `${k}=${String(v).replace(/\s+/g, " ").slice(0, 60)}`);
 	return values.join(" ");
+}
+
+function clip(text: string, max: number): string {
+	const flat = text.replace(/\s+/g, " ").trim();
+	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }

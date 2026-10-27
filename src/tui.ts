@@ -17,6 +17,7 @@ import {
 	VStack,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+import { orgToMarkdown } from "./org.ts";
 import { Client, COMMANDS, parseCommand, type Reply } from "./protocol.ts";
 import { type Item, Transcript } from "./transcript.ts";
 
@@ -121,7 +122,8 @@ class Wrapped implements Component {
 	invalidate() {}
 }
 
-function component(item: Item): Component[] {
+/** `org`: the reply answers a terminal message, so June wrote Org; one bound for Telegram is Markdown already. */
+function component(item: Item, org: boolean): Component[] {
 	switch (item.kind) {
 		case "user": {
 			const tag = item.source === "kitty" ? "" : c.muted(`${item.source} `);
@@ -130,7 +132,7 @@ function component(item: Item): Component[] {
 		case "assistant": {
 			const parts: Component[] = [new Line()];
 			for (const block of item.blocks) {
-				if (block.type === "text" && block.text) parts.push(new Markdown(block.text, 0, 0, markdownTheme));
+				if (block.type === "text" && block.text) parts.push(new Markdown(org ? orgToMarkdown(block.text) : block.text, 0, 0, markdownTheme));
 				else if (block.type === "thinking" && block.thinking)
 					parts.push(new Line(c.italic(c.muted(`∴ ${block.thinking.replace(/\s+/g, " ")}`))));
 			}
@@ -158,7 +160,11 @@ class TranscriptView extends Container {
 	update(transcript: Transcript) {
 		this.clear();
 		if (transcript.omitted) this.addChild(new Line(c.muted(`── ${transcript.omitted} earlier entries not shown`)));
-		for (const item of transcript.items) for (const part of component(item)) this.addChild(part);
+		let org = true;
+		for (const item of transcript.items) {
+			if (item.kind === "user") org = item.telegram !== true;
+			for (const part of component(item, org)) this.addChild(part);
+		}
 	}
 }
 

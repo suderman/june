@@ -144,7 +144,7 @@ export function loadConfig(p: Paths = paths()): Config {
 		...(raw.telegram
 			? {
 					telegram: {
-						tokenEnv: raw.telegram.tokenEnv ?? "JUNE_TELEGRAM_BOT_TOKEN",
+						tokenEnv: raw.telegram.tokenEnv ?? "TELEGRAM_BOT_TOKEN",
 						allowedUserIds: (raw.telegram.allowedUserIds ?? []).map(Number),
 					},
 				}

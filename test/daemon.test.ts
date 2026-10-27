@@ -7,7 +7,11 @@ import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { promptFiles } from "../src/config.ts";
 import { Client, parseCommand, type Reply } from "../src/protocol.ts";
-import { ask, fakeTelegram, openTestDaemon, tempDir, until } from "./helpers.ts";
+import { createCodingExtension } from "../src/tools/coding.ts";
+import { Transcript } from "../src/transcript.ts";
+import { ask, fakeTelegram, openTestDaemon, routed, tempDir, until } from "./helpers.ts";
+
+const call = (name: string, args: Parameters<typeof fauxToolCall>[1]) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
 
 test("ask answers over the socket, and a repeated request id is the same submission", async (t) => {
 	const tmp = await tempDir();
@@ -126,6 +130,62 @@ test("Telegram messages land in the primary conversation and are answered to the
 	});
 	await new Promise((r) => setTimeout(r, 100));
 	assert.equal(faux.state.callCount, 2);
+});
+
+test("a brief asked for from Telegram reports back to the chat; one asked for in the terminal stays there", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const faux = fauxProvider();
+	faux.setResponses(routed(
+		[
+			call("work", { brief: "Count the phone wombats." }),
+			fauxAssistantMessage("on it"),
+			(ctx) => {
+				assert.match(JSON.stringify(ctx.messages.at(-1)), /\[work\] Report: seven wombats\./);
+				return fauxAssistantMessage("seven wombats, from the phone brief");
+			},
+			call("work", { brief: "Count the desk wombats." }),
+			fauxAssistantMessage("on it at the desk"),
+			fauxAssistantMessage("three wombats, from the desk brief"),
+		],
+		[fauxAssistantMessage("Report: seven wombats."), fauxAssistantMessage("Report: three wombats.")],
+	));
+	const tg = fakeTelegram();
+	const daemon = await openTestDaemon({
+		...tmp,
+		faux,
+		telegramPort: tg.port,
+		extensions: [createCodingExtension()],
+		config: { telegram: { tokenEnv: "TG", allowedUserIds: [42] } },
+		secrets: { TG: `123456:${"a".repeat(35)}` },
+	});
+	t.after(() => daemon.close());
+	await daemon.telegram!.handleUpdate({
+		update_id: 1,
+		message: {
+			message_id: 7,
+			date: Math.floor(Date.now() / 1000),
+			chat: { id: 42, type: "private" as const, first_name: "Jon" },
+			from: { id: 42, is_bot: false, first_name: "Jon" },
+			text: "count the wombats",
+		},
+	});
+	await until(() => tg.sent.some((m) => m.text.includes("seven wombats, from the phone brief")), 10_000);
+	assert.ok(tg.sent.some((m) => m.text.includes("on it")), "the hand-off reached the chat too");
+	const transcript = new Transcript();
+	const client = await Client.open(tmp.paths.socket);
+	t.after(() => client.close());
+	transcript.load(((await client.request({ op: "attach", requestId: "a" })) as Extract<Reply, { type: "snapshot" }>).snapshot);
+	assert.ok(
+		transcript.items.some((i) => i.kind === "user" && i.source === "work" && i.text === "Report: seven wombats."),
+		"the terminal shows the delivered report as one short work line",
+	);
+
+	const before = tg.sent.length;
+	assert.equal((await ask(tmp.paths.socket, "now count the desk ones")).text, "on it at the desk");
+	await until(async () => JSON.stringify((await daemon.root.context(BG)).messages).includes("three wombats, from the desk brief"), 10_000);
+	await new Promise((r) => setTimeout(r, 100));
+	assert.equal(tg.sent.length, before, "a terminal brief's report stays in the terminal");
 });
 
 test("a second daemon refuses to open the same state", async (t) => {

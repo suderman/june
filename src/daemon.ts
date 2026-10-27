@@ -9,7 +9,6 @@ import {
 	type AgentEvent,
 	type Conversation,
 	createRegistry,
-	defineDoc,
 	type Extension,
 	Harness,
 	type SnapshotEvent,
@@ -19,6 +18,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import {
 	acquireDataDirLock,
+	createGrammyPort,
 	createLogger,
 	createSettings,
 	createTelegramChannel,
@@ -30,6 +30,7 @@ import { type CommandScope, runCommand } from "./commands.ts";
 import { type Config, expandHome, type Paths } from "./config.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { createMemoryExtension } from "./memory.ts";
+import { ChatInfo, ChatMap } from "./notify.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
 import { readLines, type Reply, type Request, type Status, writeLine } from "./protocol.ts";
 import { createCodingExtension } from "./tools/coding.ts";
@@ -40,23 +41,6 @@ import { createOrgExtension, Org } from "./tools/org.ts";
 
 export const VERSION = "0.1.0";
 const SNAPSHOT_ENTRIES = 200;
-
-// pi-durable-telegram keeps its chat → conversation map in these documents. June writes the same kinds so the user's
-// private chat lands in the primary conversation instead of a new one. Keep in step with its src/channel/docs.ts.
-const ChatMap = defineDoc<{ chats: Record<string, number> }>({
-	kind: "tg.chats",
-	version: 1,
-	scope: "session",
-	initial: () => ({ chats: {} }),
-});
-const ChatInfo = defineDoc<{ chatId: number }>({
-	kind: "tg.chat",
-	version: 1,
-	scope: "conversation",
-	history: "latest",
-	fork: "initial",
-	initial: () => ({ chatId: 0 }),
-});
 
 export type DaemonOptions = {
 	readonly config: Config;
@@ -103,8 +87,21 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const prompt = createPromptExtension(config, paths.layers);
 		const memory = createMemoryExtension(prompt.files, () => harness);
 		const telegram = createTelegram(options, model, log);
+		// Patter reaches the phone too, through its own Bot API client: the channel keeps its client to itself.
+		const patterTelegram = telegram && {
+			port: options.telegramPort ?? createGrammyPort({ token: telegramToken(options)!, apiRoot: "https://api.telegram.org" }),
+			chatId: config.telegram!.allowedUserIds[0]!,
+		};
 		const patter = config.model.patter
-			? createPatter({ models: options.models, model: config.model.patter, focus: config.model.focus, files: prompt.files, log, timing: options.patterTiming })
+			? createPatter({
+					models: options.models,
+					model: config.model.patter,
+					focus: config.model.focus,
+					files: prompt.files,
+					log,
+					timing: options.patterTiming,
+					...(patterTelegram ? { telegram: patterTelegram } : {}),
+				})
 			: undefined;
 		// June's working context does the work only: no memory review, task queueing, patter, or messages to the user.
 		const childless = [memory, ...extensions.filter((e) => e.name === "dispatch"), ...(telegram ? [telegram.extension] : []), ...(patter ? [patter.extension] : [])];
@@ -212,10 +209,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 	}
 }
 
+function telegramToken(options: DaemonOptions): string | undefined {
+	const tg = options.config.telegram;
+	return tg && (options.secrets?.[tg.tokenEnv] ?? process.env[tg.tokenEnv]);
+}
+
 function createTelegram(options: DaemonOptions, model: { provider: string; modelId: string }, log: Logger) {
 	const tg = options.config.telegram;
 	if (tg === undefined) return undefined;
-	const token = options.secrets?.[tg.tokenEnv] ?? process.env[tg.tokenEnv];
+	const token = telegramToken(options);
 	if (!token) {
 		log.warn("telegram_disabled", { reason: `${tg.tokenEnv} is not set` });
 		return undefined;

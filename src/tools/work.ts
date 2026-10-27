@@ -5,6 +5,7 @@
 import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, configure, defineDoc, LiveDoc, defineExtension, defineTask, defineTool, type Extension, section, type Tx } from "@earendil-works/pi-durable";
 import type { Config, ModelChoice } from "../config.ts";
+import { deliverIn, type Notice, noticeSurface, submitNotice, type Surface } from "../notify.ts";
 
 export const WORK = "june.work";
 
@@ -39,7 +40,7 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 		delete doc.byCall[task.input.call];
 	};
 
-	const task = defineTask<WorkInput, { phase: "run" } | { phase: "report"; report: string }, null>({
+	const task = defineTask<WorkInput, { phase: "run" } | { phase: "report"; report: string; surface: Surface }, null>({
 		name: "june.work",
 		version: 1,
 		initial: () => ({ phase: "run" }),
@@ -65,30 +66,32 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 				if (context.abortSignal?.aborted) return;
 				await runtime.commit(async (tx) => {
 					if ((await tx.doc(WorkDoc)).active[id] === undefined) return undefined;
+					// Decided once and kept, so a restart cannot send the report both ways. Reads come before the writes below.
+					const surface = await noticeSurface(tx, runtime.registry, runtime.conversationId);
 					const report =
 						settled.status === "done"
 							? textOf((await tx.entry(settled.answer!))?.model?.[0]) || "The working context finished without a report."
 							: `The working context ended ${settled.status}${"reason" in settled && settled.reason ? `: ${settled.reason}` : ""}. Tell Jon what happened.`;
 					await done(tx, task);
 					await mark(tx, runtime.conversationId, id, "finished", task.input.brief);
-					return { status: "running", checkpoint: { phase: "report", report } };
+					return { status: "running", checkpoint: { phase: "report", report, surface } };
 				}, context);
 			},
 			// The report is its own phase, so a restart sends it once and never marks the work finished twice.
 			report: async (task, runtime, context) => {
-				if (task.state.checkpoint.phase !== "report") return;
-				const root = await runtime.conversation(runtime.conversationId, context);
-				await root?.submit(
-					{
-						type: "input",
-						requestId: `work-report:${task.id}`,
-						content: `[work] ${task.state.checkpoint.report}`,
-						whenBusy: "followUp",
-						entry: { kind: "june.input", data: { source: "work", text: `report: ${clip(task.input.brief, 80)}` } },
-					},
-					context,
-				);
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
+				const checkpoint = task.state.checkpoint;
+				if (checkpoint.phase !== "report") return;
+				const notice: Notice = {
+					requestId: `work-report:${task.id}`,
+					content: `[work] ${checkpoint.report}`,
+					source: "work",
+					label: `report: ${clip(task.input.brief, 80)}`,
+				};
+				if (checkpoint.surface === "terminal") await submitNotice(await runtime.conversation(runtime.conversationId, context), notice, context);
+				await runtime.commit(async (tx) => {
+					if (checkpoint.surface === "telegram") await deliverIn(tx, runtime.registry, runtime.conversationId, notice);
+					return { status: "terminal", outcome: { status: "completed", result: null } };
+				}, context);
 			},
 		},
 		abort: (task, runtime, context) =>

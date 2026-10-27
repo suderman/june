@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import type { Api, Context as ModelContext, Message, Model, Models } from "@earendil-works/pi-ai";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import { type Conversation, defineExtension, type Extension, type Harness, LiveDoc, section } from "@earendil-works/pi-durable";
-import type { Logger } from "pi-durable-telegram";
+import type { Logger, TelegramPort } from "pi-durable-telegram";
 import type { ModelChoice, PromptFiles } from "./config.ts";
 import { WorkDoc } from "./tools/work.ts";
 
@@ -52,6 +52,8 @@ type Wait = {
 	/** Steps already reported, so each update says only what is new. */
 	seen: Set<string>;
 	asking?: AbortController;
+	/** The Telegram message this wait's lines grow in, while Jon is on his phone. */
+	phone?: { id: number; lines: string[] };
 };
 
 type Moment = { key?: string; work?: string; active: ReadonlySet<string>; live?: Live };
@@ -66,6 +68,8 @@ export function createPatter(options: {
 	files: () => PromptFiles;
 	log: Logger;
 	timing?: Partial<PatterTiming>;
+	/** Jon's private chat: lines go there too while his latest message came from Telegram. */
+	telegram?: { port: TelegramPort; chatId: number };
 }): Patter {
 	const { models, log } = options;
 	const timing = { ...TIMING, ...options.timing };
@@ -77,6 +81,8 @@ export function createPatter(options: {
 	/** The latest run that only relays a report from the working context or a followed task: June is answering, not waiting. */
 	let relay: string | undefined;
 	let read: (() => Promise<Moment>) | undefined;
+	/** When to renew "typing…" in Jon's chat; Telegram clears it after about five seconds. */
+	let typingAt = 0;
 
 	/**
 	 * Once the wait in progress is no longer the current one, its lines become the note. A brief still running keeps its
@@ -87,6 +93,8 @@ export function createPatter(options: {
 		if (wait === undefined || wait.key === key) return;
 		wait.asking?.abort();
 		if (wait.lines.length > 0) note = wait.lines.map((line) => `- ${line}`).join("\n");
+		// June's answer now sits below this wait's Telegram message, so lines after it start a new one.
+		delete wait.phone;
 		if (wait.work !== undefined && active.has(wait.work)) paused.set(wait.key, wait);
 		wait = undefined;
 	};
@@ -121,6 +129,12 @@ export function createPatter(options: {
 			const now = Date.now();
 			settle(moment);
 			const { key, work, live } = moment;
+			// While a brief runs, Jon's chat shows June typing, as it does while she writes a reply.
+			if (options.telegram !== undefined && moment.active.size > 0 && now >= typingAt && (await onTelegram())) {
+				typingAt = now + 4000;
+				const { port, chatId } = options.telegram;
+				void port.sendChatAction(chatId, "typing").catch((error) => log.warn("patter_telegram_failed", { error: (error as Error).message }));
+			}
 			if (key === undefined) return;
 			if (wait === undefined && paused.has(key)) {
 				wait = paused.get(key)!;
@@ -131,8 +145,8 @@ export function createPatter(options: {
 			}
 			if (wait === undefined && work === undefined) {
 				if (relay === key) return;
-				const asked = (await root.context(BG)).entries.findLast((entry) => entry.kind === "june.input")?.data as { source?: string } | undefined;
-				if (asked?.source === "work" || asked?.source === "follow") {
+				const latest = (await root.context(BG)).messages.findLast((m) => m.role === "user");
+				if (latest !== undefined && /^\[(work|follow|reminder)\b/.test(userText(latest))) {
 					relay = key;
 					return;
 				}
@@ -149,6 +163,7 @@ export function createPatter(options: {
 				if (line && wait === current && (await read!()).key === current.key) {
 					current.lines.push(line);
 					await root.submit({ type: "write", entry: { kind: PATTER, data: { text: line } } }, BG);
+					if (options.telegram !== undefined && (await onTelegram())) await toPhone(current, line, options.telegram);
 				}
 			} catch (error) {
 				if (!current.asking.signal.aborted) log.warn("patter_failed", { error: (error as Error).message });
@@ -157,6 +172,30 @@ export function createPatter(options: {
 				// After the opener, the first gap; each later line waits longer, up to the last gap.
 				const gaps = timing.gapsMs;
 				current.next = Date.now() + gaps[Math.min(Math.max(current.lines.length - 1, 0), gaps.length - 1)]!;
+			}
+		};
+
+		/** Whether Jon's latest own message came from Telegram: terminal messages carry a [kitty] or [cli] tag. */
+		const onTelegram = async () => {
+			const latest = (await root.context(BG)).messages.findLast((m) => m.role === "user" && !/^\[(\/stop|work|follow|reminder)\b/.test(userText(m)));
+			return latest !== undefined && !/^\[(kitty|cli)\]/.test(userText(latest));
+		};
+
+		/**
+		 * One Telegram message per wait, edited to add each line: an edit makes no sound, so the phone buzzes once and
+		 * the message shows June is still at it. A failure only costs the phone its line.
+		 */
+		const toPhone = async (current: Wait, line: string, { port, chatId }: { port: TelegramPort; chatId: number }) => {
+			const lines = [...(current.phone?.lines ?? []), line];
+			const html = (ls: string[]) => ls.map((l) => `🦘 <i>${escapeHtml(l)}</i>`).join("\n\n");
+			try {
+				if (current.phone === undefined || html(lines).length > 3500) current.phone = { id: await port.sendMessage(chatId, html([line]), { html: true }), lines: [line] };
+				else {
+					await port.editMessageText(chatId, current.phone.id, html(lines), { html: true });
+					current.phone.lines = lines;
+				}
+			} catch (error) {
+				log.warn("patter_telegram_failed", { error: (error as Error).message });
 			}
 		};
 
@@ -201,8 +240,8 @@ export function createPatter(options: {
 		 */
 		const activity = async (current: Wait, live: Live) => {
 			const view = await root.context(BG);
-			const asked = view.entries.findLast((entry) => entry.kind === "june.input")?.data as { text?: string } | undefined;
 			const ask = view.messages.findLastIndex((m) => m.role === "user");
+			const asked = ask < 0 ? undefined : { text: userText(view.messages[ask]!).replace(/^\[\w+\] /, "") };
 			// A run's own steps, or for background work only its working context's: the main thread is elsewhere.
 			const request = current.work === undefined ? view.messages.slice(ask + 1) : [];
 			const work = current.work === undefined ? undefined : (await harness.snapshot(WorkDoc, BG))?.active[current.work];
@@ -245,6 +284,16 @@ function said(model: Model<Api>, text: string, timestamp: number): Message {
 	return { role: "assistant", content: [{ type: "text", text }], api: model.api, provider: model.provider, model: model.id, usage: zero, stopReason: "stop", timestamp };
 }
 
+function escapeHtml(text: string): string {
+	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** A user message's text. */
+function userText(m: Message): string {
+	if (m.role !== "user") return "";
+	return typeof m.content === "string" ? m.content : m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ");
+}
+
 /** Tool calls in plain words, without their results. */
 function calls(messages: readonly Message[]): string[] {
 	return messages.flatMap((m) => (m.role === "assistant" ? m.content.flatMap((b) => (b.type === "toolCall" ? [`${b.name} ${step(b.arguments)}`.trim()] : [])) : []));
@@ -261,8 +310,7 @@ function conversation(messages: readonly Message[]): string[] {
 	for (const m of messages) {
 		if (m.role === "user") {
 			flush();
-			const text = typeof m.content === "string" ? m.content : m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ");
-			out.push(`Jon: ${clip(text.replace(/^\[\w+\] /, ""), 300)}`);
+			out.push(`Jon: ${clip(userText(m).replace(/^\[\w+\] /, ""), 300)}`);
 		}
 		if (m.role === "assistant") reply = m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ").trim() || reply;
 	}

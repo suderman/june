@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { orgToMarkdown } from "../src/org.ts";
 import { Transcript } from "../src/transcript.ts";
 import { compactingStatus } from "../src/tui.ts";
 
@@ -32,4 +33,12 @@ test("the transcript knows while a compaction runs, from events or a reconnect s
 	const snapshot = { entries: [], inbox: [], tools: [], compactions: [{ taskId: 3 }], agent: {} } as never;
 	transcript.load(snapshot);
 	assert.ok(transcript.compacting !== undefined, "a client that attaches mid-compaction shows it too");
+});
+
+test("June's Org replies render as Markdown in the terminal, leaving paths and Markdown alone", () => {
+	const org = "* Plan\nSome *bold*, /italic/ and =code=, see [[https://a.ca][A]].\nA path /home/jon/src/ and **markdown** stay.\n#+begin_src sh\necho *x*\n#+end_src";
+	assert.equal(
+		orgToMarkdown(org),
+		"# Plan\nSome **bold**, *italic* and `code`, see [A](https://a.ca).\nA path /home/jon/src/ and **markdown** stay.\n```sh\necho *x*\n```",
+	);
 });

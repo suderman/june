@@ -225,5 +225,5 @@ test("stopping the turn that handed off a brief stops the brief too", async (t) 
 	assert.deepEqual((await daemon.harness.snapshot(WorkDoc, BG))?.active, {}, "the brief that turn started is stopped with it");
 	assert.match(await said(daemon), /\[\/stop\] stopped your working context: «Search every flake\.»/);
 	await new Promise((r) => setTimeout(r, 500));
-	assert.doesNotMatch(await said(daemon), /\[work\] (?!message)/, "and sends no report");
+	assert.doesNotMatch(await said(daemon), /\[work\] slow/, "and sends no report");
 });

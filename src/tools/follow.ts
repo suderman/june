@@ -1,6 +1,7 @@
 // Follow the tasks June queued: a durable background task per heading checks Org and Herdr on a timer, without a
 // model call, and tells June only when something changed that the user would want to hear.
 import { defineDoc, defineTask, type Tx } from "@earendil-works/pi-durable";
+import { deliverIn, type Notice, noticeSurface, submitNotice, type Surface } from "../notify.ts";
 import type { Herdr } from "./herdr.ts";
 import type { Org } from "./org.ts";
 
@@ -93,9 +94,11 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 				// The due time is in the checkpoint, so a restart keeps the schedule instead of starting it over.
 				if (runtime.now() < due) await runtime.sleep(due, context);
 				let superseded = false;
+				let surface: Surface = "terminal";
 				await runtime.commit(async (tx) => {
 					const doc = await tx.doc(Follows);
 					superseded = doc.ids[task.input.id] !== Number(task.id);
+					if (!superseded) surface = await noticeSurface(tx, runtime.registry, runtime.conversationId);
 					return superseded ? { status: "terminal", outcome: { status: "completed", result: null } } : undefined;
 				}, context);
 				if (superseded) return;
@@ -105,26 +108,24 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 				});
 				const now = runtime.now();
 				const next = seen === undefined ? undefined : decide(task.input, seen, last, now, options);
-				if (next?.say !== undefined && next.signal !== last) {
-					const conversation = await runtime.conversation(runtime.conversationId, context);
-					// A rerun after a crash submits the same request id, which finds the first submission.
-					await conversation?.submit(
-						{
-							type: "input",
-							requestId: `follow:${task.input.request ?? task.input.id}:${next.signal}:${checks}`,
-							content: `[follow] ${next.say}`,
-							entry: { kind: "june.input", data: { source: "follow", text: next.say } },
-						},
-						context,
-					);
-				}
-				await runtime.commit(
-					() =>
-						next?.done
-							? { status: "terminal", outcome: { status: "completed", result: null } }
-							: { status: "running", checkpoint: { phase: "watch", due: now + options.intervalMs, checks: checks + 1, last: next?.signal ?? last } },
-					context,
-				);
+				const notice: Notice | undefined =
+					next?.say !== undefined && next.signal !== last
+						? {
+								requestId: `follow:${task.input.request ?? task.input.id}:${next.signal}:${checks}`,
+								content: `[follow] ${next.say}`,
+								source: "follow",
+								label: next.say,
+							}
+						: undefined;
+				// To Telegram, the delivery is created with the checkpoint that records it; to the terminal, a rerun after a
+				// crash submits the same request id, which finds the first submission.
+				if (notice !== undefined && surface === "terminal") await submitNotice(await runtime.conversation(runtime.conversationId, context), notice, context);
+				await runtime.commit(async (tx) => {
+					if (notice !== undefined && surface === "telegram") await deliverIn(tx, runtime.registry, runtime.conversationId, notice);
+					return next?.done
+						? { status: "terminal", outcome: { status: "completed", result: null } }
+						: { status: "running", checkpoint: { phase: "watch", due: now + options.intervalMs, checks: checks + 1, last: next?.signal ?? last } };
+				}, context);
 			},
 		},
 		abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),

@@ -89,24 +89,30 @@ export async function ask(socket: string, text: string, requestId: string = rand
 
 /** A Telegram port that records what June sends. */
 export function fakeTelegram() {
-	const sent: { chatId: number; text: string }[] = [];
+	const sent: { chatId: number; text: string; id: number }[] = [];
+	const edited: { chatId: number; messageId: number; text: string }[] = [];
+	const actions: { chatId: number; action: string }[] = [];
 	let next = 1000;
 	const port: TelegramPort = {
 		sendMessage: async (chatId, text) => {
-			sent.push({ chatId, text });
+			sent.push({ chatId, text, id: next });
 			return next++;
 		},
-		editMessageText: async () => {},
+		editMessageText: async (chatId, messageId, text) => {
+			edited.push({ chatId, messageId, text });
+		},
 		sendDraft: async () => {},
 		answerCallbackQuery: async () => {},
-		sendChatAction: async () => {},
+		sendChatAction: async (chatId, action) => {
+			actions.push({ chatId, action });
+		},
 		sendPhoto: async () => next++,
 		sendDocument: async () => next++,
 		getFile: async () => ({ path: "x" }),
 		downloadFile: async () => new Response(""),
 		setMyCommands: async () => {},
 	};
-	return { port, sent };
+	return { port, sent, edited, actions };
 }
 
 export async function until(check: () => boolean | Promise<boolean>, ms = 5000): Promise<void> {
