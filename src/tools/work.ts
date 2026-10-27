@@ -1,9 +1,21 @@
-// June's own working context and her focus mode. `work` runs a brief in a child conversation the call owns, so shell
-// output, file contents, and dead ends stay out of the main thread and only the report comes back. `focus` switches
-// the calling conversation between the default and focus models from its next request.
+// June's own working context and her focus mode. `work` hands a brief to a background task that owns a child
+// conversation, so shell output, file contents, and dead ends stay out of the main thread, and June stays free to talk
+// while it runs; the report comes back as a [work] follow-up. `focus` switches the calling conversation between the
+// default and focus models from its next request.
 import { Type } from "@earendil-works/pi-ai";
-import { configure, defineExtension, defineTool, type Extension, section } from "@earendil-works/pi-durable";
+import { type ConversationId, configure, defineDoc, LiveDoc, defineExtension, defineTask, defineTool, type Extension, section, type Tx } from "@earendil-works/pi-durable";
 import type { Config, ModelChoice } from "../config.ts";
+
+export const WORK = "june.work";
+
+/** Briefs running in the background, for patter and /stop; `byCall` lets a replayed work call find its task. */
+export const WorkDoc = defineDoc<{
+	/** `run` is the first input of the run that handed it off, so stopping that run stops the brief too. */
+	active: Record<string, { brief: string; started: number; run?: number; child?: number }>;
+	byCall: Record<string, number>;
+}>({ kind: "june.work", version: 1, scope: "session", initial: () => ({ active: {}, byCall: {} }) });
+
+type WorkInput = { brief: string; model: ModelChoice; call: string };
 
 const WORKER = `You are June's working context, running one brief from your main conversation. The user does not see this conversation and cannot answer here.
 Do the work with your tools, then end with one report for your main thread: the answer or outcome first, then the evidence that matters (commands, paths, findings), what you changed, and anything unresolved or needing the user's decision. Keep it concise and leave out dead ends unless they matter.
@@ -17,33 +29,100 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 	const normal = config.model.chat;
 	const focus = config.model.focus;
 
+	/** The terminal client's view of background work: a display-only entry, never in a model context. */
+	const mark = (tx: Tx, conversation: ConversationId, id: string, state: "started" | "finished" | "stopped", brief: string) =>
+		tx.appendEntry(conversation, { kind: WORK, data: { id, state, brief } });
+
+	const done = async (tx: Tx, task: { id: unknown; input: WorkInput }) => {
+		const doc = await tx.doc(WorkDoc);
+		delete doc.active[String(task.id)];
+		delete doc.byCall[task.input.call];
+	};
+
+	const task = defineTask<WorkInput, { phase: "run" } | { phase: "report"; report: string }, null>({
+		name: "june.work",
+		version: 1,
+		initial: () => ({ phase: "run" }),
+		phases: {
+			run: async (task, runtime, context) => {
+				const id = String(task.id);
+				let child: unknown;
+				// A rerun after a restart finds the same child and the same submission, so the brief runs once.
+				await runtime.commit(async (tx): Promise<undefined> => {
+					child = (await tx.scanConversations({ ownerTaskId: task.id }, 1)).items[0]?.id;
+					if (child !== undefined) return;
+					const created = await tx.createConversation({ ownership: { kind: "task", taskId: task.id } });
+					await configure(tx, created.id, { ...agentOf(task.input.model), extensions: { remove: [extension, ...childless()] }, instructions: WORKER });
+					const entry = (await tx.doc(WorkDoc)).active[id];
+					if (entry) entry.child = created.id as unknown as number;
+					await mark(tx, runtime.conversationId, id, "started", task.input.brief);
+					child = created.id;
+				}, context);
+				const handle = (await runtime.conversation(child as ConversationId, context))!;
+				const submission = await handle.submit({ type: "input", content: task.input.brief, requestId: `work:${id}` }, context);
+				const settled = await submission.wait(context);
+				// A stopped brief sends no report: the abort already ended the task and /stop told June.
+				if (context.abortSignal?.aborted) return;
+				await runtime.commit(async (tx) => {
+					if ((await tx.doc(WorkDoc)).active[id] === undefined) return undefined;
+					const report =
+						settled.status === "done"
+							? textOf((await tx.entry(settled.answer!))?.model?.[0]) || "The working context finished without a report."
+							: `The working context ended ${settled.status}${"reason" in settled && settled.reason ? `: ${settled.reason}` : ""}. Tell Jon what happened.`;
+					await done(tx, task);
+					await mark(tx, runtime.conversationId, id, "finished", task.input.brief);
+					return { status: "running", checkpoint: { phase: "report", report } };
+				}, context);
+			},
+			// The report is its own phase, so a restart sends it once and never marks the work finished twice.
+			report: async (task, runtime, context) => {
+				if (task.state.checkpoint.phase !== "report") return;
+				const root = await runtime.conversation(runtime.conversationId, context);
+				await root?.submit(
+					{
+						type: "input",
+						requestId: `work-report:${task.id}`,
+						content: `[work] ${task.state.checkpoint.report}`,
+						whenBusy: "followUp",
+						entry: { kind: "june.input", data: { source: "work", text: `report: ${clip(task.input.brief, 80)}` } },
+					},
+					context,
+				);
+				await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
+			},
+		},
+		abort: (task, runtime, context) =>
+			runtime.commit(async (tx) => {
+				await done(tx, task);
+				await mark(tx, runtime.conversationId, String(task.id), "stopped", task.input.brief);
+				return { status: "terminal", outcome: { status: "aborted" } };
+			}, context),
+	});
+
 	const work = defineTool({
 		name: "work",
 		description:
-			"Run a self-contained brief in your own separate working context, with your tools, and get back only its report. Use it for anything beyond a quick check, so shell output and dead ends stay out of this conversation.",
+			"Hand a self-contained brief to your own separate working context, with your tools. It runs in the background: this call returns at once, you stay free to talk with Jon, and its report comes back to you later as a [work] message. Use it for anything beyond a quick check, so shell output and dead ends stay out of this conversation.",
 		parameters: Type.Object({
 			brief: Type.String({ description: "The goal, what you already know, constraints, and what the report must contain" }),
 			...(focus ? { focus: Type.Optional(Type.Boolean({ description: "Run it in focus mode, for work that needs care" })) } : {}),
 		}),
-		// A rerun after a restart finds the same child and the same submission, so the brief runs once.
+		// A rerun after a restart finds the task the first run started.
 		replay: "safe",
 		execute: async (args, api, context) => {
 			const model = (args as { focus?: boolean }).focus && focus ? focus : normal;
-			const child = await api.commit(async (tx) => {
-				const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0];
-				if (existing !== undefined) return existing.id;
-				const created = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
-				await configure(tx, created.id, { ...agentOf(model), extensions: { remove: [extension, ...childless()] }, instructions: WORKER });
-				return created.id;
+			const call = String(api.taskId);
+			await api.commit(async (tx) => {
+				const doc = await tx.doc(WorkDoc);
+				if (doc.byCall[call] !== undefined) return;
+				const run = (await tx.doc(LiveDoc, api.conversationId)).run?.inputs[0];
+				const id = await tx.createTask(task, { brief: args.brief, model, call }, { ownership: { kind: "conversation" }, background: true, conversationId: api.conversationId });
+				doc.byCall[call] = Number(id);
+				doc.active[String(id)] = { brief: args.brief, started: Date.now(), ...(run !== undefined ? { run: Number(run) } : {}) };
 			}, context);
-			await api.details({ conversationId: child as unknown as number }, context);
-			const handle = (await api.conversation(child, context))!;
-			const submission = await handle.submit({ type: "input", content: args.brief, requestId: `work:${api.taskId}` }, context);
-			const settled = await submission.wait(context);
-			if (settled.status !== "done") throw new Error(`The working context ended ${settled.status}${"reason" in settled && settled.reason ? `: ${settled.reason}` : ""}`);
-			const answer = await api.commit((tx) => tx.entry(settled.answer!), context);
-			const report = textOf(answer?.model?.[0]);
-			return { output: [{ type: "text", text: report || "The working context finished without a report." }] };
+			return {
+				output: [{ type: "text", text: "Started in your working context. Tell Jon in a few words that you're on it, without repeating anything you already said this turn. Its report arrives later as a [work] message, and then you tell him what it found." }],
+			};
 		},
 	});
 
@@ -75,6 +154,7 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 	const extension: Extension = defineExtension({
 		name: "june-work",
 		tools: focus ? [work, focusTool] : [work],
+		tasks: [task],
 		sections: [mode],
 	});
 	return extension;
@@ -84,4 +164,9 @@ function textOf(message: unknown): string {
 	const content = (message as { content?: unknown })?.content;
 	if (!Array.isArray(content)) return "";
 	return content.filter((block) => block.type === "text").map((block) => block.text).join("");
+}
+
+function clip(text: string, max: number): string {
+	const flat = text.replace(/\s+/g, " ").trim();
+	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }

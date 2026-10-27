@@ -37,6 +37,8 @@ export type Status = {
 	model: string;
 	thinkingLevel: string;
 	busy: boolean;
+	/** Briefs running in June's working context in the background. */
+	background: number;
 	queued: number;
 	entries: number;
 	telegram: "off" | "polling" | "failed";

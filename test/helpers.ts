@@ -116,3 +116,20 @@ export async function until(check: () => boolean | Promise<boolean>, ms = 5000):
 		await new Promise((r) => setTimeout(r, 20));
 	}
 }
+
+type Step = Parameters<Faux["setResponses"]>[0][number];
+
+/**
+ * Responses for a main thread and a working context that run at once: each request takes the next step from its own
+ * queue, told apart by the working context's instructions, so the order between them cannot race.
+ */
+export function routed(main: Step[], worker: Step[]): Step[] {
+	const queues = { main: [...main], worker: [...worker] };
+	const next: Step = (ctx, ...rest) => {
+		const queue = JSON.stringify(ctx.messages.filter((m) => m.role === "system")).includes("You are June's working context") ? queues.worker : queues.main;
+		const step = queue.shift();
+		if (step === undefined) throw new Error("no scripted response left");
+		return typeof step === "function" ? step(ctx, ...rest) : step;
+	};
+	return Array.from({ length: main.length + worker.length }, () => next);
+}

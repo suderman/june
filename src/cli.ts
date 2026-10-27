@@ -172,7 +172,7 @@ function formatStatus(s: Status): string {
 		`June ${s.version}, pid ${s.pid}, up since ${s.startedAt}`,
 		`code ${s.source}`,
 		`model ${s.model} (${s.thinkingLevel})`,
-		`conversation ${s.conversation}: ${s.entries} entries, ${s.busy ? "working" : "idle"}${s.queued ? `, ${s.queued} queued` : ""}`,
+		`conversation ${s.conversation}: ${s.entries} entries, ${s.busy ? "working" : "idle"}${s.background ? `, ${s.background} in the background` : ""}${s.queued ? `, ${s.queued} queued` : ""}`,
 		`telegram ${s.telegram}`,
 		`tools ${s.tools.join(", ")}`,
 	].join("\n");

@@ -14,6 +14,8 @@ export type Item =
 export class Transcript {
 	items: Item[] = [];
 	running = false;
+	/** Briefs running in June's working context in the background, by task ID. */
+	background = new Set<string>();
 	queued = 0;
 	omitted = 0;
 	model = "";
@@ -29,6 +31,7 @@ export class Transcript {
 		this.items = [];
 		this.#entries.clear();
 		this.#tools.clear();
+		this.background.clear();
 		this.#live = undefined;
 		this.omitted = omitted;
 		for (const entry of snapshot.entries) this.#entry(entry);
@@ -158,10 +161,14 @@ export class Transcript {
 			case "june.patter":
 				this.items.push({ kind: "patter", id, text: entry.data?.text ?? "" });
 				return;
+			case "june.work":
+				if (entry.data?.state === "started") this.background.add(String(entry.data.id));
+				else this.background.delete(String(entry.data?.id));
+				return;
 			case "pi.user": {
 				const text = textOf(message?.content);
 				// /stop, from either surface, writes this boundary so queued messages can be placed.
-				if (text === "[/stop]") this.items.push({ kind: "note", id, text: "stopped" });
+				if (text.startsWith("[/stop]")) this.items.push({ kind: "note", id, text: "stopped" });
 				else this.items.push({ kind: "user", id, source: "telegram", text });
 				return;
 			}

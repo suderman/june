@@ -35,7 +35,7 @@ import { readLines, type Reply, type Request, type Status, writeLine } from "./p
 import { createCodingExtension } from "./tools/coding.ts";
 import { createHerdrExtension, Herdr } from "./tools/herdr.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
-import { createWorkExtension } from "./tools/work.ts";
+import { createWorkExtension, WorkDoc } from "./tools/work.ts";
 import { createOrgExtension, Org } from "./tools/org.ts";
 
 export const VERSION = "0.1.0";
@@ -173,6 +173,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				model: `${resolvedAgent.model?.provider}/${resolvedAgent.model?.modelId}`,
 				thinkingLevel: String(resolvedAgent.thinkingLevel),
 				busy: mine.some((s) => s.status === "placed"),
+				background: Object.keys((await harness.snapshot(WorkDoc, BG))?.active ?? {}).length,
 				queued: mine.filter((s) => s.status === "queued").length,
 				entries: view.entries.length,
 				telegram: telegramState,

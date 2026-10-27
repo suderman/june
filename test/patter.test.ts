@@ -5,7 +5,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContex
 import { Client, type Reply } from "../src/protocol.ts";
 import { createCodingExtension } from "../src/tools/coding.ts";
 import { Transcript } from "../src/transcript.ts";
-import { ask, openTestDaemon, tempDir } from "./helpers.ts";
+import { ask, openTestDaemon, routed, tempDir, until } from "./helpers.ts";
 
 const call = (name: string, args: Parameters<typeof fauxToolCall>[1]) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
 const sections = (ctx: TranscriptContext) =>
@@ -85,12 +85,10 @@ test("a work brief starts patter at once with the brief, and patter failures cha
 	t.after(tmp.cleanup);
 	const patter = patterModel((n) => (n === 1 ? fauxAssistantMessage("Right, sleeves up.") : fauxAssistantMessage("", { stopReason: "error", errorMessage: "luna fell over" })));
 	const faux = fauxProvider();
-	faux.setResponses([
-		call("work", { brief: "Check the wombat census." }),
-		() => call("bash", { command: "sleep 1" }),
-		() => fauxAssistantMessage("Report: census checked."),
-		() => fauxAssistantMessage("Census is fine."),
-	]);
+	faux.setResponses(routed(
+		[call("work", { brief: "Check the wombat census." }), fauxAssistantMessage("on it"), fauxAssistantMessage("Census is fine.")],
+		[() => call("bash", { command: "sleep 1" }), () => fauxAssistantMessage("Report: census checked.")],
+	));
 	const daemon = await openTestDaemon({
 		...tmp,
 		faux,
@@ -100,11 +98,42 @@ test("a work brief starts patter at once with the brief, and patter failures cha
 		patterTiming: { ...fast, openAfterMs: 60_000 },
 	});
 	t.after(() => daemon.close());
-	assert.equal((await ask(tmp.paths.socket, "check the census")).text, "Census is fine.");
+	assert.equal((await ask(tmp.paths.socket, "check the census")).text, "on it");
+	const said = async () => JSON.stringify((await daemon.root.context(BG)).messages);
+	await until(async () => (await said()).includes("Census is fine."));
 	const lines = (await daemon.root.context(BG)).entries.filter((e) => e.kind === "june.patter").map((e) => (e.data as { text: string }).text);
 	assert.deepEqual(lines, ["Right, sleeves up."], "the opener came at once and the failed lines were dropped");
 	assert.match(patter.heard[0]!.update, /June handed this to her working self: Check the wombat census\./);
+	assert.match(patter.heard[0]!.update, /Jon just said: check the census/);
 	assert.ok(patter.heard.length >= 2, "patter kept trying after a failure");
+});
+
+test("Jon breaks in during background work: patter pauses, June hears it, and patter picks the bit back up", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const patter = patterModel();
+	const faux = fauxProvider();
+	faux.setResponses(routed(
+		[
+			call("work", { brief: "Sort the sock drawer." }),
+			fauxAssistantMessage("on it"),
+			(ctx) => {
+				assert.match(sections(ctx), /your patter .* said to the user:\n- patter line 1/s, "June hears what patter said before Jon broke in");
+				return fauxAssistantMessage("ha, yes");
+			},
+			fauxAssistantMessage("Socks sorted."),
+		],
+		[() => call("bash", { command: "sleep 2.5" }), () => fauxAssistantMessage("Report: sorted.")],
+	));
+	const daemon = await openTestDaemon({ ...tmp, faux, config, providers: [patter.faux], extensions: [createCodingExtension()], patterTiming: { ...fast, gapsMs: [300] } });
+	t.after(() => daemon.close());
+	assert.equal((await ask(tmp.paths.socket, "sort my socks")).text, "on it");
+	await until(() => patter.heard.length >= 1);
+	assert.equal((await ask(tmp.paths.socket, "this is taking a while huh")).text, "ha, yes");
+	await until(() => patter.heard.some((h) => /Jon broke in to talk with June/.test(h.update)));
+	const resumed = patter.heard.find((h) => /Jon broke in/.test(h.update))!;
+	assert.ok(resumed.said.includes("patter line 1"), "the resumed wait carries on its earlier lines");
+	await until(async () => JSON.stringify((await daemon.root.context(BG)).messages).includes("Socks sorted."));
 });
 
 test("a line still being written when the answer lands is dropped", async (t) => {
@@ -147,4 +176,22 @@ test("patter hears the recent conversation and new steps, but no results", async
 	const later = patter.heard.find((h) => /New since your last line:\n- bash command=sleep 0\.6; echo \$\(\(8\*9\)\)/.test(h.update));
 	assert.ok(later, `a later update names only the new step: ${JSON.stringify(patter.heard.map((h) => h.update))}`);
 	assert.doesNotMatch(later!.update, /7\*8/);
+});
+
+test("June relaying a report gets no patter, however long she takes", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const patter = patterModel();
+	const faux = fauxProvider({ tokensPerSecond: 60 });
+	faux.setResponses(routed(
+		[call("work", { brief: "Count the wombats." }), fauxAssistantMessage("on it"), fauxAssistantMessage(`here's the count: ${"wombat ".repeat(60)}`)],
+		[() => fauxAssistantMessage("Report: many.")],
+	));
+	const daemon = await openTestDaemon({ ...tmp, faux, config, providers: [patter.faux], extensions: [createCodingExtension()], patterTiming: fast });
+	t.after(() => daemon.close());
+	await ask(tmp.paths.socket, "count them");
+	await until(async () => JSON.stringify((await daemon.root.context(BG)).messages).includes("here's the count"), 10_000);
+	const kinds = (await daemon.root.context(BG)).entries.map((e) => (e.kind === "june.input" ? `input:${(e.data as { source: string }).source}` : e.kind));
+	assert.ok(kinds.includes("input:work"), "the report arrived");
+	assert.ok(!kinds.slice(kinds.indexOf("input:work")).includes("june.patter"), `no patter while June relays it: ${kinds.join(", ")}`);
 });

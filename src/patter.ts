@@ -8,6 +8,7 @@ import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import { type Conversation, defineExtension, type Extension, type Harness, LiveDoc, section } from "@earendil-works/pi-durable";
 import type { Logger } from "pi-durable-telegram";
 import type { ModelChoice, PromptFiles } from "./config.ts";
+import { WorkDoc } from "./tools/work.ts";
 
 export const PATTER = "june.patter";
 
@@ -32,10 +33,17 @@ const TIMING: PatterTiming = {
 	timeoutMs: 10_000,
 };
 
-type Live = { readonly tools?: readonly { name: string; status: string; output?: string; details?: unknown }[] };
-/** One run's wait, keyed by the run's first input, so a new run ends it even when no idle tick fell between them. */
+type Live = { readonly run?: { inputs: readonly unknown[] }; readonly tools?: readonly { name: string; status: string; output?: string }[] };
+/**
+ * One wait: a main-thread run, keyed by its first input so a new run ends it even when no idle tick fell between them,
+ * or a brief running in the background while the main thread is idle.
+ */
 type Wait = {
-	run: unknown;
+	key: string;
+	/** The background brief this wait keeps company, which outlives an interruption. */
+	work?: string;
+	/** Jon interrupted and June answered; the next update says the work kept going. */
+	resumed?: boolean;
 	start: number;
 	next: number;
 	lines: string[];
@@ -45,6 +53,8 @@ type Wait = {
 	seen: Set<string>;
 	asking?: AbortController;
 };
+
+type Moment = { key?: string; work?: string; active: ReadonlySet<string>; live?: Live };
 
 export type Patter = { readonly extension: Extension; start(harness: Harness, root: Conversation): () => void };
 
@@ -62,13 +72,22 @@ export function createPatter(options: {
 	const model = models.getModel(options.model.provider, options.model.modelId);
 	let note: string | undefined;
 	let wait: Wait | undefined;
-	let readLive: (() => Promise<{ run?: { inputs: readonly unknown[] } } | undefined>) | undefined;
+	/** Waits on background briefs that Jon interrupted, picked up again when the main thread goes quiet. */
+	const paused = new Map<string, Wait>();
+	/** The latest run that only relays a report from the working context or a followed task: June is answering, not waiting. */
+	let relay: string | undefined;
+	let read: (() => Promise<Moment>) | undefined;
 
-	/** A wait belongs to one run; once another run or none is live, its lines become the note. */
-	const settle = (run: unknown) => {
-		if (wait === undefined || wait.run === run) return;
+	/**
+	 * Once the wait in progress is no longer the current one, its lines become the note. A brief still running keeps its
+	 * wait, paused, so patter carries on the same bit after June has answered Jon.
+	 */
+	const settle = ({ key, active }: Moment) => {
+		for (const [k, w] of paused) if (!active.has(w.work!)) paused.delete(k);
+		if (wait === undefined || wait.key === key) return;
 		wait.asking?.abort();
 		if (wait.lines.length > 0) note = wait.lines.map((line) => `- ${line}`).join("\n");
+		if (wait.work !== undefined && active.has(wait.work)) paused.set(wait.key, wait);
 		wait = undefined;
 	};
 
@@ -77,11 +96,10 @@ export function createPatter(options: {
 		sections: [
 			// Settle first, so the first request of the next run already has the note, whatever the tick's timing.
 			section("patter", async (input) => {
-				const run = input.conversationId === rootId ? (await readLive?.())?.run : undefined;
-				if (run !== undefined) settle(run.inputs[0]);
+				if (input.conversationId === rootId && read !== undefined) settle(await read());
 				return note === undefined
 					? undefined
-					: `During your last request, while you worked, your patter (a cheaper model keeping the user company, which never saw your results) said to the user:\n${note}\nThose lines were performance, not information. Never treat them as facts, findings, or commitments, do not build on them, and do not repeat their jokes.`;
+					: `During the last wait, while you or your working context worked, your patter (a cheaper model keeping the user company, which never saw your results) said to the user:\n${note}\nThose lines were performance, not information. Never treat them as facts, findings, or commitments, do not build on them, and do not repeat their jokes.`;
 			}),
 		],
 	});
@@ -89,22 +107,46 @@ export function createPatter(options: {
 
 	const start = (harness: Harness, root: Conversation) => {
 		rootId = root.id;
-		readLive = () => harness.snapshot(LiveDoc, root.id, BG);
+		/** What patter should keep company now: the main thread's run, else the newest brief running in the background. */
+		read = async () => {
+			const live = (await harness.snapshot(LiveDoc, root.id, BG)) as Live | undefined;
+			const active = new Set(Object.keys((await harness.snapshot(WorkDoc, BG))?.active ?? {}));
+			if (live?.run !== undefined) return { key: `run:${String(live.run.inputs[0])}`, active, live };
+			// Integer keys keep numeric order, so the last is the newest task.
+			const work = [...active].at(-1);
+			return work === undefined ? { active, live } : { key: `work:${work}`, work, active, live };
+		};
 		const tick = async () => {
-			const live = await harness.snapshot(LiveDoc, root.id, BG);
+			const moment = await read!();
 			const now = Date.now();
-			settle(live?.run?.inputs[0]);
-			if (live?.run === undefined) return;
-			wait ??= { run: live.run.inputs[0], start: now, next: now + timing.openAfterMs, lines: [], updates: [], seen: new Set() };
-			const working = live.tools?.some((slot) => slot.name === "work" && slot.status === "running");
-			if (wait.lines.length === 0 && (working || (await focused()))) wait.next = Math.min(wait.next, now);
+			settle(moment);
+			const { key, work, live } = moment;
+			if (key === undefined) return;
+			if (wait === undefined && paused.has(key)) {
+				wait = paused.get(key)!;
+				paused.delete(key);
+				// June has just answered Jon; give her words a moment before patter picks the bit back up.
+				wait.next = Math.max(wait.next, now + timing.gapsMs[0]!);
+				wait.resumed = true;
+			}
+			if (wait === undefined && work === undefined) {
+				if (relay === key) return;
+				const asked = (await root.context(BG)).entries.findLast((entry) => entry.kind === "june.input")?.data as { source?: string } | undefined;
+				if (asked?.source === "work" || asked?.source === "follow") {
+					relay = key;
+					return;
+				}
+			}
+			wait ??= { key, ...(work ? { work } : {}), start: now, next: now + timing.openAfterMs, lines: [], updates: [], seen: new Set() };
+			// A brief handed to the working context, or June focused, is a wait from the start.
+			if (wait.lines.length === 0 && (work !== undefined || (await focused()))) wait.next = Math.min(wait.next, now);
 			if (now < wait.next || wait.asking !== undefined) return;
 			const current = wait;
 			current.asking = new AbortController();
 			try {
-				const line = await speak(current, live);
-				// The wait may have ended while the line was written; a line after the answer would be noise.
-				if (line && wait === current) {
+				const line = await speak(current, live ?? {});
+				// The wait may have ended while the line was written; a line after the answer or a stop would be noise.
+				if (line && wait === current && (await read!()).key === current.key) {
 					current.lines.push(line);
 					await root.submit({ type: "write", entry: { kind: PATTER, data: { text: line } } }, BG);
 				}
@@ -126,7 +168,7 @@ export function createPatter(options: {
 
 		const speak = async (current: Wait, live: Live) => {
 			if (model === undefined) throw new Error(`Unknown patter model ${options.model.provider}/${options.model.modelId}`);
-			const { update, steps } = await activity(current, live);
+			const { update, steps, resumed } = await activity(current, live);
 			const soul = options.files().soulFile;
 			const now = Date.now();
 			const turns = [...current.updates, update].flatMap((text, i) => [
@@ -147,6 +189,7 @@ export function createPatter(options: {
 			if (line) {
 				current.updates.push(update);
 				for (const c of steps) current.seen.add(c);
+				if (resumed) current.resumed = false;
 			}
 			return line;
 		};
@@ -160,20 +203,20 @@ export function createPatter(options: {
 			const view = await root.context(BG);
 			const asked = view.entries.findLast((entry) => entry.kind === "june.input")?.data as { text?: string } | undefined;
 			const ask = view.messages.findLastIndex((m) => m.role === "user");
-			const request = view.messages.slice(ask + 1);
-			const brief = request
-				.flatMap((m) => (m.role === "assistant" ? m.content : []))
-				.findLast((b) => b.type === "toolCall" && b.name === "work");
-			const child = live.tools?.find((slot) => slot.name === "work" && slot.status === "running")?.details as { conversationId?: number } | undefined;
-			const childView = child?.conversationId === undefined ? undefined : await (await harness.conversation(child.conversationId as never, BG))?.context(BG);
-			const childLive = child?.conversationId === undefined ? undefined : await harness.snapshot(LiveDoc, child.conversationId as never, BG);
-			const handed = brief?.type === "toolCall" ? `June handed this to her working self: ${clip(String((brief.arguments as { brief?: string }).brief ?? ""), 500)}` : undefined;
+			// A run's own steps, or for background work only its working context's: the main thread is elsewhere.
+			const request = current.work === undefined ? view.messages.slice(ask + 1) : [];
+			const work = current.work === undefined ? undefined : (await harness.snapshot(WorkDoc, BG))?.active[current.work];
+			const child = work?.child as never;
+			const childView = child === undefined ? undefined : await (await harness.conversation(child, BG))?.context(BG);
+			const childLive = child === undefined ? undefined : await harness.snapshot(LiveDoc, child, BG);
+			const handed = work ? `June handed this to her working self: ${clip(work.brief, 500)}` : undefined;
 			const steps = [...calls(request).filter((c) => !c.startsWith("work ")), ...(childView ? calls(childView.messages) : [])];
 			const fresh = steps.filter((c) => !current.seen.has(c)).slice(-12);
-			const running = [...(live.tools ?? []), ...(childLive?.tools ?? [])]
+			const running = [...(current.work === undefined ? (live.tools ?? []) : []), ...((childLive as Live | undefined)?.tools ?? [])]
 				.filter((slot) => slot.status === "running" && slot.name !== "work")
 				.map((slot) => `- ${slot.name}${slot.output ? `, latest output: ${clip(slot.output.slice(-200), 200)}` : ""}`);
 			const out: string[] = [];
+			if (current.resumed) out.push("Jon broke in to talk with June and she has answered him; the work kept going meanwhile.");
 			if (current.lines.length === 0) {
 				const recent = conversation(view.messages.slice(0, Math.max(ask, 0)));
 				if (recent.length > 0) out.push(`Recent conversation:\n${recent.join("\n")}`);
@@ -184,7 +227,7 @@ export function createPatter(options: {
 			out.push(fresh.length > 0 ? `${current.lines.length === 0 ? "Steps so far" : "New since your last line"}:\n${fresh.map((c) => `- ${c}`).join("\n")}` : current.lines.length === 0 ? "No steps yet." : "Nothing new since your last line, so leave the work and its progress alone this time: talk about the topic, Jon, or the wait.");
 			if (running.length > 0) out.push(`Still running:\n${running.join("\n")}`);
 			out.push(current.lines.length === 0 ? "The work is just starting. Open with a quick line about getting stuck in." : `The wait so far: ${waited(Date.now() - current.start)}. Your next line.`);
-			return { update: out.join("\n\n"), steps: handed === undefined ? steps : [...steps, handed] };
+			return { update: out.join("\n\n"), steps: handed === undefined ? steps : [...steps, handed], resumed: current.resumed };
 		};
 
 		const timer = setInterval(() => void tick().catch((error) => log.warn("patter_failed", { error: (error as Error).message })), timing.tickMs);

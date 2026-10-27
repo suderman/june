@@ -195,6 +195,7 @@ export async function runTui(socketPath: string): Promise<void> {
 		const parts = [];
 		if (connection !== "online") parts.push(c.err(connection === "connecting" ? "connecting…" : "daemon unreachable, retrying"));
 		if (transcript.running) parts.push(c.accent("working"));
+		else if (transcript.background.size > 0) parts.push(c.accent("working in the background"));
 		if (transcript.queued) parts.push(c.muted(`${transcript.queued} queued`));
 		if (transcript.notice) parts.push(c.err(transcript.notice));
 		if (flash) parts.push(c.err(flash));
@@ -267,7 +268,7 @@ export async function runTui(socketPath: string): Promise<void> {
 			return { consume: true };
 		}
 		if (matchesKey(data, "escape") && !editor.isShowingAutocomplete()) {
-			if (transcript.running) void run("stop");
+			if (transcript.running || transcript.background.size > 0) void run("stop");
 			return { consume: true };
 		}
 		if (matchesKey(data, "alt+enter")) {
