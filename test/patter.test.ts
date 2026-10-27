@@ -14,7 +14,7 @@ const spoken = (ctx: TranscriptContext) => JSON.stringify(ctx.messages.filter((m
 const config = { model: { chat: { provider: "faux", modelId: "faux-1", thinkingLevel: "off" }, patter: { provider: "pf", modelId: "luna", thinkingLevel: "off" } } };
 const fast = { openAfterMs: 200, gapsMs: [400], tickMs: 50, timeoutMs: 2000 };
 
-type Heard = { said: string[]; update: string; all: string };
+type Heard = { system: string; said: string[]; update: string; all: string };
 
 /** A patter model that numbers its lines and keeps what each request told it. */
 function patterModel(reply?: (n: number) => ReturnType<typeof fauxAssistantMessage> | Promise<ReturnType<typeof fauxAssistantMessage>>) {
@@ -25,6 +25,7 @@ function patterModel(reply?: (n: number) => ReturnType<typeof fauxAssistantMessa
 	const step = (ctx: TranscriptContext) => {
 		const turns = ctx.messages.filter((m) => m.role !== "system");
 		heard.push({
+			system: String(ctx.messages.find((m) => m.role === "system")?.content ?? ""),
 			said: turns.filter((m) => m.role === "assistant").map(text),
 			update: text(turns.at(-1)!),
 			all: turns.filter((m) => m.role === "user").map(text).join("\n\n"),
@@ -61,6 +62,7 @@ test("a slow command gets patter in the transcript, never in a model context, an
 	assert.equal(lines[0], "patter line 1");
 	assert.match(patter.heard[0]!.update, /just starting/, "the first line is the opener");
 	assert.match(patter.heard[0]!.update, /Jon just said: build it/);
+	assert.match(patter.heard[0]!.system, new RegExp(`It is now [^\\n]*${new Date().getFullYear()}`), "patter knows the date");
 	assert.match(patter.heard.at(-1)!.all, /sleep 1\.5/, "patter sees the real activity");
 	assert.deepEqual(patter.heard.at(-1)!.said, lines.slice(0, -1), "and its own earlier lines, as its own turns");
 	assert.doesNotMatch(patter.heard.at(-1)!.all, /\d+ seconds/, "elapsed time comes in rough words");

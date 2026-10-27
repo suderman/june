@@ -134,7 +134,7 @@ export function createPatter(options: {
 				...(i < current.lines.length ? [said(model, current.lines[i]!, now)] : []),
 			]);
 			const request: ModelContext = {
-				messages: [{ role: "system", content: `${soul ? readFileSync(soul, "utf8") : ""}\n\n${RULES}`, timestamp: now } as Message, ...turns],
+				messages: [{ role: "system", content: `${soul ? readFileSync(soul, "utf8") : ""}\n\n${RULES}\n\nIt is now ${clock()}.`, timestamp: now } as Message, ...turns],
 			};
 			const signal = AbortSignal.any([current.asking!.signal, AbortSignal.timeout(timing.timeoutMs)]);
 			const thinking = options.model.thinkingLevel === "off" ? {} : { reasoning: options.model.thinkingLevel as never };
@@ -238,6 +238,11 @@ function step(args: unknown): string {
 function clip(text: string, max: number): string {
 	const flat = text.replace(/\s+/g, " ").trim();
 	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/** The local date and time; patter's requests are never cached, so it can be exact. */
+function clock(): string {
+	return `${new Date().toLocaleString("en-CA", { dateStyle: "full", timeStyle: "short" })}, ${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
 }
 
 /** Elapsed time in the rough words a person would use, so patter never counts seconds. */
