@@ -27,6 +27,8 @@ const c = {
 	accent: esc("33", "39"),
 	ok: esc("32", "39"),
 	err: esc("31", "39"),
+	// Patter's own colour: readable on a dim or translucent background, and used for nothing else.
+	patter: esc("35", "39"),
 	bold: esc("1", "22"),
 	italic: esc("3", "23"),
 };
@@ -146,7 +148,7 @@ function component(item: Item): Component[] {
 			return [new Line(c.muted(`── ${item.text}`))];
 		case "patter":
 			// June keeping you company while the work runs; styled apart from her real answers.
-			return [new Line(), new Wrapped(c.italic(c.muted(item.text)), c.muted("🦘 "))];
+			return [new Line(), new Wrapped(c.italic(c.patter(item.text)), "🦘 ")];
 		case "reply":
 			return [new Line(), new Wrapped(c.muted(item.text), c.muted(`/${item.command} `))];
 	}
