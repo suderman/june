@@ -33,6 +33,7 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 		rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
 		reflection: { enabled: false, quietMinutes: 60, recentDays: 3 },
 		heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
+		mail: { enabled: false, query: "tag:inbox and tag:unread", accounts: {} },
 		patter: { openAfterSeconds: 8, gapsSeconds: [25] },
 		situation: { calendars: [], homeAssistant: { people: [], pollSeconds: 300 } },
 		...extra,
@@ -66,6 +67,7 @@ export async function openTestDaemon(options: {
 	patterTiming?: Partial<PatterTiming>;
 	reflectionClock?: { now: () => Date; tickMs: number };
 	heartbeatClock?: { now: () => Date; tickMs: number };
+	mailRun?: (argv: readonly string[]) => Promise<string>;
 }): Promise<Daemon> {
 	const models = createModels();
 	models.setProvider(options.faux.provider);
@@ -81,6 +83,7 @@ export async function openTestDaemon(options: {
 		...(options.patterTiming ? { patterTiming: options.patterTiming } : {}),
 		...(options.reflectionClock ? { reflectionClock: options.reflectionClock } : {}),
 		...(options.heartbeatClock ? { heartbeatClock: options.heartbeatClock } : {}),
+		...(options.mailRun ? { mailRun: options.mailRun } : {}),
 	});
 }
 

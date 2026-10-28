@@ -38,11 +38,12 @@ import { createPatter, type PatterTiming } from "./patter.ts";
 import { createReflection } from "./reflect.ts";
 import { readLines, type Reply, type Request, type Status, writeLine } from "./protocol.ts";
 import { createCodingExtension } from "./tools/coding.ts";
-import { createHerdrExtension, Herdr } from "./tools/herdr.ts";
+import { createHerdrExtension, Herdr, type Run } from "./tools/herdr.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
 import { createWorkExtension, WorkDoc } from "./tools/work.ts";
 import { createOrgExtension, Org } from "./tools/org.ts";
 import { createOrgWriteExtension } from "./tools/write.ts";
+import { createMail } from "./mail.ts";
 
 export const VERSION = "0.1.0";
 const SNAPSHOT_ENTRIES = 200;
@@ -63,6 +64,8 @@ export type DaemonOptions = {
 	readonly reflectionClock?: { now: () => Date; tickMs: number };
 	/** Tests set the clock and loop speed of the heartbeat. */
 	readonly heartbeatClock?: { now: () => Date; tickMs: number };
+	/** Tests answer notmuch themselves. */
+	readonly mailRun?: Run;
 };
 
 export type Daemon = {
@@ -176,6 +179,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 					config: config.heartbeat,
 					window: { start: config.rhythm.wake, end: config.rhythm.quiet },
 					situation,
+					...(config.mail.enabled ? { mail: createMail({ config: config.mail, log, ...(options.mailRun ? { run: options.mailRun } : {}) }) } : {}),
 					files: prompt.files,
 					state: paths.state,
 					log,

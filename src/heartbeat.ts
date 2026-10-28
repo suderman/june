@@ -23,6 +23,8 @@ export function createHeartbeat(options: {
 	/** From the rhythm's wake until its quiet. */
 	window: { start: string; end: string };
 	situation: { render(now?: Date): Promise<string> };
+	/** New mail since the last look, sorted; omitted, the heartbeat knows nothing of mail. */
+	mail?: { render(from: Date, to: Date): Promise<string> };
 	files: () => PromptFiles;
 	state: string;
 	log: Logger;
@@ -60,7 +62,9 @@ export function createHeartbeat(options: {
 				// The receipt first: a crash after it costs one beat; one before it would repeat the beat.
 				mkdirSync(options.state, { recursive: true });
 				writeFileSync(receiptFile, `${JSON.stringify({ at: at.getTime(), lines })}\n`);
-				const content = prompt({ chatting, since: before, lines, instructions: instructions(options.files().heartbeatFile), at });
+				// Mail since the last look, or the last cadence on a first look, so a restart does not replay the morning.
+				const mail = options.mail ? await options.mail.render(new Date(before.at || at.getTime() - config.everyMinutes * 60_000), at) : "";
+				const content = prompt({ chatting, since: before, lines, mail, instructions: instructions(options.files().heartbeatFile), at });
 				const submission = await root.submit(
 					{
 						type: "input",
@@ -91,7 +95,7 @@ export function createHeartbeat(options: {
 	return { start };
 }
 
-function prompt({ chatting, since, lines, instructions, at }: { chatting: boolean; since: Receipt; lines: string[]; instructions: string; at: Date }): string {
+function prompt({ chatting, since, lines, mail, instructions, at }: { chatting: boolean; since: Receipt; lines: string[]; mail: string; instructions: string; at: Date }): string {
 	const earlier = new Set(since.lines);
 	const changed = lines.filter((line) => !earlier.has(line));
 	const first = since.at === 0 || new Date(since.at).toDateString() !== at.toDateString();
@@ -101,6 +105,7 @@ function prompt({ chatting, since, lines, instructions, at }: { chatting: boolea
 			? `${User()} is chatting with you right now, so raising something is simply your next line in the conversation, even if it changes the subject.`
 			: `${User()} is not chatting with you right now, so a message interrupts them wherever they are. Send one only when it is worth that, and only once: you can see what you already raised.`,
 		first ? "This is your first look today." : changed.length > 0 ? `Since your last look:\n${changed.map((l) => `- ${l}`).join("\n")}` : "Nothing in your now section changed since your last look.",
+		...(mail ? [mail] : []),
 		instructions ? `Your standing instructions, from HEARTBEAT.org:\n${instructions}` : "You have no HEARTBEAT.org yet; use your judgment.",
 		`If nothing is worth raising, answer with exactly ${QUIET} and nothing else. Otherwise answer with only your message to ${user()}, in the markup of where they last spoke, as you would write it to them unprompted.`,
 	].join("\n\n");

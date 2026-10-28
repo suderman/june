@@ -54,6 +54,14 @@ test("a heartbeat looks privately, stays quiet or messages Alex where they are, 
 			return fauxAssistantMessage("Clinic at 13:00 and it's cold: **heater** on soon?");
 		},
 	]);
+	// Mail from a person lands between the first and second looks.
+	let inbox: string[] = [];
+	const mailRun = async (argv: readonly string[]) => {
+		if (argv[1] === "config") return "";
+		if (argv[1] === "search") return JSON.stringify(inbox);
+		if (argv[1] === "count") return "0";
+		return JSON.stringify([[[{ id: "m1", filename: [], headers: { From: "Kim Park <kim@client.test>", Subject: "Can we move Friday?" } }, []]]]);
+	};
 	const tg = fakeTelegram();
 	const daemon = await openTestDaemon({
 		...tmp,
@@ -66,10 +74,12 @@ test("a heartbeat looks privately, stays quiet or messages Alex where they are, 
 			heartbeatFile: join(tmp.dir, "HEARTBEAT.org"),
 			telegram: { tokenEnv: "TG", allowedUserIds: [42] },
 			heartbeat: { enabled: true, everyMinutes: 60, chattingMinutes: 15 },
+			mail: { enabled: true, query: "tag:inbox", accounts: {} },
 			situation: { calendars: [calendar], homeAssistant: { people: [], pollSeconds: 300 } },
 		},
 		secrets: { TG: `123456:${"a".repeat(35)}` },
 		heartbeatClock: { now: () => clock, tickMs: 50 },
+		mailRun,
 	});
 	t.after(() => daemon.close());
 	await daemon.telegram!.handleUpdate({
@@ -100,9 +110,12 @@ test("a heartbeat looks privately, stays quiet or messages Alex where they are, 
 	await new Promise((r) => setTimeout(r, 300));
 	assert.equal(faux.state.callCount, 3);
 	await writeFile(calendar, `* Clinic on ${day}\n<${day} Thu 13:00-17:00>\n`);
+	inbox = ["m1"];
 	clock = new Date(clock.getTime() + 31 * 60_000);
 	await until(() => tg.sent.length === 2, 10_000);
 	assert.match(asked[1]!, /Since your last look:\n- Today: 13:00–17:00 Clinic/, "what changed since the last look");
+	assert.doesNotMatch(asked[0]!, /New mail/, "no mail, no mail section");
+	assert.match(asked[1]!, /New mail in Alex's inboxes since your last look\. .*\nFrom people:\n- Kim Park <kim@client\.test>: Can we move Friday\?/s);
 	assert.equal(tg.sent[1]!.text, "Clinic at 13:00 and it's cold: <b>heater</b> on soon?");
 
 	// Quiet hours: no look at all.

@@ -78,6 +78,7 @@ Keys of =config.json=, with their defaults:
   "rhythm": { "wake": "05:00", "quiet": "22:00", "sleep": "01:00" },
   "reflection": { "enabled": true, "quietMinutes": 60, "recentDays": 3 },
   "heartbeat": { "enabled": false, "everyMinutes": 60, "chattingMinutes": 15 },
+  "mail": { "enabled": false, "query": "tag:inbox and tag:unread", "accounts": {} },
   "patter": { "openAfterSeconds": 8, "gapsSeconds": [25, 25, 25, 40, 60, 90, 120, 180] },
   "situation": { "calendars": [], "homeAssistant": { "people": [], "weather": null, "pollSeconds": 300 } }
 }
@@ -94,6 +95,7 @@ Keys of =config.json=, with their defaults:
 - =rhythm= is the user's day in local =HH:MM=: heartbeats run from =wake= until =quiet=, and the nightly reflection from =sleep= until =wake=.
 - =reflection= runs the nightly pass once the user has been quiet for =quietMinutes=; =recentDays= is how many recent "Day's end" entries June sees in her prompt.
 - =heartbeat= enables a private look every =everyMinutes= in waking hours; the user counts as chatting if they wrote within =chattingMinutes=.
+- =mail= gives each heartbeat the new mail matching =query= in notmuch since the last look; =accounts= names each top-level maildir folder, such as ={"personal": "home"}=.
 - =situation= feeds the =now= section: =calendars= are Org files read for today and tomorrow, =homeAssistant.people= are =person.*= entities, =homeAssistant.weather= a =weather.*= entity, polled every =pollSeconds= when =HASS_URL= and =HASS_TOKEN= are set.
 - =patter= sets when patter speaks: a run busy =openAfterSeconds= becomes a wait, and =gapsSeconds= are the pauses between lines, the last repeating.
 
@@ -106,6 +108,8 @@ June's prompt ends with a =now= section: the weekday, the rough hour, when the s
 ** Heartbeat
 
 Every =heartbeat.everyMinutes= between =wake= and =quiet=, June takes a private look at the moment in the main conversation, with her standing instructions from =HEARTBEAT.org=, what changed in her =now= section since the last look, and whether the user is chatting. She answers =QUIET= or a message. The user never sees the look itself: the terminal hides its input, tools, and quiet answers, and Telegram gets only a real message. A heartbeat waits while June is busy, and a receipt in the state directory keeps a restart from repeating one. June updates =HEARTBEAT.org= when told what to watch for.
+
+With =mail= on, each look also lists the mail that arrived since the last one, sorted before June sees it. Messages from people come first, marked when the user has written to them before; automated senders (no-reply and alert addresses, mail domains such as =updates.=, auto-replies) follow in one line each; newsletters and list mail (=List-Unsubscribe=, =List-Id=, bulk =Precedence=) are only counted; the user's own messages are left out. She sees senders and subjects only, framed as outside text, and reads a message with notmuch when it may matter.
 
 ** Shell and files
 

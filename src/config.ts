@@ -71,6 +71,8 @@ export type Config = {
 		/** The user wrote this recently: they are chatting, so raising something is just her next line. */
 		readonly chattingMinutes: number;
 	};
+	/** New mail for the heartbeat, from a notmuch query; accounts name each maildir folder, such as {"work": "work"}. */
+	readonly mail: { readonly enabled: boolean; readonly query: string; readonly accounts: Readonly<Record<string, string>> };
 	/** The "now" prompt section: calendars read for today and tomorrow, and Home Assistant people (with HASS_URL and HASS_TOKEN). */
 	readonly situation: {
 		readonly calendars: readonly string[];
@@ -133,6 +135,7 @@ const DEFAULTS = {
 	rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
 	reflection: { enabled: true, quietMinutes: 60, recentDays: 3 },
 	heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
+	mail: { enabled: false, query: "tag:inbox and tag:unread", accounts: {} as Record<string, string> },
 	patter: { openAfterSeconds: 8, gapsSeconds: [25, 25, 25, 40, 60, 90, 120, 180] },
 	situation: { calendars: [] as string[], homeAssistant: { people: [] as string[], pollSeconds: 300 } },
 };
@@ -181,6 +184,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 		rhythm: rhythm({ ...DEFAULTS.rhythm, ...raw.rhythm }),
 		reflection: reflection({ ...DEFAULTS.reflection, ...raw.reflection }),
 		heartbeat: heartbeat({ ...DEFAULTS.heartbeat, ...raw.heartbeat }),
+		mail: mail({ ...DEFAULTS.mail, ...raw.mail }),
 		patter: patterTiming({ ...DEFAULTS.patter, ...raw.patter }),
 		situation: situation(raw.situation ?? {}),
 		// Telegram is on where the module names who may use it; the token sits beside the ids in June's secret.
@@ -214,6 +218,13 @@ function heartbeat(given: Config["heartbeat"]): Config["heartbeat"] {
 	if (!(typeof given.everyMinutes === "number" && given.everyMinutes >= 5)) throw new Error("heartbeat.everyMinutes must be 5 or more");
 	if (!(typeof given.chattingMinutes === "number" && given.chattingMinutes >= 0)) throw new Error("heartbeat.chattingMinutes must be 0 or more");
 	return given;
+}
+
+function mail(given: Config["mail"]): Config["mail"] {
+	if (typeof given.query !== "string" || given.query.trim() === "") throw new Error("mail.query must be a notmuch query");
+	const accounts = given.accounts ?? {};
+	if (typeof accounts !== "object" || Object.values(accounts).some((v) => typeof v !== "string")) throw new Error("mail.accounts maps maildir folders to names");
+	return { enabled: given.enabled === true, query: given.query, accounts };
 }
 
 function situation(given: Record<string, any>): Config["situation"] {
