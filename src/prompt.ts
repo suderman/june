@@ -4,6 +4,7 @@ import { basename, dirname, join, relative, sep } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension, section } from "@earendil-works/pi-durable";
 import { type Config, type PromptFiles, promptFiles } from "./config.ts";
+import { recentDayEnds } from "./journal.ts";
 import { DEFAULT_BASH_TIMEOUT } from "./tools/coding.ts";
 
 // Harness mechanics only. The user's conventions (Org, Herdr, task states) come from AGENTS.md in the config layers.
@@ -76,18 +77,30 @@ function skillsSection(skills: readonly Skill[]): string {
 }
 
 /** Where June keeps herself, MEMORY.org's text, and any Syncthing conflict copies of either file. */
-async function personalSection(files: PromptFiles, memory: () => Promise<string>): Promise<string | undefined> {
+async function personalSection(files: PromptFiles, memory: () => Promise<string>, journal: () => Promise<string>, recentDays: number): Promise<string | undefined> {
 	if (files.soulFile === undefined || files.memoryFile === undefined) return undefined;
 	const dir = dirname(files.soulFile);
 	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY|JOURNAL)\.sync-conflict-.*\.org$/.test(name)).sort();
 	return [
 		`Your own files, which you keep with read and edit: ${files.soulFile} (identity, shown first in this prompt) and ${files.memoryFile} (below). Changes apply from your next turn.`,
 		`${basename(files.memoryFile)} is the page of what is true about Jon's life that you must never get wrong: who he is and where he lives, his household and people, what he does, his routine, where his records live, and the corrections that shape how you work with him. When he tells you a lasting fact or corrects one, update it with edit in the same turn, in its own section; keep it to a page or two, replacing what changed. What happened on a given day goes in the journal instead. A nightly reflection also tidies the day's journal and carries lasting facts here.`,
-		...(files.journalFile ? [`Your journal, ${files.journalFile}, is an Org date tree you write with the journal tool. When you need your past with Jon, search it yourself, a quick check rather than a brief, instead of reading it whole: find a day by its heading (rg -n '^\\*\\*\\* YYYY-MM-DD') and read from that line, or search words with context (rg -i -C3).`] : []),
+		...(files.journalFile
+			? [
+					`Your journal, ${files.journalFile}, is an Org date tree you write with the journal tool: "* YYYY", "** YYYY-MM Month", "*** YYYY-MM-DD Weekday", then entries. When you need your past with Jon, search it yourself, a quick check rather than a brief, instead of reading it whole: find a day by its heading (rg -n '^\\*\\*\\* YYYY-MM-DD') and read from that line, or search words with context (rg -i -C3). Each night's reflection ends a day with a "**** Day's end" entry, its summary of the day, so to skim further back than the days below, list a month's days and summaries (rg -n -A1 "^\\*\\*\\* YYYY-MM|^\\*\\*\\*\\* Day's end") and then read the days that matter in full. When something Jon says seems to connect to an earlier day, look before answering rather than guessing.`,
+					...dayEnds(await journal(), recentDays),
+				]
+			: []),
 		...(conflicts.length > 0 ? [`Syncthing conflict copies in ${dir}: ${conflicts.join(", ")}. Tell the user and leave both copies until they decide.`] : []),
 		"",
 		(await memory()) || `${basename(files.memoryFile)} is empty or does not exist yet.`,
 	].join("\n");
+}
+
+/** The recent days as the nightly reflection summed them up, so June has them in mind without searching. */
+function dayEnds(journal: string, count: number): string[] {
+	const ends = recentDayEnds(journal, count);
+	if (ends.length === 0) return [];
+	return ["Your recent days, from each night's reflection:", ...ends.map((end) => `- ${end.day}: ${end.text}`)];
 }
 
 /** `layers` are searched again on reload, so a file added, moved, or renamed since startup is found. */
@@ -100,6 +113,7 @@ export function createPromptExtension(
 		soul: cachedFile(f.soulFile, "You are June, a personal assistant."),
 		memory: cachedFile(f.memoryFile, ""),
 		instructions: cachedFile(f.instructionsFile, ""),
+		journal: cachedFile(f.journalFile, ""),
 	});
 	let read = open(files);
 	let skills: Promise<Skill[]> | undefined;
@@ -147,7 +161,7 @@ export function createPromptExtension(
 			section("soul", () => read.soul(), { tag: false }),
 			section("harness", () => harness(config.herdr.host), { tag: false }),
 			section("agents", async () => (await read.instructions()) || undefined, { tag: false }),
-			section("memory", () => personalSection(files, read.memory)),
+			section("memory", () => personalSection(files, read.memory, read.journal, config.reflection.recentDays)),
 			section("skills", async () => skillsSection(await loadSkills())),
 			section("today", () => today()),
 		],

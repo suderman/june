@@ -43,13 +43,15 @@ test("the reflection window and patter timing have defaults, take overrides, and
 		return dir;
 	};
 	const plain = loadConfig({ ...tmp.paths, layers: [await layer("plain", {})] });
-	assert.deepEqual(plain.reflection, { enabled: true, start: "03:00", end: "06:00", quietMinutes: 60 });
+	assert.deepEqual(plain.reflection, { enabled: true, start: "03:00", end: "06:00", quietMinutes: 60, recentDays: 3 });
 	assert.equal(plain.patter.openAfterSeconds, 8);
 	const tuned = loadConfig({ ...tmp.paths, layers: [await layer("tuned", { reflection: { start: "02:30" }, patter: { openAfterSeconds: 15 } })] });
-	assert.deepEqual(tuned.reflection, { enabled: true, start: "02:30", end: "06:00", quietMinutes: 60 }, "an override keeps the other defaults");
+	assert.deepEqual(tuned.reflection, { enabled: true, start: "02:30", end: "06:00", quietMinutes: 60, recentDays: 3 }, "an override keeps the other defaults");
 	assert.equal(tuned.patter.openAfterSeconds, 15);
 	const late = await layer("late", { reflection: { start: "3am" } });
 	assert.throws(() => loadConfig({ ...tmp.paths, layers: [late] }), /reflection\.start must be HH:MM/);
+	const forgetful = await layer("forgetful", { reflection: { recentDays: -1 } });
+	assert.throws(() => loadConfig({ ...tmp.paths, layers: [forgetful] }), /reflection\.recentDays/);
 	const silent = await layer("silent", { patter: { gapsSeconds: [] } });
 	assert.throws(() => loadConfig({ ...tmp.paths, layers: [silent] }), /patter\.gapsSeconds/);
 });

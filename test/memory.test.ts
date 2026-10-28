@@ -418,6 +418,30 @@ test("compaction keeps topic threads and journals what the journal lacks, once",
 	assert.equal(await readFile(env.journal, "utf8"), written, "an entry already there is not written twice");
 });
 
+test("June's prompt carries the last few days' endings and says where to look further back", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const soul = join(tmp.dir, "SOUL.org");
+	const journal = join(tmp.dir, "JOURNAL.org");
+	await writeFile(soul, "* June\nBe observant.\n");
+	const day = (date: string, end?: string) => `*** ${date}\n**** 09:00 Morning\nCoffee on ${date}.\n${end ? `\n**** Day's end\n${end}\n` : ""}`;
+	await writeFile(journal, `#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${day("2026-10-24 Saturday", "Lucy's birthday.")}\n${day("2026-10-25 Sunday", "Church and a nap.")}\n${day("2026-10-26 Monday")}\n${day("2026-10-27 Tuesday", "Meeting the boys.\n\nThe site check is still open.")}`);
+	let prompt = "";
+	const faux = fauxProvider();
+	faux.setResponses([(ctx) => {
+		prompt = (JSON.parse(effectivePrompt(ctx)) as { memory: string }).memory;
+		return fauxAssistantMessage("hi");
+	}]);
+	const config = { soulFile: soul, memoryFile: join(tmp.dir, "MEMORY.org"), journalFile: journal, reflection: { enabled: false, start: "03:00", end: "06:00", quietMinutes: 60, recentDays: 2 } };
+	const daemon = await openTestDaemon({ ...tmp, faux, config });
+	t.after(() => daemon.close());
+	await (await daemon.root.submit({ type: "input", content: "hello", requestId: "r1" }, BG)).wait(BG);
+	assert.match(prompt, /Your recent days, from each night's reflection:\n- 2026-10-25 Sunday: Church and a nap\.\n- 2026-10-27 Tuesday: Meeting the boys\. The site check is still open\./);
+	assert.doesNotMatch(prompt, /Lucy's birthday/, "only the last two endings");
+	assert.doesNotMatch(prompt, /Coffee on/, "and never the entries themselves");
+	assert.ok(prompt.includes(`rg -n -A1 "^\\*\\*\\* YYYY-MM|^\\*\\*\\*\\* Day's end"`), "with a way to skim a month");
+});
+
 test("June writes her journal with a tool, under today's date", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
@@ -450,7 +474,7 @@ test("the reflection window looks back on the day before it opened", () => {
 	assert.equal(dayFor(new Date(2026, 9, 28, 1, 0), late), "2026-10-27", "and still on that day after midnight");
 });
 
-test("the nightly reflection rewrites the day, carries a lasting fact into memory, and runs once", async (t) => {
+test("the nightly reflection rewrites the day, carries a lasting fact into memory, keeps what it replaced, and runs once", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const soul = join(tmp.dir, "SOUL.org");
@@ -472,7 +496,7 @@ test("the nightly reflection rewrites the day, carries a lasting fact into memor
 	const daemon = await openTestDaemon({
 		...tmp,
 		faux,
-		config: { soulFile: soul, memoryFile: memory, journalFile: journal, reflection: { enabled: true, start: "03:00", end: "06:00", quietMinutes: 60 } },
+		config: { soulFile: soul, memoryFile: memory, journalFile: journal, reflection: { enabled: true, start: "03:00", end: "06:00", quietMinutes: 60, recentDays: 3 } },
 		reflectionClock: { now: () => new Date(2026, 9, 28, 3, 30), tickMs: 50 },
 	});
 	t.after(() => daemon.close());
@@ -481,6 +505,8 @@ test("the nightly reflection rewrites the day, carries a lasting fact into memor
 	assert.doesNotMatch(JSON.stringify(asked!.messages.at(-1)), /Coffee/, "and not the next day");
 	assert.equal(readFileSync(journal, "utf8"), `#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${revised}\n\n${after}\n`);
 	assert.equal(readFileSync(memory, "utf8"), remembered);
+	assert.equal(readFileSync(join(tmp.paths.state, "reflection", "2026-10-27.org"), "utf8"), `${day}\n`, "the day as it was is kept");
+	assert.match(readFileSync(join(tmp.paths.state, "reflection", "2026-10-27.MEMORY.org"), "utf8"), /the family's dog\./, "and so is the memory it replaced");
 	await new Promise((r) => setTimeout(r, 300));
 	assert.equal(faux.state.callCount, 1, "one pass a night");
 });
@@ -495,7 +521,7 @@ test("the nightly reflection waits while Jon is still talking, and refuses a day
 	let clock = Date.now();
 	const at = () => new Date(clock);
 	const hhmm = (ms: number) => `${String(new Date(ms).getHours()).padStart(2, "0")}:${String(new Date(ms).getMinutes()).padStart(2, "0")}`;
-	const reflection = { enabled: true, start: hhmm(clock - 60_000), end: hhmm(clock + 3 * 3_600_000), quietMinutes: 60 };
+	const reflection = { enabled: true, start: hhmm(clock - 60_000), end: hhmm(clock + 3 * 3_600_000), quietMinutes: 60, recentDays: 3 };
 	const date = dayFor(at(), reflection)!;
 	const text = `#+TITLE: June's journal\n\n* ${date.slice(0, 4)}\n** ${date.slice(0, 7)}\n*** ${date}\n**** 18:04 Meeting Lucy\nJon shared a photo of Lucy.\n`;
 	await writeFile(journal, text);

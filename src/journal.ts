@@ -93,6 +93,27 @@ export function daySection(text: string, date: string): { start: number; end: nu
 	return { start, end, text: lines.slice(start, end).join("\n").replace(/\n+$/, "") };
 }
 
+/** The last `count` days' "Day's end" entries, oldest first, each as its day heading's text and the entry's paragraphs. */
+export function recentDayEnds(text: string, count: number): { day: string; text: string }[] {
+	const found: { day: string; text: string }[] = [];
+	let day: string | undefined;
+	let body: string[] | undefined;
+	const close = () => {
+		if (day !== undefined && body !== undefined) found.push({ day, text: body.filter(Boolean).join(" ") });
+		body = undefined;
+	};
+	for (const line of text.split("\n")) {
+		if (/^\*+ /.test(line)) {
+			close();
+			if (line.startsWith("*** ")) day = line.slice(4).trim();
+			else if (/^\*{1,2} /.test(line)) day = undefined;
+			else if (/^\*{4} Day's end\s*$/.test(line)) body = [];
+		} else body?.push(line.trim());
+	}
+	close();
+	return count > 0 ? found.slice(-count) : [];
+}
+
 /** `text` with the day's subtree replaced by `day`, keeping one blank line before the next heading. */
 export function replaceDay(text: string, date: string, day: string): string {
 	const found = daySection(text, date);

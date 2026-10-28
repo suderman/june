@@ -108,10 +108,15 @@ export function createReflection(options: {
 			const parsed = JSON.parse(answer.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")) as { day?: unknown; memory?: unknown };
 			const revised = checkDay(parsed.day, found.text.split("\n")[0]!);
 			if (parsed.memory !== null && (typeof parsed.memory !== "string" || !parsed.memory.trim())) throw new Error("reflection returned invalid memory");
+			// What the pass replaces is kept in the state directory, since nothing else versions ~/profile.
+			const kept = join(options.state, "reflection");
+			mkdirSync(kept, { recursive: true });
+			writeFileSync(join(kept, `${date}.org`), `${found.text.trimEnd()}\n`);
 			// The day first: it is the point of the pass, and a memory left unchanged is harmless.
 			replaceIfUnchanged(journalFile, journal, replaceDay(journal, date, revised));
 			if (typeof parsed.memory === "string") {
 				checkConflicts(memoryFile);
+				writeFileSync(join(kept, `${date}.MEMORY.org`), memory);
 				replaceIfUnchanged(memoryFile, memory, `${parsed.memory.trimEnd()}\n`);
 			}
 			log.info("reflection_done", { day: date, memory: typeof parsed.memory === "string" });

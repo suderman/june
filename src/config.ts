@@ -52,6 +52,8 @@ export type Config = {
 		readonly end: string;
 		/** Minutes Jon must have been quiet before it runs; until then it waits, up to `end`. */
 		readonly quietMinutes: number;
+		/** How many recent days' "Day's end" entries June sees in her prompt; 0 shows none. */
+		readonly recentDays: number;
 	};
 	/** When patter speaks during a wait. */
 	readonly patter: {
@@ -107,7 +109,7 @@ const DEFAULTS = {
 	skillDirs: [] as string[],
 	org: { root: "~/org", agendaFiles: "~/.local/state/org-dispatch/agenda-files" },
 	herdr: { session: "default", hosts: {}, allowPrompt: false },
-	reflection: { enabled: true, start: "03:00", end: "06:00", quietMinutes: 60 },
+	reflection: { enabled: true, start: "03:00", end: "06:00", quietMinutes: 60, recentDays: 3 },
 	patter: { openAfterSeconds: 8, gapsSeconds: [25, 25, 25, 40, 60, 90, 120, 180] },
 };
 
@@ -184,6 +186,7 @@ function withModes({ chat: given, focus, patter }: Record<string, any>): Config[
 function reflection(given: Config["reflection"]): Config["reflection"] {
 	for (const key of ["start", "end"] as const)
 		if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(given[key])) throw new Error(`reflection.${key} must be HH:MM, not ${given[key]}`);
+	if (!Number.isInteger(given.recentDays) || given.recentDays < 0) throw new Error("reflection.recentDays must be a whole number, 0 or more");
 	return given;
 }
 
