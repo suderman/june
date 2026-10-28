@@ -31,7 +31,7 @@ test("config.json and AGENTS.md come from the config directory, SOUL.org and her
 	assert.equal(loaded.instructionsFile, join(config, "AGENTS.md"));
 	assert.equal(loaded.daemonHost, "kit");
 	assert.deepEqual(loaded.telegram, { tokenEnv: "TELEGRAM_BOT_TOKEN", allowedUserIds: [42, 7] });
-	assert.throws(() => loadConfig(dirs, { TELEGRAM_ALLOWED_USERS: "jon" }), /TELEGRAM_ALLOWED_USERS must be numeric/);
+	assert.throws(() => loadConfig(dirs, { TELEGRAM_ALLOWED_USERS: "alex" }), /TELEGRAM_ALLOWED_USERS must be numeric/);
 	assert.throws(() => loadConfig({ ...dirs, config: data }, {}), /No model\.chat configured/);
 	await writeFile(join(config, "config.json"), JSON.stringify({ model: { chat: { provider: "p", modelId: "m" } }, daemonHost: "kit" }));
 	assert.throws(() => loadConfig(dirs, {}), /daemonHost now comes from the NixOS module/, "an old personal setting is refused, not ignored");
@@ -70,10 +70,10 @@ test("the rhythm, reflection, heartbeat, and patter timing have defaults, take o
 	const forgetful = await layer("forgetful", { reflection: { recentDays: -1 } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: forgetful }), /reflection\.recentDays/);
 	assert.deepEqual(plain.situation, { calendars: [], homeAssistant: { people: [], pollSeconds: 300 } });
-	const placed = loadConfig({ ...tmp.paths, config: await layer("placed", { situation: { calendars: ["~/org/calendar/family.org"], homeAssistant: { people: ["person.jon"] } } }) });
+	const placed = loadConfig({ ...tmp.paths, config: await layer("placed", { situation: { calendars: ["~/org/calendar/family.org"], homeAssistant: { people: ["person.alex"] } } }) });
 	assert.equal(placed.situation.calendars[0], join(process.env.HOME!, "org/calendar/family.org"), "calendar paths expand ~");
-	assert.deepEqual(placed.situation.homeAssistant, { people: ["person.jon"], pollSeconds: 300 });
-	const nobody = await layer("nobody", { situation: { homeAssistant: { people: ["jon"] } } });
+	assert.deepEqual(placed.situation.homeAssistant, { people: ["person.alex"], pollSeconds: 300 });
+	const nobody = await layer("nobody", { situation: { homeAssistant: { people: ["alex"] } } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: nobody }), /person\.\* entity ids/);
 	const silent = await layer("silent", { patter: { gapsSeconds: [] } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: silent }), /patter\.gapsSeconds/);

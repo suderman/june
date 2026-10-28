@@ -481,7 +481,7 @@ test("the nightly reflection rewrites the day, carries a lasting fact into memor
 	const journal = join(tmp.dir, "JOURNAL.org");
 	await writeFile(soul, "* June\nBe observant.\n");
 	await writeFile(memory, "#+TITLE: June's memory\n\n* Household\n- Biscuit: the family's dog.\n");
-	const day = "*** 2026-10-27 Tuesday\n**** 18:04 Meeting Biscuit\nAlex shared a photo of Biscuit.\n\n**** 20:42 Biscuit's birthday breakfast\nLucy had a sausage for her fifth birthday.";
+	const day = "*** 2026-10-27 Tuesday\n**** 18:04 Meeting Biscuit\nAlex shared a photo of Biscuit.\n\n**** 20:42 Biscuit's birthday breakfast\nBiscuit had a sausage for her fifth birthday.";
 	const after = "*** 2026-10-28 Wednesday\n**** 09:00 Morning\nCoffee.";
 	await writeFile(journal, `#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${day}\n\n${after}\n`);
 	const revised = "*** 2026-10-27 Tuesday\n**** 18:04 Biscuit turns five\nAlex shared a photo of Biscuit, who turned five on Saturday, and she had a greasy sausage for breakfast.\n\n**** Day's end\nA warm family evening.";

@@ -50,17 +50,17 @@ test("the now section joins the day, the sun, the calendars, and where people ar
 	await writeFile(family, "* Payday\n<2026-10-28 Wed>\n* Garbage day\n<2026-10-29 Thu>\n");
 	await writeFile(work, "* Standup\n<2026-10-28 Wed 09:30>\n");
 	const states: Record<string, object> = {
-		"person.jon_suderman": { state: "Work", last_changed: new Date(2026, 9, 28, 9, 2).toISOString(), attributes: { friendly_name: "Alex" } },
-		"person.ness": { state: "unknown", last_changed: new Date(2026, 9, 25).toISOString(), attributes: { friendly_name: "Kim" } },
+		"person.alex": { state: "Work", last_changed: new Date(2026, 9, 28, 9, 2).toISOString(), attributes: { friendly_name: "Alex" } },
+		"person.kim": { state: "unknown", last_changed: new Date(2026, 9, 25).toISOString(), attributes: { friendly_name: "Kim" } },
 		"sun.sun": {
 			state: "above_horizon",
 			last_changed: "",
 			attributes: { next_setting: new Date(2026, 9, 28, 18, 22).toISOString(), next_rising: new Date(2026, 9, 29, 8, 18).toISOString() },
 		},
-		"weather.calgary_forecast": { state: "snowy", last_changed: "", attributes: { temperature: -1.7, temperature_unit: "°C" } },
+		"weather.home": { state: "snowy", last_changed: "", attributes: { temperature: -1.7, temperature_unit: "°C" } },
 		"get_forecasts?return_response": {
 			service_response: {
-				"weather.calgary_forecast": {
+				"weather.home": {
 					forecast: [
 						{ datetime: new Date(2026, 9, 28, 11).toISOString(), condition: "snowy", temperature: -1.2, templow: -6, precipitation_probability: 30 },
 						{ datetime: new Date(2026, 9, 29, 11).toISOString(), condition: "partlycloudy", temperature: 3.6, templow: -4.4, precipitation_probability: 0 },
@@ -75,7 +75,7 @@ test("the now section joins the day, the sun, the calendars, and where people ar
 		const entity = url.split("/").at(-1)!;
 		return new Response(JSON.stringify(states[entity]), { status: states[entity] ? 200 : 404 });
 	}) as typeof globalThis.fetch;
-	const config = { calendars: [family, work, join(tmp.dir, "missing.org")], homeAssistant: { people: ["person.jon_suderman", "person.ness"], weather: "weather.calgary_forecast", pollSeconds: 300 } };
+	const config = { calendars: [family, work, join(tmp.dir, "missing.org")], homeAssistant: { people: ["person.alex", "person.kim"], weather: "weather.home", pollSeconds: 300 } };
 	const situation = createSituation({ config, env: { HASS_URL: "https://hass.test/", HASS_TOKEN: "t" }, log, fetch });
 	const now = new Date(2026, 9, 28, 11, 40);
 	assert.doesNotMatch(await situation.render(now), /sun|Alex is/, "nothing from Home Assistant before its first poll");

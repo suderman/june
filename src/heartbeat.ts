@@ -54,8 +54,8 @@ export function createHeartbeat(options: {
 			busy = true;
 			try {
 				const { messages } = await root.context(BG);
-				const jon = messages.findLast((m) => m.role === "user" && !OWN.test(text(m)));
-				const chatting = jon !== undefined && at.getTime() - jon.timestamp < config.chattingMinutes * 60_000;
+				const said = messages.findLast((m) => m.role === "user" && !OWN.test(text(m)));
+				const chatting = said !== undefined && at.getTime() - said.timestamp < config.chattingMinutes * 60_000;
 				const lines = (await options.situation.render(at)).split("\n").slice(2);
 				// The receipt first: a crash after it costs one beat; one before it would repeat the beat.
 				mkdirSync(options.state, { recursive: true });
@@ -77,7 +77,7 @@ export function createHeartbeat(options: {
 				if (isQuiet(answer) || answer.trim() === "") return log.info("heartbeat_quiet", {});
 				log.info("heartbeat_spoke", { chars: answer.length });
 				// The terminal shows her message in the transcript; Telegram needs it sent when that is where the user is.
-				if (options.telegram !== undefined && jon !== undefined && !/^\[(kitty|cli)\]/.test(text(jon))) {
+				if (options.telegram !== undefined && said !== undefined && !/^\[(kitty|cli)\]/.test(text(said))) {
 					const { port, chatId } = options.telegram;
 					for (const chunk of splitForTelegram(answer)) await port.sendMessage(chatId, chunk.html, { html: true });
 				}

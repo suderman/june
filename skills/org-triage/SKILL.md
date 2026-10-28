@@ -38,7 +38,7 @@ Create one TODO for each distinct action Jon or his family has to take. A
 message may hold several actions or none.
 
 - Information with no action, such as a schedule change, belongs in a life
-  file that keeps such details (for example `~/org/life/trinity.org`).
+  file that keeps such details (for example `~/org/life/school.org`).
   Update the relevant heading there instead of creating a TODO.
 - When nothing needs doing and no file keeps the detail, say so. Never
   invent a task to have something to file.

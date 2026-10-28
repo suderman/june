@@ -39,7 +39,7 @@ const POST = String.raw`(?=[\s\-.,:;!?'")}\[]|$)`;
 const span = (marker: string, inner: string) => new RegExp(`${PRE}${marker}(${inner})${marker}${POST}`, "g");
 const rules: [RegExp, (body: string) => string][] = [
 	[span(String.raw`\*`, String.raw`[^\s*](?:[^*\n]*[^\s*])?`), (b) => `**${b}**`],
-	// No slash inside, so a path such as /home/jon/ stays a path.
+	// No slash inside, so a path such as /home/alex/ stays a path.
 	[span("/", String.raw`[^\s/](?:[^/\n]*[^\s/])?`), (b) => `*${b}*`],
 	[span(String.raw`\+`, String.raw`[^\s+](?:[^+\n]*[^\s+])?`), (b) => `~~${b}~~`],
 ];

@@ -1,6 +1,6 @@
 #+TITLE: June
 
-June is Jon's personal assistant: one persistent daemon on Pi Durable that he talks to from Kitty and Telegram. She reads Org for tasks and knowledge and Herdr for live agent sessions, and does quick checks and small edits herself with a shell and file tools on the daemon host. She does not replace either, and she still hands larger work to coding agents through the dispatcher. Design and rationale are in [[file:docs/architecture.org][docs/architecture.org]].
+June is a personal assistant: one persistent daemon on Pi Durable that the user talks to from a terminal and Telegram. She reads Org for tasks and knowledge and Herdr for live agent sessions, does quick checks and small edits herself with a shell and file tools, and hands larger work to coding agents through an Org dispatcher. Design notes are in [[file:docs/architecture.org][docs/architecture.org]].
 
 * Commands
 
@@ -11,52 +11,45 @@ june ask --json "..."    # {"requestId","status","text","reason"}
 echo "..." | june ask -
 june status [--json] # daemon, model, and conversation state; no model call
 june doctor          # configuration and dependency checks
+june init [NAME]     # copy the starting files into place
 june serve           # the daemon
 #+end_src
 
 Exit codes: 0 answered, 1 unanswered or failed, 2 usage, 3 daemon not running. In the client, Enter sends (as a steer while June is working), Alt+Enter queues a follow-up, Esc runs =/stop=, Ctrl+D detaches.
 
-The terminal client, =june ask=, and Telegram share these slash commands, with the same meanings and replies:
+The terminal client, =june ask=, and Telegram share these slash commands:
 
-| Command                  | Effect                                                         |
-|--------------------------+----------------------------------------------------------------|
-| =/new=                   | Stop the run, drop queued messages, start a fresh context. History stays in storage. |
-| =/stop=                  | Stop the current run; queued messages continue.                |
-| =/compact [instructions]= | Compact the context now.                                      |
-| =/status=                | Model, state, queue, context use, and spend.                   |
-| =/help=                  | List the commands.                                             |
+| Command                   | Effect                                                                                 |
+|---------------------------+----------------------------------------------------------------------------------------|
+| =/new=                    | Stop the run, drop queued messages, start a fresh context. History stays in storage. |
+| =/stop=                   | Stop the current run; queued messages continue.                                        |
+| =/compact [instructions]= | Compact the context now.                                                               |
+| =/status=                 | Model, state, queue, context use, and spend.                                           |
+| =/help=                   | List the commands.                                                                     |
 
-The terminal client and =june ask "/reload"= also support =/reload=. It rescans the configured skill directories and finds and rereads =SOUL.org=, =MEMORY.org=, and =AGENTS.md= without a model call, chat reset, or daemon restart. New, changed, and removed skills apply on the next model turn. A running model call and queued messages are left alone. Code, =config.json=, provider, and environment changes still need a daemon restart. Telegram does not support =/reload= yet because its channel library has no custom-command hook.
+The terminal client and =june ask= also support =/reload=, which rescans the skill directories and rereads =SOUL.org=, =MEMORY.org=, and =AGENTS.md= without a model call or restart. Code, =config.json=, provider, and environment changes need a daemon restart.
 
-There is one conversation, so =/new= and =/compact= from any surface affect all of them. Command replies are not part of the conversation; in the terminal they disappear on reconnect, as Telegram's replies sit only in the chat. Detaching or losing the connection never stops work, and the client reconnects by itself. From another host, run =ssh -t kit june= or =ssh kit june ask "..."=.
+There is one conversation, so =/new= and =/compact= from any surface affect all of them. Detaching or losing the connection never stops work, and the client reconnects by itself. From another machine, =june= runs on the daemon host over SSH (see =JUNE_DAEMON_HOST=).
 
 * Files
 
-This repository holds code only. June keeps her files in three XDG directories, each overridable for a development daemon:
+The repository holds code and templates only. June keeps her files in three XDG directories, each overridable:
 
-| What        | Directory (override)                         | Holds                                              | Kept by                          |
-|-------------+----------------------------------------------+----------------------------------------------------+----------------------------------|
-| Config      | =$XDG_CONFIG_HOME/june/= (=JUNE_CONFIG_DIR=) | =config.json=, =AGENTS.md=                          | =agents apply=, from =~/.agents/june= |
-| Data        | =$XDG_DATA_HOME/june/= (=JUNE_DATA_DIR=)     | =SOUL.org=, =MEMORY.org=, =JOURNAL.org=              | June and Jon                     |
-| State       | =$XDG_STATE_HOME/june/= (=JUNE_STATE_DIR=)   | the database, attachments, reflection copies       | June, never synced               |
+| What   | Directory (override)                         | Holds                                                |
+|--------+----------------------------------------------+------------------------------------------------------|
+| Config | =$XDG_CONFIG_HOME/june/= (=JUNE_CONFIG_DIR=) | =config.json=, =AGENTS.md=                           |
+| Data   | =$XDG_DATA_HOME/june/= (=JUNE_DATA_DIR=)     | =SOUL.org=, =MEMORY.org=, =HEARTBEAT.org=, =JOURNAL.org= |
+| State  | =$XDG_STATE_HOME/june/= (=JUNE_STATE_DIR=)   | the database, attachments, receipts, reflection copies |
 
-Configuration has two sources. The NixOS module owns machine plumbing: the package, the service, persisted directories, secrets, and two environment variables, =JUNE_DAEMON_HOST= (the machine that runs June) and =TELEGRAM_ALLOWED_USERS= (comma-separated ids; Telegram is off without it). =~/.agents= owns the presets that change more often, =config.json= and =AGENTS.md=, which =agents apply= copies into the config directory as it does for Pi; June does not read =~/.agents= herself. A =config.json= that still sets =daemonHost= or =telegram= is refused. The data directory is canonical even when its files live elsewhere: Jon's module makes =~/.local/share/june= a link to the synced folder that holds them. June has no identity until =SOUL.org= exists, and creates =MEMORY.org= and =JOURNAL.org= beside it when she first writes to them. Skill directories are configuration too (=skillDirs=); none are built in.
+The socket is =$XDG_RUNTIME_DIR/june/june.sock= (=JUNE_RUNTIME_DIR=, =JUNE_SOCKET=). Keep the state directory out of any sync tool: copying a live SQLite database with its WAL corrupts it. The data directory may be a link to a synced folder.
 
-=templates/= holds sanitized starting points: =SOUL.org= (June's character), =MEMORY.org= and =HEARTBEAT.org= (the shape and guidance, with placeholders where a family, home, and routine go), and an example =config.json=. They name nobody: ={{name}}= stands for the user, with they and them. =june init [NAME]= copies whichever are missing into the data and config directories with the name filled in, using =user.name= from =config.json= when no name is given, and never touches an existing file; =june doctor= points to it when =SOUL.org= is missing. The name is written into the files rather than substituted on each read, because June edits =MEMORY.org= and =HEARTBEAT.org= by quoting their text. Tests load the example config, so it stays valid as settings change, and check that the templates and June's own prompt text name nobody. Jon's real =config.json= and =AGENTS.md= live in his public agents repository, so they are not copied here. When tuning June's voice or behaviour in the personal files, carry anything that is not about Jon's life back into the templates.
+Machine settings come from the environment: =JUNE_DAEMON_HOST= (the machine that runs June) and =TELEGRAM_ALLOWED_USERS= (comma-separated ids; Telegram is off without it). A =config.json= that sets =daemonHost= or =telegram= is refused.
 
-Runtime files stay on the daemon host and are never synced:
-
-| What                 | Where                                |
-|----------------------+--------------------------------------|
-| Durable state        | =$XDG_STATE_HOME/june/june.sqlite=    |
-| Telegram attachments | =$XDG_STATE_HOME/june/files/inbox/=   |
-| Socket               | =$XDG_RUNTIME_DIR/june/june.sock=     |
-
-=JUNE_STATE_DIR=, =JUNE_RUNTIME_DIR=, and =JUNE_SOCKET= override these, which is how a development daemon runs beside the real one. Never put the state directory in Syncthing: copying a live SQLite database with its WAL corrupts it.
+=templates/= holds starting points that name nobody: =SOUL.org= (June's character), =MEMORY.org= and =HEARTBEAT.org= (their shape, with placeholders), and an example =config.json=. ={{name}}= stands for the user. =june init [NAME]= copies whichever are missing into the data and config directories with the name filled in, taking =user.name= from =config.json= when no name is given, and never overwrites a file. June has no identity until =SOUL.org= exists; she creates =MEMORY.org= and =JOURNAL.org= when she first writes to them.
 
 * Configuration
 
-Keys of =config.json=, with the defaults that apply when it leaves them out:
+Keys of =config.json=, with their defaults:
 
 #+begin_src json
 {
@@ -81,88 +74,67 @@ Keys of =config.json=, with the defaults that apply when it leaves them out:
 }
 #+end_src
 
-- =user.name= is the person June serves. Her prompts and tools use it; without it she says "the user". The code itself names nobody.
-- =model.chat= is June's everyday model and where every conversation starts. Its =provider= names a provider in =providersFile=, Pi's own =models.json=, whose =apiKey= must be a =$VARIABLE=.
-- =model.focus= is the model June uses when she focuses, such as ={"modelId": "gpt-6.1-sol"}=; =provider= and =thinkingLevel= default to chat's. Without it she has no =focus= tool.
-- =model.patter= is the cheap model that keeps the user company during long waits, such as ={"modelId": "gpt-6-luna"}=; =provider= comes from chat and =thinkingLevel= defaults to =medium=, which keeps its planning out of the line at no cost in speed. Without it there is no patter.
-- =envFiles= are dotenv files read for keys at startup, for development. The service gets keys from its =EnvironmentFile=.
-- =JUNE_DAEMON_HOST=, from the NixOS module, is the machine that runs June. On any other machine, =june=, =june ask=, and =june status= run there over SSH when no local daemon answers. =JUNE_LOCAL=1= disables that.
+- =user.name= is the person June serves. Her prompts and tools use it; without it she says "the user".
+- =model.chat= is June's everyday model. Its =provider= names a provider in =providersFile=, Pi's =models.json=, whose =apiKey= must be a =$VARIABLE=.
+- =model.focus= is the model for careful work, such as ={"modelId": "gpt-6.1-sol"}=; =provider= and =thinkingLevel= default to chat's. Without it there is no =focus= tool.
+- =model.patter= is a cheap model for company during long waits; =provider= comes from chat. Without it there is no patter.
+- =envFiles= are dotenv files read for keys at startup, for development. A service should get keys from its environment.
 - =skillDirs= are read in place; =skill_read= only reads inside a listed skill's directory.
-- =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"cog": {}, "lux": {}}=; ={"ssh": "target"}= overrides the SSH destination.
-- =dispatch.hosts= are the machines June may queue AUTO tasks for; the first is the default. Empty, the default, leaves out =org_create_project=, =org_queue_task=, =org_resume_task=, =org_complete_task=, and =org_dispatch_now=.
-- =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an existing agent on this host.
-- Telegram is on when the service has =TELEGRAM_ALLOWED_USERS= and =TELEGRAM_BOT_TOKEN=, both from the NixOS module.
-- =rhythm= is Jon's day in local =HH:MM=: heartbeats run from =wake= until =quiet=, when he no longer wants to be bothered even if he is up, and the nightly reflection runs from =sleep=, when he is surely asleep, until =wake=.
-- =reflection= sets June's nightly pass over the day's journal (see Personal memory): it runs in the rhythm's sleep hours once the user has been quiet for =quietMinutes=, and =enabled: false= turns it off. =recentDays= is how many recent days' "Day's end" summaries June sees in her prompt (0 for none).
-- =heartbeat= turns on June's heartbeat (see Heartbeat): a private look every =everyMinutes= in waking hours; Jon counts as chatting if he wrote within =chattingMinutes=.
-- =situation= feeds the =now= prompt section (see Where things stand): =calendars= are Org files read for today's and tomorrow's entries, =homeAssistant.people= are =person.*= entities whose zone June sees, =homeAssistant.weather= is a =weather.*= entity for the forecast, polled every =pollSeconds= when the service has =HASS_URL= and =HASS_TOKEN=.
+- =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"laptop": {}}=; ={"ssh": "target"}= overrides the destination. =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an agent on this host.
+- =dispatch.hosts= are the machines June may queue AUTO tasks for; the first is the default. Empty leaves out the task-writing tools.
+- =rhythm= is the user's day in local =HH:MM=: heartbeats run from =wake= until =quiet=, and the nightly reflection from =sleep= until =wake=.
+- =reflection= runs the nightly pass once the user has been quiet for =quietMinutes=; =recentDays= is how many recent "Day's end" entries June sees in her prompt.
+- =heartbeat= enables a private look every =everyMinutes= in waking hours; the user counts as chatting if they wrote within =chattingMinutes=.
+- =situation= feeds the =now= section: =calendars= are Org files read for today and tomorrow, =homeAssistant.people= are =person.*= entities, =homeAssistant.weather= a =weather.*= entity, polled every =pollSeconds= when =HASS_URL= and =HASS_TOKEN= are set.
 - =patter= sets when patter speaks: a run busy =openAfterSeconds= becomes a wait, and =gapsSeconds= are the pauses between lines, the last repeating.
 
-* Where things stand
+* What June does
 
-June's prompt ends with a =now= section, so she knows the moment without calling a tool: the weekday, whether it is a workday or the weekend, the rough hour ("late morning (about 11am)"), when the sun next sets or rises, the weather now with today's and tomorrow's highs, lows, and chance of precipitation, today's and tomorrow's entries from the configured calendars, and which zone each configured person is in and since when. It tells her to let this inform her judgment, such as how late it is, a commute, or something time-sensitive on the calendars, and to flag what Jon may need to act on, not to narrate it. Home Assistant is polled in the background every five minutes, so a reply never waits on it; until the first poll, or while Home Assistant is down, the sun and people lines are left out, and a person whose zone is =unknown= is left out rather than guessed. The live temperature is left out on purpose: it changes every poll and would rewrite the section each time, while the daily highs and lows are enough to judge a cold day. The section changes about once an hour or when a zone or calendar changes, so the prompt cache mostly holds. The =clock= tool still gives the exact time.
+** The moment
 
-* Heartbeat
+June's prompt ends with a =now= section: the weekday, the rough hour, when the sun next sets or rises, today's and tomorrow's weather, today's and tomorrow's calendar entries, and which zone each configured person is in. She uses it to judge, not to narrate. Home Assistant is polled in the background, so a reply never waits on it, and lines it cannot fill are left out. The section changes about once an hour, so the prompt cache mostly holds; the =clock= tool gives the exact time.
 
-Every =heartbeat.everyMinutes= (an hour by default) between the rhythm's =wake= and =quiet=, June takes a private look at the moment in the main conversation: one =[heartbeat]= input with her standing instructions from =HEARTBEAT.org= (beside =SOUL.org=), what changed in her =now= section since her last look, and whether Jon is chatting. With the chat model and the whole conversation in view, she answers either =QUIET= or a message to Jon. If he is chatting, raising something is simply her next line; if not, a message interrupts him, so she sends one only when it is worth that. Jon never sees the heartbeat: the terminal hides its input, her tools, and quiet answers, and shows only a real message; on Telegram only that message is sent, without the typing indicator a normal reply shows. A heartbeat waits while June is busy, and a receipt (=heartbeat.json= in the state directory) keeps a restart from repeating or skipping one for long. =HEARTBEAT.org= is Jon's words, not rules: what is worth a nudge, what is not, and how; June updates it when he tells her what to watch for or to stop nudging him about something.
+** Heartbeat
 
-* Shell and files
+Every =heartbeat.everyMinutes= between =wake= and =quiet=, June takes a private look at the moment in the main conversation, with her standing instructions from =HEARTBEAT.org=, what changed in her =now= section since the last look, and whether the user is chatting. She answers =QUIET= or a message. The user never sees the look itself: the terminal hides its input, tools, and quiet answers, and Telegram gets only a real message. A heartbeat waits while June is busy, and a receipt in the state directory keeps a restart from repeating one. June updates =HEARTBEAT.org= when told what to watch for.
 
-June has Pi Durable's =bash=, =read=, =edit=, and =write= tools. They run on the daemon host, kit, whichever client Jon uses, as his user; other hosts are reached with =ssh=. Commands start in the home directory and stop after 120 seconds unless the call passes a longer =timeout=. Output keeps the last 2000 lines or 50 KB, with the full output spilled to a temporary file. =/stop= kills a running command. None of these tools is replay-safe: a call a restart interrupts comes back to the model as interrupted rather than running again. =edit= fails when the text it replaces has changed, so concurrent edits from Emacs or Syncthing are not overwritten silently. The tools grant capability, not permission: when to delegate, and what needs Jon's approval, are set by =AGENTS.md=. The shell can read provider keys in the service environment and =~/.pi/agent/.env=; =AGENTS.md= forbids printing them.
+** Shell and files
 
-* Chat, focus, and patter
+June has Pi Durable's =bash=, =read=, =edit=, and =write= tools, running on the daemon host as the user. Commands stop after 120 seconds unless given a longer =timeout=, and =/stop= kills them. A call interrupted by a restart comes back as interrupted rather than running again. =edit= fails when the text it replaces has changed. The tools grant capability; =AGENTS.md= sets what she does herself and what needs approval.
 
-June has three modes, all hers to manage: chat (=model.chat=) for everyday talk, focus (=model.focus=) for careful work, and patter (=model.patter=) to keep the user company while real work runs.
+** Chat, focus, work, and patter
 
+- Chat (=model.chat=) is everyday talk. Focus (=model.focus=) is careful work; the =focus= tool switches to it and back, and a restart or =/new= starts relaxed.
+- =work= hands a self-contained brief to a background child conversation with her tools and identity. The call returns at once, so the user can keep talking; only the final report comes back, as a =[work]= follow-up. A restart resumes the same brief without running it twice.
+- Patter (=model.patter=) keeps the user company during a long wait with short playful lines that never claim results or promise anything. Lines are display-only: no model context, compaction, or memory review contains them. On Telegram one message grows by edits, so the phone buzzes once per wait.
 
-June has her own working context for work she does herself. The =work= tool hands a self-contained brief to a background task that owns a child conversation, with her tools and identity but without =work= itself, the task-queueing tools, Telegram, the journal, or the memory review. The call returns at once and June says she is on it, so the user can keep talking to her while the brief runs; the status bar shows "working in the background". Only the final report comes back, as a =[work]= follow-up she relays, so shell output, file contents, and dead ends stay out of the main thread and its compactions. The child cannot ask the user anything; a decision or approval it needs comes back in the report. After a restart the task finds the same child and the same submitted brief, so nothing runs twice, and the report is sent once. =/stop= (or Esc) stops the main thread's run if there is one, and otherwise stops the background work. =june ask= returns June's first answer, so a brief's report comes later in the conversation, not in that reply.
+** Memory and journal
 
-Focus is hers to manage, like tying her hair up for heads-down work. The =focus= tool switches the main conversation to =model.focus= or back from its next model request, and a prompt section tells her which she is in and to relax when the careful work is done. A brief can run focused on its own with =work= and =focus: true=, leaving the main thread relaxed. There is no command or setting for it; ask her to focus or relax. A restart and =/new= always start relaxed.
+- =SOUL.org= is June's identity.
+- =MEMORY.org= is a page or two of lasting facts about the user's life and how to work with them. June updates it when told something lasting, and compaction and the nightly reflection review it.
+- =JOURNAL.org= is June's own dated journal, written with the =journal= tool and read on demand. It is not in her prompt, apart from the last few "Day's end" entries.
+- Each night, in the sleep hours, once the user has gone quiet, one request rewrites the day just gone with the whole day in view, closes it with a "Day's end" entry, and carries lasting facts into =MEMORY.org=. The replaced text is kept under =reflection/= in the state directory.
+- Before compaction, one request produces the working summary and a memory review. A failed review or save skips compaction and keeps the old context. Saves are atomic renames checked against the reviewed text and refuse Syncthing conflict copies; this is not a cross-host lock.
 
-Patter is how June stays present during a long wait, the way someone beside you would banter through a slow build rather than sit like a statue. A wait begins when a run has been busy for eight seconds, at once when she is focused, or as soon as a =work= brief is running in the background. When the user breaks in during background work, patter pauses, June hears what it said, and once she has answered patter picks the same bit back up. Patter opens with a quip, then speaks about every 25 seconds, spacing out as a wait drags on (up to three minutes between lines) and stopping when the answer lands. Patter is June at her most playful, carrying one running bit through the wait. Every line hears her identity and the local date and time; the opener also hears the last few exchanges of the conversation, the user's latest message, and the brief; each later line hears only the tool calls since its last line, what is still running and its latest output, and the wait in rough words such as "a few minutes". Its earlier lines come back as its own turns, so it builds on them, and when nothing new has happened it talks about the topic, the user, or the wait instead of restating the status. Tool results stay out, since the answer is June's to give. Its rules forbid claiming results, guessing how long is left, promising, or deciding anything. A line is a display-only entry: the terminal client shows it in italics after a kangaroo, and no model context or memory review ever contains it. The next chat or focus request gets a hidden prompt section listing that wait's lines, marked as performance rather than information. Patter is best effort: a request slower than ten seconds or failing is dropped and logged, and a line that finishes after the answer is discarded. It runs as an in-memory loop, so a restart mid-wait simply starts it again. While the user's latest message came from Telegram, the lines also grow one message in his chat: the first line sends it and each later line edits it, so the phone buzzes once per wait and the message shows June is still at it. After June answers mid-wait, later lines start a new message below her answer. While a brief runs, the chat also shows her typing.
+** Org tasks
 
-* Personal memory
+June reads Org with ripgrep and writes only through =org-edit= and the dispatcher. With =dispatch.hosts= set she can:
 
-=SOUL.org= is June's identity. =MEMORY.org= is the page of what is true about Jon's life that she must never get wrong: who he is and where he lives, his household and people, what he does, his routine, where his records live, and the corrections and lessons that shape how she works with him. It holds lasting facts in a few sections and stays a page or two, since it is in every prompt; what happened on a given day goes in the journal. She updates it in the same turn when Jon tells her a lasting fact or corrects one, and compaction and the nightly reflection keep it to the same brief. Jon's words and June's interpretations stay distinct. Both are ordinary Org files in the data directory, read into the system prompt. Changed files apply on the next model turn; =/reload= also finds files added or moved since startup. June can maintain them during ordinary conversation with her file tools. Jon's Org records remain authoritative for tasks, schedules, and project facts.
+- find or create a project file under =~/org/work= (=org_projects=, =org_create_project=);
+- queue a new AUTO task and nudge the dispatcher (=org_queue_task=, =org_dispatch_now=), then follow it and report its transitions;
+- resume an existing TODO, EVAL, or HOLD task when the user asks (=org_resume_task=);
+- close a task she created once its result is reviewed (=org_complete_task=).
 
-=JOURNAL.org= is June's own journal: a dated record of Jon, their days together, and what she notices about him, in her own voice. It is an Org date tree (year, month, day, then a timed entry), like Jon's =~/org/journal.org=, which is his and not hers. She writes it on her own judgment with the =journal= tool, which files an entry under today's date and time, and searches it like any file when she needs their past to make sense of the present. Compaction adds entries for anything in the old context she missed. Her working context has no journal tool. The journal is not part of her prompt.
-
-Each night, in the rhythm's sleep hours (01:00 to 05:00 by default) and once Jon has been quiet for an hour, June reflects on the day just gone: one model request with her identity, that day's journal subtree, =MEMORY.org=, and the day's conversation. It rewrites the day in place, merging entries that tell one story and rewording them with the whole day in view while keeping every fact, closes it with a short "Day's end" entry when the day had a shape, and carries any lasting fact into =MEMORY.org=. A day without entries is skipped. Before replacing them, it keeps the day as it was in =reflection/DATE.org= in the state directory, and the old memory beside it as =DATE.MEMORY.org= when that changes, since nothing versions the data directory. Both files are replaced only if nothing changed them meanwhile and no Syncthing conflict copy exists; a revised day that loses its heading or adds a heading above its entries is refused. A failed pass tries again half an hour later within the window. A receipt in the state directory (=reflection.json=) records the last day reflected on, so a restart does not repeat it. The last few days' "Day's end" entries (=recentDays=, three by default) go into June's prompt, so she has the recent past in mind without searching, and the prompt tells her how to skim further back: list a month's days and their summaries with =rg=, then read the days that matter.
-
-Before manual or automatic compaction, one model request produces both the working summary and a review against existing memory. Useful learning is saved before the summary replaces old context. An unchanged memory is a successful review; no lesson is required. The review reconciles corrections without duplicating lessons or discarding unrelated history. It never rewrites =SOUL.org=, prunes Jon's records, or grants new authority. No nightly job is involved.
-
-A failed review or save skips compaction and keeps old context. Terminal =/compact= reports the cause. Telegram's library still gives its generic decline reply, "Nothing to compact." Failure details enter June's next model prompt on either channel. A request may still proceed if it fits, but overflow recovery cannot proceed without successful compaction. Resolve the cause before retrying. Malformed or truncated output, a two-minute timeout, concurrent edits, a memory file that moved, non-regular memory files, and Syncthing conflict copies all prevent replacement. The combined output is capped at 8192 tokens, so an oversized memory can also stop compaction; there is no automatic pruning.
-
-The save uses a flushed temporary file and atomic rename, with checks against the reviewed text before replacement. This prevents June's own callbacks from interleaving but is not a cross-host lock: an external editor or Syncthing can still race the final check and rename. A saved proposal is reused after restart, and a changed context range refuses the old summary. A provider request interrupted before its response is recorded may be repeated. Memory content stays in Org; replay receipts and failure status live in the existing unsynced SQLite state.
-
-* Filing new tasks
-
-June honors an explicit destination. Otherwise she uses =org_projects= to find an existing project under =~/org/work= by its preamble and repository links before choosing a new path. For a new GitHub repo project, owner/repo guides =work/<owner>/<repo>/<repo>.org=. Unmatched work and clear one-offs go under =work/june/<name>/<name>.org=, not the June software project's file.
-
-=org_create_project= creates the title, category, and optional local and GitHub repository links without overwriting an existing file. It refreshes the dispatcher's agenda with a read-only scan and confirms the file is listed before June queues work there. A failed discovery leaves only the metadata record for retry; it does not write an AUTO task or bypass the agenda check. =org_queue_task= then writes and follows the task as usual. Without a local repository link or a =dir= override, the dispatcher uses the new project directory as the working directory. Review stays on unless Jon explicitly waives it, including for read-only lookups. The worker leaves EVAL; June then reads the outcome and verification evidence. For a task she created, she uses =org_complete_task= to mark it DONE when the request is satisfied and no Jon decision, approval, or review remains, then reports the reviewed result. Tasks needing Jon's review or with incomplete evidence stay EVAL. Resuming Jon's task does not make it hers to close. Completion uses =org-edit= with an EVAL expected-state check; an already DONE task is unchanged on replay. Normal Org archiving handles finished tasks.
-
-* Resuming existing tasks
-
-When the user explicitly asks to start or resume an existing TODO, EVAL, or HOLD task, June can use =org_resume_task=. It uses the shared =org-edit= command with an expected-state check and a replay key, records the user's instruction in Dialog, selects one host, sets review on and deploy off, and preserves the task ID, scope, history, other properties, and schedule. A missing ID is created. A working or blocked linked agent prevents the change. June starts this host's dispatcher, and a new follow watches this run even if a previous run already reached EVAL. Other hosts use their dispatcher timer; existing SCHEDULED dates still apply.
-
-This needs the =org-edit= resume options in =org/edit/=. Coding workers still must not set AUTO. That distinction is an instruction rule, not a security boundary.
-
-* The Org agent system
-
-June owns the system underneath her Org tools: the dispatcher that starts pi agents for AUTO headings, =org-edit= for task states and dates, =herdr-link= for =herdr:= links, their prompts and tests in =org/=, and the =project-org-tasks= and =org-triage= skills in =skills/=, which every agent harness reads through local entries in =~/.agents/skills.json=: from this checkout when it is cloned, otherwise from the pinned copy the module places at =~/.config/june/skills=. Her NixOS module builds the commands from the pinned flake and, with =programs.june.dispatch.enable=, runs the dispatcher every minute. See [[file:org/README.org][org/README.org]].
+She never writes =asana.org=, =inbox.org=, archives, or conflict copies. The dispatcher, =org-edit=, =herdr-link=, their prompts, and the =project-org-tasks= and =org-triage= skills live in =org/= and =skills/=; see [[file:org/README.org][org/README.org]].
 
 * Telegram setup
 
-1. Create a new bot with @BotFather. Do not reuse the Hermes bot: two processes polling one token fail with 409 Conflict.
-2. Put =TELEGRAM_BOT_TOKEN=<token>= in an agenix secret, or an env file for development.
-3. Find Jon's numeric user id (for example from @userinfobot) and set it in the module's =programs.june.telegram.allowedUsers=, which becomes =TELEGRAM_ALLOWED_USERS=.
-4. Restart June. =june status= shows =telegram polling=, and a message to the bot appears in the terminal client too.
+1. Create a bot with @BotFather. Two processes polling one token fail with 409 Conflict.
+2. Put =TELEGRAM_BOT_TOKEN=<token>= in the service environment, or an env file for development.
+3. Set =TELEGRAM_ALLOWED_USERS= to the user's numeric id.
+4. Restart June. =june status= shows =telegram polling=.
 
-Only allowed users reach the model. Private chats share the primary conversation; Telegram's =/new= resets it for every surface.
-
-What June hears on her own initiative, a =[work]= report or a =[follow]= update on a task she queued, goes where Jon last spoke to her: if his latest message came from Telegram, it goes through the channel's delivery, so her answer reaches the chat, and the terminal shows it as one short =work= or =follow= line; otherwise it stays in the terminal. Patter follows him to the phone as one growing message (see Patter).
-
-June answers terminal messages in Org markup, which the terminal renders through a small Org-to-Markdown pass (=src/org.ts=), and Telegram messages in Markdown, the only rich text Telegram renders.
+Only allowed users reach the model, and private chats share the primary conversation. What June says on her own initiative, such as a =[work]= report, a =[follow]= update, or a heartbeat message, goes where the user last spoke to her. She answers the terminal in Org markup and Telegram in Markdown.
 
 * Development
 
@@ -171,25 +143,13 @@ nix develop           # node 22 and ripgrep
 npm ci
 npm run typecheck
 npm test              # also: nix flake check
+org/tests/test-org-dispatch && org/tests/test-org-edit
 JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june serve
 JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june
 #+end_src
 
-On kit, the =june= command from Jon's NixOS module runs this checkout instead of the pinned package whenever =src/cli.ts= and =node_modules= exist here, the service included. Edit, then =systemctl --user restart june= for daemon changes, or rerun the client; =june status= shows the code path in use. =JUNE_SOURCE=none= forces the package, and =JUNE_SOURCE=<dir>= picks another checkout. Remove =node_modules= or set =JUNE_SOURCE=none= in the service before leaving a half-finished change, since a daemon that cannot start leaves June down. Configuration, =SOUL.org=, =MEMORY.org=, =AGENTS.md=, and skills are read live in either case.
-
-Unix socket paths are limited to 108 bytes, so keep =JUNE_RUNTIME_DIR= short. Tests use pi-ai's faux model and a fake Telegram port; they never call a provider or Telegram. =nix build= typechecks and produces =result/bin/june=. After changing dependencies, update =npmDepsHash= in =nix/package.nix=.
+Tests use pi-ai's faux model and a fake Telegram port, never a real provider. Unix socket paths are limited to 108 bytes, so keep =JUNE_RUNTIME_DIR= short. =nix build= typechecks and produces =result/bin/june=. After changing dependencies, update =npmDepsHash= in =nix/package.nix=.
 
 * Deployment
 
-The flake exports =packages.<system>.default=. The Home Manager module lives in [[https://github.com/suderman/nixos][suderman/nixos]] as =programs.june=, following that repository's conventions: =programs.june.enable= puts =june= on PATH, and =programs.june.daemon.enable= on kit runs =june serve= as a user service, persists =~/.local/state/june=, and reads provider keys from Pi's agenix-generated =~/.pi/agent/.env=. Logs go to the journal as =level event key=value= lines with secrets redacted: =journalctl --user -u june=. June and the Hermes June can run side by side until Jon cuts over.
-
-* Roadmap
-
-Short technical list until this moves into the Org project.
-
-1. Telegram with a real bot token on kit.
-2. Safe Org writes through =org-edit=: capture to the inbox, add a note to a task, change state, schedule. Idempotency keys, a check of the current state before retrying, and refusal of =asana.org= and conflict copies.
-3. Herdr follow-up prompts on by default once tested, with a confirmation rule for agents that are blocked on an approval.
-4. A bounded supervision check from a systemd timer: deterministic Herdr and Org scans, silence when nothing changed, a small ledger of notified and acknowledged events, and a separate background conversation for judgment.
-5. Upgrade to Pi Durable 1.4 when pi-durable-telegram does.
-6. Later: notmuch, calendar, Home Assistant, voice.
+The flake exports =packages.<system>.default=. Logs go to stdout and stderr as =level event key=value= lines with secrets redacted. A Home Manager module that runs =june serve= as a user service, with its keys and the dispatcher timer, is =programs.june= in [[https://github.com/suderman/nixos][suderman/nixos]]. Its =june= wrapper runs a local checkout instead of the package when one with =node_modules= is present (=JUNE_SOURCE=none= forces the package), and =june status= shows which is in use.

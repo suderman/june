@@ -29,7 +29,7 @@ test("a heartbeat looks privately, stays quiet or messages Alex where they are, 
 	t.after(tmp.cleanup);
 	await writeFile(join(tmp.dir, "SOUL.org"), "* June\nBe observant.\n");
 	await writeFile(join(tmp.dir, "HEARTBEAT.org"), "* Worth a nudge\n- The clinic heater, an hour ahead when it is cold.\n");
-	const calendar = join(tmp.dir, "fresha.org");
+	const calendar = join(tmp.dir, "clinic.org");
 	await writeFile(calendar, "");
 	// Tomorrow at 10:00, so Alex's real message from a moment ago is not "chatting".
 	const base = new Date();

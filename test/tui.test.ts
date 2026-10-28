@@ -36,10 +36,10 @@ test("the transcript knows while a compaction runs, from events or a reconnect s
 });
 
 test("June's Org replies render as Markdown in the terminal, leaving paths and Markdown alone", () => {
-	const org = "* Plan\nSome *bold*, /italic/ and =code=, see [[https://a.ca][A]].\nA path /home/jon/src/ and **markdown** stay.\n#+begin_src sh\necho *x*\n#+end_src";
+	const org = "* Plan\nSome *bold*, /italic/ and =code=, see [[https://a.ca][A]].\nA path /home/alex/src/ and **markdown** stay.\n#+begin_src sh\necho *x*\n#+end_src";
 	assert.equal(
 		orgToMarkdown(org),
-		"# Plan\nSome **bold**, *italic* and `code`, see [A](https://a.ca).\nA path /home/jon/src/ and **markdown** stay.\n```sh\necho *x*\n```",
+		"# Plan\nSome **bold**, *italic* and `code`, see [A](https://a.ca).\nA path /home/alex/src/ and **markdown** stay.\n```sh\necho *x*\n```",
 	);
 	assert.equal(orgToMarkdown("queued in =~/org/work/emacs.org=."), "queued in `~/org/work/emacs.org`.", "verbatim may start with the other marker");
 	assert.equal(orgToMarkdown("set =a b= then =c=, not ==x=="), "set `a b` then `c`, not ==x==", "each span ends at its own marker");
