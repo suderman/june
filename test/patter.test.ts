@@ -273,3 +273,36 @@ test("while Alex is on Telegram, patter grows one message in his chat; at the te
 	await until(async () => JSON.stringify((await daemon.root.context(BG)).messages).includes("three wombats"), 10_000);
 	assert.deepEqual([tg.sent.length, tg.edited.length], [sends, edits], "patter for a terminal brief stays in the terminal");
 });
+
+test("on Telegram, patter's line sits above June's answer, which arrives as a new message", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const patter = patterModel();
+	const faux = fauxProvider();
+	faux.setResponses([call("bash", { command: "sleep 1.5; echo built" }), fauxAssistantMessage("Built.")]);
+	const tg = fakeTelegram();
+	const daemon = await openTestDaemon({
+		...tmp,
+		faux,
+		providers: [patter.faux],
+		telegramPort: tg.port,
+		extensions: [createCodingExtension()],
+		patterTiming: fast,
+		config: { ...config, telegram: { tokenEnv: "TG", allowedUserIds: [42] } },
+		secrets: { TG: `123456:${"a".repeat(35)}` },
+	});
+	t.after(() => daemon.close());
+	await daemon.telegram!.handleUpdate({
+		update_id: 1,
+		message: {
+			message_id: 7,
+			date: Math.floor(Date.now() / 1000),
+			chat: { id: 42, type: "private" as const, first_name: "Alex" },
+			from: { id: 42, is_bot: false, first_name: "Alex" },
+			text: "build it",
+		},
+	});
+	await until(() => tg.sent.some((m) => m.text.includes("Built.")), 10_000);
+	const order = tg.sent.map((m) => (m.text.includes("🦘") ? "patter" : m.text));
+	assert.deepEqual(order, ["patter", "Built."], "no preview message is opened before patter speaks");
+});

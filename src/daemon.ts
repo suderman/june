@@ -258,6 +258,8 @@ function createTelegram(options: DaemonOptions, model: { provider: string; model
 		model,
 		thinkingLevel: options.config.model.chat.thinkingLevel as never,
 		models: options.models,
+		// Native drafts while she works, and the answer as a new message at the end, so patter's lines stay above it.
+		rich: true,
 		log,
 		...(options.telegramPort ? { port: options.telegramPort, previewIntervalMs: 20 } : {}),
 		onFatal: (reason) => log.error("telegram_fatal", { reason }),
