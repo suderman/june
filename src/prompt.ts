@@ -79,13 +79,13 @@ function skillsSection(skills: readonly Skill[]): string {
 }
 
 /** Where June keeps herself, MEMORY.org's text, and any Syncthing conflict copies of either file. */
-async function personalSection(files: PromptFiles, memory: () => Promise<string>, journal: () => Promise<string>, recentDays: number): Promise<string | undefined> {
+async function personalSection(files: PromptFiles, memory: () => Promise<string>, journal: () => Promise<string>, recentDays: number, people?: string): Promise<string | undefined> {
 	if (files.soulFile === undefined || files.memoryFile === undefined) return undefined;
 	const dir = dirname(files.soulFile);
 	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY|JOURNAL|HEARTBEAT)\.sync-conflict-.*\.org$/.test(name)).sort();
 	return [
 		`Your own files, which you keep with read and edit: ${files.soulFile} (identity, shown first in this prompt) and ${files.memoryFile} (below). Changes apply from your next turn.`,
-		`${basename(files.memoryFile)} is the page of what is true about ${user()}'s life that you must never get wrong: who they are and where they live, their household and people, what they do, their routine, where their records live, and the corrections that shape how you work with them. When they tell you a lasting fact or corrects one, update it with edit in the same turn, in its own section; keep it to a page or two, replacing what changed. What happened on a given day goes in the journal instead. A nightly reflection also tidies the day's journal and carries lasting facts here.`,
+		`${basename(files.memoryFile)} is the page of what is true about ${user()}'s life that you must never get wrong: who they are and where they live, their household and people, what they do, their routine, where their records live, and the corrections that shape how you work with them. When they tell you a lasting fact or correct one, update it with edit in the same turn, in its own section; keep it to a page or two, replacing what changed. What happened on a given day goes in the journal instead. A nightly reflection also tidies the day's journal and carries lasting facts here.`,
 		...(files.journalFile
 			? [
 					`Your journal, ${files.journalFile}, is an Org date tree you write with the journal tool: "* YYYY", "** YYYY-MM Month", "*** YYYY-MM-DD Weekday", then entries. When you need your past with ${user()}, search it yourself, a quick check rather than a brief, instead of reading it whole: find a day by its heading (rg -n '^\\*\\*\\* YYYY-MM-DD') and read from that line, or search words with context (rg -i -C3). Each night's reflection ends a day with a "**** Day's end" entry, its summary of the day, so to skim further back than the days below, list a month's days and summaries (rg -n -A1 "^\\*\\*\\* YYYY-MM|^\\*\\*\\*\\* Day's end") and then read the days that matter in full. When something ${user()} says seems to connect to an earlier day, look before answering rather than guessing.`,
@@ -95,6 +95,12 @@ async function personalSection(files: PromptFiles, memory: () => Promise<string>
 		...(files.heartbeatFile
 			? [
 					`${files.heartbeatFile} holds ${user()}'s standing instructions for your heartbeat: what is worth a nudge between conversations and what is not, in their words. When they tell you to watch for something, or to stop nudging them about something, update it with edit in the same turn.`,
+				]
+			: []),
+		...(people
+			? [
+					`${people} is ${user()}'s rolodex, which you keep with read and edit: one heading per person, grouped under headings such as Family, School, or Work, each with a properties drawer holding :WHO: (a few words on who they are to ${user()}, such as "their son's Grade 3 teacher"), :EMAIL: (their addresses, space-separated, which is how mail is matched to them), and when known :PHONE: (numbers, space-separated, in +1 international form), :ADDRESS: (one line), and :BIRTHDAY:, then dated notes worth remembering, each with where it came from, keeping what ${user()} said apart from what you inferred. When a person comes up in conversation, mail, or Org, look them up there (rg -n -i) before answering, and in the same turn add them or what you learned, as you do the journal; leave out businesses and passing strangers, but pets the household cares about count as people here. ${basename(files.memoryFile)} keeps the household and points here for everyone else.`,
+					`${user()}'s address book holds the same contact details for their phone, so when you learn a number or address, put it in both. Read and garden it with khard: show a contact with khard show --format yaml, change it with khard edit -i FILE, add one with khard new -a ADDRESSBOOK -i FILE (khard template prints the shape). Add people worth having, fill in missing names and details, and merge duplicates as you notice them.`,
 				]
 			: []),
 		...(conflicts.length > 0 ? [`Syncthing conflict copies in ${dir}: ${conflicts.join(", ")}. Tell the user and leave both copies until they decide.`] : []),
@@ -170,7 +176,7 @@ export function createPromptExtension(
 			section("soul", () => read.soul(), { tag: false }),
 			section("harness", () => harness(config.herdr.host), { tag: false }),
 			section("agents", async () => (await read.instructions()) || undefined, { tag: false }),
-			section("memory", () => personalSection(files, read.memory, read.journal, config.reflection.recentDays)),
+			section("memory", () => personalSection(files, read.memory, read.journal, config.reflection.recentDays, config.org.people)),
 			section("skills", async () => skillsSection(await loadSkills())),
 			section("now", () => situation?.render() ?? today()),
 		],

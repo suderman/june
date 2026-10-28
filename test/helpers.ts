@@ -26,7 +26,7 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 		instructionsFile: undefined,
 		daemonHost: undefined,
 		skillDirs: [],
-		org: { root: join(dir, "org"), agendaFiles: join(dir, "agenda") },
+		org: { root: join(dir, "org"), agendaFiles: join(dir, "agenda"), people: join(dir, "org", "people.org") },
 		dispatch: { hosts: [] },
 		herdr: { session: "default", host: "kit", hosts: {}, allowPrompt: false },
 		// Off unless a test turns it on, so no test depends on the hour it runs.

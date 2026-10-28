@@ -179,7 +179,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 					config: config.heartbeat,
 					window: { start: config.rhythm.wake, end: config.rhythm.quiet },
 					situation,
-					...(config.mail.enabled ? { mail: createMail({ config: config.mail, log, ...(options.mailRun ? { run: options.mailRun } : {}) }) } : {}),
+					...(config.mail.enabled ? { mail: createMail({ config: config.mail, log, people: config.org.people, ...(options.mailRun ? { run: options.mailRun } : {}) }) } : {}),
 					files: prompt.files,
 					state: paths.state,
 					log,

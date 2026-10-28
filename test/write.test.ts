@@ -44,7 +44,7 @@ async function fixture(run?: (argv: readonly string[]) => Promise<string>) {
 	await writeFile(join(root, "elsewhere.org"), "* TODO off the agenda\n");
 	const agenda = join(tmp.dir, "agenda");
 	await writeFile(agenda, [school, garden, join(root, "asana.org"), join(root, "inbox.org")].join("\n"));
-	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: agenda } };
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: agenda, people: join(root, "people.org") } };
 	const runs: string[][] = [];
 	const writes = new OrgWrites(new Org(root), config, async (argv) => {
 		runs.push([...argv]);

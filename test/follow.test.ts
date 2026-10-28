@@ -38,7 +38,7 @@ test("June reads and closes her own reviewed EVAL task before reporting through 
 	await mkdir(root, { recursive: true });
 	await writeFile(file, "#+TITLE: Todo\n");
 	await writeFile(join(tmp.dir, "agenda"), `${file}\n`);
-	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda") }, dispatch: { hosts: ["kit"] } };
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") }, dispatch: { hosts: ["kit"] } };
 	const herdr = new Herdr(config.herdr, async () => JSON.stringify({ result: { agent: { agent_status: "working" } } }));
 	const edits: string[][] = [];
 	const dispatch = createDispatchExtension(config, new Org(root), herdr, "inst", async (args) => {
@@ -97,7 +97,7 @@ test("resuming after EVAL and HOLD follows each new run without duplicate report
 	await mkdir(root, { recursive: true });
 	await writeFile(file, "#+TITLE: Todo\n");
 	await writeFile(join(tmp.dir, "agenda"), `${file}\n`);
-	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda") }, dispatch: { hosts: ["kit"] } };
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") }, dispatch: { hosts: ["kit"] } };
 	let kicks = 0;
 	const extension = createDispatchExtension(config, new Org(root), new Herdr(config.herdr, async () => "{}"), "inst", async (args) => {
 		if (args[0] === "systemctl") { kicks++; return ""; }
@@ -149,7 +149,7 @@ test("following survives a daemon restart", async (t) => {
 	await mkdir(root, { recursive: true });
 	await writeFile(file, "#+TITLE: Todo\n");
 	await writeFile(join(tmp.dir, "agenda"), `${file}\n`);
-	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda") }, dispatch: { hosts: ["kit"] } };
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") }, dispatch: { hosts: ["kit"] } };
 	const extension = () =>
 		createDispatchExtension(config, new Org(root), new Herdr(config.herdr, async () => "{}"), "inst", async () => "", {
 			intervalMs: 40,

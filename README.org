@@ -72,7 +72,7 @@ Keys of =config.json=, with their defaults:
   "envFiles": [],
   "contextCap": 200000,
   "skillDirs": [],
-  "org": { "root": "~/org" },
+  "org": { "root": "~/org", "people": "~/org/people.org" },
   "dispatch": { "hosts": [] },
   "herdr": { "session": "default", "host": "<hostname>", "hosts": {}, "allowPrompt": false },
   "rhythm": { "wake": "05:00", "quiet": "22:00", "sleep": "01:00" },
@@ -126,6 +126,7 @@ June has Pi Durable's =bash=, =read=, =edit=, and =write= tools, running on the 
 - =SOUL.org= is June's identity.
 - =MEMORY.org= is a page or two of lasting facts about the user's life and how to work with them. June updates it when told something lasting, and compaction and the nightly reflection review it.
 - =JOURNAL.org= is June's own dated journal, written with the =journal= tool and read on demand. It is not in her prompt, apart from the last few "Day's end" entries.
+- =org.people= (=~/org/people.org= by default) is the user's rolodex, which June keeps: one heading per person (pets the household cares about included) with =:WHO:= (who they are to the user), =:EMAIL:=, =:PHONE:=, =:ADDRESS:=, and =:BIRTHDAY:= properties and dated notes. She adds people as they come up in conversation, mail, and Org, and puts contact details in the address book too, which she reads and edits with khard. The heartbeat's mail list names senders from both, and a sender either one knows by name counts as a person.
 - Each night, in the sleep hours, once the user has gone quiet, one request rewrites the day just gone with the whole day in view, closes it with a "Day's end" entry, and carries lasting facts into =MEMORY.org=. The replaced text is kept under =reflection/= in the state directory.
 - Before compaction, one request produces the working summary and a memory review. A failed review or save skips compaction and keeps the old context. Saves are atomic renames checked against the reviewed text and refuse Syncthing conflict copies; this is not a cross-host lock.
 

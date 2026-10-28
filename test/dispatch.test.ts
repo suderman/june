@@ -28,7 +28,7 @@ async function fixture() {
 	await writeFile(join(root, "other.org"), "* TODO not on the agenda\n");
 	const agenda = join(tmp.dir, "agenda");
 	await writeFile(agenda, `${project}\n${join(root, "asana.org")}\n`);
-	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: agenda }, dispatch: { hosts: ["kit", "cog"] } };
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: agenda, people: join(root, "people.org") }, dispatch: { hosts: ["kit", "cog"] } };
 	const runs: string[][] = [];
 	const dispatch = new Dispatch(new Org(root), config, async (argv) => {
 		runs.push([...argv]);
@@ -283,7 +283,7 @@ test("org-dispatch itself sees the task June wrote", { skip: !hasDispatcher && "
 	};
 	const out = execFileSync("org-dispatch", ["scan"], options);
 	assert.match(out, /^Investigate the flaky login test\t.*\tnew$/m, "June's complete request skips settling");
-	const actual = new Dispatch(new Org(f.root), { ...f.config, org: { root: f.root, agendaFiles: join(f.dir, "state/org-dispatch/agenda-files") } },
+	const actual = new Dispatch(new Org(f.root), { ...f.config, org: { ...f.config.org, root: f.root, agendaFiles: join(f.dir, "state/org-dispatch/agenda-files") } },
 		async (argv) => execFileSync(argv[0]!, argv.slice(1), options));
 	const project = await actual.createProject({ domain: "june", project: "new-oneoff", title: "New one-off" });
 	await actual.queue({ ...request, file: project.file, title: "Check free disk space", body, key: "inst:9" });

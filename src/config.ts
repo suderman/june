@@ -39,7 +39,7 @@ export type Config = {
 	/** The host that runs the daemon; elsewhere the client commands run there over SSH. */
 	readonly daemonHost: string | undefined;
 	readonly skillDirs: readonly string[];
-	readonly org: { readonly root: string; readonly agendaFiles: string };
+	readonly org: { readonly root: string; readonly agendaFiles: string; /** The user's rolodex, one heading per person. */ readonly people: string };
 	/** Hosts June may queue AUTO tasks for; empty turns the dispatch tools off. The first is the default. */
 	readonly dispatch: { readonly hosts: readonly string[] };
 	readonly herdr: {
@@ -130,7 +130,7 @@ const DEFAULTS = {
 	envFiles: [] as string[],
 	contextCap: 200_000,
 	skillDirs: [] as string[],
-	org: { root: "~/org", agendaFiles: "~/.local/state/org-dispatch/agenda-files" },
+	org: { root: "~/org", agendaFiles: "~/.local/state/org-dispatch/agenda-files", people: "~/org/people.org" },
 	herdr: { session: "default", hosts: {}, allowPrompt: false },
 	rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
 	reflection: { enabled: true, quietMinutes: 60, recentDays: 3 },
@@ -173,7 +173,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 		...promptFiles(p),
 		daemonHost: daemonHost(env),
 		skillDirs: (raw.skillDirs ?? DEFAULTS.skillDirs).map(expandHome),
-		org: { root: expandHome(org.root), agendaFiles: expandHome(org.agendaFiles) },
+		org: { root: expandHome(org.root), agendaFiles: expandHome(org.agendaFiles), people: expandHome(org.people) },
 		dispatch: { hosts: raw.dispatch?.hosts ?? [] },
 		herdr: {
 			session: herdr.session,

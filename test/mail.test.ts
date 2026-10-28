@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createMail, section } from "../src/mail.ts";
+import { rolodex } from "../src/people.ts";
 import { setUser } from "../src/user.ts";
 import { tempDir } from "./helpers.ts";
 
@@ -80,4 +81,51 @@ test("subjects are flattened and cut, and quiet or failing mail adds nothing", a
 	assert.equal(section({ people: [], automated: [], bulk: 0 }), "");
 	const broken = createMail({ config: { enabled: true, query: "tag:inbox", accounts: {} }, log: quiet, run: async () => { throw new Error("no notmuch"); } });
 	assert.equal(await broken.render(new Date(0), new Date(1000)), "");
+});
+
+test("the rolodex and address book name senders, and make a known sender a person whatever the address", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const people = join(tmp.dir, "people.org");
+	await writeFile(
+		people,
+		[
+			"#+TITLE: People",
+			"",
+			"* School",
+			"** Kelly Budd :school:",
+			":PROPERTIES:",
+			":WHO: their son's Grade 3 teacher",
+			":EMAIL: Kelly.Budd@school.test kbudd@home.test",
+			":END:",
+			"- 2026-10-26: sends weekly reminders. (mail)",
+			"** No drawer, no match",
+			"kim@client.test",
+			"",
+		].join("\n"),
+	);
+	assert.deepEqual([...rolodex(people)], [
+		["kelly.budd@school.test", { name: "Kelly Budd", who: "their son's Grade 3 teacher" }],
+		["kbudd@home.test", { name: "Kelly Budd", who: "their son's Grade 3 teacher" }],
+	]);
+	assert.equal(rolodex(join(tmp.dir, "missing.org")).size, 0);
+
+	const sent = [
+		{ id: "a", from: "K. Budd <kelly.budd@school.test>", subject: "3B reminders" },
+		{ id: "b", from: "School Office <office@school.test>", subject: "Early dismissal" },
+		{ id: "c", from: "Shop <noreply@shop.test>", subject: "Delivered" },
+	];
+	const run = async (argv: readonly string[]) => {
+		const [, verb, ...rest] = argv;
+		if (argv[0] === "khard") return "office@school.test\tSchool Office\tWORK\nnoreply@shop.test\t \tHOME\n";
+		if (verb === "config") return "";
+		if (verb === "search") return JSON.stringify(sent.map((m) => m.id));
+		if (verb === "count") return "0";
+		const m = sent.find((x) => `id:${x.id}` === rest.at(-1))!;
+		return JSON.stringify([[[{ id: m.id, filename: [], headers: { From: m.from, Subject: m.subject } }, []]]]);
+	};
+	const mail = createMail({ config: { enabled: true, query: "tag:inbox", accounts: {} }, log: quiet, run, people });
+	const text = await mail.render(new Date(0), new Date(1000));
+	assert.match(text, /From people:\n- Kelly Budd <kelly\.budd@school\.test> \(their son's Grade 3 teacher\): 3B reminders\n- School Office <office@school\.test> \(in their contacts\): Early dismissal\n/);
+	assert.match(text, /Automated:\n- Shop <noreply@shop\.test> \(in their contacts\): Delivered$/, "a no-reply address saved without a name is still a machine");
 });
