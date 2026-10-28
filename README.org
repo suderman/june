@@ -131,7 +131,7 @@ This needs the =org-edit= resume options in =org/edit/=. Coding workers still mu
 
 * The Org agent system
 
-June owns the system underneath her Org tools: the dispatcher that starts pi agents for AUTO headings, =org-edit= for task states and dates, =herdr-link= for =herdr:= links, their prompts and tests in =org/=, and the =project-org-tasks= and =org-triage= skills in =skills/=, which every agent harness reads through local entries in =~/.agents/skills.json=. Her NixOS module builds the commands from the pinned flake and, with =programs.june.dispatch.enable=, runs the dispatcher every minute. See [[file:org/README.org][org/README.org]].
+June owns the system underneath her Org tools: the dispatcher that starts pi agents for AUTO headings, =org-edit= for task states and dates, =herdr-link= for =herdr:= links, their prompts and tests in =org/=, and the =project-org-tasks= and =org-triage= skills in =skills/=, which every agent harness reads through local entries in =~/.agents/skills.json=: from this checkout when it is cloned, otherwise from the pinned copy the module places at =~/.config/june/skills=. Her NixOS module builds the commands from the pinned flake and, with =programs.june.dispatch.enable=, runs the dispatcher every minute. See [[file:org/README.org][org/README.org]].
 
 * Telegram setup
 

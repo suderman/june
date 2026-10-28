@@ -21,7 +21,7 @@ skills/                        project-org-tasks, org-triage, for every agent
 sudo nixos-rebuild switch --flake /etc/nixos#$(hostname) --override-input june path:$HOME/src/suderman/june
 #+end_src
 
-The skills are different. =~/.agents/skills.json= lists them as local entries, so =agents apply= links =~/.agents/skills/project-org-tasks= and =org-triage= into this checkout, and every harness finds them there; edits apply at once. A host without this checkout goes without them. Rebuild before publishing skill text that describes a new command.
+The skills are different. =~/.agents/skills.json= lists them as local entries with two paths, so =agents apply= links =~/.agents/skills/project-org-tasks= and =org-triage= into this checkout when it is there, and edits apply at once; elsewhere it links the pinned copy that =programs.june= places at =~/.config/june/skills=. Every harness finds them in =~/.agents/skills=. Rebuild before publishing skill text that describes a new command.
 
 =suderman/emacs= keeps its own copy of the TODO keywords and the =herdr:= link handler, because Emacs on Android has neither this checkout nor the dispatcher. Change both copies of the keywords together.
 
