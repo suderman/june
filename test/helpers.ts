@@ -30,6 +30,7 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 		// Off unless a test turns it on, so no test depends on the hour it runs.
 		reflection: { enabled: false, start: "03:00", end: "06:00", quietMinutes: 60, recentDays: 3 },
 		patter: { openAfterSeconds: 8, gapsSeconds: [25] },
+		situation: { calendars: [], homeAssistant: { people: [], pollSeconds: 300 } },
 		...extra,
 	};
 }

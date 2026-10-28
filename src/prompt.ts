@@ -107,6 +107,8 @@ function dayEnds(journal: string, count: number): string[] {
 export function createPromptExtension(
 	config: Config,
 	dirs?: Pick<Paths, "config" | "data">,
+	/** The "now" section; without it, only the date. */
+	situation?: { render(): Promise<string> },
 ): { extension: Extension; files(): PromptFiles; reload(): Promise<number> } {
 	let files: PromptFiles = config;
 	const open = (f: PromptFiles) => ({
@@ -163,7 +165,7 @@ export function createPromptExtension(
 			section("agents", async () => (await read.instructions()) || undefined, { tag: false }),
 			section("memory", () => personalSection(files, read.memory, read.journal, config.reflection.recentDays)),
 			section("skills", async () => skillsSection(await loadSkills())),
-			section("today", () => today()),
+			section("now", () => situation?.render() ?? today()),
 		],
 		tools: [skillRead, clock],
 	});

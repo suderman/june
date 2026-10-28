@@ -71,7 +71,8 @@ Keys of =config.json=, with the defaults that apply when it leaves them out:
   "dispatch": { "hosts": [] },
   "herdr": { "session": "default", "host": "<hostname>", "hosts": {}, "allowPrompt": false },
   "reflection": { "enabled": true, "start": "03:00", "end": "06:00", "quietMinutes": 60, "recentDays": 3 },
-  "patter": { "openAfterSeconds": 8, "gapsSeconds": [25, 25, 25, 40, 60, 90, 120, 180] }
+  "patter": { "openAfterSeconds": 8, "gapsSeconds": [25, 25, 25, 40, 60, 90, 120, 180] },
+  "situation": { "calendars": [], "homeAssistant": { "people": [], "weather": null, "pollSeconds": 300 } }
 }
 #+end_src
 
@@ -86,7 +87,12 @@ Keys of =config.json=, with the defaults that apply when it leaves them out:
 - =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an existing agent on this host.
 - Telegram is on when the service has =TELEGRAM_ALLOWED_USERS= and =TELEGRAM_BOT_TOKEN=, both from the NixOS module.
 - =reflection= sets June's nightly pass over the day's journal (see Personal memory): it runs between =start= and =end= local time (=HH:MM=; a window may cross midnight) once the user has been quiet for =quietMinutes=, and =enabled: false= turns it off. A window after midnight looks back on the previous day. =recentDays= is how many recent days' "Day's end" summaries June sees in her prompt (0 for none).
+- =situation= feeds the =now= prompt section (see Where things stand): =calendars= are Org files read for today's and tomorrow's entries, =homeAssistant.people= are =person.*= entities whose zone June sees, =homeAssistant.weather= is a =weather.*= entity for the forecast, polled every =pollSeconds= when the service has =HASS_URL= and =HASS_TOKEN=.
 - =patter= sets when patter speaks: a run busy =openAfterSeconds= becomes a wait, and =gapsSeconds= are the pauses between lines, the last repeating.
+
+* Where things stand
+
+June's prompt ends with a =now= section, so she knows the moment without calling a tool: the weekday, whether it is a workday or the weekend, the rough hour ("late morning (about 11am)"), when the sun next sets or rises, the weather now with today's and tomorrow's highs, lows, and chance of precipitation, today's and tomorrow's entries from the configured calendars, and which zone each configured person is in and since when. It tells her to let this inform her judgment, such as how late it is, a commute, or something time-sensitive on the calendars, and to flag what Jon may need to act on, not to narrate it. Home Assistant is polled in the background every five minutes, so a reply never waits on it; until the first poll, or while Home Assistant is down, the sun and people lines are left out, and a person whose zone is =unknown= is left out rather than guessed. The live temperature is left out on purpose: it changes every poll and would rewrite the section each time, while the daily highs and lows are enough to judge a cold day. The section changes about once an hour or when a zone or calendar changes, so the prompt cache mostly holds. The =clock= tool still gives the exact time.
 
 * Shell and files
 

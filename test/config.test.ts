@@ -59,6 +59,12 @@ test("the reflection window and patter timing have defaults, take overrides, and
 	assert.throws(() => loadConfig({ ...tmp.paths, config: late }), /reflection\.start must be HH:MM/);
 	const forgetful = await layer("forgetful", { reflection: { recentDays: -1 } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: forgetful }), /reflection\.recentDays/);
+	assert.deepEqual(plain.situation, { calendars: [], homeAssistant: { people: [], pollSeconds: 300 } });
+	const placed = loadConfig({ ...tmp.paths, config: await layer("placed", { situation: { calendars: ["~/org/calendar/family.org"], homeAssistant: { people: ["person.jon"] } } }) });
+	assert.equal(placed.situation.calendars[0], join(process.env.HOME!, "org/calendar/family.org"), "calendar paths expand ~");
+	assert.deepEqual(placed.situation.homeAssistant, { people: ["person.jon"], pollSeconds: 300 });
+	const nobody = await layer("nobody", { situation: { homeAssistant: { people: ["jon"] } } });
+	assert.throws(() => loadConfig({ ...tmp.paths, config: nobody }), /person\.\* entity ids/);
 	const silent = await layer("silent", { patter: { gapsSeconds: [] } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: silent }), /patter\.gapsSeconds/);
 });

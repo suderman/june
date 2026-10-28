@@ -29,6 +29,7 @@ import {
 import { type CommandScope, runCommand } from "./commands.ts";
 import { type Config, expandHome, type Paths } from "./config.ts";
 import { createPromptExtension } from "./prompt.ts";
+import { createSituation } from "./situation.ts";
 import { createMemoryExtension } from "./memory.ts";
 import { ChatInfo, ChatMap } from "./notify.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
@@ -87,7 +88,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			createHerdrExtension(config, herdr),
 			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, herdr, instanceId(paths.state))] : []),
 		];
-		const prompt = createPromptExtension(config, paths);
+		const situation = createSituation({ config: config.situation, env: { ...process.env, ...options.secrets }, log });
+		const prompt = createPromptExtension(config, paths, situation);
 		const memory = createMemoryExtension(prompt.files, () => harness);
 		const telegram = createTelegram(options, model, log);
 		// Patter reaches the phone too, through its own Bot API client: the channel keeps its client to itself.
@@ -158,6 +160,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				});
 		} else harness.resume();
 		const stopPatter = patter?.start(harness, root);
+		const stopSituation = situation.start();
 		const stopReflection = config.reflection.enabled
 			? createReflection({ models: options.models, model: config.model.chat, config: config.reflection, files: prompt.files, state: paths.state, log, ...options.reflectionClock }).start(harness, root)
 			: undefined;
@@ -204,6 +207,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				await closed;
 				stopPatter?.();
 				stopReflection?.();
+				stopSituation();
 				await telegram?.stop();
 				await harness.close(BG);
 				rmSync(paths.socket, { force: true });

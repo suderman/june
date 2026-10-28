@@ -57,6 +57,11 @@ export type Config = {
 		/** How many recent days' "Day's end" entries June sees in her prompt; 0 shows none. */
 		readonly recentDays: number;
 	};
+	/** The "now" prompt section: calendars read for today and tomorrow, and Home Assistant people (with HASS_URL and HASS_TOKEN). */
+	readonly situation: {
+		readonly calendars: readonly string[];
+		readonly homeAssistant: { readonly people: readonly string[]; readonly weather?: string; readonly pollSeconds: number };
+	};
 	/** When patter speaks during a wait. */
 	readonly patter: {
 		/** A run busy this long is a wait; a brief or focus starts one at once. */
@@ -113,6 +118,7 @@ const DEFAULTS = {
 	herdr: { session: "default", hosts: {}, allowPrompt: false },
 	reflection: { enabled: true, start: "03:00", end: "06:00", quietMinutes: 60, recentDays: 3 },
 	patter: { openAfterSeconds: 8, gapsSeconds: [25, 25, 25, 40, 60, 90, 120, 180] },
+	situation: { calendars: [] as string[], homeAssistant: { people: [] as string[], pollSeconds: 300 } },
 };
 
 /** config.json, without defaults or checks; {} when it does not exist. */
@@ -157,6 +163,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 		},
 		reflection: reflection({ ...DEFAULTS.reflection, ...raw.reflection }),
 		patter: patterTiming({ ...DEFAULTS.patter, ...raw.patter }),
+		situation: situation(raw.situation ?? {}),
 		// Telegram is on where the module names who may use it; the token sits beside the ids in June's secret.
 		...(allowed.length > 0 ? { telegram: { tokenEnv: "TELEGRAM_BOT_TOKEN", allowedUserIds: allowed.map(Number) } } : {}),
 	};
@@ -177,6 +184,20 @@ function reflection(given: Config["reflection"]): Config["reflection"] {
 		if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(given[key])) throw new Error(`reflection.${key} must be HH:MM, not ${given[key]}`);
 	if (!Number.isInteger(given.recentDays) || given.recentDays < 0) throw new Error("reflection.recentDays must be a whole number, 0 or more");
 	return given;
+}
+
+function situation(given: Record<string, any>): Config["situation"] {
+	const strings = (v: unknown) => Array.isArray(v) && v.every((s) => typeof s === "string" && s.trim() !== "");
+	const calendars = given.calendars ?? DEFAULTS.situation.calendars;
+	const homeAssistant = { ...DEFAULTS.situation.homeAssistant, ...given.homeAssistant };
+	if (!strings(calendars)) throw new Error("situation.calendars must be a list of paths");
+	if (!strings(homeAssistant.people) || !homeAssistant.people.every((p: string) => p.startsWith("person.")))
+		throw new Error("situation.homeAssistant.people must be a list of person.* entity ids");
+	if (homeAssistant.weather !== undefined && !(typeof homeAssistant.weather === "string" && homeAssistant.weather.startsWith("weather.")))
+		throw new Error("situation.homeAssistant.weather must be a weather.* entity id");
+	if (!(typeof homeAssistant.pollSeconds === "number" && homeAssistant.pollSeconds >= 30))
+		throw new Error("situation.homeAssistant.pollSeconds must be 30 or more");
+	return { calendars: calendars.map(expandHome), homeAssistant };
 }
 
 function patterTiming(given: Config["patter"]): Config["patter"] {
