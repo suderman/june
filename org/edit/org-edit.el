@@ -192,8 +192,10 @@ Coding workers must not set AUTO; that permission lives in instructions."
                   (lambda ()
                     (if (equal (downcase when) "none")
                         (org-add-planning-info nil nil (intern (downcase keyword)))
-                      ;; A string keeps the time and cookies.
-                      (org-entry-put nil keyword (org-edit--stamp when)))))))
+                      ;; A string keeps the time and cookies. Not org-entry-put: in Org 9.8
+                      ;; it writes DEADLINE after the next heading when this one has no body.
+                      (funcall (if (equal keyword "SCHEDULED") #'org-schedule #'org-deadline)
+                               nil (org-edit--stamp when)))))))
 
 (defun org-edit-schedule ()
   (org-edit--planning "SCHEDULED" "schedule FILE HEADING WHEN|none"))

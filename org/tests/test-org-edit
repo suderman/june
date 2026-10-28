@@ -147,6 +147,12 @@ run schedule "$tasks" "Plan" none >/dev/null
 check "none removes SCHEDULED" lacks_line "$tasks" 'SCHEDULED: <2026-11-03'
 check "and keeps DEADLINE" line "$tasks" 'DEADLINE: <2026-11-06 Fri -2d>'
 
+bare="$HOME/org/bare.org"
+printf '* Pickup\n** TODO Leave\n* Next\n' >"$bare"
+run deadline "$bare" "Pickup / Leave" "2026-10-28 15:25" >/dev/null
+check "a heading with no body gets its own deadline" has "$(sed -n 3p "$bare")" '^DEADLINE: <2026-10-28 Wed 15:25>$'
+check "and the next heading none" has "$(tail -n 1 "$bare")" '^\* Next$'
+
 check "date prints a timestamp" has "$(run date '2026-11-03 9:00-10:30 +1w')" '^<2026-11-03 Tue 09:00-10:30 +1w>$'
 check "date takes a relative day" has "$(run date '+0d')" "^<$(date +'%Y-%m-%d %a')>$"
 check "date refuses words Org would read as today" has "$(run date 'next tuesday')" 'not a date'

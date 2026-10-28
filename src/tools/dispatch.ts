@@ -73,6 +73,26 @@ export function insertAfterPreamble(content: string, text: string): string {
 	return `${before ? `${before}\n\n` : ""}${text}\n${content.slice(first.index)}`;
 }
 
+/**
+ * An agenda Org file June may write: never asana.org (rebuilt from Asana), the inbox, archives, or a file with a
+ * Syncthing conflict copy beside it, and only files on the agenda, where the dispatcher and the user's phone see them.
+ */
+export async function writable(org: Org, config: Config, file: string): Promise<string> {
+	const path = await org.file(file);
+	const name = basename(path);
+	const rel = org.rel(path);
+	if (name === "asana.org" || name === "inbox.org" || name === "archive.org" || /(^|\/)archive\//.test(rel) || name.includes(".sync-conflict-"))
+		throw new Error(`June does not write ${rel}`);
+	const siblings = await readdir(dirname(path));
+	if (siblings.some((f) => f.startsWith(name.replace(/\.org$/, ".sync-conflict-"))))
+		throw new Error(`${rel} has a Syncthing conflict copy beside it; the user should resolve it first`);
+	const agenda = await readFile(config.org.agendaFiles, "utf8").catch(() => {
+		throw new Error(`No agenda list at ${config.org.agendaFiles}; the dispatcher has not run on this host`);
+	});
+	if (!agenda.split("\n").includes(path)) throw new Error(`${rel} is not an agenda file, so neither the dispatcher nor the agenda would see it`);
+	return path;
+}
+
 export type ProjectRequest = {
 	domain: string;
 	project: string;
@@ -101,20 +121,8 @@ export class Dispatch {
 		this.#run = run;
 	}
 
-	async #target(file: string): Promise<string> {
-		const path = await this.#org.file(file);
-		const name = basename(path);
-		const rel = this.#org.rel(path);
-		if (name === "asana.org" || name === "inbox.org" || name === "archive.org" || /(^|\/)archive\//.test(rel) || name.includes(".sync-conflict-"))
-			throw new Error(`June does not write ${rel}`);
-		const siblings = await readdir(dirname(path));
-		if (siblings.some((f) => f.startsWith(name.replace(/\.org$/, ".sync-conflict-"))))
-			throw new Error(`${rel} has a Syncthing conflict copy beside it; the user should resolve it first`);
-		const agenda = await readFile(this.#config.org.agendaFiles, "utf8").catch(() => {
-			throw new Error(`No agenda list at ${this.#config.org.agendaFiles}; the dispatcher has not run on this host`);
-		});
-		if (!agenda.split("\n").includes(path)) throw new Error(`${rel} is not an agenda file, so the dispatcher would never see the task`);
-		return path;
+	#target(file: string): Promise<string> {
+		return writable(this.#org, this.#config, file);
 	}
 
 	/** Create metadata only, then refresh the dispatcher's agenda before any task can be queued here. */

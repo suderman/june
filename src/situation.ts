@@ -92,7 +92,7 @@ export function createSituation(options: {
 	return {
 		render: async (now = new Date()) => {
 			const lines = [
-				`Where things stand right now, refreshed about hourly; for the exact time, use clock. Let it inform your judgment when it bears on the moment, such as how late it is, a commute, or something time-sensitive on the calendars, and flag what ${user()} may need to act on; do not narrate it otherwise. The calendars are ${user()}'s curated ones, which their agenda also shows.`,
+				`Where things stand right now. The time of day is rounded to the hour, so for the exact time use clock; the rest is current, since where people are comes from their phones every few minutes, so state it plainly rather than as a guess. Let it inform your judgment when it bears on the moment, such as how late it is, a commute, or something time-sensitive on the calendars, and flag what ${user()} may need to act on; do not narrate it otherwise. The calendars are ${user()}'s curated ones, which their agenda also shows.`,
 				day(now),
 				...(home.sun ? [sunLine(home.sun, now)] : []),
 				...(home.weather ? [weatherLine(home.weather, now)] : []),

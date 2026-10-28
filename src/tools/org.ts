@@ -60,6 +60,36 @@ export function subtree(lines: readonly string[], line: number): { start: number
 	return { start: line, end };
 }
 
+/**
+ * The line of the one heading `heading` names: a line number, id:UUID, an exact title (any case), or an outline path
+ * such as "Trinity / Pickup" matched from its end, as org-edit accepts.
+ */
+export function locate(lines: readonly string[], heading: string | number, file: string): number {
+	if (typeof heading === "number") return heading;
+	let found: number[];
+	if (heading.startsWith("id:")) {
+		const id = heading.slice(3).trim();
+		const at = lines.findIndex((l) => new RegExp(`^\\s*:ID:\\s+${id.replace(/[^\w-]/g, "")}\\s*$`, "i").test(l));
+		const owner = at < 0 ? undefined : outline(lines, at + 1).at(-1)?.line;
+		found = owner === undefined ? [] : [owner];
+	} else {
+		const headings = lines.map((text, i) => (text.startsWith("*") ? parseHeading(text, i + 1) : undefined)).filter((h): h is Heading => h !== undefined);
+		const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+		found = headings.filter((h) => same(h.title, heading)).map((h) => h.line);
+		const parts = heading.split(" / ");
+		if (found.length === 0 && parts.length > 1)
+			found = headings
+				.filter((h) => {
+					const path = outline(lines, h.line).map((o) => o.title);
+					return path.length >= parts.length && parts.every((part, i) => same(path[path.length - parts.length + i]!, part));
+				})
+				.map((h) => h.line);
+	}
+	if (found.length === 0) throw new Error(`No heading ${JSON.stringify(heading)} in ${file}`);
+	if (found.length > 1) throw new Error(`"${heading}" matches ${found.length} headings in ${file}; name it by outline path, such as "Parent / ${heading}", or by line number`);
+	return found[0]!;
+}
+
 export function herdrLinks(text: string) {
 	return [...text.matchAll(HERDR_LINK)].map((m) => ({
 		link: m[0],
@@ -204,20 +234,7 @@ export class Org {
 	async read(file: string, heading: string | number) {
 		const path = await this.file(file);
 		const lines = await this.lines(path);
-		let line: number | undefined;
-		if (typeof heading === "number") line = heading;
-		else if (heading.startsWith("id:")) {
-			const id = heading.slice(3).trim();
-			const at = lines.findIndex((l) => new RegExp(`^\\s*:ID:\\s+${id.replace(/[^\w-]/g, "")}\\s*$`, "i").test(l));
-			line = at < 0 ? undefined : outline(lines, at + 1).at(-1)?.line;
-		} else {
-			const matches = lines
-				.map((text, i) => parseHeading(text, i + 1))
-				.filter((h): h is Heading => h !== undefined && h.title.toLowerCase() === heading.toLowerCase());
-			if (matches.length > 1) throw new Error(`"${heading}" matches ${matches.length} headings; pass a line number`);
-			line = matches[0]?.line;
-		}
-		if (line === undefined) throw new Error(`No heading ${JSON.stringify(heading)} in ${file}`);
+		const line = locate(lines, heading, file);
 		const { start, end } = subtree(lines, line);
 		const text = lines.slice(start - 1, end).join("\n");
 		return {

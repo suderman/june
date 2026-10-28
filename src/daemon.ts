@@ -42,6 +42,7 @@ import { createHerdrExtension, Herdr } from "./tools/herdr.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
 import { createWorkExtension, WorkDoc } from "./tools/work.ts";
 import { createOrgExtension, Org } from "./tools/org.ts";
+import { createOrgWriteExtension } from "./tools/write.ts";
 
 export const VERSION = "0.1.0";
 const SNAPSHOT_ENTRIES = 200;
@@ -90,6 +91,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const extensions = options.extensions ?? [
 			createCodingExtension(),
 			createOrgExtension(config, org),
+			createOrgWriteExtension(config, org),
 			createHerdrExtension(config, herdr),
 			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, herdr, instanceId(paths.state))] : []),
 		];
