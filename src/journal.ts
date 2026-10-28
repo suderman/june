@@ -1,7 +1,7 @@
 // June's journal: her own dated record of Jon and their days together, written in her perspective. Entries go into an
 // Org date tree (year, month, day), the shape of Jon's own journal.org, so the latest days are easy to find.
 import { closeSync, fsyncSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 
 export type JournalEntry = { readonly date: string; readonly time?: string; readonly title: string; readonly text: string };
 
@@ -83,9 +83,29 @@ function put(lines: string[], at: number, block: string[]): number {
 	return at + gap.length;
 }
 
-function read(file: string): string {
+/** The day's subtree, from its `*** YYYY-MM-DD` heading to the next heading at that level or above. */
+export function daySection(text: string, date: string): { start: number; end: number; text: string } | undefined {
+	const lines = text.split("\n");
+	const start = lines.findIndex((line) => line === `*** ${date}` || line.startsWith(`*** ${date} `));
+	if (start < 0) return undefined;
+	let end = start + 1;
+	while (end < lines.length && !/^\*{1,3} /.test(lines[end]!)) end++;
+	return { start, end, text: lines.slice(start, end).join("\n").replace(/\n+$/, "") };
+}
+
+/** `text` with the day's subtree replaced by `day`, keeping one blank line before the next heading. */
+export function replaceDay(text: string, date: string, day: string): string {
+	const found = daySection(text, date);
+	if (found === undefined) throw new Error(`No ${date} in the journal`);
+	const lines = text.split("\n");
+	const tail = found.end < lines.length ? [""] : [];
+	lines.splice(found.start, found.end - found.start, ...day.replace(/\n+$/, "").split("\n"), ...tail);
+	return `${lines.join("\n").replace(/\n+$/, "")}\n`;
+}
+
+export function read(file: string): string {
 	try {
-		if (!lstatSync(file).isFile()) throw new Error("JOURNAL.org must be a regular file");
+		if (!lstatSync(file).isFile()) throw new Error(`${basename(file)} must be a regular file`);
 		return readFileSync(file, "utf8");
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
@@ -104,8 +124,7 @@ export function journalTail(file: string, chars = 6000): string {
  * file is replaced atomically and only if nothing changed it meanwhile, so an edit from Emacs or Syncthing is never lost.
  */
 export function appendJournal(file: string, entries: readonly JournalEntry[]): number {
-	if (readdirSync(dirname(file)).some((name) => /^JOURNAL\.sync-conflict-.*\.org$/.test(name)))
-		throw new Error("JOURNAL.org has a Syncthing conflict copy; resolve it first");
+	checkJournalConflicts(file);
 	const base = read(file);
 	let next = base;
 	let added = 0;
@@ -115,6 +134,17 @@ export function appendJournal(file: string, entries: readonly JournalEntry[]): n
 		added++;
 	}
 	if (added === 0) return 0;
+	replaceIfUnchanged(file, base, next);
+	return added;
+}
+
+export function checkJournalConflicts(file: string): void {
+	if (readdirSync(dirname(file)).some((name) => /^JOURNAL\.sync-conflict-.*\.org$/.test(name)))
+		throw new Error("JOURNAL.org has a Syncthing conflict copy; resolve it first");
+}
+
+/** Replace `file` with `next` atomically, only if it still reads `base` (empty for a missing file). */
+export function replaceIfUnchanged(file: string, base: string, next: string): void {
 	const temp = `${file}.${process.pid}.tmp`;
 	try {
 		const fd = openSync(temp, "w", 0o600);
@@ -124,7 +154,7 @@ export function appendJournal(file: string, entries: readonly JournalEntry[]): n
 		} finally {
 			closeSync(fd);
 		}
-		if (read(file) !== base) throw new Error("JOURNAL.org changed while writing; try again");
+		if (read(file) !== base) throw new Error(`${basename(file)} changed while writing; try again`);
 		renameSync(temp, file);
 	} finally {
 		try {
@@ -133,5 +163,4 @@ export function appendJournal(file: string, entries: readonly JournalEntry[]): n
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 		}
 	}
-	return added;
 }

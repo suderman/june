@@ -33,7 +33,14 @@ const TIMING: PatterTiming = {
 	timeoutMs: 10_000,
 };
 
-type Live = { readonly run?: { inputs: readonly unknown[] }; readonly tools?: readonly { name: string; status: string; output?: string }[] };
+type Live = {
+	readonly run?: { inputs: readonly unknown[] };
+	readonly tools?: readonly { name: string; status: string; output?: string }[];
+	readonly generation?: { message?: { content?: readonly { type: string; text?: string }[] } };
+};
+
+/** June has started writing her answer: on Telegram it is already showing, so a line now would land below it. */
+const answering = (live: Live | undefined) => live?.generation?.message?.content?.some((part) => part.type === "text" && part.text?.trim()) === true;
 /**
  * One wait: a main-thread run, keyed by its first input so a new run ends it even when no idle tick fell between them,
  * or a brief running in the background while the main thread is idle.
@@ -154,13 +161,14 @@ export function createPatter(options: {
 			wait ??= { key, ...(work ? { work } : {}), start: now, next: now + timing.openAfterMs, lines: [], updates: [], seen: new Set() };
 			// A brief handed to the working context, or June focused, is a wait from the start.
 			if (wait.lines.length === 0 && (work !== undefined || (await focused()))) wait.next = Math.min(wait.next, now);
-			if (now < wait.next || wait.asking !== undefined) return;
+			if (now < wait.next || wait.asking !== undefined || answering(live)) return;
 			const current = wait;
 			current.asking = new AbortController();
 			try {
 				const line = await speak(current, live ?? {});
 				// The wait may have ended while the line was written; a line after the answer or a stop would be noise.
-				if (line && wait === current && (await read!()).key === current.key) {
+				const after = line && wait === current ? await read!() : undefined;
+				if (after !== undefined && after.key === current.key && !answering(after.live)) {
 					current.lines.push(line);
 					await root.submit({ type: "write", entry: { kind: PATTER, data: { text: line } } }, BG);
 					if (options.telegram !== undefined && (await onTelegram())) await toPhone(current, line, options.telegram);
@@ -288,10 +296,13 @@ function escapeHtml(text: string): string {
 	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/** A user message's text. */
+/** A user message's text, with Telegram's attachment notes cut to what Jon sent: patter cannot see it, only its caption. */
 function userText(m: Message): string {
 	if (m.role !== "user") return "";
-	return typeof m.content === "string" ? m.content : m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ");
+	const text = typeof m.content === "string" ? m.content : m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ");
+	return text
+		.replace(/^\[attachment\] (\w+) (?:saved to|"[^"\n]*").*$/gm, "(Jon sent a $1)")
+		.replace(/^View it with the read tool\.\n?/gm, "");
 }
 
 /** Tool calls in plain words, without their results. */

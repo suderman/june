@@ -32,6 +32,7 @@ import { createPromptExtension } from "./prompt.ts";
 import { createMemoryExtension } from "./memory.ts";
 import { ChatInfo, ChatMap } from "./notify.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
+import { createReflection } from "./reflect.ts";
 import { readLines, type Reply, type Request, type Status, writeLine } from "./protocol.ts";
 import { createCodingExtension } from "./tools/coding.ts";
 import { createHerdrExtension, Herdr } from "./tools/herdr.ts";
@@ -54,6 +55,8 @@ export type DaemonOptions = {
 	readonly extensions?: readonly Extension[];
 	/** Tests shorten patter's waits. */
 	readonly patterTiming?: Partial<PatterTiming>;
+	/** Tests set the clock and loop speed of the nightly reflection. */
+	readonly reflectionClock?: { now: () => Date; tickMs: number };
 };
 
 export type Daemon = {
@@ -99,7 +102,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 					focus: config.model.focus,
 					files: prompt.files,
 					log,
-					timing: options.patterTiming,
+					timing: { openAfterMs: config.patter.openAfterSeconds * 1000, gapsMs: config.patter.gapsSeconds.map((s) => s * 1000), ...options.patterTiming },
 					...(patterTelegram ? { telegram: patterTelegram } : {}),
 				})
 			: undefined;
@@ -155,6 +158,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				});
 		} else harness.resume();
 		const stopPatter = patter?.start(harness, root);
+		const stopReflection = config.reflection.enabled
+			? createReflection({ models: options.models, model: config.model.chat, config: config.reflection, files: prompt.files, state: paths.state, log, ...options.reflectionClock }).start(harness, root)
+			: undefined;
 
 		const status = async (): Promise<Status> => {
 			const inspection = await harness.inspect(BG);
@@ -197,6 +203,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				for (const socket of clients) socket.destroy();
 				await closed;
 				stopPatter?.();
+				stopReflection?.();
 				await telegram?.stop();
 				await harness.close(BG);
 				rmSync(paths.socket, { force: true });

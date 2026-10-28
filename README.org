@@ -71,7 +71,9 @@ Keys, with the defaults that apply when no layer sets them:
   "org": { "root": "~/org" },
   "dispatch": { "hosts": [] },
   "herdr": { "session": "default", "host": "<hostname>", "hosts": {}, "allowPrompt": false },
-  "telegram": { "tokenEnv": "TELEGRAM_BOT_TOKEN", "allowedUserIds": [] }
+  "telegram": { "tokenEnv": "TELEGRAM_BOT_TOKEN", "allowedUserIds": [] },
+  "reflection": { "enabled": true, "start": "03:00", "end": "06:00", "quietMinutes": 60 },
+  "patter": { "openAfterSeconds": 8, "gapsSeconds": [25, 25, 25, 40, 60, 90, 120, 180] }
 }
 #+end_src
 
@@ -85,6 +87,8 @@ Keys, with the defaults that apply when no layer sets them:
 - =dispatch.hosts= are the machines June may queue AUTO tasks for; the first is the default. Empty, the default, leaves out =org_create_project=, =org_queue_task=, =org_resume_task=, =org_complete_task=, and =org_dispatch_now=.
 - =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an existing agent on this host.
 - =telegram= turns the channel on. Leave it out to run without Telegram. The allowed user id is personal, so it belongs in =~/profile/june/config.json=.
+- =reflection= sets June's nightly pass over the day's journal (see Personal memory): it runs between =start= and =end= local time (=HH:MM=; a window may cross midnight) once the user has been quiet for =quietMinutes=, and =enabled: false= turns it off. A window after midnight looks back on the previous day.
+- =patter= sets when patter speaks: a run busy =openAfterSeconds= becomes a wait, and =gapsSeconds= are the pauses between lines, the last repeating.
 
 * Shell and files
 
@@ -103,9 +107,11 @@ Patter is how June stays present during a long wait, the way someone beside you 
 
 * Personal memory
 
-=SOUL.org= is June's identity. =MEMORY.org= preserves how her understanding of Jon develops, including formative corrections, shared realizations, and explanations of why something matters. A useful lesson records what happened, what changed in her understanding, and how she should act differently, with dates and source references where available. Jon's words and June's interpretations stay distinct. Both are ordinary Org files in the personal layer, shared by Syncthing and read into the system prompt. Changed files apply on the next model turn; =/reload= also finds files added or moved since startup. June can maintain them during ordinary conversation with her file tools. Jon's Org records remain authoritative for tasks, schedules, and project facts.
+=SOUL.org= is June's identity. =MEMORY.org= is the page of what is true about Jon's life that she must never get wrong: who he is and where he lives, his household and people, what he does, his routine, where his records live, and the corrections and lessons that shape how she works with him. It holds lasting facts in a few sections and stays a page or two, since it is in every prompt; what happened on a given day goes in the journal. She updates it in the same turn when Jon tells her a lasting fact or corrects one, and compaction and the nightly reflection keep it to the same brief. Jon's words and June's interpretations stay distinct. Both are ordinary Org files in the personal layer, shared by Syncthing and read into the system prompt. Changed files apply on the next model turn; =/reload= also finds files added or moved since startup. June can maintain them during ordinary conversation with her file tools. Jon's Org records remain authoritative for tasks, schedules, and project facts.
 
 =JOURNAL.org= is June's own journal: a dated record of Jon, their days together, and what she notices about him, in her own voice. It is an Org date tree (year, month, day, then a timed entry), like Jon's =~/org/journal.org=, which is his and not hers. She writes it on her own judgment with the =journal= tool, which files an entry under today's date and time, and searches it like any file when she needs their past to make sense of the present. Compaction adds entries for anything in the old context she missed. Her working context has no journal tool. The journal is not part of her prompt.
+
+Each night, in the =reflection= window (03:00 to 06:00 by default) and once Jon has been quiet for an hour, June reflects on the day just gone: one model request with her identity, that day's journal subtree, =MEMORY.org=, and the day's conversation. It rewrites the day in place, merging entries that tell one story and rewording them with the whole day in view while keeping every fact, closes it with a short "Day's end" entry when the day had a shape, and carries any lasting fact into =MEMORY.org=. A day without entries is skipped. Both files are replaced only if nothing changed them meanwhile and no Syncthing conflict copy exists; a revised day that loses its heading or adds a heading above its entries is refused. A failed pass tries again half an hour later within the window. A receipt in the state directory (=reflection.json=) records the last day reflected on, so a restart does not repeat it.
 
 Before manual or automatic compaction, one model request produces both the working summary and a review against existing memory. Useful learning is saved before the summary replaces old context. An unchanged memory is a successful review; no lesson is required. The review reconciles corrections without duplicating lessons or discarding unrelated history. It never rewrites =SOUL.org=, prunes Jon's records, or grants new authority. No nightly job is involved.
 

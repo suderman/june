@@ -10,7 +10,8 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { runCommand } from "../src/commands.ts";
 import { createMemoryExtension, MemoryReview } from "../src/memory.ts";
 import { createPromptExtension } from "../src/prompt.ts";
-import { fakeTelegram, openTestDaemon, tempDir, testConfig, until, type Faux } from "./helpers.ts";
+import { dayFor } from "../src/reflect.ts";
+import { ask, fakeTelegram, openTestDaemon, tempDir, testConfig, until, type Faux } from "./helpers.ts";
 
 const lesson = "#+TITLE: Memory\n\n* 2026-10-26 Trust and judgment\nJon said: judge when to act directly, rather than force delegation by missing tools.\n\nI had mistaken delegation for a universal rule. Use available tools for bounded checks, delegate sustained work, and keep approval rules. Source: conversation 1.\n";
 const response = (memory: string | null = lesson, summary = "Old conversation summarized.") => fauxAssistantMessage(JSON.stringify({ summary, memory }));
@@ -438,3 +439,82 @@ test("June writes her journal with a tool, under today's date", async (t) => {
 	const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 	assert.match(await readFile(journal, "utf8"), new RegExp(`\\*\\*\\* ${date} \\w+\\n\\*\\*\\*\\* \\d\\d:\\d\\d Kids\\nJon vented about the school run\\. I listened\\.\\n?$`));
 });
+
+test("the reflection window looks back on the day before it opened", () => {
+	const night = { start: "03:00", end: "06:00" };
+	assert.equal(dayFor(new Date(2026, 9, 28, 3, 30), night), "2026-10-27");
+	assert.equal(dayFor(new Date(2026, 9, 28, 6, 0), night), undefined, "the end is exclusive");
+	assert.equal(dayFor(new Date(2026, 9, 27, 22, 0), night), undefined);
+	const late = { start: "23:30", end: "02:00" };
+	assert.equal(dayFor(new Date(2026, 9, 27, 23, 45), late), "2026-10-27", "a window before midnight reflects on today");
+	assert.equal(dayFor(new Date(2026, 9, 28, 1, 0), late), "2026-10-27", "and still on that day after midnight");
+});
+
+test("the nightly reflection rewrites the day, carries a lasting fact into memory, and runs once", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const soul = join(tmp.dir, "SOUL.org");
+	const memory = join(tmp.dir, "MEMORY.org");
+	const journal = join(tmp.dir, "JOURNAL.org");
+	await writeFile(soul, "* June\nBe observant.\n");
+	await writeFile(memory, "#+TITLE: June's memory\n\n* Household\n- Lucy: the family's dog.\n");
+	const day = "*** 2026-10-27 Tuesday\n**** 18:04 Meeting Lucy\nJon shared a photo of Lucy.\n\n**** 20:42 Lucy's birthday breakfast\nLucy had a sausage for her fifth birthday.";
+	const after = "*** 2026-10-28 Wednesday\n**** 09:00 Morning\nCoffee.";
+	await writeFile(journal, `#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${day}\n\n${after}\n`);
+	const revised = "*** 2026-10-27 Tuesday\n**** 18:04 Lucy turns five\nJon shared a photo of Lucy, who turned five on Saturday, and she had a greasy sausage for breakfast.\n\n**** Day's end\nA warm family evening.";
+	const remembered = "#+TITLE: June's memory\n\n* Household\n- Lucy: the family's golden dog. Turned five on 2026-10-24.\n";
+	let asked: TranscriptContext | undefined;
+	const faux = fauxProvider();
+	faux.setResponses([(ctx) => {
+		asked = ctx;
+		return fauxAssistantMessage(JSON.stringify({ day: revised, memory: remembered }));
+	}]);
+	const daemon = await openTestDaemon({
+		...tmp,
+		faux,
+		config: { soulFile: soul, memoryFile: memory, journalFile: journal, reflection: { enabled: true, start: "03:00", end: "06:00", quietMinutes: 60 } },
+		reflectionClock: { now: () => new Date(2026, 9, 28, 3, 30), tickMs: 50 },
+	});
+	t.after(() => daemon.close());
+	await until(() => existsSync(join(tmp.paths.state, "reflection.json")));
+	assert.match(JSON.stringify(asked!.messages.at(-1)), /Meeting Lucy/, "it reads the day being reflected on");
+	assert.doesNotMatch(JSON.stringify(asked!.messages.at(-1)), /Coffee/, "and not the next day");
+	assert.equal(readFileSync(journal, "utf8"), `#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${revised}\n\n${after}\n`);
+	assert.equal(readFileSync(memory, "utf8"), remembered);
+	await new Promise((r) => setTimeout(r, 300));
+	assert.equal(faux.state.callCount, 1, "one pass a night");
+});
+
+test("the nightly reflection waits while Jon is still talking, and refuses a day that lost its heading", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const soul = join(tmp.dir, "SOUL.org");
+	const journal = join(tmp.dir, "JOURNAL.org");
+	await writeFile(soul, "* June\nBe observant.\n");
+	// A window open now, whatever the hour the test runs, and the day it looks back on.
+	let clock = Date.now();
+	const at = () => new Date(clock);
+	const hhmm = (ms: number) => `${String(new Date(ms).getHours()).padStart(2, "0")}:${String(new Date(ms).getMinutes()).padStart(2, "0")}`;
+	const reflection = { enabled: true, start: hhmm(clock - 60_000), end: hhmm(clock + 3 * 3_600_000), quietMinutes: 60 };
+	const date = dayFor(at(), reflection)!;
+	const text = `#+TITLE: June's journal\n\n* ${date.slice(0, 4)}\n** ${date.slice(0, 7)}\n*** ${date}\n**** 18:04 Meeting Lucy\nJon shared a photo of Lucy.\n`;
+	await writeFile(journal, text);
+	const faux = fauxProvider();
+	faux.setResponses([fauxAssistantMessage("hi"), fauxAssistantMessage(JSON.stringify({ day: "**** Lucy\nNo heading.", memory: null }))]);
+	const daemon = await openTestDaemon({
+		...tmp,
+		faux,
+		config: { soulFile: soul, memoryFile: join(tmp.dir, "MEMORY.org"), journalFile: journal, reflection },
+		reflectionClock: { now: at, tickMs: 50 },
+	});
+	t.after(() => daemon.close());
+	await ask(tmp.paths.socket, "still up");
+	await new Promise((r) => setTimeout(r, 300));
+	assert.equal(faux.state.callCount, 1, "no reflection while Jon has spoken in the last hour");
+	clock += 61 * 60_000;
+	await until(() => faux.state.callCount === 2);
+	await new Promise((r) => setTimeout(r, 100));
+	assert.equal(readFileSync(journal, "utf8"), text, "a revised day without its heading is refused");
+	assert.ok(!existsSync(join(tmp.paths.state, "reflection.json")), "and the night is not marked done");
+});
+

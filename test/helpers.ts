@@ -27,6 +27,9 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 		org: { root: join(dir, "org"), agendaFiles: join(dir, "agenda") },
 		dispatch: { hosts: [] },
 		herdr: { session: "default", host: "kit", hosts: {}, allowPrompt: false },
+		// Off unless a test turns it on, so no test depends on the hour it runs.
+		reflection: { enabled: false, start: "03:00", end: "06:00", quietMinutes: 60 },
+		patter: { openAfterSeconds: 8, gapsSeconds: [25] },
 		...extra,
 	};
 }
@@ -56,6 +59,7 @@ export async function openTestDaemon(options: {
 	/** More providers, such as a separate one for patter so its requests never take June's scripted answers. */
 	providers?: Faux[];
 	patterTiming?: Partial<PatterTiming>;
+	reflectionClock?: { now: () => Date; tickMs: number };
 }): Promise<Daemon> {
 	const models = createModels();
 	models.setProvider(options.faux.provider);
@@ -69,6 +73,7 @@ export async function openTestDaemon(options: {
 		...(options.telegramPort ? { telegramPort: options.telegramPort } : {}),
 		...(options.secrets ? { secrets: options.secrets } : {}),
 		...(options.patterTiming ? { patterTiming: options.patterTiming } : {}),
+		...(options.reflectionClock ? { reflectionClock: options.reflectionClock } : {}),
 	});
 }
 

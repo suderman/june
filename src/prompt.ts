@@ -81,7 +81,8 @@ async function personalSection(files: PromptFiles, memory: () => Promise<string>
 	const dir = dirname(files.soulFile);
 	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY|JOURNAL)\.sync-conflict-.*\.org$/.test(name)).sort();
 	return [
-		`Your own files, which you keep with read and edit: ${files.soulFile} (identity, shown first in this prompt) and ${files.memoryFile} (what you have learned across conversations, below). Changes apply from your next turn.`,
+		`Your own files, which you keep with read and edit: ${files.soulFile} (identity, shown first in this prompt) and ${files.memoryFile} (below). Changes apply from your next turn.`,
+		`${basename(files.memoryFile)} is the page of what is true about Jon's life that you must never get wrong: who he is and where he lives, his household and people, what he does, his routine, where his records live, and the corrections that shape how you work with him. When he tells you a lasting fact or corrects one, update it with edit in the same turn, in its own section; keep it to a page or two, replacing what changed. What happened on a given day goes in the journal instead. A nightly reflection also tidies the day's journal and carries lasting facts here.`,
 		...(files.journalFile ? [`Your journal, ${files.journalFile}, is an Org date tree you write with the journal tool. When you need your past with Jon, search it yourself, a quick check rather than a brief, instead of reading it whole: find a day by its heading (rg -n '^\\*\\*\\* YYYY-MM-DD') and read from that line, or search words with context (rg -i -C3).`] : []),
 		...(conflicts.length > 0 ? [`Syncthing conflict copies in ${dir}: ${conflicts.join(", ")}. Tell the user and leave both copies until they decide.`] : []),
 		"",

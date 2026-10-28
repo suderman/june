@@ -31,3 +31,25 @@ test("config layers merge, and SOUL.org and AGENTS.md come from the most specifi
 	await writeFile(join(machine!, "config.json"), JSON.stringify({ model: { patter: { modelId: "chatty" } } }));
 	assert.deepEqual(loadConfig({ ...tmp.paths, layers: [agents!, machine!] }).model.patter, { provider: "p", thinkingLevel: "medium", modelId: "chatty" }, "patter thinks a little unless told");
 });
+
+test("the reflection window and patter timing have defaults, take overrides, and refuse nonsense", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const chat = { model: { chat: { provider: "p", modelId: "m" } } };
+	const layer = async (name: string, extra: object) => {
+		const dir = join(tmp.dir, name);
+		await mkdir(dir);
+		await writeFile(join(dir, "config.json"), JSON.stringify({ ...chat, ...extra }));
+		return dir;
+	};
+	const plain = loadConfig({ ...tmp.paths, layers: [await layer("plain", {})] });
+	assert.deepEqual(plain.reflection, { enabled: true, start: "03:00", end: "06:00", quietMinutes: 60 });
+	assert.equal(plain.patter.openAfterSeconds, 8);
+	const tuned = loadConfig({ ...tmp.paths, layers: [await layer("tuned", { reflection: { start: "02:30" }, patter: { openAfterSeconds: 15 } })] });
+	assert.deepEqual(tuned.reflection, { enabled: true, start: "02:30", end: "06:00", quietMinutes: 60 }, "an override keeps the other defaults");
+	assert.equal(tuned.patter.openAfterSeconds, 15);
+	const late = await layer("late", { reflection: { start: "3am" } });
+	assert.throws(() => loadConfig({ ...tmp.paths, layers: [late] }), /reflection\.start must be HH:MM/);
+	const silent = await layer("silent", { patter: { gapsSeconds: [] } });
+	assert.throws(() => loadConfig({ ...tmp.paths, layers: [silent] }), /patter\.gapsSeconds/);
+});

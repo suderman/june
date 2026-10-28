@@ -45,6 +45,21 @@ export type Config = {
 		readonly allowPrompt: boolean;
 	};
 	readonly telegram?: { readonly tokenEnv: string; readonly allowedUserIds: readonly number[] };
+	/** The nightly pass over the day's journal and memory, between `start` and `end` local time ("HH:MM"). */
+	readonly reflection: {
+		readonly enabled: boolean;
+		readonly start: string;
+		readonly end: string;
+		/** Minutes Jon must have been quiet before it runs; until then it waits, up to `end`. */
+		readonly quietMinutes: number;
+	};
+	/** When patter speaks during a wait. */
+	readonly patter: {
+		/** A run busy this long is a wait; a brief or focus starts one at once. */
+		readonly openAfterSeconds: number;
+		/** Pauses between lines; the last repeats. */
+		readonly gapsSeconds: readonly number[];
+	};
 };
 
 export type Paths = {
@@ -92,6 +107,8 @@ const DEFAULTS = {
 	skillDirs: [] as string[],
 	org: { root: "~/org", agendaFiles: "~/.local/state/org-dispatch/agenda-files" },
 	herdr: { session: "default", hosts: {}, allowPrompt: false },
+	reflection: { enabled: true, start: "03:00", end: "06:00", quietMinutes: 60 },
+	patter: { openAfterSeconds: 8, gapsSeconds: [25, 25, 25, 40, 60, 90, 120, 180] },
 };
 
 /** Objects merge key by key; anything else, arrays included, replaces. */
@@ -141,6 +158,8 @@ export function loadConfig(p: Paths = paths()): Config {
 			hosts: herdr.hosts,
 			allowPrompt: herdr.allowPrompt === true,
 		},
+		reflection: reflection({ ...DEFAULTS.reflection, ...raw.reflection }),
+		patter: patterTiming({ ...DEFAULTS.patter, ...raw.patter }),
 		...(raw.telegram
 			? {
 					telegram: {
@@ -160,6 +179,20 @@ function withModes({ chat: given, focus, patter }: Record<string, any>): Config[
 		...(focus ? { focus: { provider: chat.provider, thinkingLevel: chat.thinkingLevel, ...focus } } : {}),
 		...(patter ? { patter: { provider: chat.provider, thinkingLevel: "medium", ...patter } } : {}),
 	} as Config["model"];
+}
+
+function reflection(given: Config["reflection"]): Config["reflection"] {
+	for (const key of ["start", "end"] as const)
+		if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(given[key])) throw new Error(`reflection.${key} must be HH:MM, not ${given[key]}`);
+	return given;
+}
+
+function patterTiming(given: Config["patter"]): Config["patter"] {
+	const positive = (n: unknown) => typeof n === "number" && n > 0;
+	if (!positive(given.openAfterSeconds)) throw new Error("patter.openAfterSeconds must be a positive number");
+	if (!Array.isArray(given.gapsSeconds) || given.gapsSeconds.length === 0 || !given.gapsSeconds.every(positive))
+		throw new Error("patter.gapsSeconds must be a list of positive numbers");
+	return given;
 }
 
 export type PromptFiles = Pick<Config, "soulFile" | "memoryFile" | "journalFile" | "instructionsFile">;

@@ -153,6 +153,23 @@ test("a line still being written when the answer lands is dropped", async (t) =>
 	assert.deepEqual((await daemon.root.context(BG)).entries.filter((e) => e.kind === "june.patter"), [], "but never after the answer");
 });
 
+test("once June starts writing her answer, patter holds its line", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const patter = patterModel(async () => {
+		await new Promise((r) => setTimeout(r, 800));
+		return fauxAssistantMessage("Too late.");
+	});
+	// The answer streams for a couple of seconds, as a reply does on Telegram while its message fills in.
+	const faux = fauxProvider({ tokensPerSecond: 20 });
+	faux.setResponses([call("bash", { command: "sleep 0.3" }), fauxAssistantMessage("slowly ".repeat(40))]);
+	const daemon = await openTestDaemon({ ...tmp, faux, config, providers: [patter.faux], extensions: [createCodingExtension()], patterTiming: fast });
+	t.after(() => daemon.close());
+	await ask(tmp.paths.socket, "quick job");
+	assert.ok(patter.faux.state.callCount >= 1, "patter started a line");
+	assert.deepEqual((await daemon.root.context(BG)).entries.filter((e) => e.kind === "june.patter"), [], "but none landed once the answer was showing");
+});
+
 test("patter hears the recent conversation and new steps, but no results", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
