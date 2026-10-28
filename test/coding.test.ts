@@ -109,9 +109,9 @@ test("June remembers, corrects, and keeps her memory across a restart", async (t
 	await mkdir(personal);
 	await writeFile(join(personal, "SOUL.org"), "* June\nYou are June.");
 	const memory = join(personal, "MEMORY.org");
-	const layers = [personal];
+	const dirs = { ...tmp.paths, data: personal };
 	const open = (faux: ReturnType<typeof fauxProvider>) =>
-		openTestDaemon({ ...tmp, paths: { ...tmp.paths, layers }, faux, config: promptFiles(layers), extensions: [createCodingExtension()] });
+		openTestDaemon({ ...tmp, paths: dirs, faux, config: promptFiles(dirs), extensions: [createCodingExtension()] });
 
 	const faux = fauxProvider();
 	faux.setResponses([

@@ -264,12 +264,12 @@ test("/reload refreshes prompt files and skill discovery without a model call or
 	const oldSkill = join(skills, "old");
 	const newSkill = join(skills, "new");
 	const personal = join(tmp.dir, "personal");
-	const layers = [tmp.dir, personal];
+	const dirs = { ...tmp.paths, data: personal };
 	const instructions = join(tmp.dir, "AGENTS.md");
 	await mkdir(oldSkill, { recursive: true });
 	await mkdir(personal);
 	await writeFile(join(oldSkill, "SKILL.md"), "---\nname: old\ndescription: Old skill\n---\nOld body.");
-	await writeFile(join(tmp.dir, "SOUL.org"), "Soul before.");
+	await writeFile(join(personal, "SOUL.org"), "Soul before.");
 	await writeFile(instructions, "Rules before.");
 	const stamp = await stat(instructions);
 	const faux = fauxProvider();
@@ -286,9 +286,9 @@ test("/reload refreshes prompt files and skill discovery without a model call or
 	]);
 	const daemon = await openTestDaemon({
 		...tmp,
-		paths: { ...tmp.paths, layers },
+		paths: dirs,
 		faux,
-		config: { ...promptFiles(layers), skillDirs: [skills] },
+		config: { ...promptFiles(dirs), skillDirs: [skills] },
 	});
 	t.after(() => daemon.close());
 	await ask(tmp.paths.socket, "before");
@@ -296,7 +296,7 @@ test("/reload refreshes prompt files and skill discovery without a model call or
 	await rm(oldSkill, { recursive: true });
 	await mkdir(newSkill);
 	await writeFile(join(newSkill, "SKILL.md"), "---\nname: new\ndescription: New skill\n---\nNew body.");
-	// The identity moves to a more specific layer after startup, and memory starts beside it.
+	// The identity changes after startup, and memory starts beside it.
 	await writeFile(join(personal, "SOUL.org"), "Soul after!.");
 	await writeFile(join(personal, "MEMORY.org"), "* Jon prefers Org");
 	await writeFile(join(personal, "MEMORY.sync-conflict-20261026-120000-ABCDEFG.org"), "* other copy");
@@ -313,7 +313,7 @@ test("/reload refreshes prompt files and skill discovery without a model call or
 	faux.setResponses([
 		(ctx) => {
 			assert.match(prompt(ctx), /Soul after!\./);
-			assert.doesNotMatch(prompt(ctx), /Soul before/, "one identity, from the most specific layer");
+			assert.doesNotMatch(prompt(ctx), /Soul before/, "the identity as it is now");
 			assert.match(prompt(ctx), /Rules after!\./);
 			assert.match(prompt(ctx), /\* Jon prefers Org/);
 			assert.ok(prompt(ctx).includes(join(personal, "MEMORY.org")), "June is told where her memory lives");

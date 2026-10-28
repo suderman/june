@@ -38,8 +38,8 @@ export async function tempDir(): Promise<{ dir: string; paths: Paths; cleanup():
 	// Short base: Unix socket paths are limited to 108 bytes.
 	const dir = await mkdtemp(join(tmpdir(), "june-"));
 	const paths: Paths = {
-		layers: [dir],
 		config: dir,
+		data: dir,
 		state: join(dir, "state"),
 		runtime: join(dir, "run"),
 		socket: join(dir, "run", "s"),

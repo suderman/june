@@ -32,15 +32,15 @@ There is one conversation, so =/new= and =/compact= from any surface affect all 
 
 * Files
 
-This repository holds code only. June reads configuration and identity in place from the directories in =JUNE_CONFIG_PATH=, colon-separated, least specific first. Without it she reads only =$XDG_CONFIG_HOME/june/=. Jon's NixOS module sets three layers:
+This repository holds code only. June keeps her files in three XDG directories, each overridable for a development daemon:
 
-| Layer     | Directory                 | Kept in                  | Holds                                         |
-|-----------+---------------------------+--------------------------+-----------------------------------------------|
-| Harness   | =~/.agents/june/=          | Git (suderman/agents)    | =config.json= defaults, =AGENTS.md= conventions |
-| Personal  | =~/profile/june/=          | Syncthing                | =SOUL.org=, =MEMORY.org=, =JOURNAL.org=, =config.json= with =daemonHost= |
-| Machine   | =$XDG_CONFIG_HOME/june/=   | this host only           | optional =config.json= overrides                |
+| What        | Directory (override)                         | Holds                                              | Kept by                          |
+|-------------+----------------------------------------------+----------------------------------------------------+----------------------------------|
+| Config      | =$XDG_CONFIG_HOME/june/= (=JUNE_CONFIG_DIR=) | =config.json=, =AGENTS.md=                          | =agents apply=, from =~/.agents/june= |
+| Data        | =$XDG_DATA_HOME/june/= (=JUNE_DATA_DIR=)     | =SOUL.org=, =MEMORY.org=, =JOURNAL.org=              | June and Jon                     |
+| State       | =$XDG_STATE_HOME/june/= (=JUNE_STATE_DIR=)   | the database, attachments, reflection copies       | June, never synced               |
 
-=config.json= files merge in path order: objects key by key, arrays and values replaced. =SOUL.org= and =AGENTS.md= come from the most specific directory that has them, and =MEMORY.org= and =JOURNAL.org= are the files beside that =SOUL.org=, which June creates when she first writes to them. =SOUL.md= is no longer read, and =june doctor= fails while one remains. Skill directories are configuration too (=skillDirs=); none are built in.
+Configuration has two sources. The NixOS module owns machine plumbing: the package, the service, persisted directories, secrets, and two environment variables, =JUNE_DAEMON_HOST= (the machine that runs June) and =TELEGRAM_ALLOWED_USERS= (comma-separated ids; Telegram is off without it). =~/.agents= owns the presets that change more often, =config.json= and =AGENTS.md=, which =agents apply= copies into the config directory as it does for Pi; June does not read =~/.agents= herself. A =config.json= that still sets =daemonHost= or =telegram= is refused. The data directory is canonical even when its files live elsewhere: Jon's module makes =~/.local/share/june= a link to the synced folder that holds them. June has no identity until =SOUL.org= exists, and creates =MEMORY.org= and =JOURNAL.org= beside it when she first writes to them. Skill directories are configuration too (=skillDirs=); none are built in.
 
 Runtime files stay on the daemon host and are never synced:
 
@@ -54,7 +54,7 @@ Runtime files stay on the daemon host and are never synced:
 
 * Configuration
 
-Keys, with the defaults that apply when no layer sets them:
+Keys of =config.json=, with the defaults that apply when it leaves them out:
 
 #+begin_src json
 {
@@ -66,12 +66,10 @@ Keys, with the defaults that apply when no layer sets them:
   "providersFile": "~/.pi/agent/models.json",
   "envFiles": [],
   "contextCap": 200000,
-  "daemonHost": null,
   "skillDirs": [],
   "org": { "root": "~/org" },
   "dispatch": { "hosts": [] },
   "herdr": { "session": "default", "host": "<hostname>", "hosts": {}, "allowPrompt": false },
-  "telegram": { "tokenEnv": "TELEGRAM_BOT_TOKEN", "allowedUserIds": [] },
   "reflection": { "enabled": true, "start": "03:00", "end": "06:00", "quietMinutes": 60, "recentDays": 3 },
   "patter": { "openAfterSeconds": 8, "gapsSeconds": [25, 25, 25, 40, 60, 90, 120, 180] }
 }
@@ -81,12 +79,12 @@ Keys, with the defaults that apply when no layer sets them:
 - =model.focus= is the model June uses when she focuses, such as ={"modelId": "gpt-6.1-sol"}=; =provider= and =thinkingLevel= default to chat's. Without it she has no =focus= tool.
 - =model.patter= is the cheap model that keeps the user company during long waits, such as ={"modelId": "gpt-6-luna"}=; =provider= comes from chat and =thinkingLevel= defaults to =medium=, which keeps its planning out of the line at no cost in speed. Without it there is no patter.
 - =envFiles= are dotenv files read for keys at startup, for development. The service gets keys from its =EnvironmentFile=.
-- =daemonHost= is the machine that runs June. Keep it in a layer every host has, such as a synced one. On any other machine, =june=, =june ask=, and =june status= run there over SSH when no local daemon answers. =JUNE_LOCAL=1= disables that.
+- =JUNE_DAEMON_HOST=, from the NixOS module, is the machine that runs June. On any other machine, =june=, =june ask=, and =june status= run there over SSH when no local daemon answers. =JUNE_LOCAL=1= disables that.
 - =skillDirs= are read in place; =skill_read= only reads inside a listed skill's directory.
 - =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"cog": {}, "lux": {}}=; ={"ssh": "target"}= overrides the SSH destination.
 - =dispatch.hosts= are the machines June may queue AUTO tasks for; the first is the default. Empty, the default, leaves out =org_create_project=, =org_queue_task=, =org_resume_task=, =org_complete_task=, and =org_dispatch_now=.
 - =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an existing agent on this host.
-- =telegram= turns the channel on. Leave it out to run without Telegram. The allowed user id is personal, so it belongs in =~/profile/june/config.json=.
+- Telegram is on when the service has =TELEGRAM_ALLOWED_USERS= and =TELEGRAM_BOT_TOKEN=, both from the NixOS module.
 - =reflection= sets June's nightly pass over the day's journal (see Personal memory): it runs between =start= and =end= local time (=HH:MM=; a window may cross midnight) once the user has been quiet for =quietMinutes=, and =enabled: false= turns it off. A window after midnight looks back on the previous day. =recentDays= is how many recent days' "Day's end" summaries June sees in her prompt (0 for none).
 - =patter= sets when patter speaks: a run busy =openAfterSeconds= becomes a wait, and =gapsSeconds= are the pauses between lines, the last repeating.
 
@@ -107,15 +105,15 @@ Patter is how June stays present during a long wait, the way someone beside you 
 
 * Personal memory
 
-=SOUL.org= is June's identity. =MEMORY.org= is the page of what is true about Jon's life that she must never get wrong: who he is and where he lives, his household and people, what he does, his routine, where his records live, and the corrections and lessons that shape how she works with him. It holds lasting facts in a few sections and stays a page or two, since it is in every prompt; what happened on a given day goes in the journal. She updates it in the same turn when Jon tells her a lasting fact or corrects one, and compaction and the nightly reflection keep it to the same brief. Jon's words and June's interpretations stay distinct. Both are ordinary Org files in the personal layer, shared by Syncthing and read into the system prompt. Changed files apply on the next model turn; =/reload= also finds files added or moved since startup. June can maintain them during ordinary conversation with her file tools. Jon's Org records remain authoritative for tasks, schedules, and project facts.
+=SOUL.org= is June's identity. =MEMORY.org= is the page of what is true about Jon's life that she must never get wrong: who he is and where he lives, his household and people, what he does, his routine, where his records live, and the corrections and lessons that shape how she works with him. It holds lasting facts in a few sections and stays a page or two, since it is in every prompt; what happened on a given day goes in the journal. She updates it in the same turn when Jon tells her a lasting fact or corrects one, and compaction and the nightly reflection keep it to the same brief. Jon's words and June's interpretations stay distinct. Both are ordinary Org files in the data directory, read into the system prompt. Changed files apply on the next model turn; =/reload= also finds files added or moved since startup. June can maintain them during ordinary conversation with her file tools. Jon's Org records remain authoritative for tasks, schedules, and project facts.
 
 =JOURNAL.org= is June's own journal: a dated record of Jon, their days together, and what she notices about him, in her own voice. It is an Org date tree (year, month, day, then a timed entry), like Jon's =~/org/journal.org=, which is his and not hers. She writes it on her own judgment with the =journal= tool, which files an entry under today's date and time, and searches it like any file when she needs their past to make sense of the present. Compaction adds entries for anything in the old context she missed. Her working context has no journal tool. The journal is not part of her prompt.
 
-Each night, in the =reflection= window (03:00 to 06:00 by default) and once Jon has been quiet for an hour, June reflects on the day just gone: one model request with her identity, that day's journal subtree, =MEMORY.org=, and the day's conversation. It rewrites the day in place, merging entries that tell one story and rewording them with the whole day in view while keeping every fact, closes it with a short "Day's end" entry when the day had a shape, and carries any lasting fact into =MEMORY.org=. A day without entries is skipped. Before replacing them, it keeps the day as it was in =reflection/DATE.org= in the state directory, and the old memory beside it as =DATE.MEMORY.org= when that changes, since nothing versions the personal layer. Both files are replaced only if nothing changed them meanwhile and no Syncthing conflict copy exists; a revised day that loses its heading or adds a heading above its entries is refused. A failed pass tries again half an hour later within the window. A receipt in the state directory (=reflection.json=) records the last day reflected on, so a restart does not repeat it. The last few days' "Day's end" entries (=recentDays=, three by default) go into June's prompt, so she has the recent past in mind without searching, and the prompt tells her how to skim further back: list a month's days and their summaries with =rg=, then read the days that matter.
+Each night, in the =reflection= window (03:00 to 06:00 by default) and once Jon has been quiet for an hour, June reflects on the day just gone: one model request with her identity, that day's journal subtree, =MEMORY.org=, and the day's conversation. It rewrites the day in place, merging entries that tell one story and rewording them with the whole day in view while keeping every fact, closes it with a short "Day's end" entry when the day had a shape, and carries any lasting fact into =MEMORY.org=. A day without entries is skipped. Before replacing them, it keeps the day as it was in =reflection/DATE.org= in the state directory, and the old memory beside it as =DATE.MEMORY.org= when that changes, since nothing versions the data directory. Both files are replaced only if nothing changed them meanwhile and no Syncthing conflict copy exists; a revised day that loses its heading or adds a heading above its entries is refused. A failed pass tries again half an hour later within the window. A receipt in the state directory (=reflection.json=) records the last day reflected on, so a restart does not repeat it. The last few days' "Day's end" entries (=recentDays=, three by default) go into June's prompt, so she has the recent past in mind without searching, and the prompt tells her how to skim further back: list a month's days and their summaries with =rg=, then read the days that matter.
 
 Before manual or automatic compaction, one model request produces both the working summary and a review against existing memory. Useful learning is saved before the summary replaces old context. An unchanged memory is a successful review; no lesson is required. The review reconciles corrections without duplicating lessons or discarding unrelated history. It never rewrites =SOUL.org=, prunes Jon's records, or grants new authority. No nightly job is involved.
 
-A failed review or save skips compaction and keeps old context. Terminal =/compact= reports the cause. Telegram's library still gives its generic decline reply, "Nothing to compact." Failure details enter June's next model prompt on either channel. A request may still proceed if it fits, but overflow recovery cannot proceed without successful compaction. Resolve the cause before retrying. Malformed or truncated output, a two-minute timeout, concurrent edits, a changed personal layer, non-regular memory files, and Syncthing conflict copies all prevent replacement. The combined output is capped at 8192 tokens, so an oversized memory can also stop compaction; there is no automatic pruning.
+A failed review or save skips compaction and keeps old context. Terminal =/compact= reports the cause. Telegram's library still gives its generic decline reply, "Nothing to compact." Failure details enter June's next model prompt on either channel. A request may still proceed if it fits, but overflow recovery cannot proceed without successful compaction. Resolve the cause before retrying. Malformed or truncated output, a two-minute timeout, concurrent edits, a memory file that moved, non-regular memory files, and Syncthing conflict copies all prevent replacement. The combined output is capped at 8192 tokens, so an oversized memory can also stop compaction; there is no automatic pruning.
 
 The save uses a flushed temporary file and atomic rename, with checks against the reviewed text before replacement. This prevents June's own callbacks from interleaving but is not a cross-host lock: an external editor or Syncthing can still race the final check and rename. A saved proposal is reused after restart, and a changed context range refuses the old summary. A provider request interrupted before its response is recorded may be repeated. Memory content stays in Org; replay receipts and failure status live in the existing unsynced SQLite state.
 
@@ -135,7 +133,7 @@ This needs the =org-edit= resume options from =suderman/agents=. Coding workers 
 
 1. Create a new bot with @BotFather. Do not reuse the Hermes bot: two processes polling one token fail with 409 Conflict.
 2. Put =TELEGRAM_BOT_TOKEN=<token>= in an agenix secret, or an env file for development.
-3. Find Jon's numeric user id (for example from @userinfobot) and set ="telegram": {"allowedUserIds": [<id>]}=.
+3. Find Jon's numeric user id (for example from @userinfobot) and set it in the module's =programs.june.telegram.allowedUsers=, which becomes =TELEGRAM_ALLOWED_USERS=.
 4. Restart June. =june status= shows =telegram polling=, and a message to the bot appears in the terminal client too.
 
 Only allowed users reach the model. Private chats share the primary conversation; Telegram's =/new= resets it for every surface.

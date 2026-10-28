@@ -3,11 +3,11 @@ import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension, section } from "@earendil-works/pi-durable";
-import { type Config, type PromptFiles, promptFiles } from "./config.ts";
+import { type Config, type Paths, type PromptFiles, promptFiles } from "./config.ts";
 import { recentDayEnds } from "./journal.ts";
 import { DEFAULT_BASH_TIMEOUT } from "./tools/coding.ts";
 
-// Harness mechanics only. The user's conventions (Org, Herdr, task states) come from AGENTS.md in the config layers.
+// Harness mechanics only. The user's conventions (Org, Herdr, task states) come from AGENTS.md in the config directory.
 const harness = (host: string) => `How this harness works:
 - The user reaches you from a terminal client and from Telegram. Talk to them directly, never about them in the third person. It is one conversation. Terminal messages start with [kitty] or [cli]: answer those in Org markup, never Markdown (*bold*, /italic/, =code=, [[url][label]], - lists, #+begin_src blocks), since the terminal renders Org. Untagged messages come from Telegram, which renders only Markdown, so answers there stay compact Markdown without tables. Answer a [work] or [follow] message in the markup of the user's latest own message, since it goes where they last spoke.
 - Messages starting with [follow] come from your own checks on tasks you queued; nobody typed them. Do what they say and tell the user briefly; do not repeat the check yourself.
@@ -103,10 +103,10 @@ function dayEnds(journal: string, count: number): string[] {
 	return ["Your recent days, from each night's reflection:", ...ends.map((end) => `- ${end.day}: ${end.text}`)];
 }
 
-/** `layers` are searched again on reload, so a file added, moved, or renamed since startup is found. */
+/** With `dirs`, reload looks for the prompt files again, so a file made since startup is found. */
 export function createPromptExtension(
 	config: Config,
-	layers?: readonly string[],
+	dirs?: Pick<Paths, "config" | "data">,
 ): { extension: Extension; files(): PromptFiles; reload(): Promise<number> } {
 	let files: PromptFiles = config;
 	const open = (f: PromptFiles) => ({
@@ -172,7 +172,7 @@ export function createPromptExtension(
 		files: () => files,
 		reload: async () => {
 			const refreshed = await findSkills(config.skillDirs);
-			if (layers !== undefined) files = promptFiles(layers);
+			if (dirs !== undefined) files = promptFiles(dirs);
 			const next = open(files);
 			await Promise.all([next.soul(true), next.memory(true), next.instructions(true)]);
 			read = next;

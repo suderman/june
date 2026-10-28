@@ -87,7 +87,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			createHerdrExtension(config, herdr),
 			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, herdr, instanceId(paths.state))] : []),
 		];
-		const prompt = createPromptExtension(config, paths.layers);
+		const prompt = createPromptExtension(config, paths);
 		const memory = createMemoryExtension(prompt.files, () => harness);
 		const telegram = createTelegram(options, model, log);
 		// Patter reaches the phone too, through its own Bot API client: the channel keeps its client to itself.

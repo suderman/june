@@ -1,9 +1,10 @@
-// Paths and runtime configuration. Configuration is read in place from layered directories, least specific first,
-// such as harness defaults in Git, personal files, and this machine's overrides. Each may hold config.json (merged),
-// AGENTS.md, and SOUL.org (most specific wins). MEMORY.org sits beside the SOUL.org in use.
+// Paths and runtime configuration, in XDG directories. The config directory holds config.json and AGENTS.md, which
+// `agents apply` copies there from ~/.agents; the data directory holds what June keeps herself: SOUL.org, MEMORY.org,
+// and JOURNAL.org. Machine plumbing comes from the environment the NixOS module sets: JUNE_DAEMON_HOST, and
+// TELEGRAM_ALLOWED_USERS beside the bot token.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 export type HerdrHost = { readonly ssh?: string };
 
@@ -24,11 +25,12 @@ export type Config = {
 	/** dotenv files read for provider keys at startup; values never reach the model. Empty under systemd. */
 	readonly envFiles: readonly string[];
 	readonly contextCap: number;
-	/** SOUL.org and AGENTS.md from the most specific layer that has them; MEMORY.org beside SOUL.org, maybe not yet made. */
+	/** SOUL.org from the data directory when it exists, MEMORY.org and JOURNAL.org beside it (maybe not yet made). */
 	readonly soulFile: string | undefined;
 	readonly memoryFile: string | undefined;
 	/** JOURNAL.org beside SOUL.org: June's dated record of Jon and their days together. */
 	readonly journalFile: string | undefined;
+	/** AGENTS.md from the config directory, when it exists. */
 	readonly instructionsFile: string | undefined;
 	/** The host that runs the daemon; elsewhere the client commands run there over SSH. */
 	readonly daemonHost: string | undefined;
@@ -65,9 +67,10 @@ export type Config = {
 };
 
 export type Paths = {
-	/** Configuration directories, least specific first. */
-	readonly layers: readonly string[];
+	/** config.json and AGENTS.md. */
 	readonly config: string;
+	/** SOUL.org, MEMORY.org, and JOURNAL.org. */
+	readonly data: string;
 	readonly state: string;
 	readonly runtime: string;
 	readonly socket: string;
@@ -88,13 +91,12 @@ function xdg(name: string, fallback: string): string {
 
 export function paths(env: NodeJS.ProcessEnv = process.env): Paths {
 	const config = env.JUNE_CONFIG_DIR ?? join(xdg("XDG_CONFIG_HOME", ".config"), "june");
+	const data = env.JUNE_DATA_DIR ?? join(xdg("XDG_DATA_HOME", ".local/share"), "june");
 	const state = env.JUNE_STATE_DIR ?? join(xdg("XDG_STATE_HOME", ".local/state"), "june");
 	const runtime = env.JUNE_RUNTIME_DIR ?? join(env.XDG_RUNTIME_DIR ?? join(state, "run"), "june");
-	// JUNE_CONFIG_PATH lists the layers, least specific first, like PATH; without it, only the XDG directory.
-	const layers = env.JUNE_CONFIG_PATH ? env.JUNE_CONFIG_PATH.split(":").filter(Boolean).map(expandHome) : [config];
 	return {
-		layers,
 		config,
+		data,
 		state,
 		runtime,
 		socket: env.JUNE_SOCKET ?? join(runtime, "june.sock"),
@@ -113,35 +115,28 @@ const DEFAULTS = {
 	patter: { openAfterSeconds: 8, gapsSeconds: [25, 25, 25, 40, 60, 90, 120, 180] },
 };
 
-/** Objects merge key by key; anything else, arrays included, replaces. */
-export function merge(base: Record<string, any>, over: Record<string, any>): Record<string, any> {
-	const out = { ...base };
-	for (const [key, value] of Object.entries(over)) {
-		const old = out[key];
-		const plain = (v: unknown) => v !== null && typeof v === "object" && !Array.isArray(v);
-		out[key] = plain(old) && plain(value) ? merge(old, value) : value;
+/** config.json, without defaults or checks; {} when it does not exist. */
+export function readConfigFile(p: Paths): Record<string, any> {
+	const file = join(p.config, "config.json");
+	try {
+		return JSON.parse(readFileSync(file, "utf8"));
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+		throw new Error(`${file}: ${(error as Error).message}`);
 	}
-	return out;
 }
 
-/** The layers' config.json files merged, without defaults or checks. Missing files are skipped. */
-export function readLayers(p: Paths): Record<string, any> {
-	let raw: Record<string, any> = {};
-	for (const dir of p.layers) {
-		const file = join(dir, "config.json");
-		try {
-			raw = merge(raw, JSON.parse(readFileSync(file, "utf8")));
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error(`${file}: ${(error as Error).message}`);
-		}
-	}
-	return raw;
-}
+/** The daemon's host, from the environment the NixOS module sets; undefined runs June here. */
+export const daemonHost = (env: NodeJS.ProcessEnv = process.env) => env.JUNE_DAEMON_HOST?.trim() || undefined;
 
-/** The merged layers over the defaults. */
-export function loadConfig(p: Paths = paths()): Config {
-	const raw = readLayers(p);
-	if (!raw.model?.chat?.provider || !raw.model?.chat?.modelId) throw new Error(`No model.chat configured in ${p.layers.join(", ")}`);
+/** config.json over the defaults, with the machine's settings from the environment. */
+export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.env): Config {
+	const raw = readConfigFile(p);
+	const file = join(p.config, "config.json");
+	if (!raw.model?.chat?.provider || !raw.model?.chat?.modelId) throw new Error(`No model.chat configured in ${file}`);
+	for (const key of ["daemonHost", "telegram"]) if (key in raw) throw new Error(`${file}: ${key} now comes from the NixOS module, not config.json`);
+	const allowed = (env.TELEGRAM_ALLOWED_USERS ?? "").split(/[\s,]+/).filter(Boolean);
+	if (allowed.some((id) => !/^\d+$/.test(id))) throw new Error("TELEGRAM_ALLOWED_USERS must be numeric user ids, separated by commas");
 	const herdr = { ...DEFAULTS.herdr, ...raw.herdr };
 	const org = { ...DEFAULTS.org, ...raw.org };
 	return {
@@ -149,8 +144,8 @@ export function loadConfig(p: Paths = paths()): Config {
 		providersFile: expandHome(raw.providersFile ?? DEFAULTS.providersFile),
 		envFiles: (raw.envFiles ?? DEFAULTS.envFiles).map(expandHome),
 		contextCap: raw.contextCap ?? DEFAULTS.contextCap,
-		...promptFiles(p.layers),
-		daemonHost: raw.daemonHost,
+		...promptFiles(p),
+		daemonHost: daemonHost(env),
 		skillDirs: (raw.skillDirs ?? DEFAULTS.skillDirs).map(expandHome),
 		org: { root: expandHome(org.root), agendaFiles: expandHome(org.agendaFiles) },
 		dispatch: { hosts: raw.dispatch?.hosts ?? [] },
@@ -162,14 +157,8 @@ export function loadConfig(p: Paths = paths()): Config {
 		},
 		reflection: reflection({ ...DEFAULTS.reflection, ...raw.reflection }),
 		patter: patterTiming({ ...DEFAULTS.patter, ...raw.patter }),
-		...(raw.telegram
-			? {
-					telegram: {
-						tokenEnv: raw.telegram.tokenEnv ?? "TELEGRAM_BOT_TOKEN",
-						allowedUserIds: (raw.telegram.allowedUserIds ?? []).map(Number),
-					},
-				}
-			: {}),
+		// Telegram is on where the module names who may use it; the token sits beside the ids in June's secret.
+		...(allowed.length > 0 ? { telegram: { tokenEnv: "TELEGRAM_BOT_TOKEN", allowedUserIds: allowed.map(Number) } } : {}),
 	};
 }
 
@@ -200,15 +189,16 @@ function patterTiming(given: Config["patter"]): Config["patter"] {
 
 export type PromptFiles = Pick<Config, "soulFile" | "memoryFile" | "journalFile" | "instructionsFile">;
 
-/** The prompt files the layers select now; /reload calls this again so moved or new files are picked up. */
-export function promptFiles(layers: readonly string[]): PromptFiles {
-	const layerFile = (name: string) => [...layers].reverse().map((dir) => join(dir, name)).find((f) => existsSync(f));
-	const soulFile = layerFile("SOUL.org");
+/** The prompt files as they are now; /reload calls this again so files made since startup are found. */
+export function promptFiles(p: Pick<Paths, "config" | "data">): PromptFiles {
+	const soulFile = join(p.data, "SOUL.org");
+	const instructionsFile = join(p.config, "AGENTS.md");
+	const soul = existsSync(soulFile);
 	return {
-		soulFile,
-		memoryFile: soulFile === undefined ? undefined : join(dirname(soulFile), "MEMORY.org"),
-		journalFile: soulFile === undefined ? undefined : join(dirname(soulFile), "JOURNAL.org"),
-		instructionsFile: layerFile("AGENTS.md"),
+		soulFile: soul ? soulFile : undefined,
+		memoryFile: soul ? join(p.data, "MEMORY.org") : undefined,
+		journalFile: soul ? join(p.data, "JOURNAL.org") : undefined,
+		instructionsFile: existsSync(instructionsFile) ? instructionsFile : undefined,
 	};
 }
 

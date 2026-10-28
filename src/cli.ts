@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { createLogger } from "pi-durable-telegram";
-import { loadConfig, paths, readEnvFiles, readLayers, shortHostname } from "./config.ts";
+import { daemonHost, loadConfig, paths, readEnvFiles, shortHostname } from "./config.ts";
 import { startDaemon } from "./daemon.ts";
 import { createJuneModels, providerFromPiModels } from "./models.ts";
 import { findSkills } from "./prompt.ts";
@@ -55,13 +55,7 @@ async function main(argv: string[]): Promise<number> {
 /** The daemon host when it is another machine and no daemon answers here; undefined to run locally. */
 function remoteHost(p: ReturnType<typeof paths>): string | undefined {
 	if (process.env.JUNE_LOCAL === "1" || existsSync(p.socket)) return undefined;
-	// Only daemonHost is needed here; a client-only host may lack the rest of the configuration.
-	let host: string | undefined;
-	try {
-		host = readLayers(p).daemonHost;
-	} catch {
-		return undefined;
-	}
+	const host = daemonHost();
 	return host !== undefined && host !== shortHostname() ? host : undefined;
 }
 
@@ -185,15 +179,11 @@ async function doctor(): Promise<number> {
 	const check = (name: string, run: () => string | Promise<string>) => checks.push([name, run]);
 	check("config", () => {
 		config = loadConfig(p);
-		const found = p.layers.map((dir) => `${dir}/config.json`).filter((file) => existsSync(file));
-		return found.join(", ");
+		return `${p.config}/config.json${config.daemonHost ? `, daemon on ${config.daemonHost}` : ""}`;
 	});
 	check("identity", () => {
-		if (config!.soulFile === undefined) throw new Error(`no SOUL.org in ${p.layers.join(", ")}`);
+		if (config!.soulFile === undefined) throw new Error(`no SOUL.org in ${p.data}`);
 		accessSync(config!.soulFile, constants.R_OK);
-		// SOUL.md is no longer read; a leftover one would be a second, silent identity.
-		const stale = p.layers.map((dir) => `${dir}/SOUL.md`).filter((file) => existsSync(file));
-		if (stale.length > 0) throw new Error(`${stale.join(", ")} is ignored; move it into ${config!.soulFile}`);
 		const memory = existsSync(config!.memoryFile!) ? config!.memoryFile : `${config!.memoryFile} (not yet created)`;
 		return `${config!.soulFile}; memory ${memory}; instructions ${config!.instructionsFile ?? "none"}`;
 	});
@@ -225,8 +215,7 @@ async function doctor(): Promise<number> {
 	});
 	check("telegram", () => {
 		const tg = config!.telegram;
-		if (tg === undefined) return "not configured";
-		if (tg.allowedUserIds.length === 0) throw new Error("telegram.allowedUserIds is empty");
+		if (tg === undefined) return "not configured (no TELEGRAM_ALLOWED_USERS in this shell; the service may have it)";
 		const has = readEnvFiles(config!.envFiles)[tg.tokenEnv] ?? process.env[tg.tokenEnv];
 		if (!has) throw new Error(`${tg.tokenEnv} is not set for this shell (the service may still have it)`);
 		return `${tg.allowedUserIds.length} allowed user(s), token in ${tg.tokenEnv}`;

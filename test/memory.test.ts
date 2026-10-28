@@ -32,7 +32,7 @@ async function fixture(t: TestContext) {
 		const models = createModels();
 		models.setProvider(faux.provider);
 		const registry = createRegistry();
-		const prompt = createPromptExtension(config, [tmp.dir, join(tmp.dir, "override")]);
+		const prompt = createPromptExtension(config, { config: tmp.dir, data: tmp.dir });
 		registry.install(prompt.extension);
 		const commit: Harness["commit"] = async (fn, context) => {
 			if (pause !== undefined && existsSync(memory)) await pause();
@@ -200,14 +200,13 @@ test("cancelling a review aborts its model call without saving or replacing cont
 	assert.deepEqual((await f.root.context(BG)).entries, entries);
 });
 
-test("reload during review cannot write to the old personal layer", async (t) => {
+test("reload during review cannot write once the memory file has moved", async (t) => {
 	const env = await fixture(t);
-	const override = join(env.dir, "override");
 	const faux = fauxProvider();
 	let f: Awaited<ReturnType<typeof env.open>>;
 	faux.setResponses([async () => {
-		await mkdir(override);
-		await writeFile(join(override, "SOUL.org"), "* June\nNew personal layer.\n");
+		// SOUL.org gone: June has no personal files, so memory has nowhere to go.
+		await rm(env.soul);
 		await f.reload();
 		return response();
 	}, response()]);
@@ -215,10 +214,10 @@ test("reload during review cannot write to the old personal layer", async (t) =>
 	await seed(f);
 	assert.match(await f.compact(), /Memory destination changed during review/);
 	assert.equal(existsSync(env.memory), false);
-	assert.equal(existsSync(join(override, "MEMORY.org")), false);
+	await writeFile(env.soul, "#+TITLE: June\nBack again.\n");
+	await f.reload();
 	assert.match(await f.compact(), /updated/);
-	assert.equal(await readFile(join(override, "MEMORY.org"), "utf8"), lesson);
-	assert.equal(existsSync(env.memory), false);
+	assert.equal(await readFile(env.memory, "utf8"), lesson);
 });
 
 test("a restart after the file save reuses the durable proposal without repeating the write or model request", async (t) => {
