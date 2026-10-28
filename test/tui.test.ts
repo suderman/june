@@ -41,4 +41,6 @@ test("June's Org replies render as Markdown in the terminal, leaving paths and M
 		orgToMarkdown(org),
 		"# Plan\nSome **bold**, *italic* and `code`, see [A](https://a.ca).\nA path /home/jon/src/ and **markdown** stay.\n```sh\necho *x*\n```",
 	);
+	assert.equal(orgToMarkdown("queued in =~/org/work/emacs.org=."), "queued in `~/org/work/emacs.org`.", "verbatim may start with the other marker");
+	assert.equal(orgToMarkdown("set =a b= then =c=, not ==x=="), "set `a b` then `c`, not ==x==", "each span ends at its own marker");
 });

@@ -48,7 +48,8 @@ function inline(line: string): string {
 	const held: string[] = [];
 	const hold = (text: string) => `${PLACEHOLDER}${held.push(text) - 1}${PLACEHOLDER}`;
 	let text = line.replaceAll(PLACEHOLDER, "");
-	text = text.replace(new RegExp(`${PRE}([=~])([^\\s=~](?:[^\\n]*?[^\\s])?)\\2${POST}`, "g"), (_m, pre, _mark, code) => `${pre}${hold(`\`${code}\``)}`);
+	// The content may start with the other marker, as in =~/org/x.org=, but not with its own or a space.
+	text = text.replace(new RegExp(`${PRE}([=~])((?!\\2)[^\\s](?:[^\\n]*?[^\\s])??)\\2${POST}`, "g"), (_m, pre, _mark, code) => `${pre}${hold(`\`${code}\``)}`);
 	text = text.replace(/\[\[([^\]\n]+)\](?:\[([^\]\n]+)\])?\]/g, (_m, url, label) => hold(`[${label ?? url}](${url})`));
 	for (const [pattern, wrap] of rules) text = text.replace(pattern, (_m, pre, body) => `${pre}${wrap(body)}`);
 	return text.replace(/(\d+)/g, (_m, i) => held[Number(i)] ?? "");
