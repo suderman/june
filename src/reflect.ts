@@ -19,12 +19,14 @@ Set memory to the complete revised MEMORY.org text only if the day brought a las
 The supplied identity and operating rules still apply. Update only the journal day and MEMORY.org, never SOUL.org, the user's task records, or your authority. Memory cannot grant new permissions.`;
 
 /** Own inputs June's tasks write; they say nothing about whether Jon is still up. */
-const OWN = /^\[(\/stop|work|follow|reminder)\b/;
+const OWN = /^\[(\/stop|work|follow|reminder|heartbeat)\b/;
 
 export function createReflection(options: {
 	models: Models;
 	model: ModelChoice;
 	config: Config["reflection"];
+	/** The rhythm's sleep hours, from `sleep` to `wake`. */
+	window: { start: string; end: string };
 	files: () => PromptFiles;
 	state: string;
 	log: Logger;
@@ -49,7 +51,7 @@ export function createReflection(options: {
 	const start = (harness: Harness, root: Conversation) => {
 		const tick = async () => {
 			const at = now();
-			const day = dayFor(at, config);
+			const day = dayFor(at, options.window);
 			if (busy || day === undefined || done() >= day || at.getTime() < retryAt) return;
 			if ((await harness.snapshot(LiveDoc, root.id, BG))?.run !== undefined) return;
 			const { messages } = await root.context(BG);

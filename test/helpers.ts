@@ -21,6 +21,7 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 		soulFile: undefined,
 		memoryFile: undefined,
 		journalFile: undefined,
+		heartbeatFile: undefined,
 		instructionsFile: undefined,
 		daemonHost: undefined,
 		skillDirs: [],
@@ -28,7 +29,9 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 		dispatch: { hosts: [] },
 		herdr: { session: "default", host: "kit", hosts: {}, allowPrompt: false },
 		// Off unless a test turns it on, so no test depends on the hour it runs.
-		reflection: { enabled: false, start: "03:00", end: "06:00", quietMinutes: 60, recentDays: 3 },
+		rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
+		reflection: { enabled: false, quietMinutes: 60, recentDays: 3 },
+		heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
 		patter: { openAfterSeconds: 8, gapsSeconds: [25] },
 		situation: { calendars: [], homeAssistant: { people: [], pollSeconds: 300 } },
 		...extra,
@@ -61,6 +64,7 @@ export async function openTestDaemon(options: {
 	providers?: Faux[];
 	patterTiming?: Partial<PatterTiming>;
 	reflectionClock?: { now: () => Date; tickMs: number };
+	heartbeatClock?: { now: () => Date; tickMs: number };
 }): Promise<Daemon> {
 	const models = createModels();
 	models.setProvider(options.faux.provider);
@@ -75,6 +79,7 @@ export async function openTestDaemon(options: {
 		...(options.secrets ? { secrets: options.secrets } : {}),
 		...(options.patterTiming ? { patterTiming: options.patterTiming } : {}),
 		...(options.reflectionClock ? { reflectionClock: options.reflectionClock } : {}),
+		...(options.heartbeatClock ? { heartbeatClock: options.heartbeatClock } : {}),
 	});
 }
 

@@ -39,7 +39,7 @@ test("config.json and AGENTS.md come from the config directory, SOUL.org and her
 	assert.equal(loaded.model.focus, undefined, "no focus unless configured");
 });
 
-test("the reflection window and patter timing have defaults, take overrides, and refuse nonsense", async (t) => {
+test("the rhythm, reflection, heartbeat, and patter timing have defaults, take overrides, and refuse nonsense", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const chat = { model: { chat: { provider: "p", modelId: "m" } } };
@@ -50,13 +50,20 @@ test("the reflection window and patter timing have defaults, take overrides, and
 		return dir;
 	};
 	const plain = loadConfig({ ...tmp.paths, config: await layer("plain", {}) });
-	assert.deepEqual(plain.reflection, { enabled: true, start: "03:00", end: "06:00", quietMinutes: 60, recentDays: 3 });
+	assert.deepEqual(plain.rhythm, { wake: "05:00", quiet: "22:00", sleep: "01:00" });
+	assert.deepEqual(plain.reflection, { enabled: true, quietMinutes: 60, recentDays: 3 });
+	assert.deepEqual(plain.heartbeat, { enabled: false, everyMinutes: 60, chattingMinutes: 15 }, "off unless configured");
 	assert.equal(plain.patter.openAfterSeconds, 8);
-	const tuned = loadConfig({ ...tmp.paths, config: await layer("tuned", { reflection: { start: "02:30" }, patter: { openAfterSeconds: 15 } }) });
-	assert.deepEqual(tuned.reflection, { enabled: true, start: "02:30", end: "06:00", quietMinutes: 60, recentDays: 3 }, "an override keeps the other defaults");
+	const tuned = loadConfig({ ...tmp.paths, config: await layer("tuned", { rhythm: { sleep: "00:30" }, heartbeat: { enabled: true, everyMinutes: 30 }, patter: { openAfterSeconds: 15 } }) });
+	assert.deepEqual(tuned.rhythm, { wake: "05:00", quiet: "22:00", sleep: "00:30" }, "an override keeps the other defaults");
+	assert.deepEqual(tuned.heartbeat, { enabled: true, everyMinutes: 30, chattingMinutes: 15 });
 	assert.equal(tuned.patter.openAfterSeconds, 15);
-	const late = await layer("late", { reflection: { start: "3am" } });
-	assert.throws(() => loadConfig({ ...tmp.paths, config: late }), /reflection\.start must be HH:MM/);
+	const late = await layer("late", { rhythm: { quiet: "10pm" } });
+	assert.throws(() => loadConfig({ ...tmp.paths, config: late }), /rhythm\.quiet must be HH:MM/);
+	const old = await layer("old", { reflection: { start: "03:00" } });
+	assert.throws(() => loadConfig({ ...tmp.paths, config: old }), /runs from rhythm\.sleep to rhythm\.wake/);
+	const eager = await layer("eager", { heartbeat: { everyMinutes: 1 } });
+	assert.throws(() => loadConfig({ ...tmp.paths, config: eager }), /heartbeat\.everyMinutes/);
 	const forgetful = await layer("forgetful", { reflection: { recentDays: -1 } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: forgetful }), /reflection\.recentDays/);
 	assert.deepEqual(plain.situation, { calendars: [], homeAssistant: { people: [], pollSeconds: 300 } });

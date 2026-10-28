@@ -27,7 +27,7 @@ const DELIVER = "tg.deliver";
 export type Surface = "telegram" | "terminal";
 
 /** Inputs June's own tasks write, which say nothing about where Jon is. */
-const OWN = /^\[(\/stop|work|follow|reminder)\b/;
+const OWN = /^\[(\/stop|work|follow|reminder|heartbeat)\b/;
 
 /**
  * Where a notice goes: Telegram when Jon last spoke to June there and the channel can deliver to his chat, otherwise

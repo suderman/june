@@ -1,6 +1,10 @@
 // Folds a Pi Durable snapshot and its agent events into display items for the terminal client.
 import type { AgentEvent, SnapshotEvent } from "@earendil-works/pi-durable";
 
+/** A heartbeat's whole answer when nothing is worth raising; the heartbeat sends nothing and the terminal shows nothing. */
+export const QUIET = "QUIET";
+export const isQuiet = (text: string) => /^\s*QUIET\.?\s*$/i.test(text);
+
 type Block = { type: string; text?: string; thinking?: string; name?: string; arguments?: unknown; id?: string };
 
 export type Item =
@@ -23,6 +27,8 @@ export class Transcript {
 	/** When the running compaction started, as this client first saw it; undefined when none runs. */
 	compacting: number | undefined;
 	#entries = new Set<string>();
+	/** Inside a heartbeat, June's private look: only a real message to the user shows, never the look itself. */
+	#private = false;
 	#live: Extract<Item, { kind: "assistant" }> | undefined;
 	#tools = new Map<string, Extract<Item, { kind: "tool" }>>();
 	#calls = new Map<string, string>();
@@ -33,14 +39,15 @@ export class Transcript {
 		this.#tools.clear();
 		this.background.clear();
 		this.#live = undefined;
+		this.#private = false;
 		this.omitted = omitted;
 		for (const entry of snapshot.entries) this.#entry(entry);
 		this.running = snapshot.run !== undefined;
 		this.queued = snapshot.inbox.length;
 		this.compacting = snapshot.compactions.length > 0 ? (this.compacting ?? Date.now()) : undefined;
 		this.#model(snapshot.agent);
-		if (snapshot.generation?.message) this.#startLive(snapshot.generation.message);
-		for (const slot of snapshot.tools as readonly any[]) {
+		if (snapshot.generation?.message && !this.#private) this.#startLive(snapshot.generation.message);
+		for (const slot of this.#private ? [] : (snapshot.tools as readonly any[])) {
 			if (slot?.toolCallId && !this.#tools.has(slot.toolCallId))
 				this.#tool(slot.toolCallId, slot.toolName ?? slot.name ?? "tool", slot.args);
 		}
@@ -71,7 +78,7 @@ export class Transcript {
 				return;
 			case "message_start":
 				// Inputs are placed as messages too; only an assistant message streams.
-				if (event.message.role === "assistant") this.#startLive(event.message);
+				if (event.message.role === "assistant" && !this.#private) this.#startLive(event.message);
 				return;
 			case "message_update": {
 				const live = this.#live;
@@ -91,7 +98,7 @@ export class Transcript {
 			case "entry_appended":
 				return this.#entry(event.entry);
 			case "tool_execution_start":
-				if (event.parentToolCallId === undefined) this.#tool(event.toolCallId, event.toolName, event.args);
+				if (event.parentToolCallId === undefined && !this.#private) this.#tool(event.toolCallId, event.toolName, event.args);
 				return;
 			case "tool_execution_update": {
 				const tool = this.#tools.get(event.toolCallId);
@@ -156,7 +163,8 @@ export class Transcript {
 		const message = entry.model?.[0];
 		switch (entry.kind) {
 			case "june.input":
-				this.items.push({ kind: "user", id, source: entry.data?.source ?? "?", text: entry.data?.text ?? "" });
+				this.#private = entry.data?.source === "heartbeat";
+				if (!this.#private) this.items.push({ kind: "user", id, source: entry.data?.source ?? "?", text: entry.data?.text ?? "" });
 				return;
 			case "june.patter":
 				this.items.push({ kind: "patter", id, text: entry.data?.text ?? "" });
@@ -166,6 +174,7 @@ export class Transcript {
 				else this.background.delete(String(entry.data?.id));
 				return;
 			case "pi.user": {
+				this.#private = false;
 				const text = textOf(message?.content);
 				// /stop, from either surface, writes this boundary so queued messages can be placed.
 				const own = /^\[(work|follow|reminder)[\] ]\s*/.exec(text);
@@ -177,6 +186,12 @@ export class Transcript {
 			}
 			case "pi.assistant": {
 				const content: Block[] = message?.content ?? [];
+				if (this.#private) {
+					// Only her final words, and only when they are a message rather than the quiet answer.
+					const words = textOf(content.filter((b) => b.type === "text"));
+					if (words.trim() !== "" && !isQuiet(words)) this.items.push({ kind: "assistant", id, blocks: [{ type: "text", text: words }], streaming: false });
+					return;
+				}
 				for (const b of content) if (b.type === "toolCall" && b.id) this.#calls.set(b.id, summarize(b.arguments));
 				const blocks = content.filter((b) => b.type !== "toolCall");
 				const error = message?.stopReason === "error" || message?.stopReason === "aborted" ? (message.errorMessage ?? message.stopReason) : undefined;
@@ -184,6 +199,7 @@ export class Transcript {
 				return;
 			}
 			case "pi.tool-result": {
+				if (this.#private) return;
 				const callId = message?.toolCallId as string | undefined;
 				const tool = callId ? this.#tools.get(callId) : undefined;
 				if (tool !== undefined) {

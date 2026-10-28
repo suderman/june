@@ -30,6 +30,8 @@ export type Config = {
 	readonly memoryFile: string | undefined;
 	/** JOURNAL.org beside SOUL.org: June's dated record of Jon and their days together. */
 	readonly journalFile: string | undefined;
+	/** HEARTBEAT.org beside SOUL.org: what June watches for between conversations, in Jon's words. */
+	readonly heartbeatFile: string | undefined;
 	/** AGENTS.md from the config directory, when it exists. */
 	readonly instructionsFile: string | undefined;
 	/** The host that runs the daemon; elsewhere the client commands run there over SSH. */
@@ -47,15 +49,25 @@ export type Config = {
 		readonly allowPrompt: boolean;
 	};
 	readonly telegram?: { readonly tokenEnv: string; readonly allowedUserIds: readonly number[] };
-	/** The nightly pass over the day's journal and memory, between `start` and `end` local time ("HH:MM"). */
+	/**
+	 * Jon's day, in local "HH:MM": heartbeats run from `wake` until `quiet`, when he no longer wants to be bothered even
+	 * if he is up, and the nightly reflection runs from `sleep`, when he is surely asleep, until `wake`.
+	 */
+	readonly rhythm: { readonly wake: string; readonly quiet: string; readonly sleep: string };
+	/** The nightly pass over the day's journal and memory, in the rhythm's sleep hours. */
 	readonly reflection: {
 		readonly enabled: boolean;
-		readonly start: string;
-		readonly end: string;
-		/** Minutes Jon must have been quiet before it runs; until then it waits, up to `end`. */
+		/** Minutes Jon must have been quiet before it runs; until then it waits, up to `rhythm.wake`. */
 		readonly quietMinutes: number;
 		/** How many recent days' "Day's end" entries June sees in her prompt; 0 shows none. */
 		readonly recentDays: number;
+	};
+	/** June's periodic private look at the moment, which she may turn into a message to Jon, or not. */
+	readonly heartbeat: {
+		readonly enabled: boolean;
+		readonly everyMinutes: number;
+		/** Jon wrote this recently: he is chatting, so raising something is just her next line. */
+		readonly chattingMinutes: number;
 	};
 	/** The "now" prompt section: calendars read for today and tomorrow, and Home Assistant people (with HASS_URL and HASS_TOKEN). */
 	readonly situation: {
@@ -116,7 +128,9 @@ const DEFAULTS = {
 	skillDirs: [] as string[],
 	org: { root: "~/org", agendaFiles: "~/.local/state/org-dispatch/agenda-files" },
 	herdr: { session: "default", hosts: {}, allowPrompt: false },
-	reflection: { enabled: true, start: "03:00", end: "06:00", quietMinutes: 60, recentDays: 3 },
+	rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
+	reflection: { enabled: true, quietMinutes: 60, recentDays: 3 },
+	heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
 	patter: { openAfterSeconds: 8, gapsSeconds: [25, 25, 25, 40, 60, 90, 120, 180] },
 	situation: { calendars: [] as string[], homeAssistant: { people: [] as string[], pollSeconds: 300 } },
 };
@@ -161,7 +175,9 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 			hosts: herdr.hosts,
 			allowPrompt: herdr.allowPrompt === true,
 		},
+		rhythm: rhythm({ ...DEFAULTS.rhythm, ...raw.rhythm }),
 		reflection: reflection({ ...DEFAULTS.reflection, ...raw.reflection }),
+		heartbeat: heartbeat({ ...DEFAULTS.heartbeat, ...raw.heartbeat }),
 		patter: patterTiming({ ...DEFAULTS.patter, ...raw.patter }),
 		situation: situation(raw.situation ?? {}),
 		// Telegram is on where the module names who may use it; the token sits beside the ids in June's secret.
@@ -179,10 +195,21 @@ function withModes({ chat: given, focus, patter }: Record<string, any>): Config[
 	} as Config["model"];
 }
 
-function reflection(given: Config["reflection"]): Config["reflection"] {
-	for (const key of ["start", "end"] as const)
-		if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(given[key])) throw new Error(`reflection.${key} must be HH:MM, not ${given[key]}`);
+function rhythm(given: Config["rhythm"]): Config["rhythm"] {
+	for (const key of ["wake", "quiet", "sleep"] as const)
+		if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(given[key])) throw new Error(`rhythm.${key} must be HH:MM, not ${given[key]}`);
+	return given;
+}
+
+function reflection(given: Config["reflection"] & { start?: unknown; end?: unknown }): Config["reflection"] {
+	if ("start" in given || "end" in given) throw new Error("reflection.start and end are gone: the reflection runs from rhythm.sleep to rhythm.wake");
 	if (!Number.isInteger(given.recentDays) || given.recentDays < 0) throw new Error("reflection.recentDays must be a whole number, 0 or more");
+	return given;
+}
+
+function heartbeat(given: Config["heartbeat"]): Config["heartbeat"] {
+	if (!(typeof given.everyMinutes === "number" && given.everyMinutes >= 5)) throw new Error("heartbeat.everyMinutes must be 5 or more");
+	if (!(typeof given.chattingMinutes === "number" && given.chattingMinutes >= 0)) throw new Error("heartbeat.chattingMinutes must be 0 or more");
 	return given;
 }
 
@@ -208,7 +235,7 @@ function patterTiming(given: Config["patter"]): Config["patter"] {
 	return given;
 }
 
-export type PromptFiles = Pick<Config, "soulFile" | "memoryFile" | "journalFile" | "instructionsFile">;
+export type PromptFiles = Pick<Config, "soulFile" | "memoryFile" | "journalFile" | "heartbeatFile" | "instructionsFile">;
 
 /** The prompt files as they are now; /reload calls this again so files made since startup are found. */
 export function promptFiles(p: Pick<Paths, "config" | "data">): PromptFiles {
@@ -219,6 +246,7 @@ export function promptFiles(p: Pick<Paths, "config" | "data">): PromptFiles {
 		soulFile: soul ? soulFile : undefined,
 		memoryFile: soul ? join(p.data, "MEMORY.org") : undefined,
 		journalFile: soul ? join(p.data, "JOURNAL.org") : undefined,
+		heartbeatFile: soul ? join(p.data, "HEARTBEAT.org") : undefined,
 		instructionsFile: existsSync(instructionsFile) ? instructionsFile : undefined,
 	};
 }

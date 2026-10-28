@@ -10,6 +10,7 @@ import { DEFAULT_BASH_TIMEOUT } from "./tools/coding.ts";
 // Harness mechanics only. The user's conventions (Org, Herdr, task states) come from AGENTS.md in the config directory.
 const harness = (host: string) => `How this harness works:
 - The user reaches you from a terminal client and from Telegram. Talk to them directly, never about them in the third person. It is one conversation. Terminal messages start with [kitty] or [cli]: answer those in Org markup, never Markdown (*bold*, /italic/, =code=, [[url][label]], - lists, #+begin_src blocks), since the terminal renders Org. Untagged messages come from Telegram, which renders only Markdown, so answers there stay compact Markdown without tables. Answer a [work] or [follow] message in the markup of the user's latest own message, since it goes where they last spoke.
+- Messages starting with [heartbeat] are your own private look at the moment between conversations; the user never sees them or your quiet answers, only a message you choose to send.
 - Messages starting with [follow] come from your own checks on tasks you queued; nobody typed them. Do what they say and tell the user briefly; do not repeat the check yourself.
 - bash, read, edit, and write act on ${host}, where you run, whichever client the user writes from. Commands start in the home directory and stop after ${DEFAULT_BASH_TIMEOUT} seconds unless you pass a timeout; reach other hosts explicitly and name the host in what you report. Do quick checks yourself. Take anything longer that you do yourself, such as investigating a problem, research, multi-step commands, or reading several files, into your own working context with work, which keeps its output out of this conversation and returns only a report; then tell the user what it found. Whether to hand work to an agent through the task tools instead is your judgment: sustained coding, debugging, and larger changes usually belong with one. Ask the user to act only when no permitted tool or agent can proceed, or their input or approval is required.
 - Having a tool is not permission. The user's rules on approval, destructive or external actions, and changes outside the request apply to commands and file edits as they do to everything else.
@@ -80,7 +81,7 @@ function skillsSection(skills: readonly Skill[]): string {
 async function personalSection(files: PromptFiles, memory: () => Promise<string>, journal: () => Promise<string>, recentDays: number): Promise<string | undefined> {
 	if (files.soulFile === undefined || files.memoryFile === undefined) return undefined;
 	const dir = dirname(files.soulFile);
-	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY|JOURNAL)\.sync-conflict-.*\.org$/.test(name)).sort();
+	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY|JOURNAL|HEARTBEAT)\.sync-conflict-.*\.org$/.test(name)).sort();
 	return [
 		`Your own files, which you keep with read and edit: ${files.soulFile} (identity, shown first in this prompt) and ${files.memoryFile} (below). Changes apply from your next turn.`,
 		`${basename(files.memoryFile)} is the page of what is true about Jon's life that you must never get wrong: who he is and where he lives, his household and people, what he does, his routine, where his records live, and the corrections that shape how you work with him. When he tells you a lasting fact or corrects one, update it with edit in the same turn, in its own section; keep it to a page or two, replacing what changed. What happened on a given day goes in the journal instead. A nightly reflection also tidies the day's journal and carries lasting facts here.`,
@@ -88,6 +89,11 @@ async function personalSection(files: PromptFiles, memory: () => Promise<string>
 			? [
 					`Your journal, ${files.journalFile}, is an Org date tree you write with the journal tool: "* YYYY", "** YYYY-MM Month", "*** YYYY-MM-DD Weekday", then entries. When you need your past with Jon, search it yourself, a quick check rather than a brief, instead of reading it whole: find a day by its heading (rg -n '^\\*\\*\\* YYYY-MM-DD') and read from that line, or search words with context (rg -i -C3). Each night's reflection ends a day with a "**** Day's end" entry, its summary of the day, so to skim further back than the days below, list a month's days and summaries (rg -n -A1 "^\\*\\*\\* YYYY-MM|^\\*\\*\\*\\* Day's end") and then read the days that matter in full. When something Jon says seems to connect to an earlier day, look before answering rather than guessing.`,
 					...dayEnds(await journal(), recentDays),
+				]
+			: []),
+		...(files.heartbeatFile
+			? [
+					`${files.heartbeatFile} holds Jon's standing instructions for your heartbeat: what is worth a nudge between conversations and what is not, in his words. When he tells you to watch for something, or to stop nudging him about something, update it with edit in the same turn.`,
 				]
 			: []),
 		...(conflicts.length > 0 ? [`Syncthing conflict copies in ${dir}: ${conflicts.join(", ")}. Tell the user and leave both copies until they decide.`] : []),

@@ -29,6 +29,7 @@ import {
 import { type CommandScope, runCommand } from "./commands.ts";
 import { type Config, expandHome, type Paths } from "./config.ts";
 import { createPromptExtension } from "./prompt.ts";
+import { createHeartbeat } from "./heartbeat.ts";
 import { createSituation } from "./situation.ts";
 import { createMemoryExtension } from "./memory.ts";
 import { ChatInfo, ChatMap } from "./notify.ts";
@@ -58,6 +59,8 @@ export type DaemonOptions = {
 	readonly patterTiming?: Partial<PatterTiming>;
 	/** Tests set the clock and loop speed of the nightly reflection. */
 	readonly reflectionClock?: { now: () => Date; tickMs: number };
+	/** Tests set the clock and loop speed of the heartbeat. */
+	readonly heartbeatClock?: { now: () => Date; tickMs: number };
 };
 
 export type Daemon = {
@@ -162,7 +165,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const stopPatter = patter?.start(harness, root);
 		const stopSituation = situation.start();
 		const stopReflection = config.reflection.enabled
-			? createReflection({ models: options.models, model: config.model.chat, config: config.reflection, files: prompt.files, state: paths.state, log, ...options.reflectionClock }).start(harness, root)
+			? createReflection({ models: options.models, model: config.model.chat, config: config.reflection, window: { start: config.rhythm.sleep, end: config.rhythm.wake }, files: prompt.files, state: paths.state, log, ...options.reflectionClock }).start(harness, root)
+			: undefined;
+		const stopHeartbeat = config.heartbeat.enabled
+			? createHeartbeat({
+					config: config.heartbeat,
+					window: { start: config.rhythm.wake, end: config.rhythm.quiet },
+					situation,
+					files: prompt.files,
+					state: paths.state,
+					log,
+					...(patterTelegram ? { telegram: patterTelegram } : {}),
+					...options.heartbeatClock,
+				}).start(harness, root)
 			: undefined;
 
 		const status = async (): Promise<Status> => {
@@ -208,6 +223,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				stopPatter?.();
 				stopReflection?.();
 				stopSituation();
+				stopHeartbeat?.();
 				await telegram?.stop();
 				await harness.close(BG);
 				rmSync(paths.socket, { force: true });

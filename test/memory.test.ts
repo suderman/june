@@ -431,7 +431,7 @@ test("June's prompt carries the last few days' endings and says where to look fu
 		prompt = (JSON.parse(effectivePrompt(ctx)) as { memory: string }).memory;
 		return fauxAssistantMessage("hi");
 	}]);
-	const config = { soulFile: soul, memoryFile: join(tmp.dir, "MEMORY.org"), journalFile: journal, reflection: { enabled: false, start: "03:00", end: "06:00", quietMinutes: 60, recentDays: 2 } };
+	const config = { soulFile: soul, memoryFile: join(tmp.dir, "MEMORY.org"), journalFile: journal, reflection: { enabled: false, quietMinutes: 60, recentDays: 2 } };
 	const daemon = await openTestDaemon({ ...tmp, faux, config });
 	t.after(() => daemon.close());
 	await (await daemon.root.submit({ type: "input", content: "hello", requestId: "r1" }, BG)).wait(BG);
@@ -495,7 +495,7 @@ test("the nightly reflection rewrites the day, carries a lasting fact into memor
 	const daemon = await openTestDaemon({
 		...tmp,
 		faux,
-		config: { soulFile: soul, memoryFile: memory, journalFile: journal, reflection: { enabled: true, start: "03:00", end: "06:00", quietMinutes: 60, recentDays: 3 } },
+		config: { soulFile: soul, memoryFile: memory, journalFile: journal, reflection: { enabled: true, quietMinutes: 60, recentDays: 3 }, rhythm: { wake: "06:00", quiet: "22:00", sleep: "03:00" } },
 		reflectionClock: { now: () => new Date(2026, 9, 28, 3, 30), tickMs: 50 },
 	});
 	t.after(() => daemon.close());
@@ -520,8 +520,9 @@ test("the nightly reflection waits while Jon is still talking, and refuses a day
 	let clock = Date.now();
 	const at = () => new Date(clock);
 	const hhmm = (ms: number) => `${String(new Date(ms).getHours()).padStart(2, "0")}:${String(new Date(ms).getMinutes()).padStart(2, "0")}`;
-	const reflection = { enabled: true, start: hhmm(clock - 60_000), end: hhmm(clock + 3 * 3_600_000), quietMinutes: 60, recentDays: 3 };
-	const date = dayFor(at(), reflection)!;
+	const reflection = { enabled: true, quietMinutes: 60, recentDays: 3 };
+	const rhythm = { wake: hhmm(clock + 3 * 3_600_000), quiet: "22:00", sleep: hhmm(clock - 60_000) };
+	const date = dayFor(at(), { start: rhythm.sleep, end: rhythm.wake })!;
 	const text = `#+TITLE: June's journal\n\n* ${date.slice(0, 4)}\n** ${date.slice(0, 7)}\n*** ${date}\n**** 18:04 Meeting Lucy\nJon shared a photo of Lucy.\n`;
 	await writeFile(journal, text);
 	const faux = fauxProvider();
@@ -529,7 +530,7 @@ test("the nightly reflection waits while Jon is still talking, and refuses a day
 	const daemon = await openTestDaemon({
 		...tmp,
 		faux,
-		config: { soulFile: soul, memoryFile: join(tmp.dir, "MEMORY.org"), journalFile: journal, reflection },
+		config: { soulFile: soul, memoryFile: join(tmp.dir, "MEMORY.org"), journalFile: journal, reflection, rhythm },
 		reflectionClock: { now: at, tickMs: 50 },
 	});
 	t.after(() => daemon.close());
