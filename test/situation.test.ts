@@ -16,14 +16,14 @@ test("the day line gives the weekday, workday or weekend, and a rough hour", () 
 test("calendar entries fall on a day by their active timestamps, ranges included, never by done or inactive ones", () => {
 	const org = [
 		"#+TITLE: Family calendar",
-		"* Jon in office meeting",
+		"* Alex in office meeting",
 		":PROPERTIES:",
 		":ICAL_UID: abc",
 		":END:",
 		"<2026-10-29 Thu 13:00-15:00>",
 		"* Garbage day :bins:",
 		"<2026-10-29 Thu>",
-		"* Ness away",
+		"* Kim away",
 		"<2026-10-27 Tue>--<2026-10-30 Fri>",
 		"* DONE Old thing",
 		"<2026-10-29 Thu 09:00>",
@@ -34,9 +34,9 @@ test("calendar entries fall on a day by their active timestamps, ranges included
 		"<2026-10-29 Thu 09:00>",
 	].join("\n");
 	assert.deepEqual(calendarEvents(org, "family", "2026-10-29"), [
-		{ title: "Jon in office meeting", calendar: "family", time: "13:00–15:00" },
+		{ title: "Alex in office meeting", calendar: "family", time: "13:00–15:00" },
 		{ title: "Garbage day", calendar: "family" },
-		{ title: "Ness away", calendar: "family" },
+		{ title: "Kim away", calendar: "family" },
 		{ title: "Repeated", calendar: "family", time: "09:00" },
 	]);
 	assert.deepEqual(calendarEvents(org, "family", "2026-10-31"), []);
@@ -50,8 +50,8 @@ test("the now section joins the day, the sun, the calendars, and where people ar
 	await writeFile(family, "* Payday\n<2026-10-28 Wed>\n* Garbage day\n<2026-10-29 Thu>\n");
 	await writeFile(work, "* Standup\n<2026-10-28 Wed 09:30>\n");
 	const states: Record<string, object> = {
-		"person.jon_suderman": { state: "Work", last_changed: new Date(2026, 9, 28, 9, 2).toISOString(), attributes: { friendly_name: "Jon" } },
-		"person.ness": { state: "unknown", last_changed: new Date(2026, 9, 25).toISOString(), attributes: { friendly_name: "Ness" } },
+		"person.jon_suderman": { state: "Work", last_changed: new Date(2026, 9, 28, 9, 2).toISOString(), attributes: { friendly_name: "Alex" } },
+		"person.ness": { state: "unknown", last_changed: new Date(2026, 9, 25).toISOString(), attributes: { friendly_name: "Kim" } },
 		"sun.sun": {
 			state: "above_horizon",
 			last_changed: "",
@@ -78,7 +78,7 @@ test("the now section joins the day, the sun, the calendars, and where people ar
 	const config = { calendars: [family, work, join(tmp.dir, "missing.org")], homeAssistant: { people: ["person.jon_suderman", "person.ness"], weather: "weather.calgary_forecast", pollSeconds: 300 } };
 	const situation = createSituation({ config, env: { HASS_URL: "https://hass.test/", HASS_TOKEN: "t" }, log, fetch });
 	const now = new Date(2026, 9, 28, 11, 40);
-	assert.doesNotMatch(await situation.render(now), /sun|Jon is/, "nothing from Home Assistant before its first poll");
+	assert.doesNotMatch(await situation.render(now), /sun|Alex is/, "nothing from Home Assistant before its first poll");
 	const stop = situation.start();
 	t.after(stop);
 	await new Promise((r) => setTimeout(r, 50));
@@ -89,8 +89,8 @@ test("the now section joins the day, the sun, the calendars, and where people ar
 	assert.match(text, /\nThe sun is up; it sets at 18:22\.\n/);
 	assert.match(text, /\nWeather: snowy now; today: high -1°C, low -6°C, 30% chance of precipitation; tomorrow: partly cloudy, high 4°C, low -4°C\.\n/, "no live temperature, which would change every poll");
 	assert.match(text, /\nToday: Payday \(family\); 09:30 Standup \(work\)\.\nTomorrow: Garbage day \(family\)\.\n/);
-	assert.match(text, /\nJon is at Work \(since 9:02\)\.$/);
-	assert.doesNotMatch(text, /Ness/, "an unknown zone is left out, not guessed");
+	assert.match(text, /\nAlex is at Work \(since 9:02\)\.$/);
+	assert.doesNotMatch(text, /Kim/, "an unknown zone is left out, not guessed");
 	const quiet = createSituation({ config: { calendars: [], homeAssistant: { people: [], pollSeconds: 300 } }, env: {}, log });
 	quiet.start()();
 	assert.equal((await quiet.render(now)).split("\n").length, 2, "without calendars or Home Assistant, only the day");

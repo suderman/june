@@ -261,7 +261,7 @@ function json(value: unknown) {
 
 export function createOrgExtension(config: Config, org = new Org(config.org.root), run: Run = runProcess): Extension {
 	const scope = Type.Optional(
-		Type.String({ description: 'Directory or file under ~/org, such as "work", "life", or "work/suderman/june"; default "all"' }),
+		Type.String({ description: 'Directory or file under ~/org, such as "work", "life", or "work/acme/site"; default "all"' }),
 	);
 	return defineExtension({
 		name: "org",

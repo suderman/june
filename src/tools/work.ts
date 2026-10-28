@@ -6,6 +6,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { type ConversationId, configure, defineDoc, LiveDoc, defineExtension, defineTask, defineTool, type Extension, section, type Tx } from "@earendil-works/pi-durable";
 import type { Config, ModelChoice } from "../config.ts";
 import { deliverIn, type Notice, noticeSurface, submitNotice, type Surface } from "../notify.ts";
+import { User, user } from "../user.ts";
 
 export const WORK = "june.work";
 
@@ -71,7 +72,7 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 					const report =
 						settled.status === "done"
 							? textOf((await tx.entry(settled.answer!))?.model?.[0]) || "The working context finished without a report."
-							: `The working context ended ${settled.status}${"reason" in settled && settled.reason ? `: ${settled.reason}` : ""}. Tell Jon what happened.`;
+							: `The working context ended ${settled.status}${"reason" in settled && settled.reason ? `: ${settled.reason}` : ""}. Tell ${user()} what happened.`;
 					await done(tx, task);
 					await mark(tx, runtime.conversationId, id, "finished", task.input.brief);
 					return { status: "running", checkpoint: { phase: "report", report, surface } };
@@ -105,7 +106,7 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 	const work = defineTool({
 		name: "work",
 		description:
-			"Hand a self-contained brief to your own separate working context, with your tools. It runs in the background: this call returns at once, you stay free to talk with Jon, and its report comes back to you later as a [work] message. Use it for anything beyond a quick check, so shell output and dead ends stay out of this conversation.",
+			`Hand a self-contained brief to your own separate working context, with your tools. It runs in the background: this call returns at once, you stay free to talk with ${user()}, and its report comes back to you later as a [work] message. Use it for anything beyond a quick check, so shell output and dead ends stay out of this conversation.`,
 		parameters: Type.Object({
 			brief: Type.String({ description: "The goal, what you already know, constraints, and what the report must contain" }),
 			...(focus ? { focus: Type.Optional(Type.Boolean({ description: "Run it in focus mode, for work that needs care" })) } : {}),
@@ -124,7 +125,7 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 				doc.active[String(id)] = { brief: args.brief, started: Date.now(), ...(run !== undefined ? { run: Number(run) } : {}) };
 			}, context);
 			return {
-				output: [{ type: "text", text: "Started in your working context. Tell Jon in a few words that you're on it, without repeating anything you already said this turn. Its report arrives later as a [work] message, and then you tell him what it found." }],
+				output: [{ type: "text", text: `Started in your working context. Tell ${user()} in a few words that you're on it, without repeating anything you already said this turn. Its report arrives later as a [work] message, and then you tell them what it found.` }],
 			};
 		},
 	});

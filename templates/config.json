@@ -1,0 +1,20 @@
+{
+  "user": { "name": "{{name}}" },
+  "model": {
+    "chat": { "provider": "openai", "modelId": "gpt-6.1-terra", "thinkingLevel": "medium" },
+    "focus": { "modelId": "gpt-6.1-sol" },
+    "patter": { "modelId": "gpt-6-luna" }
+  },
+  "providersFile": "~/.pi/agent/models.json",
+  "skillDirs": ["~/.agents/skills"],
+  "org": { "root": "~/org" },
+  "herdr": { "session": "default", "hosts": {} },
+  "dispatch": { "hosts": [] },
+  "rhythm": { "wake": "05:00", "quiet": "22:00", "sleep": "01:00" },
+  "reflection": { "enabled": true, "quietMinutes": 60, "recentDays": 3 },
+  "heartbeat": { "enabled": true, "everyMinutes": 60, "chattingMinutes": 15 },
+  "situation": {
+    "calendars": ["~/org/calendar/family.org", "~/org/calendar/work.org"],
+    "homeAssistant": { "people": ["person.you"], "weather": "weather.home", "pollSeconds": 300 }
+  }
+}

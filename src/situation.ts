@@ -1,4 +1,4 @@
-// Where things stand for Jon right now, as atmosphere in June's prompt rather than a tool she must think to call: the
+// Where things stand for the user right now, as atmosphere in June's prompt rather than a tool she must think to call: the
 // day and rough hour, sunrise and sunset, the weather forecast, today's and tomorrow's entries from his curated
 // calendars, and where the configured people are according to Home Assistant. It changes about once an hour, when a calendar file changes, or
 // when someone's zone changes, so the prompt cache survives. Home Assistant is polled in the background and never
@@ -8,6 +8,7 @@ import { basename } from "node:path";
 import type { Logger } from "pi-durable-telegram";
 import type { Config } from "./config.ts";
 import { parseHeading } from "./tools/org.ts";
+import { User, user } from "./user.ts";
 
 type Env = Readonly<Record<string, string | undefined>>;
 type Person = { name: string; zone: string; since: Date };
@@ -91,7 +92,7 @@ export function createSituation(options: {
 	return {
 		render: async (now = new Date()) => {
 			const lines = [
-				"Where things stand right now, refreshed about hourly; for the exact time, use clock. Let it inform your judgment when it bears on the moment, such as how late it is, a commute, or something time-sensitive on the calendars, and flag what Jon may need to act on; do not narrate it otherwise. The calendars are Jon's curated ones, which his agenda also shows.",
+				`Where things stand right now, refreshed about hourly; for the exact time, use clock. Let it inform your judgment when it bears on the moment, such as how late it is, a commute, or something time-sensitive on the calendars, and flag what ${user()} may need to act on; do not narrate it otherwise. The calendars are ${user()}'s curated ones, which their agenda also shows.`,
 				day(now),
 				...(home.sun ? [sunLine(home.sun, now)] : []),
 				...(home.weather ? [weatherLine(home.weather, now)] : []),

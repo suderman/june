@@ -17,16 +17,16 @@ test("ask answers over the socket, and a repeated request id is the same submiss
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const faux = fauxProvider();
-	faux.setResponses([fauxAssistantMessage("Hiya Jon.")]);
+	faux.setResponses([fauxAssistantMessage("Hiya Alex.")]);
 	const daemon = await openTestDaemon({ ...tmp, faux });
 	t.after(() => daemon.close());
 
 	const first = await ask(tmp.paths.socket, "Hello", "req-1");
 	assert.equal(first.status, "done");
-	assert.equal(first.text, "Hiya Jon.");
+	assert.equal(first.text, "Hiya Alex.");
 	const again = await ask(tmp.paths.socket, "Hello", "req-1");
 	assert.equal(again.submissionId, first.submissionId);
-	assert.equal(again.text, "Hiya Jon.");
+	assert.equal(again.text, "Hiya Alex.");
 	assert.equal(faux.state.callCount, 1, "the duplicate never reached the model");
 
 	const status = await daemon.status();
@@ -109,8 +109,8 @@ test("Telegram messages land in the primary conversation and are answered to the
 		message: {
 			message_id: 7,
 			date: Math.floor(Date.now() / 1000),
-			chat: { id: 42, type: "private" as const, first_name: "Jon" },
-			from: { id: 42, is_bot: false, first_name: "Jon" },
+			chat: { id: 42, type: "private" as const, first_name: "Alex" },
+			from: { id: 42, is_bot: false, first_name: "Alex" },
 			text: "hello from my phone",
 		},
 	};
@@ -165,8 +165,8 @@ test("a brief asked for from Telegram reports back to the chat; one asked for in
 		message: {
 			message_id: 7,
 			date: Math.floor(Date.now() / 1000),
-			chat: { id: 42, type: "private" as const, first_name: "Jon" },
-			from: { id: 42, is_bot: false, first_name: "Jon" },
+			chat: { id: 42, type: "private" as const, first_name: "Alex" },
+			from: { id: 42, is_bot: false, first_name: "Alex" },
 			text: "count the wombats",
 		},
 	});
@@ -298,7 +298,7 @@ test("/reload refreshes prompt files and skill discovery without a model call or
 	await writeFile(join(newSkill, "SKILL.md"), "---\nname: new\ndescription: New skill\n---\nNew body.");
 	// The identity changes after startup, and memory starts beside it.
 	await writeFile(join(personal, "SOUL.org"), "Soul after!.");
-	await writeFile(join(personal, "MEMORY.org"), "* Jon prefers Org");
+	await writeFile(join(personal, "MEMORY.org"), "* Alex prefers Org");
 	await writeFile(join(personal, "MEMORY.sync-conflict-20261026-120000-ABCDEFG.org"), "* other copy");
 	await writeFile(instructions, "Rules after!."); // Same size and mtime: /reload must bypass the file cache.
 	await utimes(instructions, stamp.atime, stamp.mtime);
@@ -315,7 +315,7 @@ test("/reload refreshes prompt files and skill discovery without a model call or
 			assert.match(prompt(ctx), /Soul after!\./);
 			assert.doesNotMatch(prompt(ctx), /Soul before/, "the identity as it is now");
 			assert.match(prompt(ctx), /Rules after!\./);
-			assert.match(prompt(ctx), /\* Jon prefers Org/);
+			assert.match(prompt(ctx), /\* Alex prefers Org/);
 			assert.ok(prompt(ctx).includes(join(personal, "MEMORY.org")), "June is told where her memory lives");
 			assert.match(prompt(ctx), /conflict copies in .*MEMORY\.sync-conflict-20261026-120000-ABCDEFG\.org/);
 			assert.match(prompt(ctx), /new: New skill/);

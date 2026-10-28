@@ -117,7 +117,7 @@ test("June remembers, corrects, and keeps her memory across a restart", async (t
 	faux.setResponses([
 		(ctx) => {
 			assert.ok(prompt(ctx).includes(memory));
-			return call("write", { path: memory, content: "* Preferences\n- Jon said: briefings at 8:00.\n" });
+			return call("write", { path: memory, content: "* Preferences\n- Alex said: briefings at 8:00.\n" });
 		},
 		fauxAssistantMessage("Noted."),
 		(ctx) => {

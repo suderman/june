@@ -66,7 +66,7 @@ test("work runs a brief in the background and only its report reaches the main t
 	assert.deepEqual(reports.at(-1), { source: "work", text: "report: Find the secret word in the scratch file." });
 });
 
-test("June talks with Jon while her working context runs", async (t) => {
+test("June talks with Alex while her working context runs", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const faux = fauxProvider();

@@ -1,11 +1,12 @@
-// June's journal: her own dated record of Jon and their days together, written in her perspective. Entries go into an
-// Org date tree (year, month, day), the shape of Jon's own journal.org, so the latest days are easy to find.
+// June's journal: her own dated record of the user and their days together, written in her perspective. Entries go into an
+// Org date tree (year, month, day), the shape of the user's own journal.org, so the latest days are easy to find.
 import { closeSync, fsyncSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
+import { User, user } from "./user.ts";
 
 export type JournalEntry = { readonly date: string; readonly time?: string; readonly title: string; readonly text: string };
 
-const HEADER = "#+TITLE: June's journal\n\nJune's own record of Jon and their days together, in her words. Newest at the end.\n";
+const header = () => `#+TITLE: June's journal\n\nJune's own record of ${user()} and their days together, in her words. Newest at the end.\n`;
 
 /** The local date and time, as an entry records them. */
 export function localStamp(now = new Date()): { date: string; time: string } {
@@ -25,7 +26,7 @@ export function insertEntry(text: string, entry: JournalEntry): string {
 	const body = paragraphs(entry.text);
 	if (body.length === 0) throw new Error("A journal entry needs some text");
 
-	const lines = (text.trim() ? text : HEADER).replace(/\n+$/, "").split("\n");
+	const lines = (text.trim() ? text : header()).replace(/\n+$/, "").split("\n");
 	const monthName = when.toLocaleString("en-CA", { month: "long" });
 	const weekday = when.toLocaleString("en-CA", { weekday: "long" });
 	let [start, end] = [0, lines.length];

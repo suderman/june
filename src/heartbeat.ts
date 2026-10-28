@@ -1,6 +1,6 @@
-// June's heartbeat: every so often between Jon's wake and quiet hours, she takes a private look at the moment in the
+// June's heartbeat: every so often between the user's wake and quiet hours, she takes a private look at the moment in the
 // main conversation, with her standing instructions from HEARTBEAT.org and what changed since her last look, and
-// either says something to Jon or stays quiet. Jon never sees the heartbeat itself: the terminal hides it and its
+// either says something to the user or stays quiet. The user never sees the heartbeat itself: the terminal hides it and its
 // quiet answers, and on Telegram only a real message is sent. Like patter and the reflection, it is an in-memory loop
 // with a receipt in the state directory, so a restart neither skips a beat for long nor repeats one.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -11,8 +11,9 @@ import { type Conversation, type Harness, LiveDoc } from "@earendil-works/pi-dur
 import { type Logger, splitForTelegram, type TelegramPort } from "pi-durable-telegram";
 import type { Config, PromptFiles } from "./config.ts";
 import { isQuiet, QUIET } from "./transcript.ts";
+import { User, user } from "./user.ts";
 
-/** Own inputs June's tasks write; they say nothing about where Jon is or whether he is chatting. */
+/** Own inputs June's tasks write; they say nothing about where the user is or whether they are chatting. */
 const OWN = /^\[(\/stop|work|follow|reminder|heartbeat)\b/;
 
 type Receipt = { at: number; lines: string[] };
@@ -75,7 +76,7 @@ export function createHeartbeat(options: {
 				const answer = reply((await root.commit((tx) => tx.entry(settled.answer!), BG))?.model?.[0]);
 				if (isQuiet(answer) || answer.trim() === "") return log.info("heartbeat_quiet", {});
 				log.info("heartbeat_spoke", { chars: answer.length });
-				// The terminal shows her message in the transcript; Telegram needs it sent when that is where Jon is.
+				// The terminal shows her message in the transcript; Telegram needs it sent when that is where the user is.
 				if (options.telegram !== undefined && jon !== undefined && !/^\[(kitty|cli)\]/.test(text(jon))) {
 					const { port, chatId } = options.telegram;
 					for (const chunk of splitForTelegram(answer)) await port.sendMessage(chatId, chunk.html, { html: true });
@@ -95,13 +96,13 @@ function prompt({ chatting, since, lines, instructions, at }: { chatting: boolea
 	const changed = lines.filter((line) => !earlier.has(line));
 	const first = since.at === 0 || new Date(since.at).toDateString() !== at.toDateString();
 	return [
-		"[heartbeat] A private heartbeat: Jon does not see this or anything you do for it, only a message you choose to send him. Look at the moment, in your now section and the conversation, against your standing instructions below, and decide whether anything is worth his attention now.",
+		`[heartbeat] A private heartbeat: ${User()} does not see this or anything you do for it, only a message you choose to send them. Look at the moment, in your now section and the conversation, against your standing instructions below, and decide whether anything is worth their attention now.`,
 		chatting
-			? "Jon is chatting with you right now, so raising something is simply your next line in the conversation, even if it changes the subject."
-			: "Jon is not chatting with you right now, so a message interrupts him wherever he is. Send one only when it is worth that, and only once: you can see what you already raised.",
+			? `${User()} is chatting with you right now, so raising something is simply your next line in the conversation, even if it changes the subject.`
+			: `${User()} is not chatting with you right now, so a message interrupts them wherever they are. Send one only when it is worth that, and only once: you can see what you already raised.`,
 		first ? "This is your first look today." : changed.length > 0 ? `Since your last look:\n${changed.map((l) => `- ${l}`).join("\n")}` : "Nothing in your now section changed since your last look.",
 		instructions ? `Your standing instructions, from HEARTBEAT.org:\n${instructions}` : "You have no HEARTBEAT.org yet; use your judgment.",
-		`If nothing is worth raising, answer with exactly ${QUIET} and nothing else. Otherwise answer with only your message to Jon, in the markup of where he last spoke, as you would write it to him unprompted.`,
+		`If nothing is worth raising, answer with exactly ${QUIET} and nothing else. Otherwise answer with only your message to ${user()}, in the markup of where they last spoke, as you would write it to them unprompted.`,
 	].join("\n\n");
 }
 

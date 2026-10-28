@@ -11,6 +11,7 @@ import { type Run, runProcess } from "./herdr.ts";
 import { createFollowTask, FOLLOW_DEFAULTS, type FollowOptions, follow } from "./follow.ts";
 import type { Herdr } from "./herdr.ts";
 import { type Org, parseHeading } from "./org.ts";
+import { User, user } from "../user.ts";
 
 export type QueueRequest = {
 	file: string;
@@ -194,7 +195,7 @@ export class Dispatch {
 	async resume(request: ResumeRequest, herdr: Herdr) {
 		if (!this.#config.dispatch.hosts.includes(request.host)) throw new Error(`No allowed dispatcher on ${request.host}`);
 		if (!["TODO", "EVAL", "HOLD"].includes(request.expected)) throw new Error("Only TODO, EVAL, or HOLD tasks can resume");
-		if (!request.note.trim() || /[\n\r]/.test(request.note)) throw new Error("note must be one non-empty line recording Jon's instruction");
+		if (!request.note.trim() || /[\n\r]/.test(request.note)) throw new Error(`note must be one non-empty line recording ${user()}'s instruction`);
 		const path = await this.#target(request.file);
 		const task = await this.#org.read(request.file, request.heading);
 		const properties = task.text.split(/\n\*+ /, 1)[0]!;
@@ -294,12 +295,12 @@ export function createDispatchExtension(
 				parameters: Type.Object({
 					file: Type.String({ description: "Org file under ~/org, usually the project's <project>.org" }),
 					title: Type.String({ description: "Concise verb-led heading title, without keyword or tags" }),
-					reason: Type.String({ description: 'One line, written after "Queued by June: ": the reason itself, naming the user rather than writing "you", such as "Jon asked for a read-only docs check."' }),
+					reason: Type.String({ description: 'One line, written after "Queued by June: ": the reason itself, naming the user rather than writing "you", such as `${User()} asked for a read-only docs check.`' }),
 					scope: Type.String({ description: "Outcome, constraints, and success criteria in Org; one physical line per paragraph" }),
 					checklist: Type.Array(Type.String(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
 					host: Type.String({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${hosts[0]}` }),
 					dir: Type.Optional(Type.String({ description: "Existing working directory override, usually one of the project's local repository links. Omit for one-offs without a checkout: the dispatcher uses the project directory" })),
-					review: Type.Optional(Type.Boolean({ description: "Default true: the worker stops at EVAL for human or agent review, including read-only lookups you will review yourself. Set false only when Jon explicitly waives review" })),
+					review: Type.Optional(Type.Boolean({ description: `Default true: the worker stops at EVAL for human or agent review, including read-only lookups you will review yourself. Set false only when ${user()} explicitly waives review` })),
 				}),
 				// Idempotent by key: a rerun after a restart finds the heading it wrote.
 				replay: "safe",
@@ -335,7 +336,7 @@ export function createDispatchExtension(
 					heading: Type.String({ description: "Exact title or id:UUID, as org_read_task accepts" }),
 					expected: Type.Union([Type.Literal("TODO"), Type.Literal("EVAL"), Type.Literal("HOLD")], { description: "Current state just read; a stale request is refused" }),
 					host: Type.String({ description: `Keep the existing host unless the user changes it; otherwise default ${hosts[0]}. Allowed: ${hosts.join(", ")}` }),
-					note: Type.String({ description: "One line recording Jon's request and any answer or revised scope, naming Jon rather than writing you" }),
+					note: Type.String({ description: `One line recording ${user()}'s request and any answer or revised scope, naming ${user()} rather than writing you` }),
 				}),
 				replay: "safe",
 				execute: async (args, api, context) => {
@@ -356,7 +357,7 @@ export function createDispatchExtension(
 			}),
 			defineTool({
 				name: "org_complete_task",
-				description: "After reading the whole task, outcome, and verification evidence, mark your own EVAL task DONE through org-edit. Use only when the request is satisfied and no decision, approval, or review from Jon remains. You must have created the task; merely resuming Jon's task does not make it yours. Leave incomplete or uncertain work, and work needing Jon's review, at EVAL and report what remains. Report the reviewed result to Jon after closing. Refuses other states; an already DONE task is unchanged on replay.",
+				description: `After reading the whole task, outcome, and verification evidence, mark your own EVAL task DONE through org-edit. Use only when the request is satisfied and no decision, approval, or review from ${user()} remains. You must have created the task; merely resuming ${user()}'s task does not make it yours. Leave incomplete or uncertain work, and work needing ${user()}'s review, at EVAL and report what remains. Report the reviewed result to ${user()} after closing. Refuses other states; an already DONE task is unchanged on replay.`,
 				parameters: Type.Object({
 					file: Type.String({ description: "Org agenda file under ~/org" }),
 					heading: Type.String({ description: "Exact title or id:UUID of the EVAL task you just reviewed" }),

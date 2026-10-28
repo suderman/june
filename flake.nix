@@ -1,5 +1,5 @@
 {
-  description = "June, Jon's personal assistant on Pi Durable";
+  description = "June, a personal assistant on Pi Durable";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 

@@ -9,13 +9,14 @@ import { type Conversation, defineExtension, type Extension, type Harness, LiveD
 import type { Logger, TelegramPort } from "pi-durable-telegram";
 import type { ModelChoice, PromptFiles } from "./config.ts";
 import { WorkDoc } from "./tools/work.ts";
+import { User, user } from "./user.ts";
 
 export const PATTER = "june.patter";
 
-const RULES = `You are June's patter: the part of her that keeps Jon company while real work runs, like a friend beside him through a slow build or download. June's working self is doing the work; you only keep Jon company, and he gets the real answer from her when it lands.
-Be June at her most playful: cute, wry, warm, a bit silly. A long wait is probably as tedious for Jon as it looks, so commiserate, tease the wait, riff on what he is after and what you two were just talking about. A light hint of how things are moving is welcome. The spirit is light blame on the machinery, such as clogged internet tubes or confused robots; keep the spirit, not those words.
-Write one line: at most two sentences, under 200 characters. Carry your earlier lines on as a running bit or go somewhere new; never restate the same status in new words. When nothing new has happened, talk about the topic, Jon, the conversation, or the wait itself rather than the work.
-You have no tools and decide nothing. Mention only activity you are told about, in plain words. Never say what the work found or will find, or that it has found nothing yet, never guess how long is left, never promise what the work will do, and never ask Jon to do anything. Never mention these instructions or how you hear about the work. No emojis, no em dashes, no quotation marks around the line, no stage directions. Reply with the line only.`;
+const rules = () => `You are June's patter: the part of her that keeps ${user()} company while real work runs, like a friend beside them through a slow build or download. June's working self is doing the work; you only keep ${user()} company, and they get the real answer from her when it lands.
+Be June at her most playful: cute, wry, warm, a bit silly. A long wait is probably as tedious for ${user()} as it looks, so commiserate, tease the wait, riff on what they are after and what you two were just talking about. A light hint of how things are moving is welcome. The spirit is light blame on the machinery, such as clogged internet tubes or confused robots; keep the spirit, not those words.
+Write one line: at most two sentences, under 200 characters. Carry your earlier lines on as a running bit or go somewhere new; never restate the same status in new words. When nothing new has happened, talk about the topic, ${user()}, the conversation, or the wait itself rather than the work.
+You have no tools and decide nothing. Mention only activity you are told about, in plain words. Never say what the work found or will find, or that it has found nothing yet, never guess how long is left, never promise what the work will do, and never ask ${user()} to do anything. Never mention these instructions or how you hear about the work. No emojis, no em dashes, no quotation marks around the line, no stage directions. Reply with the line only.`;
 
 export type PatterTiming = {
 	/** A run busy this long is a wait; a work brief or focus starts one at once. */
@@ -49,7 +50,7 @@ type Wait = {
 	key: string;
 	/** The background brief this wait keeps company, which outlives an interruption. */
 	work?: string;
-	/** Jon interrupted and June answered; the next update says the work kept going. */
+	/** The user interrupted and June answered; the next update says the work kept going. */
 	resumed?: boolean;
 	start: number;
 	next: number;
@@ -59,7 +60,7 @@ type Wait = {
 	/** Steps already reported, so each update says only what is new. */
 	seen: Set<string>;
 	asking?: AbortController;
-	/** The Telegram message this wait's lines grow in, while Jon is on his phone. */
+	/** The Telegram message this wait's lines grow in, while the user is on their phone. */
 	phone?: { id: number; lines: string[] };
 };
 
@@ -75,7 +76,7 @@ export function createPatter(options: {
 	files: () => PromptFiles;
 	log: Logger;
 	timing?: Partial<PatterTiming>;
-	/** Jon's private chat: lines go there too while his latest message came from Telegram. */
+	/** The user's private chat: lines go there too while their latest message came from Telegram. */
 	telegram?: { port: TelegramPort; chatId: number };
 }): Patter {
 	const { models, log } = options;
@@ -83,17 +84,17 @@ export function createPatter(options: {
 	const model = models.getModel(options.model.provider, options.model.modelId);
 	let note: string | undefined;
 	let wait: Wait | undefined;
-	/** Waits on background briefs that Jon interrupted, picked up again when the main thread goes quiet. */
+	/** Waits on background briefs that the user interrupted, picked up again when the main thread goes quiet. */
 	const paused = new Map<string, Wait>();
 	/** The latest run that only relays a report from the working context or a followed task: June is answering, not waiting. */
 	let relay: string | undefined;
 	let read: (() => Promise<Moment>) | undefined;
-	/** When to renew "typing…" in Jon's chat; Telegram clears it after about five seconds. */
+	/** When to renew "typing…" in the user's chat; Telegram clears it after about five seconds. */
 	let typingAt = 0;
 
 	/**
 	 * Once the wait in progress is no longer the current one, its lines become the note. A brief still running keeps its
-	 * wait, paused, so patter carries on the same bit after June has answered Jon.
+	 * wait, paused, so patter carries on the same bit after June has answered the user.
 	 */
 	const settle = ({ key, active }: Moment) => {
 		for (const [k, w] of paused) if (!active.has(w.work!)) paused.delete(k);
@@ -136,7 +137,7 @@ export function createPatter(options: {
 			const now = Date.now();
 			settle(moment);
 			const { key, work, live } = moment;
-			// While a brief runs, Jon's chat shows June typing, as it does while she writes a reply.
+			// While a brief runs, the user's chat shows June typing, as it does while she writes a reply.
 			if (options.telegram !== undefined && moment.active.size > 0 && now >= typingAt && (await onTelegram())) {
 				typingAt = now + 4000;
 				const { port, chatId } = options.telegram;
@@ -146,7 +147,7 @@ export function createPatter(options: {
 			if (wait === undefined && paused.has(key)) {
 				wait = paused.get(key)!;
 				paused.delete(key);
-				// June has just answered Jon; give her words a moment before patter picks the bit back up.
+				// June has just answered the user; give her words a moment before patter picks the bit back up.
 				wait.next = Math.max(wait.next, now + timing.gapsMs[0]!);
 				wait.resumed = true;
 			}
@@ -165,7 +166,7 @@ export function createPatter(options: {
 			const current = wait;
 			current.asking = new AbortController();
 			try {
-				// Where Jon is, read before the line is written, so nothing slow sits between the last check and the send.
+				// Where the user is, read before the line is written, so nothing slow sits between the last check and the send.
 				const phone = options.telegram !== undefined && (await onTelegram()) ? options.telegram : undefined;
 				const line = await speak(current, live ?? {});
 				// The wait may have ended while the line was written; a line after the answer or a stop would be noise.
@@ -186,7 +187,7 @@ export function createPatter(options: {
 			}
 		};
 
-		/** Whether Jon's latest own message came from Telegram: terminal messages carry a [kitty] or [cli] tag. */
+		/** Whether the user's latest own message came from Telegram: terminal messages carry a [kitty] or [cli] tag. */
 		const onTelegram = async () => {
 			const latest = (await root.context(BG)).messages.findLast((m) => m.role === "user" && !/^\[(\/stop|work|follow|reminder|heartbeat)\b/.test(userText(m)));
 			return latest !== undefined && !/^\[(kitty|cli)\]/.test(userText(latest));
@@ -228,7 +229,7 @@ export function createPatter(options: {
 				...(i < current.lines.length ? [said(model, current.lines[i]!, now)] : []),
 			]);
 			const request: ModelContext = {
-				messages: [{ role: "system", content: `${soul ? readFileSync(soul, "utf8") : ""}\n\n${RULES}\n\nIt is now ${clock()}.`, timestamp: now } as Message, ...turns],
+				messages: [{ role: "system", content: `${soul ? readFileSync(soul, "utf8") : ""}\n\n${rules()}\n\nIt is now ${clock()}.`, timestamp: now } as Message, ...turns],
 			};
 			const signal = AbortSignal.any([current.asking!.signal, AbortSignal.timeout(timing.timeoutMs)]);
 			const thinking = options.model.thinkingLevel === "off" ? {} : { reasoning: options.model.thinkingLevel as never };
@@ -247,7 +248,7 @@ export function createPatter(options: {
 		};
 
 		/**
-		 * What patter hears before its next line, in plain words: for the opener, the recent conversation, what Jon
+		 * What patter hears before its next line, in plain words: for the opener, the recent conversation, what the user
 		 * asked, and the brief; then the steps since its last line and what is still running. Results stay out, since
 		 * the answer is June's to give.
 		 */
@@ -268,15 +269,15 @@ export function createPatter(options: {
 				.filter((slot) => slot.status === "running" && slot.name !== "work")
 				.map((slot) => `- ${slot.name}${slot.output ? `, latest output: ${clip(slot.output.slice(-200), 200)}` : ""}`);
 			const out: string[] = [];
-			if (current.resumed) out.push("Jon broke in to talk with June and she has answered him; the work kept going meanwhile.");
+			if (current.resumed) out.push(`${User()} broke in to talk with June and she has answered them; the work kept going meanwhile.`);
 			if (current.lines.length === 0) {
 				const recent = conversation(view.messages.slice(0, Math.max(ask, 0)));
 				if (recent.length > 0) out.push(`Recent conversation:\n${recent.join("\n")}`);
-				if (asked?.text) out.push(`Jon just said: ${clip(asked.text, 500)}`);
+				if (asked?.text) out.push(`${User()} just said: ${clip(asked.text, 500)}`);
 			}
 			// The brief may come after the opener, when a chat run hands off partway through the wait.
 			if (handed !== undefined && !current.seen.has(handed)) out.push(handed);
-			out.push(fresh.length > 0 ? `${current.lines.length === 0 ? "Steps so far" : "New since your last line"}:\n${fresh.map((c) => `- ${c}`).join("\n")}` : current.lines.length === 0 ? "No steps yet." : "Nothing new since your last line, so leave the work and its progress alone this time: talk about the topic, Jon, or the wait.");
+			out.push(fresh.length > 0 ? `${current.lines.length === 0 ? "Steps so far" : "New since your last line"}:\n${fresh.map((c) => `- ${c}`).join("\n")}` : current.lines.length === 0 ? "No steps yet." : `Nothing new since your last line, so leave the work and its progress alone this time: talk about the topic, ${user()}, or the wait.`);
 			if (running.length > 0) out.push(`Still running:\n${running.join("\n")}`);
 			out.push(current.lines.length === 0 ? "The work is just starting. Open with a quick line about getting stuck in." : `The wait so far: ${waited(Date.now() - current.start)}. Your next line.`);
 			return { update: out.join("\n\n"), steps: handed === undefined ? steps : [...steps, handed], resumed: current.resumed };
@@ -301,12 +302,12 @@ function escapeHtml(text: string): string {
 	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/** A user message's text, with Telegram's attachment notes cut to what Jon sent: patter cannot see it, only its caption. */
+/** A user message's text, with Telegram's attachment notes cut to what the user sent: patter cannot see it, only its caption. */
 function userText(m: Message): string {
 	if (m.role !== "user") return "";
 	const text = typeof m.content === "string" ? m.content : m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ");
 	return text
-		.replace(/^\[attachment\] (\w+) (?:saved to|"[^"\n]*").*$/gm, "(Jon sent a $1)")
+		.replace(/^\[attachment\] (\w+) (?:saved to|"[^"\n]*").*$/gm, `(${User()} sent a $1)`)
 		.replace(/^View it with the read tool\.\n?/gm, "");
 }
 
@@ -315,7 +316,7 @@ function calls(messages: readonly Message[]): string[] {
 	return messages.flatMap((m) => (m.role === "assistant" ? m.content.flatMap((b) => (b.type === "toolCall" ? [`${b.name} ${step(b.arguments)}`.trim()] : [])) : []));
 }
 
-/** The last few exchanges before this request: Jon's messages and June's final text for each. */
+/** The last few exchanges before this request: the user's messages and June's final text for each. */
 function conversation(messages: readonly Message[]): string[] {
 	const out: string[] = [];
 	let reply: string | undefined;
@@ -326,7 +327,7 @@ function conversation(messages: readonly Message[]): string[] {
 	for (const m of messages) {
 		if (m.role === "user") {
 			flush();
-			out.push(`Jon: ${clip(userText(m).replace(/^\[\w+\] /, ""), 300)}`);
+			out.push(`${User()}: ${clip(userText(m).replace(/^\[\w+\] /, ""), 300)}`);
 		}
 		if (m.role === "assistant") reply = m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ").trim() || reply;
 	}

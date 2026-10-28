@@ -1,4 +1,4 @@
-// What June hears on her own initiative, such as a brief's report or news of a task she follows, goes where Jon last
+// What June hears on her own initiative, such as a brief's report or news of a task she follows, goes where the user last
 // spoke to her. From Telegram, it goes through the channel's own delivery task, so her answer reaches his chat as a
 // reminder's does; otherwise it is an ordinary input, which the terminal shows.
 import type { Context } from "@earendil-works/chord";
@@ -26,11 +26,11 @@ const DELIVER = "tg.deliver";
 
 export type Surface = "telegram" | "terminal";
 
-/** Inputs June's own tasks write, which say nothing about where Jon is. */
+/** Inputs June's own tasks write, which say nothing about where the user is. */
 const OWN = /^\[(\/stop|work|follow|reminder|heartbeat)\b/;
 
 /**
- * Where a notice goes: Telegram when Jon last spoke to June there and the channel can deliver to his chat, otherwise
+ * Where a notice goes: Telegram when the user last spoke to June there and the channel can deliver to their chat, otherwise
  * the terminal. Decide it inside a commit and keep it, so a restart cannot send one notice both ways.
  */
 export async function noticeSurface(tx: Tx, registry: RegistrySnapshot, conversationId: ConversationId): Promise<Surface> {
@@ -39,7 +39,7 @@ export async function noticeSurface(tx: Tx, registry: RegistrySnapshot, conversa
 }
 
 /**
- * Where Jon last spoke to June. The terminal and CLI tag their input as june.input; a Telegram message is a plain user
+ * Where the user last spoke to June. The terminal and CLI tag their input as june.input; a Telegram message is a plain user
  * entry. Only the newest hundred entries are read: a quiet stretch longer than that falls back to the terminal.
  */
 async function lastSurface(tx: Tx, conversationId: ConversationId): Promise<Surface> {

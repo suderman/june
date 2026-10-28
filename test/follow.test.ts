@@ -54,7 +54,7 @@ test("June reads and closes her own reviewed EVAL task before reporting through 
 	});
 
 	const faux = fauxProvider();
-	const queue = { file: "todo.org", title: "Check docs", reason: "Jon asked for a docs check.", scope: "Check the docs.", checklist: ["Compare docs and code"], host: "kit" };
+	const queue = { file: "todo.org", title: "Check docs", reason: "Alex asked for a docs check.", scope: "Check the docs.", checklist: ["Compare docs and code"], host: "kit" };
 	faux.setResponses([
 		fauxAssistantMessage([fauxToolCall("org_queue_task", queue)], { stopReason: "toolUse" }),
 		fauxAssistantMessage("Queued it; I'll tell you when it lands."),
@@ -112,10 +112,10 @@ test("resuming after EVAL and HOLD follows each new run without duplicate report
 	}, { intervalMs: 40, launchMs: 60_000, maxMs: 3_600_000 });
 	const faux = fauxProvider();
 	const resume = (expected: "EVAL" | "HOLD") => fauxAssistantMessage([fauxToolCall("org_resume_task", {
-		file: "todo.org", heading: "Check docs", expected, host: "kit", note: "Jon asked for another pass.",
+		file: "todo.org", heading: "Check docs", expected, host: "kit", note: "Alex asked for another pass.",
 	})], { stopReason: "toolUse" });
 	faux.setResponses([
-		fauxAssistantMessage([fauxToolCall("org_queue_task", { file: "todo.org", title: "Check docs", reason: "Jon asked.", scope: "Check docs.", checklist: ["Compare"], host: "kit" })], { stopReason: "toolUse" }),
+		fauxAssistantMessage([fauxToolCall("org_queue_task", { file: "todo.org", title: "Check docs", reason: "Alex asked.", scope: "Check docs.", checklist: ["Compare"], host: "kit" })], { stopReason: "toolUse" }),
 		fauxAssistantMessage("Queued."), fauxAssistantMessage("Ready for review."),
 		resume("EVAL"), fauxAssistantMessage("Resumed."), fauxAssistantMessage("The agent has a question."),
 		resume("HOLD"), fauxAssistantMessage("Resumed again."), fauxAssistantMessage("Finished."),
@@ -156,7 +156,7 @@ test("following survives a daemon restart", async (t) => {
 			launchMs: 60_000,
 			maxMs: 3_600_000,
 		});
-	const queue = { file: "todo.org", title: "Check docs", reason: "Jon asked.", scope: "Check the docs.", checklist: ["Compare"], host: "kit" };
+	const queue = { file: "todo.org", title: "Check docs", reason: "Alex asked.", scope: "Check the docs.", checklist: ["Compare"], host: "kit" };
 	const before = fauxProvider();
 	before.setResponses([fauxAssistantMessage([fauxToolCall("org_queue_task", queue)], { stopReason: "toolUse" }), fauxAssistantMessage("Queued.")]);
 	let daemon = await openTestDaemon({ ...tmp, faux: before, config, extensions: [extension()] });

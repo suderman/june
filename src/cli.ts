@@ -15,6 +15,7 @@ const USAGE = `usage:
   june ask [--json] TEXT  send one message and print the answer ("-" or no text reads stdin)
   june status [--json]    daemon, model, and conversation state, without a model call
   june doctor             check configuration and dependencies
+  june init [NAME]        create missing personal files from the templates, for NAME or user.name
   june serve              run the daemon`;
 
 // Exit codes: 0 ok, 1 failed or unanswered, 2 usage, 3 daemon unavailable.
@@ -41,6 +42,13 @@ async function main(argv: string[]): Promise<number> {
 			return status(p.socket, json);
 		case "doctor":
 			return doctor();
+		case "init": {
+			const { init } = await import("./init.ts");
+			const { readConfigFile } = await import("./config.ts");
+			const name = args.join(" ") || String(readConfigFile(p).user?.name ?? "");
+			for (const { path, created } of init(p, name)) console.log(`${created ? "created" : "kept   "} ${path}`);
+			return 0;
+		}
 		case "help":
 		case "--help":
 		case "-h":
@@ -182,7 +190,7 @@ async function doctor(): Promise<number> {
 		return `${p.config}/config.json${config.daemonHost ? `, daemon on ${config.daemonHost}` : ""}`;
 	});
 	check("identity", () => {
-		if (config!.soulFile === undefined) throw new Error(`no SOUL.org in ${p.data}`);
+		if (config!.soulFile === undefined) throw new Error(`no SOUL.org in ${p.data}; june init creates it from the templates`);
 		accessSync(config!.soulFile, constants.R_OK);
 		const memory = existsSync(config!.memoryFile!) ? config!.memoryFile : `${config!.memoryFile} (not yet created)`;
 		return `${config!.soulFile}; memory ${memory}; instructions ${config!.instructionsFile ?? "none"}`;

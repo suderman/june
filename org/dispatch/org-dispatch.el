@@ -470,9 +470,9 @@ with NOTE, moving the Sessions links into it, then trim the log."
                 (branch (plist-get task :branch)))
             (if (or (org-dispatch--git-p (plist-get task :dir)) (plist-get task :repos))
                 (if branch
-                    (format "- Commit %s and push it to the branch =%s=, not the default branch."
+                    (format "- Commit %s and push it to the branch =%s=, not the default branch, unless the task itself says not to."
                             where branch)
-                  (format "- Commit %s and push it to the current branch." where))
+                  (format "- Commit %s and push it to the current branch, unless the task itself says not to." where))
               "- No repository belongs to this task; there is nothing to commit."))
           (if (plist-get task :deploy)
               "- Deploying is allowed when the task calls for it."

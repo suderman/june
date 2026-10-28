@@ -42,6 +42,8 @@ This repository holds code only. June keeps her files in three XDG directories, 
 
 Configuration has two sources. The NixOS module owns machine plumbing: the package, the service, persisted directories, secrets, and two environment variables, =JUNE_DAEMON_HOST= (the machine that runs June) and =TELEGRAM_ALLOWED_USERS= (comma-separated ids; Telegram is off without it). =~/.agents= owns the presets that change more often, =config.json= and =AGENTS.md=, which =agents apply= copies into the config directory as it does for Pi; June does not read =~/.agents= herself. A =config.json= that still sets =daemonHost= or =telegram= is refused. The data directory is canonical even when its files live elsewhere: Jon's module makes =~/.local/share/june= a link to the synced folder that holds them. June has no identity until =SOUL.org= exists, and creates =MEMORY.org= and =JOURNAL.org= beside it when she first writes to them. Skill directories are configuration too (=skillDirs=); none are built in.
 
+=templates/= holds sanitized starting points: =SOUL.org= (June's character), =MEMORY.org= and =HEARTBEAT.org= (the shape and guidance, with placeholders where a family, home, and routine go), and an example =config.json=. They name nobody: ={{name}}= stands for the user, with they and them. =june init [NAME]= copies whichever are missing into the data and config directories with the name filled in, using =user.name= from =config.json= when no name is given, and never touches an existing file; =june doctor= points to it when =SOUL.org= is missing. The name is written into the files rather than substituted on each read, because June edits =MEMORY.org= and =HEARTBEAT.org= by quoting their text. Tests load the example config, so it stays valid as settings change, and check that the templates and June's own prompt text name nobody. Jon's real =config.json= and =AGENTS.md= live in his public agents repository, so they are not copied here. When tuning June's voice or behaviour in the personal files, carry anything that is not about Jon's life back into the templates.
+
 Runtime files stay on the daemon host and are never synced:
 
 | What                 | Where                                |
@@ -58,6 +60,7 @@ Keys of =config.json=, with the defaults that apply when it leaves them out:
 
 #+begin_src json
 {
+  "user": { "name": null },
   "model": {
     "chat": { "provider": "(required)", "modelId": "(required)", "thinkingLevel": "medium" },
     "focus": null,
@@ -78,6 +81,7 @@ Keys of =config.json=, with the defaults that apply when it leaves them out:
 }
 #+end_src
 
+- =user.name= is the person June serves. Her prompts and tools use it; without it she says "the user". The code itself names nobody.
 - =model.chat= is June's everyday model and where every conversation starts. Its =provider= names a provider in =providersFile=, Pi's own =models.json=, whose =apiKey= must be a =$VARIABLE=.
 - =model.focus= is the model June uses when she focuses, such as ={"modelId": "gpt-6.1-sol"}=; =provider= and =thinkingLevel= default to chat's. Without it she has no =focus= tool.
 - =model.patter= is the cheap model that keeps the user company during long waits, such as ={"modelId": "gpt-6-luna"}=; =provider= comes from chat and =thinkingLevel= defaults to =medium=, which keeps its planning out of the line at no cost in speed. Without it there is no patter.

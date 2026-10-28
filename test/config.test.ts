@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadConfig } from "../src/config.ts";
-import { tempDir } from "./helpers.ts";
+import { loadConfig, paths } from "../src/config.ts";
+import { init } from "../src/init.ts";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import { ask, openTestDaemon, tempDir } from "./helpers.ts";
 
 test("config.json and AGENTS.md come from the config directory, SOUL.org and her files from the data directory, and machine settings from the environment", async (t) => {
 	const tmp = await tempDir();
@@ -74,4 +77,58 @@ test("the rhythm, reflection, heartbeat, and patter timing have defaults, take o
 	assert.throws(() => loadConfig({ ...tmp.paths, config: nobody }), /person\.\* entity ids/);
 	const silent = await layer("silent", { patter: { gapsSeconds: [] } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: silent }), /patter\.gapsSeconds/);
+});
+
+test("the templates load: the example config is valid, and the identity files are where June looks for them", () => {
+	const templates = join(import.meta.dirname, "..", "templates");
+	const config = loadConfig({ ...paths({}), config: templates, data: templates }, {});
+	assert.equal(config.heartbeat.enabled, true);
+	assert.equal(config.soulFile, join(templates, "SOUL.org"));
+	assert.equal(config.heartbeatFile, join(templates, "HEARTBEAT.org"));
+	for (const file of ["SOUL.org", "MEMORY.org", "HEARTBEAT.org"]) assert.match(readFileSync(join(templates, file), "utf8"), /^#\+TITLE: /);
+});
+
+test("June's prompts and tools name the configured user, and the code names nobody", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	await writeFile(join(tmp.dir, "SOUL.org"), "* June\n");
+	let request = "";
+	const faux = fauxProvider();
+	faux.setResponses([
+		(ctx) => {
+			request = JSON.stringify(ctx);
+			return fauxAssistantMessage("hi");
+		},
+	]);
+	const daemon = await openTestDaemon({
+		...tmp,
+		faux,
+		config: { user: { name: "Robin" }, soulFile: join(tmp.dir, "SOUL.org"), memoryFile: join(tmp.dir, "MEMORY.org"), journalFile: join(tmp.dir, "JOURNAL.org"), heartbeatFile: join(tmp.dir, "HEARTBEAT.org"), dispatch: { hosts: ["kit"] } },
+	});
+	t.after(() => daemon.close());
+	await ask(tmp.paths.socket, "hello");
+	assert.match(request, /Robin's/, "the name reaches her prompt");
+	assert.doesNotMatch(request, /\$\{\s*[uU]ser\(\)\s*\}/, "no placeholder left uninterpolated");
+	assert.doesNotMatch(request, /\bJon\b/, "nobody's real name in the code's own text");
+	for (const file of ["SOUL.org", "MEMORY.org", "HEARTBEAT.org", "config.json"])
+		assert.doesNotMatch(readFileSync(join(import.meta.dirname, "..", "templates", file), "utf8"), /\bJon\b/, `templates/${file} names nobody`);
+});
+
+test("june init creates missing personal files from the templates with the name filled in, and keeps existing ones", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const dirs = { config: join(tmp.dir, "config"), data: join(tmp.dir, "data") };
+	await mkdir(dirs.data);
+	await writeFile(join(dirs.data, "MEMORY.org"), "mine\n");
+	const results = init(dirs, "Robin");
+	assert.deepEqual(
+		results.map((r) => [r.path.slice(tmp.dir.length + 1), r.created]),
+		[["data/SOUL.org", true], ["data/MEMORY.org", false], ["data/HEARTBEAT.org", true], ["config/config.json", true]],
+	);
+	const soul = readFileSync(join(dirs.data, "SOUL.org"), "utf8");
+	assert.match(soul, /^You are June, Robin's personal assistant/m);
+	assert.doesNotMatch(soul, /\{\{name\}\}/, "every placeholder filled");
+	assert.equal(readFileSync(join(dirs.data, "MEMORY.org"), "utf8"), "mine\n", "an existing file is never touched");
+	assert.equal(JSON.parse(readFileSync(join(dirs.config, "config.json"), "utf8")).user.name, "Robin");
+	assert.throws(() => init(dirs, " "), /a name is needed/);
 });

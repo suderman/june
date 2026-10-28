@@ -14,6 +14,7 @@ export type Faux = ReturnType<typeof fauxProvider>;
 
 export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 	return {
+		user: { name: "Alex" },
 		model: { chat: { provider: "faux", modelId: "faux-1", thinkingLevel: "off" } },
 		providersFile: "/nonexistent",
 		envFiles: [],

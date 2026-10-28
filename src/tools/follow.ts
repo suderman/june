@@ -4,6 +4,7 @@ import { defineDoc, defineTask, type Tx } from "@earendil-works/pi-durable";
 import { deliverIn, type Notice, noticeSurface, submitNotice, type Surface } from "../notify.ts";
 import type { Herdr } from "./herdr.ts";
 import type { Org } from "./org.ts";
+import { User, user } from "../user.ts";
 
 export type FollowInput = { id: string; title: string; host: string; queuedAt: number; request?: string };
 type FollowState = { phase: "watch"; due: number; checks: number; last: string };
@@ -50,7 +51,7 @@ export function decide(input: FollowInput, seen: Observation, last: string, now:
 			return {
 				signal: seen.state,
 				done: true,
-				say: `${Name} is now ${seen.state}. Read it with org_read_task, including its outcome and verification evidence.${seen.state === "EVAL" ? " If you created it, the request is satisfied, and no decision or review from Jon remains, use org_complete_task to mark it DONE before reporting. Otherwise leave EVAL and explain what needs Jon's review." : ""} Tell the user what came of it in a line or two.`,
+				say: `${Name} is now ${seen.state}. Read it with org_read_task, including its outcome and verification evidence.${seen.state === "EVAL" ? ` If you created it, the request is satisfied, and no decision or review from ${user()} remains, use org_complete_task to mark it DONE before reporting. Otherwise leave EVAL and explain what needs ${user()}'s review.` : ""} Tell ${user()} what came of it in a line or two.`,
 			};
 		case "HOLD":
 			return { signal: "HOLD", done: false, say: `${Name} is on HOLD. Read its Dialog with org_read_task and pass the agent's question to the user.` };

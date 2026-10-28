@@ -1,0 +1,24 @@
+#+TITLE: June's memory
+
+What's true about {{name}}'s life that June must never get wrong: who they are, their household and people, their routine, and where things live, plus the corrections and lessons that shape how she works with them. Lasting facts only; what happened on a given day goes in the journal. {{name}}'s Org records stay authoritative for tasks, schedules, and project details. Keep it to a page or two.
+
+* {{name}}
+- Full name, and birthday.
+- Where they live: city and province or state. Name the time zone's city too when it differs from their own, so June never mistakes one for the other.
+- What they do and where, and the names of their machines.
+- Preferences June must always honour, such as Org markup wherever Markdown isn't required.
+
+* Household
+- Each person at home: name and nicknames, relationship, and a line on who they are (school, work, a trait worth knowing), with birthdays.
+- Pets.
+- Anything about the home that changes how June helps, such as a business run from the house and what it means on the days it runs.
+
+* Rhythm
+- The regular commitments of their week: activities, church, sport, and who they are for.
+
+* Where things live
+- The Org files that hold each part of life, so June looks things up instead of guessing.
+- The calendars June reads, and what each one covers.
+
+* Knowing {{name}}
+- Dated corrections and lessons about how to work with them: what happened, what changed in June's understanding, and what she does differently now.

@@ -6,6 +6,7 @@ import { defineExtension, defineTool, type Extension, section } from "@earendil-
 import { type Config, type Paths, type PromptFiles, promptFiles } from "./config.ts";
 import { recentDayEnds } from "./journal.ts";
 import { DEFAULT_BASH_TIMEOUT } from "./tools/coding.ts";
+import { User, user } from "./user.ts";
 
 // Harness mechanics only. The user's conventions (Org, Herdr, task states) come from AGENTS.md in the config directory.
 const harness = (host: string) => `How this harness works:
@@ -84,16 +85,16 @@ async function personalSection(files: PromptFiles, memory: () => Promise<string>
 	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY|JOURNAL|HEARTBEAT)\.sync-conflict-.*\.org$/.test(name)).sort();
 	return [
 		`Your own files, which you keep with read and edit: ${files.soulFile} (identity, shown first in this prompt) and ${files.memoryFile} (below). Changes apply from your next turn.`,
-		`${basename(files.memoryFile)} is the page of what is true about Jon's life that you must never get wrong: who he is and where he lives, his household and people, what he does, his routine, where his records live, and the corrections that shape how you work with him. When he tells you a lasting fact or corrects one, update it with edit in the same turn, in its own section; keep it to a page or two, replacing what changed. What happened on a given day goes in the journal instead. A nightly reflection also tidies the day's journal and carries lasting facts here.`,
+		`${basename(files.memoryFile)} is the page of what is true about ${user()}'s life that you must never get wrong: who they are and where they live, their household and people, what they do, their routine, where their records live, and the corrections that shape how you work with them. When they tell you a lasting fact or corrects one, update it with edit in the same turn, in its own section; keep it to a page or two, replacing what changed. What happened on a given day goes in the journal instead. A nightly reflection also tidies the day's journal and carries lasting facts here.`,
 		...(files.journalFile
 			? [
-					`Your journal, ${files.journalFile}, is an Org date tree you write with the journal tool: "* YYYY", "** YYYY-MM Month", "*** YYYY-MM-DD Weekday", then entries. When you need your past with Jon, search it yourself, a quick check rather than a brief, instead of reading it whole: find a day by its heading (rg -n '^\\*\\*\\* YYYY-MM-DD') and read from that line, or search words with context (rg -i -C3). Each night's reflection ends a day with a "**** Day's end" entry, its summary of the day, so to skim further back than the days below, list a month's days and summaries (rg -n -A1 "^\\*\\*\\* YYYY-MM|^\\*\\*\\*\\* Day's end") and then read the days that matter in full. When something Jon says seems to connect to an earlier day, look before answering rather than guessing.`,
+					`Your journal, ${files.journalFile}, is an Org date tree you write with the journal tool: "* YYYY", "** YYYY-MM Month", "*** YYYY-MM-DD Weekday", then entries. When you need your past with ${user()}, search it yourself, a quick check rather than a brief, instead of reading it whole: find a day by its heading (rg -n '^\\*\\*\\* YYYY-MM-DD') and read from that line, or search words with context (rg -i -C3). Each night's reflection ends a day with a "**** Day's end" entry, its summary of the day, so to skim further back than the days below, list a month's days and summaries (rg -n -A1 "^\\*\\*\\* YYYY-MM|^\\*\\*\\*\\* Day's end") and then read the days that matter in full. When something ${user()} says seems to connect to an earlier day, look before answering rather than guessing.`,
 					...dayEnds(await journal(), recentDays),
 				]
 			: []),
 		...(files.heartbeatFile
 			? [
-					`${files.heartbeatFile} holds Jon's standing instructions for your heartbeat: what is worth a nudge between conversations and what is not, in his words. When he tells you to watch for something, or to stop nudging him about something, update it with edit in the same turn.`,
+					`${files.heartbeatFile} holds ${user()}'s standing instructions for your heartbeat: what is worth a nudge between conversations and what is not, in their words. When they tell you to watch for something, or to stop nudging them about something, update it with edit in the same turn.`,
 				]
 			: []),
 		...(conflicts.length > 0 ? [`Syncthing conflict copies in ${dir}: ${conflicts.join(", ")}. Tell the user and leave both copies until they decide.`] : []),

@@ -11,6 +11,8 @@ export type HerdrHost = { readonly ssh?: string };
 export type ModelChoice = { readonly provider: string; readonly modelId: string; readonly thinkingLevel: string };
 
 export type Config = {
+	/** The person June serves; her prompts use the name. Without one she says "the user". */
+	readonly user: { readonly name?: string };
 	/** June's three modes. Focus and patter take the provider they leave out from chat. */
 	readonly model: {
 		/** Everyday conversation, and where every conversation starts. */
@@ -28,9 +30,9 @@ export type Config = {
 	/** SOUL.org from the data directory when it exists, MEMORY.org and JOURNAL.org beside it (maybe not yet made). */
 	readonly soulFile: string | undefined;
 	readonly memoryFile: string | undefined;
-	/** JOURNAL.org beside SOUL.org: June's dated record of Jon and their days together. */
+	/** JOURNAL.org beside SOUL.org: June's dated record of the user and their days together. */
 	readonly journalFile: string | undefined;
-	/** HEARTBEAT.org beside SOUL.org: what June watches for between conversations, in Jon's words. */
+	/** HEARTBEAT.org beside SOUL.org: what June watches for between conversations, in the user's words. */
 	readonly heartbeatFile: string | undefined;
 	/** AGENTS.md from the config directory, when it exists. */
 	readonly instructionsFile: string | undefined;
@@ -50,23 +52,23 @@ export type Config = {
 	};
 	readonly telegram?: { readonly tokenEnv: string; readonly allowedUserIds: readonly number[] };
 	/**
-	 * Jon's day, in local "HH:MM": heartbeats run from `wake` until `quiet`, when he no longer wants to be bothered even
+	 * The user's day, in local "HH:MM": heartbeats run from `wake` until `quiet`, when they no longer want to be bothered even
 	 * if he is up, and the nightly reflection runs from `sleep`, when he is surely asleep, until `wake`.
 	 */
 	readonly rhythm: { readonly wake: string; readonly quiet: string; readonly sleep: string };
 	/** The nightly pass over the day's journal and memory, in the rhythm's sleep hours. */
 	readonly reflection: {
 		readonly enabled: boolean;
-		/** Minutes Jon must have been quiet before it runs; until then it waits, up to `rhythm.wake`. */
+		/** Minutes the user must have been quiet before it runs; until then it waits, up to `rhythm.wake`. */
 		readonly quietMinutes: number;
 		/** How many recent days' "Day's end" entries June sees in her prompt; 0 shows none. */
 		readonly recentDays: number;
 	};
-	/** June's periodic private look at the moment, which she may turn into a message to Jon, or not. */
+	/** June's periodic private look at the moment, which she may turn into a message to the user, or not. */
 	readonly heartbeat: {
 		readonly enabled: boolean;
 		readonly everyMinutes: number;
-		/** Jon wrote this recently: he is chatting, so raising something is just her next line. */
+		/** The user wrote this recently: they are chatting, so raising something is just her next line. */
 		readonly chattingMinutes: number;
 	};
 	/** The "now" prompt section: calendars read for today and tomorrow, and Home Assistant people (with HASS_URL and HASS_TOKEN). */
@@ -160,6 +162,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 	const herdr = { ...DEFAULTS.herdr, ...raw.herdr };
 	const org = { ...DEFAULTS.org, ...raw.org };
 	return {
+		user: raw.user?.name ? { name: String(raw.user.name) } : {},
 		model: withModes(raw.model),
 		providersFile: expandHome(raw.providersFile ?? DEFAULTS.providersFile),
 		envFiles: (raw.envFiles ?? DEFAULTS.envFiles).map(expandHome),

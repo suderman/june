@@ -31,6 +31,7 @@ import { type Config, expandHome, type Paths } from "./config.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { createHeartbeat } from "./heartbeat.ts";
 import { createSituation } from "./situation.ts";
+import { setUser } from "./user.ts";
 import { createMemoryExtension } from "./memory.ts";
 import { ChatInfo, ChatMap } from "./notify.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
@@ -73,6 +74,7 @@ export type Daemon = {
 
 export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 	const { config, paths } = options;
+	setUser(config.user.name);
 	const log = options.log ?? createLogger();
 	for (const dir of [paths.state, paths.runtime]) mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const lock = acquireDataDirLock(paths.state);

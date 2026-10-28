@@ -13,7 +13,7 @@ import { createPromptExtension } from "../src/prompt.ts";
 import { dayFor } from "../src/reflect.ts";
 import { ask, fakeTelegram, openTestDaemon, tempDir, testConfig, until, type Faux } from "./helpers.ts";
 
-const lesson = "#+TITLE: Memory\n\n* 2026-10-26 Trust and judgment\nJon said: judge when to act directly, rather than force delegation by missing tools.\n\nI had mistaken delegation for a universal rule. Use available tools for bounded checks, delegate sustained work, and keep approval rules. Source: conversation 1.\n";
+const lesson = "#+TITLE: Memory\n\n* 2026-10-26 Trust and judgment\nAlex said: judge when to act directly, rather than force delegation by missing tools.\n\nI had mistaken delegation for a universal rule. Use available tools for bounded checks, delegate sustained work, and keep approval rules. Source: conversation 1.\n";
 const response = (memory: string | null = lesson, summary = "Old conversation summarized.") => fauxAssistantMessage(JSON.stringify({ summary, memory }));
 const effectivePrompt = (ctx: TranscriptContext) => JSON.stringify(Object.assign({}, ...ctx.messages.filter((m) => m.role === "system").map((m) => m.sections)));
 
@@ -352,7 +352,7 @@ test("Telegram's manual compact uses the same memory hook without a separate rev
 	} }, BG)).wait(BG);
 	const compact = async (id: number) => daemon.telegram!.handleUpdate({ update_id: id, message: {
 		message_id: id, date: Math.floor(Date.now() / 1000),
-		chat: { id: 42, type: "private", first_name: "Jon" }, from: { id: 42, is_bot: false, first_name: "Jon" }, text: "/compact",
+		chat: { id: 42, type: "private", first_name: "Alex" }, from: { id: 42, is_bot: false, first_name: "Alex" }, text: "/compact",
 	} });
 	await append("Old formative interaction. ".repeat(300));
 	await append("Recent working context. ".repeat(300));
@@ -391,7 +391,7 @@ test("overflow recovery also preserves memory before retrying the request", asyn
 
 test("compaction keeps topic threads and journals what the journal lacks, once", async (t) => {
 	const env = await fixture(t);
-	const entry = { date: "2026-10-26", title: "Rough morning", text: "Jon had a rough morning with the kids and wanted to vent, not fix it." };
+	const entry = { date: "2026-10-26", title: "Rough morning", text: "Alex had a rough morning with the kids and wanted to vent, not fix it." };
 	const faux = fauxProvider();
 	faux.setResponses([
 		(ctx) => {
@@ -410,7 +410,7 @@ test("compaction keeps topic threads and journals what the journal lacks, once",
 	await seed(f);
 	await f.compact();
 	const written = await readFile(env.journal, "utf8");
-	assert.match(written, /^\* 2026\n\*\* 2026-10 October\n\*\*\* 2026-10-26 Monday\n\*\*\*\* Rough morning\nJon had a rough morning/m);
+	assert.match(written, /^\* 2026\n\*\* 2026-10 October\n\*\*\* 2026-10-26 Monday\n\*\*\*\* Rough morning\nAlex had a rough morning/m);
 	await seed(f);
 	await f.compact();
 	assert.equal(faux.state.callCount, 2, "both compactions reviewed");
@@ -424,7 +424,7 @@ test("June's prompt carries the last few days' endings and says where to look fu
 	const journal = join(tmp.dir, "JOURNAL.org");
 	await writeFile(soul, "* June\nBe observant.\n");
 	const day = (date: string, end?: string) => `*** ${date}\n**** 09:00 Morning\nCoffee on ${date}.\n${end ? `\n**** Day's end\n${end}\n` : ""}`;
-	await writeFile(journal, `#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${day("2026-10-24 Saturday", "Lucy's birthday.")}\n${day("2026-10-25 Sunday", "Church and a nap.")}\n${day("2026-10-26 Monday")}\n${day("2026-10-27 Tuesday", "Meeting the boys.\n\nThe site check is still open.")}`);
+	await writeFile(journal, `#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${day("2026-10-24 Saturday", "Biscuit's birthday.")}\n${day("2026-10-25 Sunday", "Church and a nap.")}\n${day("2026-10-26 Monday")}\n${day("2026-10-27 Tuesday", "Meeting the boys.\n\nThe site check is still open.")}`);
 	let prompt = "";
 	const faux = fauxProvider();
 	faux.setResponses([(ctx) => {
@@ -436,7 +436,7 @@ test("June's prompt carries the last few days' endings and says where to look fu
 	t.after(() => daemon.close());
 	await (await daemon.root.submit({ type: "input", content: "hello", requestId: "r1" }, BG)).wait(BG);
 	assert.match(prompt, /Your recent days, from each night's reflection:\n- 2026-10-25 Sunday: Church and a nap\.\n- 2026-10-27 Tuesday: Meeting the boys\. The site check is still open\./);
-	assert.doesNotMatch(prompt, /Lucy's birthday/, "only the last two endings");
+	assert.doesNotMatch(prompt, /Biscuit's birthday/, "only the last two endings");
 	assert.doesNotMatch(prompt, /Coffee on/, "and never the entries themselves");
 	assert.ok(prompt.includes(`rg -n -A1 "^\\*\\*\\* YYYY-MM|^\\*\\*\\*\\* Day's end"`), "with a way to skim a month");
 });
@@ -451,7 +451,7 @@ test("June writes her journal with a tool, under today's date", async (t) => {
 	faux.setResponses([
 		(ctx) => {
 			assert.match(effectivePrompt(ctx), /Your journal, .*JOURNAL\.org/);
-			return fauxAssistantMessage([fauxToolCall("journal", { title: "Kids", text: "Jon vented about the school run.\nI listened." })], { stopReason: "toolUse" });
+			return fauxAssistantMessage([fauxToolCall("journal", { title: "Kids", text: "Alex vented about the school run.\nI listened." })], { stopReason: "toolUse" });
 		},
 		fauxAssistantMessage("that sounds rough"),
 	]);
@@ -460,7 +460,7 @@ test("June writes her journal with a tool, under today's date", async (t) => {
 	await (await daemon.root.submit({ type: "input", content: "ugh, the school run", requestId: "r1" }, BG)).wait(BG);
 	const today = new Date();
 	const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-	assert.match(await readFile(journal, "utf8"), new RegExp(`\\*\\*\\* ${date} \\w+\\n\\*\\*\\*\\* \\d\\d:\\d\\d Kids\\nJon vented about the school run\\. I listened\\.\\n?$`));
+	assert.match(await readFile(journal, "utf8"), new RegExp(`\\*\\*\\* ${date} \\w+\\n\\*\\*\\*\\* \\d\\d:\\d\\d Kids\\nAlex vented about the school run\\. I listened\\.\\n?$`));
 });
 
 test("the reflection window looks back on the day before it opened", () => {
@@ -480,12 +480,12 @@ test("the nightly reflection rewrites the day, carries a lasting fact into memor
 	const memory = join(tmp.dir, "MEMORY.org");
 	const journal = join(tmp.dir, "JOURNAL.org");
 	await writeFile(soul, "* June\nBe observant.\n");
-	await writeFile(memory, "#+TITLE: June's memory\n\n* Household\n- Lucy: the family's dog.\n");
-	const day = "*** 2026-10-27 Tuesday\n**** 18:04 Meeting Lucy\nJon shared a photo of Lucy.\n\n**** 20:42 Lucy's birthday breakfast\nLucy had a sausage for her fifth birthday.";
+	await writeFile(memory, "#+TITLE: June's memory\n\n* Household\n- Biscuit: the family's dog.\n");
+	const day = "*** 2026-10-27 Tuesday\n**** 18:04 Meeting Biscuit\nAlex shared a photo of Biscuit.\n\n**** 20:42 Biscuit's birthday breakfast\nLucy had a sausage for her fifth birthday.";
 	const after = "*** 2026-10-28 Wednesday\n**** 09:00 Morning\nCoffee.";
 	await writeFile(journal, `#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${day}\n\n${after}\n`);
-	const revised = "*** 2026-10-27 Tuesday\n**** 18:04 Lucy turns five\nJon shared a photo of Lucy, who turned five on Saturday, and she had a greasy sausage for breakfast.\n\n**** Day's end\nA warm family evening.";
-	const remembered = "#+TITLE: June's memory\n\n* Household\n- Lucy: the family's golden dog. Turned five on 2026-10-24.\n";
+	const revised = "*** 2026-10-27 Tuesday\n**** 18:04 Biscuit turns five\nAlex shared a photo of Biscuit, who turned five on Saturday, and she had a greasy sausage for breakfast.\n\n**** Day's end\nA warm family evening.";
+	const remembered = "#+TITLE: June's memory\n\n* Household\n- Biscuit: the family's golden dog. Turned five on 2026-10-24.\n";
 	let asked: TranscriptContext | undefined;
 	const faux = fauxProvider();
 	faux.setResponses([(ctx) => {
@@ -500,7 +500,7 @@ test("the nightly reflection rewrites the day, carries a lasting fact into memor
 	});
 	t.after(() => daemon.close());
 	await until(() => existsSync(join(tmp.paths.state, "reflection.json")));
-	assert.match(JSON.stringify(asked!.messages.at(-1)), /Meeting Lucy/, "it reads the day being reflected on");
+	assert.match(JSON.stringify(asked!.messages.at(-1)), /Meeting Biscuit/, "it reads the day being reflected on");
 	assert.doesNotMatch(JSON.stringify(asked!.messages.at(-1)), /Coffee/, "and not the next day");
 	assert.equal(readFileSync(journal, "utf8"), `#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${revised}\n\n${after}\n`);
 	assert.equal(readFileSync(memory, "utf8"), remembered);
@@ -510,7 +510,7 @@ test("the nightly reflection rewrites the day, carries a lasting fact into memor
 	assert.equal(faux.state.callCount, 1, "one pass a night");
 });
 
-test("the nightly reflection waits while Jon is still talking, and refuses a day that lost its heading", async (t) => {
+test("the nightly reflection waits while Alex is still talking, and refuses a day that lost its heading", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const soul = join(tmp.dir, "SOUL.org");
@@ -523,10 +523,10 @@ test("the nightly reflection waits while Jon is still talking, and refuses a day
 	const reflection = { enabled: true, quietMinutes: 60, recentDays: 3 };
 	const rhythm = { wake: hhmm(clock + 3 * 3_600_000), quiet: "22:00", sleep: hhmm(clock - 60_000) };
 	const date = dayFor(at(), { start: rhythm.sleep, end: rhythm.wake })!;
-	const text = `#+TITLE: June's journal\n\n* ${date.slice(0, 4)}\n** ${date.slice(0, 7)}\n*** ${date}\n**** 18:04 Meeting Lucy\nJon shared a photo of Lucy.\n`;
+	const text = `#+TITLE: June's journal\n\n* ${date.slice(0, 4)}\n** ${date.slice(0, 7)}\n*** ${date}\n**** 18:04 Meeting Biscuit\nAlex shared a photo of Biscuit.\n`;
 	await writeFile(journal, text);
 	const faux = fauxProvider();
-	faux.setResponses([fauxAssistantMessage("hi"), fauxAssistantMessage(JSON.stringify({ day: "**** Lucy\nNo heading.", memory: null }))]);
+	faux.setResponses([fauxAssistantMessage("hi"), fauxAssistantMessage(JSON.stringify({ day: "**** Biscuit\nNo heading.", memory: null }))]);
 	const daemon = await openTestDaemon({
 		...tmp,
 		faux,
@@ -536,7 +536,7 @@ test("the nightly reflection waits while Jon is still talking, and refuses a day
 	t.after(() => daemon.close());
 	await ask(tmp.paths.socket, "still up");
 	await new Promise((r) => setTimeout(r, 300));
-	assert.equal(faux.state.callCount, 1, "no reflection while Jon has spoken in the last hour");
+	assert.equal(faux.state.callCount, 1, "no reflection while Alex has spoken in the last hour");
 	clock += 61 * 60_000;
 	await until(() => faux.state.callCount === 2);
 	await new Promise((r) => setTimeout(r, 100));

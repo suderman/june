@@ -61,7 +61,7 @@ test("a slow command gets patter in the transcript, never in a model context, an
 	assert.ok(lines.length >= 2, `patter spoke during the wait: ${JSON.stringify(lines)}`);
 	assert.equal(lines[0], "patter line 1");
 	assert.match(patter.heard[0]!.update, /just starting/, "the first line is the opener");
-	assert.match(patter.heard[0]!.update, /Jon just said: build it/);
+	assert.match(patter.heard[0]!.update, /Alex just said: build it/);
 	assert.match(patter.heard[0]!.system, new RegExp(`It is now [^\\n]*${new Date().getFullYear()}`), "patter knows the date");
 	assert.match(patter.heard.at(-1)!.all, /sleep 1\.5/, "patter sees the real activity");
 	assert.deepEqual(patter.heard.at(-1)!.said, lines.slice(0, -1), "and its own earlier lines, as its own turns");
@@ -104,11 +104,11 @@ test("a work brief starts patter at once with the brief, and patter failures cha
 	const lines = (await daemon.root.context(BG)).entries.filter((e) => e.kind === "june.patter").map((e) => (e.data as { text: string }).text);
 	assert.deepEqual(lines, ["Right, sleeves up."], "the opener came at once and the failed lines were dropped");
 	assert.match(patter.heard[0]!.update, /June handed this to her working self: Check the wombat census\./);
-	assert.match(patter.heard[0]!.update, /Jon just said: check the census/);
+	assert.match(patter.heard[0]!.update, /Alex just said: check the census/);
 	assert.ok(patter.heard.length >= 2, "patter kept trying after a failure");
 });
 
-test("Jon breaks in during background work: patter pauses, June hears it, and patter picks the bit back up", async (t) => {
+test("Alex breaks in during background work: patter pauses, June hears it, and patter picks the bit back up", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const patter = patterModel();
@@ -118,7 +118,7 @@ test("Jon breaks in during background work: patter pauses, June hears it, and pa
 			call("work", { brief: "Sort the sock drawer." }),
 			fauxAssistantMessage("on it"),
 			(ctx) => {
-				assert.match(sections(ctx), /your patter .* said to the user:\n- patter line 1/s, "June hears what patter said before Jon broke in");
+				assert.match(sections(ctx), /your patter .* said to the user:\n- patter line 1/s, "June hears what patter said before Alex broke in");
 				return fauxAssistantMessage("ha, yes");
 			},
 			fauxAssistantMessage("Socks sorted."),
@@ -130,8 +130,8 @@ test("Jon breaks in during background work: patter pauses, June hears it, and pa
 	assert.equal((await ask(tmp.paths.socket, "sort my socks")).text, "on it");
 	await until(() => patter.heard.length >= 1);
 	assert.equal((await ask(tmp.paths.socket, "this is taking a while huh")).text, "ha, yes");
-	await until(() => patter.heard.some((h) => /Jon broke in to talk with June/.test(h.update)));
-	const resumed = patter.heard.find((h) => /Jon broke in/.test(h.update))!;
+	await until(() => patter.heard.some((h) => /Alex broke in to talk with June/.test(h.update)));
+	const resumed = patter.heard.find((h) => /Alex broke in/.test(h.update))!;
 	assert.ok(resumed.said.includes("patter line 1"), "the resumed wait carries on its earlier lines");
 	await until(async () => JSON.stringify((await daemon.root.context(BG)).messages).includes("Socks sorted."));
 });
@@ -187,8 +187,8 @@ test("patter hears the recent conversation and new steps, but no results", async
 	assert.equal((await ask(tmp.paths.socket, "count the wombats")).text, "The wombats are counted.");
 	assert.equal((await ask(tmp.paths.socket, "now the slow part")).text, "Both done.");
 	const opener = patter.heard[0]!.update;
-	assert.match(opener, /Recent conversation:\nJon: count the wombats\nJune: The wombats are counted\./);
-	assert.match(opener, /Jon just said: now the slow part/);
+	assert.match(opener, /Recent conversation:\nAlex: count the wombats\nJune: The wombats are counted\./);
+	assert.match(opener, /Alex just said: now the slow part/);
 	assert.doesNotMatch(patter.heard.map((h) => h.all).join("\n"), /\b(42|56)\b/, "results stay out");
 	const later = patter.heard.find((h) => /New since your last line:\n- bash command=sleep 0\.6; echo \$\(\(8\*9\)\)/.test(h.update));
 	assert.ok(later, `a later update names only the new step: ${JSON.stringify(patter.heard.map((h) => h.update))}`);
@@ -213,7 +213,7 @@ test("June relaying a report gets no patter, however long she takes", async (t) 
 	assert.ok(!kinds.slice(kinds.indexOf("input:work")).includes("june.patter"), `no patter while June relays it: ${kinds.join(", ")}`);
 });
 
-test("while Jon is on Telegram, patter grows one message in his chat; at the terminal it stays there", async (t) => {
+test("while Alex is on Telegram, patter grows one message in his chat; at the terminal it stays there", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const patter = patterModel();
@@ -251,8 +251,8 @@ test("while Jon is on Telegram, patter grows one message in his chat; at the ter
 		message: {
 			message_id: 7,
 			date: Math.floor(Date.now() / 1000),
-			chat: { id: 42, type: "private" as const, first_name: "Jon" },
-			from: { id: 42, is_bot: false, first_name: "Jon" },
+			chat: { id: 42, type: "private" as const, first_name: "Alex" },
+			from: { id: 42, is_bot: false, first_name: "Alex" },
 			text: "count the wombats",
 		},
 	});

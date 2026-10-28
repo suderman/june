@@ -10,7 +10,7 @@
   nodejs = nodejs_22;
   src = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../test];
+    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test];
   };
 in
   buildNpmPackage (finalAttrs: {
@@ -31,7 +31,7 @@ in
       runHook preInstall
       npm prune --omit=dev --no-save
       mkdir -p $out/lib/june $out/bin
-      cp -r package.json src node_modules $out/lib/june/
+      cp -r package.json src templates node_modules $out/lib/june/
       makeWrapper ${nodejs}/bin/node $out/bin/june \
         --add-flags "--disable-warning=ExperimentalWarning $out/lib/june/src/cli.ts" \
         --suffix PATH : ${lib.makeBinPath [ripgrep openssh]}
@@ -53,7 +53,7 @@ in
     };
 
     meta = {
-      description = "June, Jon's personal assistant on Pi Durable";
+      description = "June, a personal assistant on Pi Durable";
       mainProgram = "june";
       platforms = lib.platforms.linux;
     };

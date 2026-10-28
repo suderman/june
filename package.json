@@ -2,7 +2,7 @@
   "name": "june",
   "version": "0.1.0",
   "private": true,
-  "description": "Jon's personal assistant on Pi Durable",
+  "description": "June, a personal assistant on Pi Durable",
   "type": "module",
   "bin": { "june": "bin/june" },
   "engines": { "node": ">=22.19" },

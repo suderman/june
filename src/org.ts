@@ -1,4 +1,4 @@
-// June writes Org in the terminal, where either would do and Jon prefers it; Telegram renders only Markdown. The
+// June writes Org in the terminal, where either would do and the user prefers it; Telegram renders only Markdown. The
 // terminal draws text with a Markdown component, so her Org replies pass through here first. Only Org's own syntax is
 // converted: anything else, Markdown included, is left as written.
 
