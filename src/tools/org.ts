@@ -1,7 +1,7 @@
 // Read-only Org tools. Search runs ripgrep; context comes from heading lines alone. These tools never parse or write
 // Org structure themselves: changes go through org-edit and org-dispatch, which run Org in Emacs.
 import { readdir, readFile, realpath } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import type { Config } from "../config.ts";
@@ -23,6 +23,14 @@ export function parseHeading(text: string, line: number): Heading | undefined {
 		title: match[3]!,
 		tags: match[4] ? match[4].split(":").filter(Boolean) : [],
 	};
+}
+
+/** Every heading's title in an Org text. */
+function headingTitles(text: string): string[] {
+	return text.split("\n").flatMap((line, i) => {
+		const heading = line.startsWith("*") ? parseHeading(line, i + 1) : undefined;
+		return heading === undefined ? [] : [heading.title];
+	});
 }
 
 /** The headings enclosing `line` (1-based), outermost first. */
@@ -114,9 +122,14 @@ export class Org {
 	}
 
 	/** Project records only, not client files, task material, or archives. Preambles include repository mappings. */
+	/**
+	 * Projects whose name, preamble, or task headings (archived ones included) hold a word of `query`, best match first.
+	 * A topic such as "Hyprland" finds the project that has worked on it before, even when its name says otherwise.
+	 */
 	async projects(query = "", limit = 100) {
 		const work = join(this.#root, "work");
-		const results: { file: string; preamble: string }[] = [];
+		const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+		const results: { file: string; preamble: string; headings?: string[]; named: number; hits: number[] }[] = [];
 		const domains = await readdir(work, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
 			if (error.code === "ENOENT") return [];
 			throw error;
@@ -131,11 +144,26 @@ export class Org {
 				if (path === undefined) continue;
 				const content = await readFile(path, "utf8");
 				const preamble = content.split(/^\* /m, 1)[0]!.trim();
-				if (!`${file}\n${preamble}`.toLowerCase().includes(query.toLowerCase())) continue;
-				results.push({ file, preamble });
+				if (words.length === 0) {
+					results.push({ file, preamble, named: 0, hits: [] });
+					continue;
+				}
+				const preambleText = preamble.toLowerCase();
+				const archive = await readFile(join(dirname(path), "archive.org"), "utf8").catch(() => "");
+				const all = [...new Set([...headingTitles(content), ...headingTitles(archive).map((title) => `${title} (archived)`)])];
+				// The project's own name ranks first; a preamble match, such as a repository link, counts as ten headings.
+				const named = words.filter((word) => file.toLowerCase().includes(word)).length;
+				const hits = words.map((word) => (preambleText.includes(word) ? 10 : 0) + all.filter((title) => title.toLowerCase().includes(word)).length);
+				if (named === 0 && hits.every((n) => n === 0)) continue;
+				const titles = all.filter((title) => words.some((word) => title.toLowerCase().includes(word)));
+				results.push({ file, preamble, ...(titles.length > 0 ? { headings: titles.slice(0, 3) } : {}), named, hits });
 			}
 		}
-		return { projects: results.slice(0, limit), total: results.length };
+		// A word few projects share says more than a common one, so each word's hits weigh by its rarity.
+		const spread = words.map((_, i) => Math.max(1, results.filter((r) => r.hits[i]! > 0).length));
+		const score = (r: (typeof results)[number]) => r.hits.reduce((sum, n, i) => sum + n / spread[i]!, 0);
+		results.sort((a, b) => b.named - a.named || score(b) - score(a));
+		return { projects: results.slice(0, limit).map(({ named: _, hits: __, ...project }) => project), total: results.length };
 	}
 
 	/** Matches grouped under their nearest enclosing heading. */
@@ -240,7 +268,7 @@ export function createOrgExtension(config: Config, org = new Org(config.org.root
 		tools: [
 			defineTool({
 				name: "org_projects",
-				description: "Find existing projects under ~/org/work before choosing where to file a task. Returns project paths and preambles, including local and GitHub repository links. Search by project name, repository, or topic; omit query to list projects. Does not scan task material or archives.",
+				description: "Find existing projects under ~/org/work before choosing where to file a task. Returns project paths and preambles, including local and GitHub repository links, best match first. Each word of query is matched against project names, repository links, and task headings, archived ones included, so a topic finds the project that worked on it before; matching headings are listed. Omit query to list projects. Does not scan task bodies or material.",
 				parameters: Type.Object({
 					query: Type.Optional(Type.String()),
 					limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 300, description: "Default 100; total reports whether more match" })),

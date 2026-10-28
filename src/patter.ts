@@ -165,13 +165,16 @@ export function createPatter(options: {
 			const current = wait;
 			current.asking = new AbortController();
 			try {
+				// Where Jon is, read before the line is written, so nothing slow sits between the last check and the send.
+				const phone = options.telegram !== undefined && (await onTelegram()) ? options.telegram : undefined;
 				const line = await speak(current, live ?? {});
 				// The wait may have ended while the line was written; a line after the answer or a stop would be noise.
 				const after = line && wait === current ? await read!() : undefined;
 				if (after !== undefined && after.key === current.key && !answering(after.live)) {
 					current.lines.push(line);
+					// The phone first: its answer arrives as a separate message, so a late send lands below it.
+					if (phone !== undefined) await toPhone(current, line, phone);
 					await root.submit({ type: "write", entry: { kind: PATTER, data: { text: line } } }, BG);
-					if (options.telegram !== undefined && (await onTelegram())) await toPhone(current, line, options.telegram);
 				}
 			} catch (error) {
 				if (!current.asking.signal.aborted) log.warn("patter_failed", { error: (error as Error).message });
@@ -196,12 +199,14 @@ export function createPatter(options: {
 		const toPhone = async (current: Wait, line: string, { port, chatId }: { port: TelegramPort; chatId: number }) => {
 			const lines = [...(current.phone?.lines ?? []), line];
 			const html = (ls: string[]) => ls.map((l) => `🦘 <i>${escapeHtml(l)}</i>`).join("\n\n");
+			const began = Date.now();
 			try {
 				if (current.phone === undefined || html(lines).length > 3500) current.phone = { id: await port.sendMessage(chatId, html([line]), { html: true }), lines: [line] };
 				else {
 					await port.editMessageText(chatId, current.phone.id, html(lines), { html: true });
 					current.phone.lines = lines;
 				}
+				if (Date.now() - began > 2000) log.warn("patter_telegram_slow", { ms: Date.now() - began });
 			} catch (error) {
 				log.warn("patter_telegram_failed", { error: (error as Error).message });
 			}

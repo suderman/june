@@ -61,7 +61,7 @@ test("org search groups matches by heading and skips archives", async (t) => {
 	assert.deepEqual(active.map((t) => t.state), ["PROG", "EVAL"]);
 });
 
-test("project discovery uses preambles and repository links, not task material or archives", async (t) => {
+test("project discovery uses preambles, repository links, and task headings, archived ones too, best match first", async (t) => {
 	const { org, root, cleanup } = await orgFixture();
 	t.after(cleanup);
 	const file = "work/studio/portal/portal.org";
@@ -76,8 +76,21 @@ test("project discovery uses preambles and repository links, not task material o
 	assert.match(all.projects[0]!.preamble, /secondary/);
 	assert.doesNotMatch(all.projects[0]!.preamble, /Fix duplicate/);
 	assert.deepEqual(await org.projects("ELSEWHERE/secondary"), all);
-	assert.deepEqual(await org.projects("webhook"), { projects: [], total: 0 }, "task text is searched with org_search instead");
+	assert.deepEqual((await org.projects("webhook")).projects.map((p) => p.headings), [["Fix duplicate webhook delivery"]], "a topic finds the project by its headings");
+	assert.deepEqual(await org.projects("retries"), { projects: [], total: 0 }, "task text is searched with org_search instead");
 	assert.deepEqual(await org.projects("", 0), { projects: [], total: 1 });
+	await mkdir(join(root, "work/studio/hooks"));
+	await writeFile(join(root, "work/studio/hooks/hooks.org"), "#+TITLE: Hooks\n\n* TODO Tidy\n");
+	await writeFile(join(root, "work/studio/hooks/archive.org"), "* DONE Retry webhook delivery\n* DONE Webhook signatures\n");
+	assert.deepEqual(
+		(await org.projects("webhook")).projects.map((p) => [p.file, p.headings]),
+		[
+			["work/studio/hooks/hooks.org", ["Retry webhook delivery (archived)", "Webhook signatures (archived)"]],
+			[file, ["Fix duplicate webhook delivery"]],
+		],
+		"more history ranks first",
+	);
+	assert.equal((await org.projects("hooks webhook")).projects[0]!.file, "work/studio/hooks/hooks.org", "a name match outranks headings");
 });
 
 test("org read returns the subtree and its Herdr sessions without touching the file", async (t) => {
