@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Batch tests for org-dispatch against fixture Org files. Needs only emacs;
+# nothing here calls Herdr, starts pi, or touches ~/org.
+
+org="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+fixture="$(mktemp -d)"
+trap 'rm -rf -- "$fixture"' EXIT
+
+export HOME="$fixture/home"
+export XDG_STATE_HOME="$fixture/state"
+export ORG_DISPATCH_EMACS_INIT="$fixture/no-init.el"
+export ORG_DISPATCH_ROOT="$fixture/org"
+export ORG_DISPATCH_PROMPTS="$org/prompts"
+export ORG_DISPATCH_HOST=kit
+export ORG_DISPATCH_SETTLE=0
+export ORG_DISPATCH_LOG_KEEP=2
+export PATH="$fixture/bin:$PATH"
+# Some checks load org-dispatch.el directly, without the script that finds NixOS zone data.
+if [[ -z ${TZDIR:-} && ! -d /usr/share/zoneinfo && -d /etc/zoneinfo ]]; then export TZDIR=/etc/zoneinfo; fi
+mkdir -p "$HOME" "$ORG_DISPATCH_ROOT" "$fixture/bin"
+# A failing herdr keeps notifications and pane lookups away from any real server.
+printf '#!/bin/sh\nexit 1\n' >"$fixture/bin/herdr"
+chmod +x "$fixture/bin/herdr"
+
+dispatch="$org/dispatch/org-dispatch"
+failures=0
+
+check() {
+  local name=$1
+  shift
+  if "$@"; then
+    echo "ok   $name"
+  else
+    echo "FAIL $name"
+    failures=$((failures + 1))
+  fi
+}
+
+# Run org-dispatch, keeping only its own output, not Emacs's loading chatter.
+run() { "$dispatch" "$@" 2>&1 | grep -v -e '^Loading' -e 'could not read org-agenda-files' || true; }
+has() { grep -q -- "$2" <<<"$1"; }
+lacks() { ! grep -q -- "$2" <<<"$1"; }
+line() { grep -q -- "$2" "$1"; }
+
+# Scan: which headings this host would launch.
+cat >"$ORG_DISPATCH_ROOT/scan.org" <<'EOF'
+* AUTO Launch me :kit:
+* TODO Jon's own task :kit:
+* AUTO No host
+* AUTO Two hosts :kit:cog:
+* AUTO The other host :cog:
+* AUTO Not yet :kit:
+SCHEDULED: <2999-01-01 Tue 06:00>
+EOF
+# The dispatcher runs one task per directory, so give this file its own.
+mkdir -p "$ORG_DISPATCH_ROOT/other"
+cat >"$ORG_DISPATCH_ROOT/other/filetags.org" <<'EOF'
+#+FILETAGS: :kit:
+* AUTO Host from the file
+EOF
+# Keep only the task lines, not the log lines that name skipped headings.
+scan=$(run scan | grep $'\t' || true)
+check "scan lists an AUTO heading tagged with this host" has "$scan" "Launch me"
+check "scan takes the host from #+FILETAGS" has "$scan" "Host from the file"
+check "scan skips TODO headings" lacks "$scan" "Jon's own task"
+check "scan skips AUTO without a host" lacks "$scan" "No host"
+check "scan skips AUTO tagged for two hosts" lacks "$scan" "Two hosts"
+check "scan skips AUTO for the other host" lacks "$scan" "The other host"
+check "scan skips AUTO scheduled in the future" lacks "$scan" "Not yet"
+rm -r "$ORG_DISPATCH_ROOT/scan.org" "$ORG_DISPATCH_ROOT/other"
+
+# Settling: a typed heading waits; one June wrote whole launches at once.
+mkdir -p "$ORG_DISPATCH_ROOT/typed" "$ORG_DISPATCH_ROOT/june"
+printf '* AUTO Typed by Jon :kit:\n' >"$ORG_DISPATCH_ROOT/typed/typed.org"
+printf '* AUTO Written by June :kit:\n:PROPERTIES:\n:JUNE_REQUEST: test:1\n:END:\n' >"$ORG_DISPATCH_ROOT/june/june.org"
+scan=$(ORG_DISPATCH_SETTLE=600 run scan | grep $'\t' || true)
+check "scan holds a typed heading while it settles" has "$scan" $'Typed by Jon\t.*\tsettling'
+check "scan launches a June heading without settling" has "$scan" $'Written by June\t.*\tnew'
+rm -r "$ORG_DISPATCH_ROOT/typed" "$ORG_DISPATCH_ROOT/june"
+
+# Retry: allowed, refused, and what it leaves behind.
+retry_file="$ORG_DISPATCH_ROOT/retry.org"
+cat >"$retry_file" <<'EOF'
+* PROG Wait for upstream :kit:
+:PROPERTIES:
+:ID:       00000000-0000-0000-0000-000000000001
+:RETRY:    1
+:END:
+
+Body stays.
+
+** Sessions
+
+- [[herdr:kit/pi:aaaa@w1:p1][pi@kit/2026-10-14T0550]]
+
+** Dialog
+
+- Jon [2026-10-13 Tue 22:00]: go
+* PROG No retries granted :kit:
+:PROPERTIES:
+:ID:       00000000-0000-0000-0000-000000000002
+:END:
+* PROG Repeating :kit:
+SCHEDULED: <2026-10-14 Wed 04:30 +1d>
+:PROPERTIES:
+:ID:       00000000-0000-0000-0000-000000000003
+:RETRY:    3
+:END:
+* PROG Date only :kit:
+:PROPERTIES:
+:ID:       00000000-0000-0000-0000-000000000008
+:RETRY:    1
+:END:
+* HOLD Not running :kit:
+:PROPERTIES:
+:ID:       00000000-0000-0000-0000-000000000004
+:RETRY:    3
+:END:
+EOF
+out=$(run retry 00000000-0000-0000-0000-000000000001 "+1d 06:00" "upstream lacks the fix")
+check "retry reports AUTO with no retries left" has "$out" "is now AUTO, scheduled for .* 06:00> with 0 retries left"
+check "retry sets AUTO without padding tags" line "$retry_file" "^\* AUTO Wait for upstream :kit:$"
+check "retry keeps the time of day" line "$retry_file" "^SCHEDULED: <.* 06:00>$"
+check "retry lowers RETRY" line "$retry_file" "^:RETRY: *0$"
+check "retry logs the session link" line "$retry_file" "\[\[herdr:kit/pi:aaaa@w1:p1\].*Retry <"
+check "retry removes Sessions" bash -c "! grep -q '^\*\* Sessions' '$retry_file'"
+check "retry keeps Dialog" line "$retry_file" "^- Jon \[2026-10-13 Tue 22:00\]: go$"
+check "retry keeps the body" line "$retry_file" "^Body stays.$"
+run retry 00000000-0000-0000-0000-000000000008 +3d "no time given" >/dev/null
+check "retry without a time schedules a date only" line "$retry_file" "^SCHEDULED: <[0-9-]* [A-Za-z]*>$"
+check "retry refuses a task that is not PROG" has "$(run retry 00000000-0000-0000-0000-000000000001 +2d note)" "only a running task can retry"
+check "retry refuses without RETRY" has "$(run retry 00000000-0000-0000-0000-000000000002 +1d note)" "Jon allowed no more retries"
+check "retry refuses a repeating task" has "$(run retry 00000000-0000-0000-0000-000000000003 +1d note)" "a repeating task recurs on its own"
+check "retry refuses HOLD" has "$(run retry 00000000-0000-0000-0000-000000000004 +1d note)" "only a running task can retry"
+check "retry refuses a date too soon" has "$(run retry 00000000-0000-0000-0000-000000000004 +0d note)" "less than 15 minutes away"
+check "retry refuses an empty note" has "$(run retry 00000000-0000-0000-0000-000000000004 +1d)" "usage: org-dispatch retry"
+
+# Finish: a repeat returns to AUTO, logs the run, and trims old entries.
+repeat_file="$ORG_DISPATCH_ROOT/repeat.org"
+cat >"$repeat_file" <<'EOF'
+* PROG Daily check :kit:
+SCHEDULED: <2026-10-14 Wed 04:30 +1d>
+:PROPERTIES:
+:ID:       00000000-0000-0000-0000-000000000005
+:REPEAT_TO_STATE: AUTO
+:REVIEW:   no
+:END:
+:LOGBOOK:
+- State "DONE"       from "PROG"       [2026-10-13 Tue 04:31] \\
+  Second run.
+- State "DONE"       from "PROG"       [2026-10-12 Mon 04:31] \\
+  First run.
+:END:
+
+Standing instructions.
+
+** Sessions
+
+- [[herdr:kit/pi:bbbb@w2:p1][pi@kit/2026-10-14T0430]]
+* PROG Reviewed one-off :kit:
+:PROPERTIES:
+:ID:       00000000-0000-0000-0000-000000000006
+:END:
+EOF
+out=$(run finish 00000000-0000-0000-0000-000000000005 DONE "No change.")
+check "finish returns a repeat to AUTO" has "$out" "is now AUTO"
+check "finish advances the repeat without padding tags" line "$repeat_file" "^\* AUTO Daily check :kit:$"
+check "finish advances SCHEDULED" line "$repeat_file" "^SCHEDULED: <2026-10-15 Thu 04:30 +1d>$"
+check "finish logs the run with its session" line "$repeat_file" "\[\[herdr:kit/pi:bbbb@w2:p1\].*No change.$"
+check "finish keeps ORG_DISPATCH_LOG_KEEP entries" bash -c "[[ \$(grep -c '^- State \"DONE\"' '$repeat_file') -eq 2 ]]"
+check "finish archives the oldest entry" line "$ORG_DISPATCH_ROOT/archive.org" "^  First run.$"
+check "the archive names the task" line "$ORG_DISPATCH_ROOT/archive.org" "^:ARCHIVE_ID: 00000000-0000-0000-0000-000000000005$"
+out=$(run finish 00000000-0000-0000-0000-000000000006 DONE "Done.")
+check "finish turns DONE into EVAL when Jon reviews" has "$out" "is now EVAL"
+check "finish refuses HOLD without a question" has "$(run finish 00000000-0000-0000-0000-000000000006 HOLD)" "HOLD needs a question for Jon"
+check "finish refuses AUTO" has "$(run finish 00000000-0000-0000-0000-000000000006 AUTO note)" "STATE must be EVAL, HOLD, or DONE"
+
+# Prompt: the retry rule appears only when Jon allowed a retry.
+render() {
+  local file="$ORG_DISPATCH_ROOT/render.org"
+  printf '* AUTO Render :kit:\n%b:PROPERTIES:\n:ID: 00000000-0000-0000-0000-000000000007\n:RETRY: %s\n:END:\n' "$2" "$1" >"$file"
+  emacs -Q --batch -l "$org/dispatch/org-dispatch.el" --eval "
+    (with-current-buffer (find-file-noselect \"$file\")
+      (goto-char (point-min))
+      (princ (org-dispatch--render \"task\" (org-dispatch--task) '((\"DIALOG\" . \"\")))))" 2>/dev/null
+}
+check "the prompt offers retry when RETRY is set" has "$(render 2 '')" "org-dispatch retry 00000000-0000-0000-0000-000000000007"
+check "the prompt counts the retries left" has "$(render 1 '')" "allowed 1 more retry\."
+check "the prompt omits retry at RETRY 0" lacks "$(render 0 '')" "org-dispatch retry 0000"
+check "the prompt omits retry for a repeat" lacks "$(render 2 'SCHEDULED: <2026-10-15 Thu 04:30 +1d>\n')" "org-dispatch retry 0000"
+check "the prompt fills every placeholder" lacks "$(render 2 '')" "{{"
+
+# Workspaces: a run opens in the workspace named for its Org file, never a shared "auto" one.
+# This fake herdr records its arguments and answers with fixed panes.
+cat >"$fixture/bin/herdr" <<'EOF'
+#!/usr/bin/env bash
+[[ $1 == --session ]] && shift 2
+echo "$*" >>"$FAKE_HERDR_LOG"
+case "$1 $2" in
+  "workspace list") printf '{"result":{"workspaces":%s}}\n' "$FAKE_WORKSPACES" ;;
+  "workspace create") echo '{"result":{"root_pane":{"pane_id":"p-new","tab_id":"t-new"}}}' ;;
+  "tab create") echo '{"result":{"root_pane":{"pane_id":"p-tab","tab_id":"t-tab"}}}' ;;
+  "pane run") touch "$FAKE_HERDR_LOG.started" ;;
+  "agent list")
+    if [[ -e $FAKE_HERDR_LOG.started ]]; then
+      printf '{"result":{"agents":[{"pane_id":"p-live","agent_session":{"agent":"pi","value":"x_%s.jsonl"}}]}}\n' "$FAKE_SESSION"
+    else echo '{"result":{"agents":[]}}'; fi ;;
+  *) echo '{}' ;;
+esac
+EOF
+chmod +x "$fixture/bin/herdr"
+export FAKE_HERDR_LOG="$fixture/herdr.log"
+pane_in() {
+  rm -f "$FAKE_HERDR_LOG" "$FAKE_HERDR_LOG.started"
+  FAKE_WORKSPACES=$1 emacs -Q --batch -l "$org/dispatch/org-dispatch.el" --eval "
+    (princ (alist-get 'pane_id (org-dispatch--project-pane \"/tmp\" \"Fix the thing\" \"june\")))" 2>/dev/null
+  echo
+  cat "$FAKE_HERDR_LOG"
+}
+calls=$(pane_in '[{"label":"[4] auto","workspace_id":"w-auto"},{"label":"[8] june","workspace_id":"w-june"}]')
+check "a run opens as a tab in its project's workspace" has "$calls" "^tab create --workspace w-june --cwd /tmp --label Fix the thing --no-focus$"
+check "a run skips the auto workspace" lacks "$calls" "w-auto"
+check "the tab's pane is returned" has "$calls" "^p-tab$"
+calls=$(pane_in '[{"label":"[4] auto","workspace_id":"w-auto"},{"label":"[5] junebug","workspace_id":"w-bug"}]')
+check "a missing project workspace is created under its name" has "$calls" "^workspace create --cwd /tmp --label june --no-focus$"
+check "only an exact project name matches" lacks "$calls" "w-bug"
+check "the new workspace's tab takes the heading" has "$calls" "^tab rename t-new Fix the thing$"
+
+# herdr-link reopens a dispatched session in the workspace of the Org file that links it.
+export FAKE_SESSION=01234567-89ab-cdef-0123-456789abcdef
+mkdir -p "$HOME/.pi/agent/sessions/x" "$HOME/org/work/suderman/june"
+printf '{"type":"session","cwd":"/tmp"}\n{"type":"session_info","name":"auto · Fix the thing"}\n' \
+  >"$HOME/.pi/agent/sessions/x/2026_$FAKE_SESSION.jsonl"
+printf '* EVAL Fix the thing\n** Sessions\n- [[herdr:kit/pi:%s@w1:p1][pi@kit/2026-10-26T1500]]\n' "$FAKE_SESSION" \
+  >"$HOME/org/work/suderman/june/june.org"
+reopen() {
+  rm -f "$FAKE_HERDR_LOG" "$FAKE_HERDR_LOG.started"
+  FAKE_WORKSPACES=$1 "$org/bin/herdr-link" attach "herdr:$(</proc/sys/kernel/hostname)/pi:$FAKE_SESSION@w1:p1" >/dev/null 2>&1 || true
+  cat "$FAKE_HERDR_LOG"
+}
+calls=$(reopen '[{"label":"[4] auto","workspace_id":"w-auto"},{"label":"[8] June","workspace_id":"w-june"}]')
+check "herdr-link reopens in the linking file's workspace" has "$calls" "^tab create --workspace w-june --cwd /tmp --label Fix the thing --focus$"
+check "herdr-link attaches to the resumed pane" has "$calls" "^agent attach p-live --takeover$"
+calls=$(reopen '[]')
+check "herdr-link creates the project workspace when missing" has "$calls" "^workspace create --cwd /tmp --label june --focus$"
+rm "$HOME/org/work/suderman/june/june.org"
+calls=$(reopen '[{"label":"[8] june","workspace_id":"w-june"}]')
+check "herdr-link without a linking file opens in the current workspace" has "$calls" "^tab create --cwd /tmp --focus$"
+printf '#!/bin/sh\nexit 1\n' >"$fixture/bin/herdr"
+
+# The source byte-compiles without warnings.
+cp "$org/dispatch/org-dispatch.el" "$fixture/org-dispatch.el"
+compile=$(emacs -Q --batch --eval '(setq byte-compile-error-on-warn t)' -f batch-byte-compile "$fixture/org-dispatch.el" 2>&1 | grep -v '^Loading' || true)
+check "org-dispatch.el byte-compiles cleanly" test -z "$compile"
+
+if ((failures)); then
+  echo "$failures failed"
+  exit 1
+fi
+echo "all passed"

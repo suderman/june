@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Let Org make agents' state and date changes.
+#
+#   org-edit todo FILE HEADING STATE [--expect STATE]
+#     June may also pass --request KEY --host HOST --note TEXT when granting AUTO.
+#     Coding workers never grant AUTO; Jon and June may.
+#   org-edit schedule FILE HEADING WHEN|none    set or remove SCHEDULED
+#   org-edit deadline FILE HEADING WHEN|none    set or remove DEADLINE
+#   org-edit date WHEN                          print the active timestamp
+#
+# HEADING is the title without keyword, priority, or tags, an outline path
+# matched from its end (Hockey / Practice), or id:UUID.
+# WHEN is one date (2026-10-30, +3d, fri, today), an optional time or range
+# (14:00, 9:00-10:30), and optional cookies (+1w, .+1d, -2d).
+# The Nix wrapper sets ORG_EDIT_EL and ORG_DISPATCH_EL; from a checkout, use the files here.
+here="$(dirname "$(readlink -f "$0")")"
+: "${ORG_EDIT_EL:=$here/org-edit.el}"
+: "${ORG_DISPATCH_EL:=$here/../dispatch/org-dispatch.el}"
+# org-dispatch.el pins Calgary time; without zone data Emacs silently runs in UTC,
+# so evenings would date tomorrow. NixOS keeps zones in /etc/zoneinfo, not the libc default.
+if [[ -z ${TZDIR:-} && ! -d /usr/share/zoneinfo && -d /etc/zoneinfo ]]; then export TZDIR=/etc/zoneinfo; fi
+batch=(emacs -Q --batch -L "$(dirname "$ORG_DISPATCH_EL")" -l "$ORG_EDIT_EL")
+
+case ${1:-} in
+  todo | schedule | deadline | date)
+    command=$1
+    shift
+    "${batch[@]}" -f "org-edit-$command" "$@" 2> >(grep -v -e '^Loading' -e 'state changed to' -e '^Scheduled to' -e '^Deadline on' -e '^Entry repeats' -e '^Note stored' >&2)
+    ;;
+  *) echo "usage: org-edit todo|schedule|deadline FILE HEADING ARG, or org-edit date WHEN" >&2; exit 2 ;;
+esac

@@ -127,7 +127,11 @@ June honors an explicit destination. Otherwise she uses =org_projects= to find a
 
 When the user explicitly asks to start or resume an existing TODO, EVAL, or HOLD task, June can use =org_resume_task=. It uses the shared =org-edit= command with an expected-state check and a replay key, records the user's instruction in Dialog, selects one host, sets review on and deploy off, and preserves the task ID, scope, history, other properties, and schedule. A missing ID is created. A working or blocked linked agent prevents the change. June starts this host's dispatcher, and a new follow watches this run even if a previous run already reached EVAL. Other hosts use their dispatcher timer; existing SCHEDULED dates still apply.
 
-This needs the =org-edit= resume options from =suderman/agents=. Coding workers still must not set AUTO. That distinction is an instruction rule, not a security boundary.
+This needs the =org-edit= resume options in =org/edit/=. Coding workers still must not set AUTO. That distinction is an instruction rule, not a security boundary.
+
+* The Org agent system
+
+June owns the system underneath her Org tools: the dispatcher that starts pi agents for AUTO headings, =org-edit= for task states and dates, =herdr-link= for =herdr:= links, their prompts and tests in =org/=, and the =project-org-tasks= and =org-triage= skills in =skills/=, which every agent harness reads through local entries in =~/.agents/skills.json=. Her NixOS module builds the commands from the pinned flake and, with =programs.june.dispatch.enable=, runs the dispatcher every minute. See [[file:org/README.org][org/README.org]].
 
 * Telegram setup
 

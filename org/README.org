@@ -1,0 +1,113 @@
+* Org agent system
+
+Jon's Org files assign work to agents, and June runs that system: she queues and follows tasks with her own tools (=src/tools/org.ts=, =dispatch.ts=, =follow.ts=), and this directory holds the commands and prompts underneath. It moved here from =suderman/agents= on 2026-10-28, so June owns the dispatcher she depends on.
+
+#+begin_src text
+org/
+├── dispatch/org-dispatch.el   dispatcher, run by Emacs in batch
+├── dispatch/org-dispatch      command-line wrapper
+├── edit/org-edit              TODO states and dates set by Org for agents
+├── prompts/                   task.org and nudge.org, sent to pi
+├── bin/herdr-link             stamp and follow herdr: links
+└── tests/                     batch tests with fixtures
+skills/                        project-org-tasks, org-triage, for every agent
+#+end_src
+
+** Where each piece runs
+
+=suderman/nixos= pins this repository as the =june= flake input. June's Home Manager module, =programs.june=, builds =org-dispatch=, =org-edit=, and =herdr-link= from the pinned copy, with =ORG_DISPATCH_EL=, =ORG_DISPATCH_PROMPTS=, and =ORG_EDIT_EL= set to the same commit, and with =programs.june.dispatch.enable= runs the dispatcher every minute with a systemd user timer. It enables pi and Herdr, which the dispatcher drives. The dispatcher therefore always runs with the prompts from the same commit, and rolling back the system rolls both back. Changing either one needs an input update and a rebuild. To test local changes before pushing:
+
+#+begin_src sh
+sudo nixos-rebuild switch --flake /etc/nixos#$(hostname) --override-input june path:$HOME/src/suderman/june
+#+end_src
+
+The skills are different. =~/.agents/skills.json= lists them as local entries, so =agents apply= links =~/.agents/skills/project-org-tasks= and =org-triage= into this checkout, and every harness finds them there; edits apply at once. A host without this checkout goes without them. Rebuild before publishing skill text that describes a new command.
+
+=suderman/emacs= keeps its own copy of the TODO keywords and the =herdr:= link handler, because Emacs on Android has neither this checkout nor the dispatcher. Change both copies of the keywords together.
+
+** The contract
+
+States, set in =org-todo-keywords= both here and in =suderman-org.el=:
+
+| State | Meaning                                                       |
+|-------+---------------------------------------------------------------|
+| TODO  | Jon's task                                                    |
+| AUTO  | Jon asks an agent to do it; its own sequence, never cycled to |
+| PROG  | an agent or Jon is working on it                              |
+| EVAL  | ready for Jon to review                                       |
+| HOLD  | waiting, usually on Jon's answer in =Dialog=                  |
+| DONE  | finished                                                      |
+
+A task is an AUTO heading in Jon's agenda files with exactly one host tag
+(=:kit:=, =:cog:=, or =:lux:=), on the heading or in =#+FILETAGS=. =SCHEDULED= delays
+it and a repeater makes it recur. Properties adjust a run:
+
+| Property  | Default          | Effect                                      |
+|-----------+------------------+---------------------------------------------|
+| REVIEW    | yes              | =no= lets the agent finish DONE             |
+| DEPLOY    | no               | =yes= allows deploying                      |
+| BRANCH    | current          | push to this branch                         |
+| MODEL     | pi's default     | pi model                                    |
+| DIR       | project checkout | working directory                           |
+| RETRY     | 0                | times the agent may reschedule a one-off    |
+
+The dispatcher adds =REPEAT_TO_STATE: AUTO= to repeating tasks so they
+return to AUTO, not TODO.
+
+Agents end each turn with one of:
+
+#+begin_src sh
+org-dispatch finish ID EVAL|HOLD|DONE "note"   # HOLD needs a question
+org-dispatch retry ID WHEN "what it waits for" # only when RETRY > 0
+#+end_src
+
+Jon sets AUTO; dispatched agents never do. June, Jon's assistant, may queue new AUTO tasks and, when Jon explicitly asks, resume existing TODO, EVAL, or HOLD tasks under her =AGENTS.md= (=~/.agents/june/AGENTS.md=, applied to =~/.config/june=). They use the same =org-edit= command; instructions define who may grant AUTO. =retry= is the one worker exception: it returns a task Jon allowed to retry to AUTO, lowers =RETRY=, and schedules it for =WHEN=, at least 15 minutes away.
+
+Runtime state lives in =~/.local/state/org-dispatch= on each host and is
+not synced. Repeating tasks keep 14 run entries in =:LOGBOOK:=; older ones
+move to =archive.org= beside the task's file.
+
+** States and dates outside dispatch
+
+Agents write headings and body text directly, but leave TODO states,
+=SCHEDULED=, =DEADLINE=, and timestamps to Org, so =CLOSED=, repeaters,
+=:LOGBOOK:= entries, and weekdays come out as Emacs makes them:
+
+#+begin_src sh
+org-edit todo FILE HEADING STATE [--expect STATE] # workers never grant AUTO
+org-edit schedule FILE HEADING WHEN|none
+org-edit deadline FILE HEADING WHEN|none
+org-edit date WHEN                          # print an active timestamp
+#+end_src
+
+=--expect STATE= refuses a stale state before saving. June resumes with =org-edit todo FILE HEADING AUTO --expect HOLD --request KEY --host kit --note "Jon chose option A. Resume."=. The expected state must be TODO, EVAL, or HOLD. This saves the state, one local host tag, ID if missing, =JUNE_REQUEST= key, review on, deploy off, and a June entry in Dialog together. It preserves other properties, schedules, and task history. The request key makes a replay return the existing ID without changing the task, even if work has already finished. This form prints JSON rather than the heading. June checks for active linked agents before calling it. Coding workers must not use it to grant AUTO.
+
+=HEADING= is the title without keyword, priority, or tags. When a title
+matches twice, name it by its outline path, matched from the end, such as
+=Hockey 2026-27 / Practice=, or by =id:UUID=; a path that still matches twice
+is refused. =WHEN= is one date (=2026-10-30=,
+=+3d=, =fri=, =today=), an optional time or range (=14:00=, =9:00-10:30=), and
+optional cookies (=+1w=, =.+1d=, =-2d=). Words Org would silently read as
+today, such as =next tuesday=, are refused.
+
+It runs Emacs in batch with =org-dispatch.el='s keywords, like the
+dispatcher, rather than talking to a running daemon. kit runs a shared
+daemon plus one per Herdr workspace, and any of them may visit the file, so
+the file on disk is the shared truth; Jon's Emacs auto-saves visited Org
+buffers every few seconds and reverts on change. It refuses =asana.org= and
+Syncthing conflict copies. From a checkout, run it as
+=bash org/edit/org-edit=.
+
+** Tests
+
+#+begin_src sh
+org/tests/test-org-dispatch
+org/tests/test-org-edit
+#+end_src
+
+The tests need =emacs= on =PATH= and use temporary Org files and state. A
+fake =herdr= that always fails keeps the dispatcher test away from any
+running server; another that records its calls checks that a run opens in
+the Herdr workspace named for its Org file, which is its project for a
+=work/<domain>/<project>/<project>.org= file, and that =herdr-link= reopens
+a dispatched session there.

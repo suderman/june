@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Batch tests for org-edit against fixture Org files. Needs only emacs.
+
+org="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+fixture="$(mktemp -d)"
+trap 'rm -rf -- "$fixture"' EXIT
+export HOME="$fixture/home"
+mkdir -p "$HOME/org"
+
+edit="$org/edit/org-edit"
+failures=0
+
+check() {
+  local name=$1
+  shift
+  if "$@"; then
+    echo "ok   $name"
+  else
+    echo "FAIL $name"
+    failures=$((failures + 1))
+  fi
+}
+
+run() { bash "$edit" "$@" 2>&1 || true; }
+has() { grep -q -- "$2" <<<"$1"; }
+line() { grep -q -- "$2" "$1"; }
+lacks_line() { ! grep -q -- "$2" "$1"; }
+
+tasks="$HOME/org/tasks.org"
+cat >"$tasks" <<'EOF'
+* TODO Fix the thing :kit:
+* TODO [#A] Water plants
+SCHEDULED: <2026-10-01 Thu +1w>
+* TODO Twin
+* TODO Twin
+:PROPERTIES:
+:ID:       twin-two
+:END:
+* HOLD Plan
+EOF
+
+out=$(run todo "$tasks" "Fix the thing" prog)
+check "todo sets a state by title" line "$tasks" '^\* PROG Fix the thing :kit:$'
+check "todo prints the heading" has "$out" 'PROG Fix the thing'
+
+run todo "$tasks" "Fix the thing" DONE >/dev/null
+check "DONE writes CLOSED" line "$tasks" '^CLOSED: \[20'
+
+run todo "$tasks" "Water plants" DONE >/dev/null
+check "DONE on a repeater advances it" line "$tasks" 'SCHEDULED: <2026-10-08 Thu +1w>'
+check "the repeater stays TODO" line "$tasks" '^\* TODO \[#A\] Water plants$'
+check "the repeat is logged" line "$tasks" '^- State "DONE"       from "TODO"'
+
+run todo "$tasks" "Plan" AUTO --expect HOLD >/dev/null
+check "AUTO is available to Jon and June" line "$tasks" '^\* AUTO Plan$'
+out=$(run todo "$tasks" "Plan" PROG --expect HOLD)
+check "a stale expected state is refused" has "$out" 'expected HOLD, found AUTO'
+check "a stale request leaves state alone" line "$tasks" '^\* AUTO Plan$'
+run todo "$tasks" "Plan" HOLD --expect AUTO >/dev/null
+out=$(run todo "$tasks" "Plan" WAIT)
+check "an unknown state is refused" has "$out" 'STATE is one of'
+check "refusals leave the file" line "$tasks" '^\* HOLD Plan$'
+
+resume="$HOME/org/resume.org"
+cat >"$resume" <<'EOF'
+#+FILETAGS: :cog:
+* HOLD Answer the question :cog:work:
+SCHEDULED: <2026-11-03 Tue>
+:PROPERTIES:
+:ID:       12345678-abcd-abcd-abcd-123456789abc
+:DIR:      /keep/this
+:REVIEW:   no
+:DEPLOY:   yes
+:END:
+Original scope.
+
+** Dialog
+- Agent [2026-10-25 Sun 20:00]: Which option?
+EOF
+out=$(run todo "$resume" 'id:12345678-abcd-abcd-abcd-123456789abc' AUTO --expect HOLD --request inst:1 --host kit --note 'Jon chose option A. Resume.')
+check "resume returns the original ID" has "$out" '"id":"12345678-abcd-abcd-abcd-123456789abc"'
+check "resume reports one write" has "$out" '"written":true'
+check "resume selects one local host and keeps other tags" line "$resume" '^\* AUTO Answer the question :work:kit:$'
+check "resume keeps the schedule" line "$resume" '^SCHEDULED: <2026-11-03 Tue>$'
+check "resume keeps DIR" line "$resume" '^:DIR: */keep/this$'
+check "resume keeps the scope" line "$resume" '^Original scope\.$'
+check "resume keeps the question" line "$resume" '^- Agent .*Which option?'
+check "resume records Jon answer through June" line "$resume" '^- June .*Jon chose option A. Resume\.$'
+check "resume enables review" line "$resume" '^:REVIEW: *yes$'
+check "resume disables deploy" line "$resume" '^:DEPLOY: *no$'
+check "resume marks the request for immediate dispatch" line "$resume" '^:JUNE_REQUEST: *inst:1$'
+run todo "$resume" 'id:12345678-abcd-abcd-abcd-123456789abc' EVAL >/dev/null
+before=$(<"$resume")
+out=$(run todo "$resume" 'id:12345678-abcd-abcd-abcd-123456789abc' AUTO --expect HOLD --request inst:1 --host kit --note 'Jon chose option A. Resume.')
+check "replay reports no write after completion" has "$out" '"written":false'
+check "replay leaves task and Dialog unchanged" test "$before" = "$(<"$resume")"
+out=$(run todo "$resume" 'id:12345678-abcd-abcd-abcd-123456789abc' AUTO --expect HOLD --request inst:2 --host kit --note 'Jon asked again.')
+check "a new stale resume is refused" has "$out" 'expected HOLD, found EVAL'
+check "stale resume writes no metadata or note" test "$before" = "$(<"$resume")"
+run todo "$resume" 'id:12345678-abcd-abcd-abcd-123456789abc' AUTO --expect EVAL --request inst:2 --host kit --note 'Jon asked for another pass.' >/dev/null
+check "EVAL can resume again" line "$resume" '^\* AUTO Answer the question'
+run todo "$resume" 'id:12345678-abcd-abcd-abcd-123456789abc' PROG >/dev/null
+out=$(run todo "$resume" 'id:12345678-abcd-abcd-abcd-123456789abc' AUTO --expect PROG --request inst:3 --host kit --note 'Jon asked.')
+check "June resume refuses PROG" has "$out" 'resuming needs'
+run todo "$tasks" Plan TODO >/dev/null
+out=$(run todo "$tasks" Plan AUTO --expect TODO --request inst:4 --host kit --note 'Jon asked to start Plan.')
+check "TODO resume creates a missing ID" has "$out" '"id":"[0-9a-f-]*"'
+check "TODO can start as AUTO" line "$tasks" '^\* AUTO Plan :kit:$'
+run todo "$tasks" Plan HOLD >/dev/null
+
+out=$(run todo "$tasks" "Twin" PROG)
+check "a duplicate title is refused" has "$out" '2 headings'
+run todo "$tasks" "id:twin-two" PROG >/dev/null
+check "id: picks one" line "$tasks" '^\* PROG Twin$'
+
+seasons="$HOME/org/seasons.org"
+cat >"$seasons" <<'EOF'
+* Hockey
+** Fall
+*** TODO Practice
+** Winter
+*** TODO Practice
+* Basketball
+** Winter
+*** TODO Practice
+* TODO A / B
+EOF
+out=$(run todo "$seasons" "Practice" DONE)
+check "a duplicate suggests a path" has "$out" 'Parent / Practice'
+run todo "$seasons" "Fall / Practice" DONE >/dev/null
+check "a path picks one" has "$(sed -n 3p "$seasons")" '^\*\*\* DONE Practice$'
+out=$(run todo "$seasons" "Winter / Practice" DONE)
+check "a path that still matches twice is refused" has "$out" '2 headings'
+run todo "$seasons" "Hockey / Winter / Practice" DONE >/dev/null
+check "a longer path picks one" has "$(sed -n 6p "$seasons")" '^\*\*\* DONE Practice$'
+check "and leaves the other" line "$seasons" '^\*\*\* TODO Practice$'
+run todo "$seasons" "A / B" DONE >/dev/null
+check "a title with a slash still matches whole" line "$seasons" '^\* DONE A / B$'
+
+run schedule "$tasks" "Plan" "2026-11-03 9:00" >/dev/null
+check "schedule writes the weekday" line "$tasks" '^SCHEDULED: <2026-11-03 Tue 09:00>$'
+run deadline "$tasks" "Plan" "2026-11-06 -2d" >/dev/null
+check "deadline joins the planning line" line "$tasks" 'DEADLINE: <2026-11-06 Fri -2d>'
+run schedule "$tasks" "Plan" none >/dev/null
+check "none removes SCHEDULED" lacks_line "$tasks" 'SCHEDULED: <2026-11-03'
+check "and keeps DEADLINE" line "$tasks" 'DEADLINE: <2026-11-06 Fri -2d>'
+
+check "date prints a timestamp" has "$(run date '2026-11-03 9:00-10:30 +1w')" '^<2026-11-03 Tue 09:00-10:30 +1w>$'
+check "date takes a relative day" has "$(run date '+0d')" "^<$(date +'%Y-%m-%d %a')>$"
+check "date refuses words Org would read as today" has "$(run date 'next tuesday')" 'not a date'
+check "missing zone data stops instead of using UTC" has "$(TZDIR=/nonexistent run date '+0d')" 'No zone data for America/Edmonton'
+
+cp "$tasks" "$HOME/org/asana.org"
+check "asana.org is refused" has "$(run todo "$HOME/org/asana.org" Plan DONE)" 'never edit it'
+cp "$tasks" "$HOME/org/tasks.sync-conflict-20261024-000000-ABC.org"
+check "conflict copies are refused" \
+  has "$(run todo "$HOME/org/tasks.sync-conflict-20261024-000000-ABC.org" Plan DONE)" 'conflict copy'
+
+if ((failures)); then
+  echo "$failures failed"
+  exit 1
+fi
+echo "all passed"
