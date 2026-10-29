@@ -69,6 +69,10 @@ test("the rhythm, reflection, heartbeat, and patter timing have defaults, take o
 	assert.throws(() => loadConfig({ ...tmp.paths, config: eager }), /heartbeat\.everyMinutes/);
 	const forgetful = await layer("forgetful", { reflection: { recentDays: -1 } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: forgetful }), /reflection\.recentDays/);
+	const defaults = loadConfig({ ...tmp.paths, config: await layer("defaults", { dispatch: { hosts: ["kit", "cog"], host: "kit", agent: "pi" } }) });
+	assert.deepEqual(defaults.dispatch, { hosts: ["kit", "cog"], host: "kit", agent: "pi" });
+	const spaced = await layer("spaced", { dispatch: { hosts: ["kit"], agent: "pi claude" } });
+	assert.throws(() => loadConfig({ ...tmp.paths, config: spaced }), /dispatch\.agent must be a plain name/);
 	const fortnightly = await layer("fortnightly", { reflection: { periods: ["week", "fortnight"] } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: fortnightly }), /reflection\.periods may hold only week, month, quarter, year/);
 	assert.deepEqual(plain.situation, { calendars: [], homeAssistant: { people: [], pollSeconds: 300 } });

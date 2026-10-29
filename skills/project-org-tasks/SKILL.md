@@ -326,9 +326,14 @@ finish` moves that run's links into `:LOGBOOK:` and removes the section.
 
 ## Autonomous tasks
 
-An `AUTO` heading in one of Jon's agenda files (`org-agenda-files`), tagged
-with one host (`:kit:`, `:cog:`, or `:lux:`, on the heading or in `#+FILETAGS`), is run
-unattended by `org-dispatch` on that host once its text has stopped changing for
+An `AUTO` heading in one of Jon's agenda files (`org-agenda-files`) is run
+unattended by `org-dispatch` on the host its property drawer names in `:HOST:`,
+with the agent in `:AGENT:`. When either is missing, the dispatcher fills it in
+when it claims the task, as it does `:ID:`: from one host tag (`:kit:`, `:cog:`,
+`:lux:`) or agent tag (`:pi:`, `:claude:`) on the heading or in `#+FILETAGS`,
+else from June's `dispatch.host` and `dispatch.agent` defaults. Two host or two
+agent tags hold the task until fixed; once the drawer is set, tags are only
+decoration. Only pi can be started for now. A task runs once its text has stopped changing for
 `org-dispatch-settle` (headings June writes, marked `:JUNE_REQUEST:`, launch at
 once); `org-dispatch scan` shows what that host would launch
 now. `SCHEDULED` delays it and a repeater makes it recur. Jon adjusts a run with the
@@ -348,8 +353,8 @@ agent runs `org-dispatch retry ID WHEN NOTE`. The dispatcher then lowers
 task to `AUTO`, and a fresh session picks it up when it is due. Once `RETRY`
 reaches 0 the agent must use `HOLD`.
 
-- Coding agents never set `AUTO` on a heading and add a host tag only when
-  Jon asks: Jon grants their autonomy. June, Jon's assistant, is the one
+- Coding agents never set `AUTO` on a heading and set `:HOST:` or `:AGENT:`
+  only when Jon asks: Jon grants their autonomy. June, Jon's assistant, is the one
   exception. Under her `AGENTS.md` (from `~/.agents/june`), she may queue new `AUTO` tasks, starting each one's body with a line saying she queued it and why. When Jon explicitly asks, she may also resume an existing TODO, EVAL, or HOLD task through `org_resume_task`, which uses the shared `org-edit` command and records his instruction in Dialog. `org-edit` accepting AUTO does not give coding workers permission to set it.
 - In a dispatched session, follow the dispatch prompt where it differs from
   this skill, and change the TODO state only with `org-dispatch finish`.

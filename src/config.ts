@@ -41,8 +41,12 @@ export type Config = {
 	readonly daemonHost: string | undefined;
 	readonly skillDirs: readonly string[];
 	readonly org: { readonly root: string; readonly agendaFiles: string; /** The user's rolodex, one heading per person. */ readonly people: string };
-	/** Hosts June may queue AUTO tasks for; empty turns the dispatch tools off. The first is the default. */
-	readonly dispatch: { readonly hosts: readonly string[] };
+	/**
+	 * Hosts June may queue AUTO tasks for; empty turns the dispatch tools off. `host` and `agent` are the defaults the
+	 * dispatcher writes into an AUTO task's drawer when it lacks them and no tag names one: `host` defaults to the first
+	 * of `hosts`, `agent` to pi.
+	 */
+	readonly dispatch: { readonly hosts: readonly string[]; readonly host?: string; readonly agent?: string };
 	readonly herdr: {
 		readonly session: string;
 		/** This machine's name, as Org host tags and herdr: links use it. */
@@ -180,7 +184,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 		daemonHost: daemonHost(env),
 		skillDirs: (raw.skillDirs ?? DEFAULTS.skillDirs).map(expandHome),
 		org: { root: expandHome(org.root), agendaFiles: expandHome(org.agendaFiles), people: expandHome(org.people) },
-		dispatch: { hosts: raw.dispatch?.hosts ?? [] },
+		dispatch: dispatch(raw.dispatch),
 		herdr: {
 			session: herdr.session,
 			host: herdr.host ?? shortHostname(),
@@ -226,6 +230,13 @@ function heartbeat(given: Config["heartbeat"]): Config["heartbeat"] {
 	if (!(typeof given.everyMinutes === "number" && given.everyMinutes >= 5)) throw new Error("heartbeat.everyMinutes must be 5 or more");
 	if (!(typeof given.chattingMinutes === "number" && given.chattingMinutes >= 0)) throw new Error("heartbeat.chattingMinutes must be 0 or more");
 	return given;
+}
+
+function dispatch(given: Partial<Config["dispatch"]> | undefined): Config["dispatch"] {
+	const hosts = given?.hosts ?? [];
+	for (const key of ["host", "agent"] as const)
+		if (given?.[key] !== undefined && !(typeof given[key] === "string" && /^[a-z0-9-]+$/.test(given[key]!))) throw new Error(`dispatch.${key} must be a plain name`);
+	return { hosts, ...(given?.host ? { host: given.host } : {}), ...(given?.agent ? { agent: given.agent } : {}) };
 }
 
 function watch(given: Config["watch"]): Config["watch"] {

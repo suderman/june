@@ -45,7 +45,7 @@ async function fixture() {
 const request = { file: "work/studio/portal/portal.org", title: "Investigate the flaky login test", host: "kit", review: true, key: "inst:7" };
 const body = "June queued this because Alex asked for it.\n\n** Scope\nFind why login fails one run in ten.";
 
-test("a queued task is a new first heading with one host tag, written once per key", async (t) => {
+test("a queued task is a new first heading with its agent and host in the drawer, written once per key", async (t) => {
 	const f = await fixture();
 	t.after(f.cleanup);
 	const first = await f.dispatch.queue({ ...request, body });
@@ -57,7 +57,7 @@ test("a queued task is a new first heading with one host tag, written once per k
 	assert.equal(text.match(/^\* AUTO /gm)?.length, 1);
 	assert.match(
 		text,
-		/Repositories:\n- portal: \[\[file:~\/src\/studio\/portal\/\]\[local\]\]\n\n\* AUTO Investigate the flaky login test :kit:\n:PROPERTIES:\n:ID: [0-9a-f-]{36}\n:JUNE_REQUEST: inst:7\n:END:\nJune queued this because Alex asked for it.\n\n\*\* Scope\nFind why login fails one run in ten.\n\n\* PROG Existing thread\n/,
+		/Repositories:\n- portal: \[\[file:~\/src\/studio\/portal\/\]\[local\]\]\n\n\* AUTO Investigate the flaky login test\n:PROPERTIES:\n:ID: [0-9a-f-]{36}\n:AGENT: pi\n:HOST: kit\n:JUNE_REQUEST: inst:7\n:END:\nJune queued this because Alex asked for it.\n\n\*\* Scope\nFind why login fails one run in ten.\n\n\* PROG Existing thread\n/,
 	);
 });
 
@@ -279,6 +279,8 @@ test("org-dispatch itself sees the task June wrote", { skip: !hasDispatcher && "
 			ORG_DISPATCH_ROOT: join(f.root, "work"),
 			ORG_DISPATCH_EMACS_INIT: init,
 			XDG_STATE_HOME: join(f.dir, "state"),
+			XDG_CONFIG_HOME: join(f.dir, "config"),
+			JUNE_CONFIG_DIR: join(f.dir, "config", "june"),
 		},
 	};
 	const out = execFileSync("org-dispatch", ["scan"], options);

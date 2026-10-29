@@ -6,10 +6,13 @@
 ;;   org-dispatch-finish   ID STATE [NOTE], used by the agent to end its task
 ;;   org-dispatch-retry    ID WHEN NOTE, used by the agent to try again later
 ;;
-;; A task is an AUTO heading in Jon's Org agenda files tagged with this host.
-;; SCHEDULED delays it; a repeater makes it recur. Settings are properties:
-;; REVIEW, DEPLOY, BRANCH, MODEL, DIR, and RETRY, the number of times an agent
-;; may return the task to AUTO at a later date.
+;; A task is an AUTO heading in Jon's Org agenda files whose HOST is this host.
+;; HOST and AGENT live in its property drawer; when either is missing, one tag
+;; naming a known host or agent fills it, else June's configured default, and
+;; the dispatcher writes it when it claims the task, as it does ID. Once set,
+;; tags are decoration. SCHEDULED delays a task; a repeater makes it recur.
+;; Other settings are properties: REVIEW, DEPLOY, BRANCH, MODEL, DIR, and
+;; RETRY, the number of times an agent may return the task to AUTO later.
 
 (require 'org)
 (require 'org-id)
@@ -24,6 +27,16 @@
   (org-dispatch--env "ORG_DISPATCH_HOST" (car (split-string (system-name) "\\."))))
 (defvar org-dispatch-hosts
   (split-string (org-dispatch--env "ORG_DISPATCH_HOSTS" "kit cog lux")))
+(defvar org-dispatch-agents
+  (split-string (org-dispatch--env "ORG_DISPATCH_AGENTS" "pi claude"))
+  "Agents a task may name in AGENT or a tag.")
+(defconst org-dispatch-launchable '("pi")
+  "Agents this dispatcher can start; a task for another waits until it can.")
+(defvar org-dispatch-config
+  (expand-file-name "config.json"
+                    (org-dispatch--env "JUNE_CONFIG_DIR"
+                                       (expand-file-name "june" (org-dispatch--env "XDG_CONFIG_HOME" "~/.config"))))
+  "June's config.json, whose dispatch.host and dispatch.agent are the defaults.")
 (defvar org-dispatch-root
   (expand-file-name (org-dispatch--env "ORG_DISPATCH_ROOT" "~/org/work"))
   "Directory scanned when Jon's Emacs config cannot list agenda files.")
@@ -365,11 +378,44 @@ with NOTE, moving the Sessions links into it, then trim the log."
         (car repos)
       (directory-file-name (file-name-directory file)))))
 
+(defvar org-dispatch--defaults nil)
+(defun org-dispatch--default (key fallback)
+  "June's dispatch KEY (\"host\" or \"agent\"), or FALLBACK without one."
+  (unless org-dispatch--defaults
+    (setq org-dispatch--defaults
+          (or (ignore-errors
+                (with-temp-buffer
+                  (insert-file-contents org-dispatch-config)
+                  (let ((dispatch (gethash "dispatch" (json-parse-buffer))))
+                    (and (hash-table-p dispatch) dispatch))))
+              (make-hash-table :test 'equal))))
+  (let ((value (gethash key org-dispatch--defaults)))
+    (if (and (stringp value) (not (string-empty-p value))) value fallback)))
+
+(defun org-dispatch--resolve (property known default)
+  "The entry's PROPERTY: from its drawer, else the one tag among KNOWN on the
+heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
+(:problem TEXT); :fill means the drawer lacks it."
+  (let ((set (org-entry-get nil property)))
+    (if set
+        (if (member set known)
+            (list :value set)
+          (list :problem (format "%s %s is not one of %s" property set (string-join known ", "))))
+      (let ((tagged (or (seq-intersection (org-get-tags nil t) known)
+                        (seq-intersection org-file-tags known))))
+        (cond ((cdr tagged)
+               (list :problem (format "tagged for %s" (string-join tagged " and "))))
+              (tagged (list :value (car tagged) :fill t))
+              ((member default known) (list :value default :fill t))
+              (t (list :problem (format "no %s, and the default %s is not one of %s"
+                                        property default (string-join known ", ")))))))))
+
 (defun org-dispatch--task ()
   "Describe the entry at point."
-  (let* ((tags (org-get-tags nil t))
-         (hosts (or (seq-intersection tags org-dispatch-hosts)
-                    (seq-intersection org-file-tags org-dispatch-hosts)))
+  (let* ((host (org-dispatch--resolve "HOST" org-dispatch-hosts
+                                      (org-dispatch--default "host" (car org-dispatch-hosts))))
+         (agent (org-dispatch--resolve "AGENT" org-dispatch-agents
+                                       (org-dispatch--default "agent" "pi")))
          (section (org-dispatch--section-bounds "Sessions"))
          (dir (org-entry-get nil "DIR"))
          sessions)
@@ -385,7 +431,11 @@ with NOTE, moving the Sessions links into it, then trim the log."
           :id (org-entry-get nil "ID")
           :heading (org-get-heading t t t t)
           :todo (org-get-todo-state)
-          :hosts hosts
+          :host (plist-get host :value)
+          :agent (plist-get agent :value)
+          :problem (or (plist-get host :problem) (plist-get agent :problem))
+          :fill (append (when (plist-get agent :fill) (list (cons "AGENT" (plist-get agent :value))))
+                        (when (plist-get host :fill) (list (cons "HOST" (plist-get host :value)))))
           :scheduled (org-get-scheduled-time (point))
           :repeat (org-get-repeat)
           :retry (string-to-number (or (org-entry-get nil "RETRY") "0"))
@@ -531,6 +581,9 @@ with NOTE, moving the Sessions links into it, then trim the log."
      (plist-get task :file) (plist-get task :id)
      (lambda ()
        (org-entry-put nil "ID" (plist-get task :id))
+       ;; Written once, so tags no longer decide where or how the task runs.
+       (pcase-dolist (`(,property . ,value) (plist-get task :fill))
+         (unless (org-entry-get nil property) (org-entry-put nil property value)))
        ;; Org resets a repeat to TODO, which is Jon's; keep it AUTO. Also trim
        ;; here: a reviewed repeat is closed in Emacs, not by finish.
        (when (plist-get task :repeat)
@@ -716,8 +769,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                               states))
          eligible)
     (dolist (task tasks)
-      (let* ((hosts (plist-get task :hosts))
-             (key (or (plist-get task :id)
+      (let* ((key (or (plist-get task :id)
                       (concat (plist-get task :file) "::" (plist-get task :heading))))
              (seen (gethash key old))
              (same (and seen (equal (gethash "hash" seen) (plist-get task :hash))))
@@ -727,12 +779,16 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                         (puthash "seen" now entry)
                         entry))))
         (cond
-         ((> (length hosts) 1)
+         ((plist-get task :problem)
           (unless same
-            (org-dispatch--log "skipped %s: tagged for %s" (plist-get task :heading)
-                               (string-join hosts " and ")))
+            (org-dispatch--log "skipped %s: %s" (plist-get task :heading) (plist-get task :problem)))
           (puthash key entry new))
-         ((not (equal hosts (list org-dispatch-host))))
+         ((not (equal (plist-get task :host) org-dispatch-host)))
+         ((not (member (plist-get task :agent) org-dispatch-launchable))
+          (unless same
+            (org-dispatch--log "skipped %s: AGENT %s cannot be launched yet"
+                               (plist-get task :heading) (plist-get task :agent)))
+          (puthash key entry new))
          ;; Record text before checking SCHEDULED, so a task written ahead of
          ;; time starts on schedule instead of settling then.
          ((progn (puthash key entry new) nil))

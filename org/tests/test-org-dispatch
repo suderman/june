@@ -10,6 +10,8 @@ trap 'rm -rf -- "$fixture"' EXIT
 
 export HOME="$fixture/home"
 export XDG_STATE_HOME="$fixture/state"
+export XDG_CONFIG_HOME="$HOME/.config"
+unset JUNE_CONFIG_DIR
 export ORG_DISPATCH_EMACS_INIT="$fixture/no-init.el"
 export ORG_DISPATCH_ROOT="$fixture/org"
 export ORG_DISPATCH_PROMPTS="$org/prompts"
@@ -44,32 +46,55 @@ has() { grep -q -- "$2" <<<"$1"; }
 lacks() { ! grep -q -- "$2" <<<"$1"; }
 line() { grep -q -- "$2" "$1"; }
 
-# Scan: which headings this host would launch.
-cat >"$ORG_DISPATCH_ROOT/scan.org" <<'EOF'
-* AUTO Launch me :kit:
-* TODO Jon's own task :kit:
-* AUTO No host
-* AUTO Two hosts :kit:cog:
-* AUTO The other host :cog:
-* AUTO Not yet :kit:
-SCHEDULED: <2999-01-01 Tue 06:00>
-EOF
-# The dispatcher runs one task per directory, so give this file its own.
-mkdir -p "$ORG_DISPATCH_ROOT/other"
-cat >"$ORG_DISPATCH_ROOT/other/filetags.org" <<'EOF'
-#+FILETAGS: :kit:
-* AUTO Host from the file
-EOF
+# Scan: which headings this host would launch. The dispatcher runs one task per
+# directory, so each heading gets a directory of its own.
+n=0
+task() { n=$((n + 1)); mkdir -p "$ORG_DISPATCH_ROOT/scan$n"; printf '%s\n' "$@" >"$ORG_DISPATCH_ROOT/scan$n/scan$n.org"; }
+task '* AUTO Launch me :kit:'
+task "* TODO Jon's own task :kit:"
+task '* AUTO No host or agent'
+task '* AUTO Two hosts :kit:cog:'
+task '* AUTO The other host :cog:'
+task '* AUTO Not yet :kit:' 'SCHEDULED: <2999-01-01 Tue 06:00>'
+task '#+FILETAGS: :kit:' '* AUTO Host from the file'
+task '#+FILETAGS: :kit:' '* AUTO Heading tag over the file :cog:'
+task '* AUTO Agent and host :pi:kit:'
+task '* AUTO Host and agent :kit:pi:'
+task '* AUTO Claude cannot launch yet :claude:kit:'
+task '* AUTO Two agents :pi:claude:'
+task '* AUTO The drawer beats the tags :cog:claude:' ':PROPERTIES:' ':HOST: kit' ':AGENT: pi' ':END:'
+task '* AUTO The drawer sends it away :kit:' ':PROPERTIES:' ':HOST: cog' ':END:'
+task '* AUTO An unknown host :kit:' ':PROPERTIES:' ':HOST: mars' ':END:'
 # Keep only the task lines, not the log lines that name skipped headings.
-scan=$(run scan | grep $'\t' || true)
+log=$(ORG_DISPATCH_MAX_AGENTS=20 run scan)
+scan=$(grep $'\t' <<<"$log" || true)
 check "scan lists an AUTO heading tagged with this host" has "$scan" "Launch me"
-check "scan takes the host from #+FILETAGS" has "$scan" "Host from the file"
 check "scan skips TODO headings" lacks "$scan" "Jon's own task"
-check "scan skips AUTO without a host" lacks "$scan" "No host"
+check "scan gives an untagged AUTO June's default host and agent" has "$scan" "No host or agent"
 check "scan skips AUTO tagged for two hosts" lacks "$scan" "Two hosts"
 check "scan skips AUTO for the other host" lacks "$scan" "The other host"
 check "scan skips AUTO scheduled in the future" lacks "$scan" "Not yet"
-rm -r "$ORG_DISPATCH_ROOT/scan.org" "$ORG_DISPATCH_ROOT/other"
+check "scan takes the host from #+FILETAGS" has "$scan" "Host from the file"
+check "a heading's host tag wins over the file's" lacks "$scan" "Heading tag over the file"
+check "scan takes an agent and host tag in either order" has "$scan" "Agent and host"
+check "scan takes a host and agent tag in either order" has "$scan" "Host and agent"
+check "scan skips an agent it cannot launch yet" lacks "$scan" "Claude cannot launch yet"
+check "scan skips AUTO tagged for two agents" lacks "$scan" "Two agents"
+check "the drawer's HOST and AGENT beat the tags" has "$scan" "The drawer beats the tags"
+check "the drawer's HOST sends a kit-tagged task elsewhere" lacks "$scan" "The drawer sends it away"
+check "scan skips an unknown HOST" lacks "$scan" "An unknown host"
+check "the log says why two hosts were skipped" has "$log" "Two hosts: tagged for kit and cog"
+check "the log says why claude waits" has "$log" "AGENT claude cannot be launched yet"
+check "the log names an unknown HOST" has "$log" "HOST mars is not one of"
+
+# June's config sets the defaults.
+mkdir -p "$HOME/.config/june"
+printf '{"dispatch": {"hosts": ["kit"], "host": "cog", "agent": "pi"}}\n' >"$HOME/.config/june/config.json"
+scan=$(ORG_DISPATCH_MAX_AGENTS=20 run scan | grep $'\t' || true)
+check "June's default host applies to an untagged AUTO" lacks "$scan" "No host or agent"
+check "a host tag still beats the default" has "$scan" "Launch me"
+rm -r "$HOME/.config/june"
+for ((i = 1; i <= n; i++)); do rm -r "$ORG_DISPATCH_ROOT/scan$i"; done
 
 # Settling: a typed heading waits; one June wrote whole launches at once.
 mkdir -p "$ORG_DISPATCH_ROOT/typed" "$ORG_DISPATCH_ROOT/june"
@@ -191,6 +216,27 @@ check "the prompt counts the retries left" has "$(render 1 '')" "allowed 1 more 
 check "the prompt omits retry at RETRY 0" lacks "$(render 0 '')" "org-dispatch retry 0000"
 check "the prompt omits retry for a repeat" lacks "$(render 2 'SCHEDULED: <2026-10-15 Thu 04:30 +1d>\n')" "org-dispatch retry 0000"
 check "the prompt fills every placeholder" lacks "$(render 2 '')" "{{"
+
+# Claiming writes the resolved HOST and AGENT into the drawer once, beside ID.
+claim_file="$ORG_DISPATCH_ROOT/claim.org"
+printf '* AUTO Claim me :pi:cog:\n* AUTO Keep my drawer :kit:\n:PROPERTIES:\n:HOST: cog\n:END:\n' >"$claim_file"
+claim() {
+  emacs -Q --batch -l "$org/dispatch/org-dispatch.el" --eval "
+    (with-current-buffer (find-file-noselect \"$claim_file\")
+      (org-mode)
+      (goto-char (point-min))
+      (search-forward \"$1\")
+      (let ((task (org-dispatch--task)))
+        (org-dispatch--claim (plist-put task :id \"$2\") \"p1\" \"5e55\")))" >/dev/null 2>&1
+}
+claim "Claim me" 00000000-0000-0000-0000-0000000000c1
+claim "Keep my drawer" 00000000-0000-0000-0000-0000000000c2
+check "a claim writes the tagged host" line "$claim_file" '^:HOST: *cog$'
+check "a claim writes the tagged agent" line "$claim_file" '^:AGENT: *pi$'
+check "a claim keeps the ID beside them" line "$claim_file" '^:ID: *00000000-0000-0000-0000-0000000000c1$'
+check "a claim leaves an existing HOST and the tags alone" bash -c "[[ \$(grep -c '^:HOST:' '$claim_file') -eq 2 ]] && ! grep -q '^:HOST: *kit' '$claim_file' && grep -q '^\* PROG Keep my drawer :kit:$' '$claim_file'"
+check "a claim fills the default agent" bash -c "[[ \$(grep -c '^:AGENT: *pi$' '$claim_file') -eq 2 ]]"
+rm "$claim_file"
 
 # Workspaces: a run opens in the workspace named for its Org file, never a shared "auto" one.
 # This fake herdr records its arguments and answers with fixed panes.

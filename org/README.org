@@ -34,9 +34,18 @@ States, set in =org-todo-keywords= here and in the user's Emacs configuration:
 | HOLD  | waiting, usually on the user's answer in =Dialog=             |
 | DONE  | finished                                                      |
 
-A task is an AUTO heading in the agenda files with exactly one host tag naming
-the machine to run it, on the heading or in =#+FILETAGS=. =SCHEDULED= delays
-it and a repeater makes it recur. Properties adjust a run:
+A task is an AUTO heading in the agenda files. Its property drawer names the
+machine to run it (=HOST=) and the agent to start (=AGENT=), beside =ID=. When
+either is missing, the dispatcher fills it from one tag naming a known host or
+agent, on the heading or else in =#+FILETAGS=, such as =:kit:=, =:pi:cog:=, or
+=:claude:kit:=, or else from =dispatch.host= and =dispatch.agent= in June's
+=config.json= (the first known host and pi without them). Only the dispatcher on
+the resolved host acts, and it writes the values into the drawer when it claims
+the task, as it does =ID=. From then on the drawer decides and the tags are
+decoration. A task with two host tags, two agent tags, or an unknown =HOST= or
+=AGENT= is skipped, with a log line, until that is fixed. Only pi can be started
+for now, so an =AGENT: claude= task waits. =SCHEDULED= delays a task and a
+repeater makes it recur. Properties adjust a run:
 
 | Property  | Default          | Effect                                      |
 |-----------+------------------+---------------------------------------------|
@@ -76,7 +85,7 @@ org-edit deadline FILE HEADING WHEN|none
 org-edit date WHEN                          # print an active timestamp
 #+end_src
 
-=--expect STATE= refuses a stale state before saving. June resumes with =org-edit todo FILE HEADING AUTO --expect HOLD --request KEY --host HOST --note "Chose option A. Resume."=. The expected state must be TODO, EVAL, or HOLD. This saves the state, one local host tag, ID if missing, =JUNE_REQUEST= key, review on, deploy off, and a June entry in Dialog together. It preserves other properties, schedules, and task history. The request key makes a replay return the existing ID without changing the task, even if work has already finished. This form prints JSON rather than the heading. June checks for active linked agents before calling it. Coding workers must not use it to grant AUTO.
+=--expect STATE= refuses a stale state before saving. June resumes with =org-edit todo FILE HEADING AUTO --expect HOLD --request KEY --host HOST --note "Chose option A. Resume."=. The expected state must be TODO, EVAL, or HOLD. This saves the state, =HOST=, =AGENT= if missing, ID if missing, =JUNE_REQUEST= key, review on, deploy off, and a June entry in Dialog together. It preserves other properties, schedules, and task history. The request key makes a replay return the existing ID without changing the task, even if work has already finished. This form prints JSON rather than the heading. June checks for active linked agents before calling it. Coding workers must not use it to grant AUTO.
 
 =HEADING= is the title without keyword, priority, or tags. When a title
 matches twice, name it by its outline path, matched from the end, such as

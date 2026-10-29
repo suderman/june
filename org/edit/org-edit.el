@@ -171,7 +171,10 @@ Coding workers must not set AUTO; that permission lives in instructions."
              (error "STATE is one of %s" (string-join org-todo-keywords-1 " ")))
            (when request
              (org-id-get-create)
-             (org-set-tags (append (seq-difference (org-get-tags nil t) org-dispatch-hosts) (list host)))
+             ;; The drawer decides where and how it runs; tags are left as they are.
+             (unless (org-entry-get nil "AGENT")
+               (org-entry-put nil "AGENT" (org-dispatch--default "agent" "pi")))
+             (org-entry-put nil "HOST" host)
              (org-entry-put nil "JUNE_REQUEST" request)
              (org-entry-put nil "REVIEW" "yes")
              (org-entry-put nil "DEPLOY" "no")

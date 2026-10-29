@@ -7,6 +7,8 @@ org="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 fixture="$(mktemp -d)"
 trap 'rm -rf -- "$fixture"' EXIT
 export HOME="$fixture/home"
+export XDG_CONFIG_HOME="$HOME/.config"
+unset JUNE_CONFIG_DIR
 mkdir -p "$HOME/org"
 
 edit="$org/edit/org-edit"
@@ -82,7 +84,9 @@ EOF
 out=$(run todo "$resume" 'id:12345678-abcd-abcd-abcd-123456789abc' AUTO --expect HOLD --request inst:1 --host kit --note 'Jon chose option A. Resume.')
 check "resume returns the original ID" has "$out" '"id":"12345678-abcd-abcd-abcd-123456789abc"'
 check "resume reports one write" has "$out" '"written":true'
-check "resume selects one local host and keeps other tags" line "$resume" '^\* AUTO Answer the question :work:kit:$'
+check "resume leaves the tags as they were" line "$resume" '^\* AUTO Answer the question :cog:work:$'
+check "resume puts the host in the drawer" line "$resume" '^:HOST: *kit$'
+check "resume fills a missing agent with the default" line "$resume" '^:AGENT: *pi$'
 check "resume keeps the schedule" line "$resume" '^SCHEDULED: <2026-11-03 Tue>$'
 check "resume keeps DIR" line "$resume" '^:DIR: */keep/this$'
 check "resume keeps the scope" line "$resume" '^Original scope\.$'
@@ -107,7 +111,8 @@ check "June resume refuses PROG" has "$out" 'resuming needs'
 run todo "$tasks" Plan TODO >/dev/null
 out=$(run todo "$tasks" Plan AUTO --expect TODO --request inst:4 --host kit --note 'Jon asked to start Plan.')
 check "TODO resume creates a missing ID" has "$out" '"id":"[0-9a-f-]*"'
-check "TODO can start as AUTO" line "$tasks" '^\* AUTO Plan :kit:$'
+check "TODO can start as AUTO" line "$tasks" '^\* AUTO Plan$'
+check "a started TODO gets its host in the drawer" line "$tasks" '^:HOST: *kit$'
 run todo "$tasks" Plan HOLD >/dev/null
 
 out=$(run todo "$tasks" "Twin" PROG)

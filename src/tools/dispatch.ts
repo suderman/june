@@ -18,19 +18,21 @@ export type QueueRequest = {
 	title: string;
 	body: string;
 	host: string;
+	/** The agent the dispatcher starts; June's config default, pi without one. */
+	agent?: string;
 	dir?: string;
 	review: boolean;
 	/** Stable across a tool's replay, so a rerun finds its own heading instead of writing a second one. */
 	key: string;
 };
 
-/** The heading text June writes: keyword, title, one host tag, a property drawer, then the body. */
+/** The heading text June writes: keyword, title, a property drawer that names the agent and host, then the body. */
 export function renderTask(request: QueueRequest, id: string): string {
-	const properties = [`:ID: ${id}`, `:JUNE_REQUEST: ${request.key}`];
+	const properties = [`:ID: ${id}`, `:AGENT: ${request.agent ?? "pi"}`, `:HOST: ${request.host}`, `:JUNE_REQUEST: ${request.key}`];
 	if (request.dir) properties.push(`:DIR: ${request.dir}`);
 	if (!request.review) properties.push(":REVIEW: no");
 	const body = request.body.trim();
-	return [`* AUTO ${request.title} :${request.host}:`, ":PROPERTIES:", ...properties, ":END:", ...(body ? [body] : []), ""].join("\n");
+	return [`* AUTO ${request.title}`, ":PROPERTIES:", ...properties, ":END:", ...(body ? [body] : []), ""].join("\n");
 }
 
 export function checkRequest(request: QueueRequest, hosts: readonly string[]): void {
@@ -188,13 +190,13 @@ export class Dispatch {
 			const existing = new RegExp(`^:JUNE_REQUEST: ${request.key}$`, "m").exec(content);
 			if (existing !== null) return { file: this.#org.rel(path), written: false, ...this.#located(content, existing.index) };
 			const id = randomUUID();
-			const next = insertAfterPreamble(content, renderTask(request, id));
+			const next = insertAfterPreamble(content, renderTask({ agent: this.#config.dispatch.agent ?? "pi", ...request }, id));
 			// Replace only if nobody (Emacs, Syncthing) changed the file since it was read.
 			if ((await stat(path)).mtimeMs !== before.mtimeMs) continue;
 			const temp = join(dirname(path), `.${basename(path)}.june-${process.pid}`);
 			await writeFile(temp, next, { mode: before.mode & 0o777 });
 			await rename(temp, path);
-			return { file: this.#org.rel(path), written: true, id, heading: `AUTO ${request.title} :${request.host}:` };
+			return { file: this.#org.rel(path), written: true, id, heading: `AUTO ${request.title}` };
 		}
 		throw new Error(`${this.#org.rel(path)} kept changing; try again shortly`);
 	}
@@ -280,6 +282,7 @@ export function createDispatchExtension(
 	const dispatch = new Dispatch(org, config, run);
 	const followTask = createFollowTask(org, herdr, followOptions);
 	const hosts = config.dispatch.hosts;
+	const defaultHost = config.dispatch.host ?? hosts[0];
 	return defineExtension({
 		name: "dispatch",
 		tasks: [followTask],
@@ -299,14 +302,14 @@ export function createDispatchExtension(
 			}),
 			defineTool({
 				name: "org_queue_task",
-				description: `Queue new work for an unattended Pi agent: write a new AUTO heading with one host tag (${hosts.join(", ")}) into an Org agenda file. The dispatcher on that host launches it, and this tool starts the one on this host right away, and the agent ends at EVAL for review by you or the user unless review is explicitly waived. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task and use org_projects to find its project first. If no project fits, use org_create_project before queueing. The tool writes the body from reason, scope, and checklist.`,
+				description: `Queue new work for an unattended Pi agent: write a new AUTO heading, its host (${hosts.join(", ")}) and agent in its property drawer, into an Org agenda file. The dispatcher on that host launches it, and this tool starts the one on this host right away, and the agent ends at EVAL for review by you or the user unless review is explicitly waived. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task and use org_projects to find its project first. If no project fits, use org_create_project before queueing. The tool writes the body from reason, scope, and checklist.`,
 				parameters: Type.Object({
 					file: Type.String({ description: "Org file under ~/org, usually the project's <project>.org" }),
 					title: Type.String({ description: "Concise verb-led heading title, without keyword or tags" }),
 					reason: Type.String({ description: 'One line, written after "Queued by June: ": the reason itself, naming the user rather than writing "you", such as `${User()} asked for a read-only docs check.`' }),
 					scope: Type.String({ description: "Outcome, constraints, and success criteria in Org; one physical line per paragraph" }),
 					checklist: Type.Array(Type.String(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
-					host: Type.String({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${hosts[0]}` }),
+					host: Type.String({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` }),
 					dir: Type.Optional(Type.String({ description: "Existing working directory override, usually one of the project's local repository links. Omit for one-offs without a checkout: the dispatcher uses the project directory" })),
 					review: Type.Optional(Type.Boolean({ description: `Default true: the worker stops at EVAL for human or agent review, including read-only lookups you will review yourself. Set false only when ${user()} explicitly waives review` })),
 				}),
@@ -343,7 +346,7 @@ export function createDispatchExtension(
 					file: Type.String({ description: "Org agenda file under ~/org" }),
 					heading: Type.String({ description: "Exact title or id:UUID, as org_read_task accepts" }),
 					expected: Type.Union([Type.Literal("TODO"), Type.Literal("EVAL"), Type.Literal("HOLD")], { description: "Current state just read; a stale request is refused" }),
-					host: Type.String({ description: `Keep the existing host unless the user changes it; otherwise default ${hosts[0]}. Allowed: ${hosts.join(", ")}` }),
+					host: Type.String({ description: `Keep the existing host unless the user changes it; otherwise default ${defaultHost}. Allowed: ${hosts.join(", ")}` }),
 					note: Type.String({ description: `One line recording ${user()}'s request and any answer or revised scope, naming ${user()} rather than writing you` }),
 				}),
 				replay: "safe",

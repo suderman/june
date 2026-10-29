@@ -73,7 +73,7 @@ Keys of =config.json=, with their defaults:
   "contextCap": 200000,
   "skillDirs": [],
   "org": { "root": "~/org", "people": "~/org/people.org" },
-  "dispatch": { "hosts": [] },
+  "dispatch": { "hosts": [], "agent": "pi" },
   "herdr": { "session": "default", "host": "<hostname>", "hosts": {}, "allowPrompt": false },
   "rhythm": { "wake": "05:00", "quiet": "22:00", "sleep": "01:00" },
   "reflection": { "enabled": true, "quietMinutes": 60, "recentDays": 3, "periods": ["week", "month", "quarter", "year"] },
@@ -92,7 +92,7 @@ Keys of =config.json=, with their defaults:
 - =envFiles= are dotenv files read for keys at startup, for development. A service should get keys from its environment.
 - =skillDirs= are read in place; =skill_read= only reads inside a listed skill's directory.
 - =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"laptop": {}}=; ={"ssh": "target"}= overrides the destination. =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an agent on this host.
-- =dispatch.hosts= are the machines June may queue AUTO tasks for; the first is the default. Empty leaves out the task-writing tools.
+- =dispatch.hosts= are the machines June may queue AUTO tasks for. Empty leaves out the task-writing tools. =dispatch.host= (the first of =hosts= by default) and =dispatch.agent= (pi by default) are what the dispatcher writes into an AUTO task's drawer when it has no =HOST= or =AGENT= and no tag names one; June's own tasks use them too.
 - =rhythm= is the user's day in local =HH:MM=: heartbeats run from =wake= until =quiet=, and the nightly reflection from =sleep= until =wake=.
 - =reflection= runs the nightly pass once the user has been quiet for =quietMinutes=; =recentDays= is how many recent "Day's end" entries June sees in her prompt; =periods= are the longer digests that follow it.
 - =heartbeat= enables a private look every =everyMinutes= in waking hours; the user counts as chatting if they wrote within =chattingMinutes=.
