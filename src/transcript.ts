@@ -5,6 +5,9 @@ import type { AgentEvent, SnapshotEvent } from "@earendil-works/pi-durable";
 export const QUIET = "QUIET";
 export const isQuiet = (text: string) => /^\s*QUIET\.?\s*$/i.test(text);
 
+/** June's own looks, by their june.input source or [tag]: only a real message to the user shows, never the prompt or her tools. */
+const PRIVATE = new Set(["heartbeat", "watch"]);
+
 type Block = { type: string; text?: string; thinking?: string; name?: string; arguments?: unknown; id?: string };
 
 export type Item =
@@ -27,7 +30,7 @@ export class Transcript {
 	/** When the running compaction started, as this client first saw it; undefined when none runs. */
 	compacting: number | undefined;
 	#entries = new Set<string>();
-	/** Inside a heartbeat, June's private look: only a real message to the user shows, never the look itself. */
+	/** Inside a heartbeat or watch notice, June's private look: only a real message to the user shows, never the look itself. */
 	#private = false;
 	#live: Extract<Item, { kind: "assistant" }> | undefined;
 	#tools = new Map<string, Extract<Item, { kind: "tool" }>>();
@@ -163,7 +166,7 @@ export class Transcript {
 		const message = entry.model?.[0];
 		switch (entry.kind) {
 			case "june.input":
-				this.#private = entry.data?.source === "heartbeat";
+				this.#private = PRIVATE.has(entry.data?.source);
 				if (!this.#private) this.items.push({ kind: "user", id, source: entry.data?.source ?? "?", text: entry.data?.text ?? "" });
 				return;
 			case "june.patter":
@@ -174,10 +177,11 @@ export class Transcript {
 				else this.background.delete(String(entry.data?.id));
 				return;
 			case "pi.user": {
-				this.#private = false;
 				const text = textOf(message?.content);
+				this.#private = PRIVATE.has(/^\[(\w+)\]/.exec(text)?.[1] ?? "");
 				// /stop, from either surface, writes this boundary so queued messages can be placed.
 				const own = /^\[(work|follow|reminder)[\] ]\s*/.exec(text);
+				if (this.#private) return;
 				if (text.startsWith("[/stop]")) this.items.push({ kind: "note", id, text: "stopped" });
 				// A notice delivered through Telegram, which June relays there: one short line here, not the whole report.
 				else if (own) this.items.push({ kind: "user", id, source: own[1]!, text: clip(text.slice(own[0].length), 80), telegram: true });

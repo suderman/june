@@ -44,3 +44,30 @@ test("June's Org replies render as Markdown in the terminal, leaving paths and M
 	assert.equal(orgToMarkdown("queued in =~/org/work/emacs.org=."), "queued in `~/org/work/emacs.org`.", "verbatim may start with the other marker");
 	assert.equal(orgToMarkdown("set =a b= then =c=, not ==x=="), "set `a b` then `c`, not ==x==", "each span ends at its own marker");
 });
+
+test("a watch or heartbeat notice shows only June's words, whether it came through Telegram or the terminal", () => {
+	const user = (id: number, text: string) => ({ id, kind: "pi.user", model: [{ role: "user", content: text }] });
+	const said = (id: number, text: string, tool = false) => ({
+		id,
+		kind: "pi.assistant",
+		model: [{ role: "assistant", content: [...(tool ? [{ type: "toolCall", id: `c${id}`, name: "org_read_task", arguments: {} }] : []), { type: "text", text }] }],
+	});
+	const entries = [
+		user(1, "hi"),
+		said(2, "hello"),
+		user(3, "[watch] Dispatched tasks you did not queue changed since you last heard:\n- «Snape» on kit is now EVAL."),
+		said(4, "", true),
+		said(5, "Snape's uptime report is at EVAL."),
+		{ id: 6, kind: "june.input", data: { source: "watch", text: "1 dispatched task changed" } },
+		user(7, "[watch] Dispatched tasks you did not queue changed since you last heard:\n- «Pirate» on kit is DONE."),
+		said(8, "The pirate report is done."),
+		user(9, "[heartbeat] A private heartbeat."),
+		said(10, "QUIET"),
+		user(11, "[follow] The task «Ship» is EVAL."),
+		said(12, "Ship is ready."),
+	];
+	const transcript = new Transcript();
+	transcript.load({ entries, inbox: [], tools: [], compactions: [], agent: {} } as never);
+	const shown = transcript.items.map((i) => (i.kind === "user" ? `${i.source} › ${i.text}` : i.kind === "assistant" ? `june: ${i.blocks.map((b) => b.text ?? "").join("")}` : i.kind));
+	assert.deepEqual(shown, ["telegram › hi", "june: hello", "june: Snape's uptime report is at EVAL.", "june: The pirate report is done.", "follow › The task «Ship» is EVAL.", "june: Ship is ready."]);
+});
