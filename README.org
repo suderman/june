@@ -6,7 +6,7 @@ June is a personal assistant: one persistent daemon on Pi Durable that the user 
 
 - [[https://github.com/earendil-works/pi/tree/main/packages/durable][Pi Durable]]: the harness June runs in. Her conversation, tasks, tools, and compaction are durable, so a restart resumes work rather than losing or repeating it. [[https://github.com/earendil-works/pi/tree/main/packages/ai][pi-ai]] talks to the models and [[https://github.com/earendil-works/pi/tree/main/packages/tui][pi-tui]] draws the terminal client.
 - [[https://github.com/smixs/pi-durable-telegram][pi-durable-telegram]]: the Telegram channel for Pi Durable.
-- [[https://github.com/earendil-works/pi/tree/main/packages/coding-agent][Pi Coding Agent]]: the coding agent the dispatcher starts for AUTO tasks. June reads her providers from its =models.json=.
+- [[https://github.com/earendil-works/pi/tree/main/packages/coding-agent][Pi Coding Agent]] and Claude Code: the agents the dispatcher starts for AUTO tasks, selected by =AGENT=. June reads her providers from Pi's =models.json=.
 - [[https://herdr.dev][Herdr]]: the runtime those agents run in, one pane each. June reads their status through its CLI.
 - [[https://orgmode.org][Org]] in [[https://www.gnu.org/software/emacs/][Emacs]]: where tasks, projects, calendars, and June's own files live. Task states and dates are set by Org itself, through Emacs in batch.
 - [[https://github.com/BurntSushi/ripgrep][ripgrep]]: how June searches Org.

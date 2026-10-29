@@ -302,7 +302,7 @@ export function createDispatchExtension(
 			}),
 			defineTool({
 				name: "org_queue_task",
-				description: `Queue new work for an unattended Pi agent: write a new AUTO heading, its host (${hosts.join(", ")}) and agent in its property drawer, into an Org agenda file. The dispatcher on that host launches it, and this tool starts the one on this host right away, and the agent ends at EVAL for review by you or the user unless review is explicitly waived. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task and use org_projects to find its project first. If no project fits, use org_create_project before queueing. The tool writes the body from reason, scope, and checklist.`,
+				description: `Queue new work for an unattended agent: write a new AUTO heading, its host (${hosts.join(", ")}) and agent in its property drawer, into an Org agenda file. The dispatcher on that host launches it, and this tool starts the one on this host right away, and the agent ends at EVAL for review by you or the user unless review is explicitly waived. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task and use org_projects to find its project first. If no project fits, use org_create_project before queueing. The tool writes the body from reason, scope, and checklist.`,
 				parameters: Type.Object({
 					file: Type.String({ description: "Org file under ~/org, usually the project's <project>.org" }),
 					title: Type.String({ description: "Concise verb-led heading title, without keyword or tags" }),

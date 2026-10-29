@@ -47,7 +47,7 @@ case $1 in
 esac
 [ -n "$f" ] || exit 1
 printf '%s\n%s\n%s\n' "$(grep -m1 -o '"cwd":"[^"]*"' "$f" | cut -d'"' -f4)" "$f" \
-  "$(grep '"type":"session_info"' "$f" | tail -n1 | grep -o '"name":"[^"]*"' | cut -d'"' -f4)"
+  "$(jq -r 'select(.type == "session_info" or .type == "custom-title") | .name // .customTitle // empty' "$f" | tail -n1)"
 EOF
   ) || die "session $agent:$session not found on $host"
   cwd=$(sed -n 1p <<<"$found")
@@ -58,7 +58,7 @@ EOF
   esac
 }
 
-# Open a focused tab in DIR and print its pane. org-dispatch names its pi
+# Open a focused tab in DIR and print its pane. org-dispatch names its agent
 # sessions "auto · HEADING" and opens them in the workspace named for the task's
 # Org file, its project; a reopened run goes back there under the same tab label.
 # The Org file is the one whose Sessions link names this session.

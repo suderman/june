@@ -7,7 +7,7 @@ org/
 ├── dispatch/org-dispatch.el   dispatcher, run by Emacs in batch
 ├── dispatch/org-dispatch      command-line wrapper
 ├── edit/org-edit              TODO states and dates set by Org for agents
-├── prompts/                   task.org and nudge.org, sent to pi
+├── prompts/                   task.org and nudge.org, sent to the agent
 ├── bin/herdr-link             stamp and follow herdr: links
 └── tests/                     batch tests with fixtures
 skills/                        project-org-tasks, org-triage, for every agent
@@ -15,7 +15,7 @@ skills/                        project-org-tasks, org-triage, for every agent
 
 ** Where each piece runs
 
-June's Home Manager module (=homeModules.default=, see the main README) builds =org-dispatch=, =org-edit=, and =herdr-link= from the same commit as the package, with =ORG_DISPATCH_EL=, =ORG_DISPATCH_PROMPTS=, and =ORG_EDIT_EL= set to that commit, and with =programs.june.dispatch.enable= runs the dispatcher every minute with a systemd user timer. The host provides pi and Herdr, which the dispatcher drives. A system flake pins June as an input, so the dispatcher always runs with the prompts from the same commit, and rolling back the system rolls both back. Changing either one needs an input update and a rebuild. To test local changes before pushing, rebuild with =--override-input june path:<checkout>=.
+June's Home Manager module (=homeModules.default=, see the main README) builds =org-dispatch=, =org-edit=, and =herdr-link= from the same commit as the package, with =ORG_DISPATCH_EL=, =ORG_DISPATCH_PROMPTS=, and =ORG_EDIT_EL= set to that commit, and with =programs.june.dispatch.enable= runs the dispatcher every minute with a systemd user timer. The host provides Herdr and the agents it dispatches, pi or Claude Code. A system flake pins June as an input, so the dispatcher always runs with the prompts from the same commit, and rolling back the system rolls both back. Changing either one needs an input update and a rebuild. To test local changes before pushing, rebuild with =--override-input june path:<checkout>=.
 
 The skills are different. =~/.agents/skills.json= lists them as local entries with two paths, so =agents apply= links =~/.agents/skills/project-org-tasks= and =org-triage= into this checkout when it is there, and edits apply at once; elsewhere it links the pinned copy that =programs.june= places at =~/.config/june/skills=. Every harness finds them in =~/.agents/skills=. Rebuild before publishing skill text that describes a new command.
 
@@ -34,32 +34,20 @@ States, set in =org-todo-keywords= here and in the user's Emacs configuration:
 | HOLD  | waiting, usually on the user's answer in =Dialog=             |
 | DONE  | finished                                                      |
 
-A task is an AUTO heading in the agenda files. Its property drawer names the
-machine to run it (=HOST=) and the agent to start (=AGENT=), beside =ID=. When
-either is missing, the dispatcher fills it from one tag naming a known host or
-agent, on the heading or else in =#+FILETAGS=, such as =:kit:=, =:pi:cog:=, or
-=:claude:kit:=, or else from =dispatch.host= and =dispatch.agent= in June's
-=config.json= (the first known host and pi without them). Only the dispatcher on
-the resolved host acts, and it writes the values into the drawer when it claims
-the task, as it does =ID=. From then on the drawer decides and the tags are
-decoration. A task with two host tags, two agent tags, or an unknown =HOST= or
-=AGENT= is skipped, with a log line, until that is fixed. Only pi can be started
-for now, so an =AGENT: claude= task waits. A heading the user typed launches
-once it has stayed unchanged for =dispatch.settle= seconds (120 by default); one
-June wrote launches at once. =SCHEDULED= delays a task and a
-repeater makes it recur. Properties adjust a run:
+A task is an AUTO heading in the agenda files. Its property drawer names the machine to run it (=HOST=) and the agent to start (=AGENT=), beside =ID=. When either is missing, the dispatcher fills it from one tag naming a known host or agent, on the heading or else in =#+FILETAGS=, such as =:kit:=, =:pi:cog:=, or =:claude:kit:=, or else from =dispatch.host= and =dispatch.agent= in June's =config.json= (the first known host and pi without them). Only the dispatcher on the resolved host acts, and it writes the values into the drawer when it claims the task, as it does =ID=. From then on the drawer decides and the tags are decoration. A task with two host tags, two agent tags, or an unknown =HOST= or =AGENT= is skipped, with a log line, until that is fixed. The dispatcher starts pi or Claude Code, selected by =AGENT=. A heading the user typed launches once it has stayed unchanged for =dispatch.settle= seconds (120 by default); one June wrote launches at once. =SCHEDULED= delays a task and a repeater makes it recur. Properties adjust a run:
 
 | Property  | Default          | Effect                                      |
 |-----------+------------------+---------------------------------------------|
 | REVIEW    | yes              | =no= lets the agent finish DONE             |
 | DEPLOY    | no               | =yes= allows deploying                      |
 | BRANCH    | current          | push to this branch                         |
-| MODEL     | pi's default     | pi model                                    |
+| MODEL     | agent's default  | model passed to the selected agent          |
 | DIR       | project checkout | working directory                           |
 | RETRY     | 0                | times the agent may reschedule a one-off    |
 
-The dispatcher adds =REPEAT_TO_STATE: AUTO= to repeating tasks so they
-return to AUTO, not TODO.
+The dispatcher adds =REPEAT_TO_STATE: AUTO= to repeating tasks so they return to AUTO, not TODO.
+
+Both agents run unattended: pi with =--no-approve=, Claude Code with =--dangerously-skip-permissions=. The task and dispatch prompt set the limits on their work. =MODEL= uses the selected agent's native syntax; =ORG_DISPATCH_MODEL= supplies a default for pi only. Each run has an =auto · HEADING= session name and a =herdr:HOST/AGENT:UUID= link. Resuming reuses a live pane for that host and agent, or starts pi with its session file or Claude with =--resume UUID=; both receive the same task and Dialog prompt. Claude's working directory must already be trusted. A trust or login dialog during startup puts the task on HOLD with the pane ID in Dialog, rather than opening another blocked tab each minute. The dispatcher never answers those dialogs.
 
 Agents end each turn with one of:
 

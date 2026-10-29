@@ -48,7 +48,7 @@ in {
     xdg.configFile."june/skills".source = "${self}/skills";
 
     systemd.user.services.org-dispatch = lib.mkIf cfg.dispatch.enable {
-      Unit.Description = "Dispatch autonomous Org tasks to pi in Herdr";
+      Unit.Description = "Dispatch autonomous Org tasks to agents in Herdr";
       Service = {
         Type = "oneshot";
         ExecStart = "${lib.getExe orgDispatch} run";

@@ -1,4 +1,4 @@
-;;; org-dispatch.el --- Run autonomous Org tasks with pi in Herdr  -*- lexical-binding: t; -*-
+;;; org-dispatch.el --- Run autonomous Org tasks with pi or Claude in Herdr  -*- lexical-binding: t; -*-
 
 ;; Batch entry points:
 ;;   org-dispatch-run      watch running tasks, then launch eligible ones
@@ -30,7 +30,7 @@
 (defvar org-dispatch-agents
   (split-string (org-dispatch--env "ORG_DISPATCH_AGENTS" "pi claude"))
   "Agents a task may name in AGENT or a tag.")
-(defconst org-dispatch-launchable '("pi")
+(defconst org-dispatch-launchable '("pi" "claude")
   "Agents this dispatcher can start; a task for another waits until it can.")
 (defvar org-dispatch-config
   (expand-file-name "config.json"
@@ -62,7 +62,7 @@
 Nil takes dispatch.settle from June's config.json, else 120.")
 (defvar org-dispatch-nudge-after
   (string-to-number (org-dispatch--env "ORG_DISPATCH_NUDGE_AFTER" "300"))
-  "Seconds pi must stay idle in PROG before each nudge.")
+  "Seconds an agent must stay idle in PROG before each nudge.")
 (defvar org-dispatch-time-limit
   (string-to-number (org-dispatch--env "ORG_DISPATCH_TIME_LIMIT" "14400")))
 (defvar org-dispatch-log-keep
@@ -124,22 +124,27 @@ Nil takes dispatch.settle from June's config.json, else 120.")
   (ignore-errors
     (org-dispatch--get (org-dispatch--herdr "agent" "get" pane) 'result 'agent 'agent_status)))
 
-(defun org-dispatch--pane-session (pane)
-  "Return the pi session UUID running in PANE, waiting briefly for Herdr."
+(defun org-dispatch--pane-session (pane agent)
+  "Return AGENT's session UUID running in PANE, waiting briefly for Herdr."
   (let (uuid)
     (dotimes (_ 20)
       (unless uuid
-        (let ((value (org-dispatch--get (org-dispatch--herdr "pane" "get" pane)
-                                        'result 'pane 'agent_session 'value)))
-          (if (and value (string-match "\\([0-9a-f]\\{8\\}-[0-9a-f-]\\{27\\}\\)\\.jsonl\\'" value))
+        (let* ((session (org-dispatch--get (org-dispatch--herdr "pane" "get" pane)
+                                          'result 'pane 'agent_session))
+               (value (alist-get 'value session))
+               (pattern (if (equal agent "claude")
+                            "\\`\\([0-9a-f]\\{8\\}-[0-9a-f-]\\{27\\}\\)\\'"
+                          "\\([0-9a-f]\\{8\\}-[0-9a-f-]\\{27\\}\\)\\.jsonl\\'")))
+          (if (and (equal (alist-get 'agent session) agent)
+                   value (string-match pattern value))
               (setq uuid (match-string 1 value))
             (sleep-for 0.5)))))
-    (or uuid (error "no pi session reported for %s" pane))))
+    (or uuid (error "no %s session reported for %s" agent pane))))
 
-(defun org-dispatch--live-pane (uuid)
-  "Return the pane where pi session UUID is running, if any."
+(defun org-dispatch--live-pane (uuid kind)
+  "Return the pane where KIND's session UUID is running, if any."
   (seq-some (lambda (agent)
-              (and (equal (org-dispatch--get agent 'agent) "pi")
+              (and (equal (org-dispatch--get agent 'agent) kind)
                    (string-search uuid (or (org-dispatch--get agent 'agent_session 'value) ""))
                    (org-dispatch--get agent 'pane_id)))
             (org-dispatch--get (org-dispatch--herdr "agent" "list") 'result 'agents)))
@@ -429,7 +434,9 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
       (save-excursion
         (goto-char (car section))
         (while (re-search-forward
-                (format "herdr:%s/pi:\\([0-9a-f-]+\\)" (regexp-quote org-dispatch-host))
+                (format "herdr:%s/%s:\\([0-9a-f-]+\\)"
+                        (regexp-quote org-dispatch-host)
+                        (regexp-quote (or (plist-get agent :value) "")))
                 (cdr section) t)
           (push (match-string 1) sessions))))
     (list :file buffer-file-name
@@ -448,7 +455,8 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
           :review (not (equal (downcase (or (org-entry-get nil "REVIEW") "yes")) "no"))
           :deploy (equal (downcase (or (org-entry-get nil "DEPLOY") "no")) "yes")
           :branch (org-entry-get nil "BRANCH")
-          :model (or (org-entry-get nil "MODEL") org-dispatch-model)
+          :model (or (org-entry-get nil "MODEL")
+                     (when (equal (plist-get agent :value) "pi") org-dispatch-model))
           :dir (if dir (expand-file-name dir) (org-dispatch--project-dir buffer-file-name))
           :repos (org-dispatch--project-repos buffer-file-name)
           :session (car sessions)
@@ -580,8 +588,9 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
 ;;; Launching
 
 (defun org-dispatch--claim (task pane session)
-  "Mark TASK in progress and link its SESSION in one edit."
-  (let ((link (format "herdr:%s/pi:%s" org-dispatch-host session)))
+  "Mark TASK in progress and link SESSION when available, in one edit."
+  (let* ((agent (plist-get task :agent))
+         (link (format "herdr:%s/%s:%s" org-dispatch-host agent session)))
     (org-dispatch--edit
      (plist-get task :file) (plist-get task :id)
      (lambda ()
@@ -595,13 +604,14 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
          (org-entry-put nil "REPEAT_TO_STATE" "AUTO")
          (org-dispatch--trim-log (plist-get task :id)))
        (org-todo "PROG")
-       (unless (let ((section (org-dispatch--section-bounds "Sessions")))
-                 (and section (string-search link (buffer-substring-no-properties
-                                                   (car section) (cdr section)))))
-         (org-dispatch--append
-          "Sessions"
-          (format "- [[%s@%s][pi@%s/%s]]" link pane org-dispatch-host
-                  (format-time-string "%Y-%m-%dT%H%M")))))
+       (when session
+         (unless (let ((section (org-dispatch--section-bounds "Sessions")))
+                   (and section (string-search link (buffer-substring-no-properties
+                                                     (car section) (cdr section)))))
+           (org-dispatch--append
+            "Sessions"
+            (format "- [[%s@%s][%s@%s/%s]]" link pane agent org-dispatch-host
+                    (format-time-string "%Y-%m-%dT%H%M"))))))
      (plist-get task :heading))))
 
 (defun org-dispatch--prompt (pane text)
@@ -610,15 +620,16 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
                        "--timeout" "60000"))
 
 (defun org-dispatch--launch (task)
-  "Start or resume pi for TASK in Herdr and claim it. Return non-nil on success."
+  "Start or resume TASK's agent in Herdr and claim it. Return non-nil on success."
   (let* ((id (or (plist-get task :id) (org-id-new)))
          (task (plist-put (copy-sequence task) :id id))
+         (agent (plist-get task :agent))
          (resume (plist-get task :session))
-         (pane (and resume (org-dispatch--live-pane resume)))
+         (pane (and resume (org-dispatch--live-pane resume agent)))
          (tab nil)
          (label (truncate-string-to-width (concat "auto · " (plist-get task :heading)) 60))
          (state (list :id id :file (plist-get task :file) :heading (plist-get task :heading)
-                      :dir (plist-get task :dir) :status "starting"
+                      :dir (plist-get task :dir) :agent agent :status "starting"
                       :started (float-time) :nudges 0
                       :repeat (if (plist-get task :repeat) 1 0))))
     (org-dispatch--save-state state)
@@ -636,20 +647,23 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
                    (format "auto-%s-%s"
                            (substring (replace-regexp-in-string "[^0-9a-f]" "" id) 0 8)
                            (format-time-string "%H%M%S"))
-                   "--kind" "pi" "--pane" pane "--timeout" "60000" "--"
-                   "--no-approve" "--name" label
+                   "--kind" agent "--pane" pane "--timeout" "60000" "--"
                    (append
+                    (list (if (equal agent "claude") "--dangerously-skip-permissions" "--no-approve")
+                          "--name" label)
                     (when (plist-get task :model) (list "--model" (plist-get task :model)))
                     (when resume
-                      (list "--session" (or (org-dispatch--session-file resume) resume))))))
-          (let ((session (org-dispatch--pane-session pane)))
+                      (if (equal agent "claude")
+                          (list "--resume" resume)
+                        (list "--session" (or (org-dispatch--session-file resume) resume)))))))
+          (let ((session (org-dispatch--pane-session pane agent)))
             (org-dispatch--claim task pane session)
             (setq state (plist-put state :pane pane))
             (setq state (plist-put state :tab (or tab "")))
             (setq state (plist-put state :session session))
             (setq state (plist-put state :status "running"))
             (org-dispatch--save-state state)
-            ;; Claimed: a failed prompt leaves pi idle, which the watcher nudges.
+            ;; Claimed: a failed prompt leaves the agent idle, which the watcher nudges.
             (condition-case err
                 (org-dispatch--prompt
                  pane (org-dispatch--render
@@ -659,7 +673,15 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
                                id (plist-get task :heading) pane)
             t))
       (error
-       (org-dispatch--drop-state id)
+       ;; Trust or login dialogs may block before the agent reports a session.
+       ;; Hold the task for Jon instead of opening another blocked tab each tick.
+       (if (and pane (equal (org-dispatch--agent-status pane) "blocked"))
+           (progn
+             (org-dispatch--claim task pane nil)
+             (org-dispatch--hold
+              state (format "%s is blocked during startup in Herdr pane %s. Inspect it with herdr agent read %s and resolve the prompt before resuming."
+                            agent pane pane)))
+         (org-dispatch--drop-state id))
        (org-dispatch--log "launch failed for %s: %s"
                           (plist-get task :heading) (error-message-string err))
        nil))))
@@ -723,11 +745,13 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
       (org-dispatch--hold state (format "Interrupted after %d minutes without finishing."
                                         (/ org-dispatch-time-limit 60))))
      ((null status)
-      (org-dispatch--hold state "pi is no longer running in its pane."))
+      (org-dispatch--hold state (format "%s is no longer running in its pane."
+                                        (or (plist-get state :agent) "pi"))))
      ((equal status "blocked")
       (when (eq (plist-get state :blocked) 0)
         (org-dispatch--notify (concat "Blocked · " (plist-get state :heading))
-                              "pi is waiting on an approval prompt."))
+                              (format "%s is waiting on an approval prompt."
+                                      (or (plist-get state :agent) "pi"))))
       (org-dispatch--save-state (plist-put state :blocked 1)))
      ((member status '("idle" "done"))
       (let* ((idle (plist-get state :idle))

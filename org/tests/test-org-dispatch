@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Batch tests for org-dispatch against fixture Org files. Needs only emacs;
-# nothing here calls Herdr, starts pi, or touches ~/org.
+# nothing here calls a real Herdr, starts an agent, or touches ~/org.
 
 org="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 fixture="$(mktemp -d)"
@@ -60,7 +60,7 @@ task '#+FILETAGS: :kit:' '* AUTO Host from the file'
 task '#+FILETAGS: :kit:' '* AUTO Heading tag over the file :cog:'
 task '* AUTO Agent and host :pi:kit:'
 task '* AUTO Host and agent :kit:pi:'
-task '* AUTO Claude cannot launch yet :claude:kit:'
+task '* AUTO Launch Claude :claude:kit:'
 task '* AUTO Two agents :pi:claude:'
 task '* AUTO The drawer beats the tags :cog:claude:' ':PROPERTIES:' ':HOST: kit' ':AGENT: pi' ':END:'
 task '* AUTO The drawer sends it away :kit:' ':PROPERTIES:' ':HOST: cog' ':END:'
@@ -78,18 +78,17 @@ check "scan takes the host from #+FILETAGS" has "$scan" "Host from the file"
 check "a heading's host tag wins over the file's" lacks "$scan" "Heading tag over the file"
 check "scan takes an agent and host tag in either order" has "$scan" "Agent and host"
 check "scan takes a host and agent tag in either order" has "$scan" "Host and agent"
-check "scan skips an agent it cannot launch yet" lacks "$scan" "Claude cannot launch yet"
+check "scan lists a Claude task for this host" has "$scan" "Launch Claude"
 check "scan skips AUTO tagged for two agents" lacks "$scan" "Two agents"
 check "the drawer's HOST and AGENT beat the tags" has "$scan" "The drawer beats the tags"
 check "the drawer's HOST sends a kit-tagged task elsewhere" lacks "$scan" "The drawer sends it away"
 check "scan skips an unknown HOST" lacks "$scan" "An unknown host"
 check "the log says why two hosts were skipped" has "$log" "Two hosts: tagged for kit and cog"
-check "the log says why claude waits" has "$log" "AGENT claude cannot be launched yet"
 check "the log names an unknown HOST" has "$log" "HOST mars is not one of"
 
 # June's config sets the defaults.
 mkdir -p "$HOME/.config/june"
-printf '{"dispatch": {"hosts": ["kit"], "host": "cog", "agent": "pi"}}\n' >"$HOME/.config/june/config.json"
+printf '{"dispatch": {"hosts": ["kit"], "host": "cog", "agent": "claude"}}\n' >"$HOME/.config/june/config.json"
 scan=$(ORG_DISPATCH_MAX_AGENTS=20 run scan | grep $'\t' || true)
 check "June's default host applies to an untagged AUTO" lacks "$scan" "No host or agent"
 check "a host tag still beats the default" has "$scan" "Launch me"
@@ -258,7 +257,8 @@ case "$1 $2" in
   "pane run") touch "$FAKE_HERDR_LOG.started" ;;
   "agent list")
     if [[ -e $FAKE_HERDR_LOG.started ]]; then
-      printf '{"result":{"agents":[{"pane_id":"p-live","agent_session":{"agent":"pi","value":"x_%s.jsonl"}}]}}\n' "$FAKE_SESSION"
+      if [[ ${FAKE_AGENT:-pi} == claude ]]; then value=$FAKE_SESSION; else value=x_$FAKE_SESSION.jsonl; fi
+      printf '{"result":{"agents":[{"pane_id":"p-live","agent":"%s","agent_session":{"agent":"%s","value":"%s"}}]}}\n' "${FAKE_AGENT:-pi}" "${FAKE_AGENT:-pi}" "$value"
     else echo '{"result":{"agents":[]}}'; fi ;;
   *) echo '{}' ;;
 esac
@@ -303,7 +303,192 @@ check "herdr-link creates the project workspace when missing" has "$calls" "^wor
 rm "$HOME/org/work/suderman/june/june.org"
 calls=$(reopen '[{"label":"[8] june","workspace_id":"w-june"}]')
 check "herdr-link without a linking file opens in the current workspace" has "$calls" "^tab create --cwd /tmp --focus$"
+# Claude stores its display name as custom-title, not pi's session_info.
+mkdir -p "$HOME/.claude/projects/x"
+printf '{"type":"user","cwd":"/tmp"}\n{"type":"custom-title","customTitle":"auto · Fix the thing"}\n' \
+  >"$HOME/.claude/projects/x/$FAKE_SESSION.jsonl"
+printf '* EVAL Fix the thing\n** Sessions\n- [[herdr:kit/claude:%s@w1:p1][claude@kit/2026-10-26T1500]]\n' "$FAKE_SESSION" \
+  >"$HOME/org/work/suderman/june/june.org"
+rm -f "$FAKE_HERDR_LOG" "$FAKE_HERDR_LOG.started"
+FAKE_AGENT=claude FAKE_WORKSPACES='[{"label":"[8] June","workspace_id":"w-june"}]' \
+  "$org/bin/herdr-link" attach "herdr:$(</proc/sys/kernel/hostname)/claude:$FAKE_SESSION@w1:p1" >/dev/null 2>&1 || true
+calls=$(cat "$FAKE_HERDR_LOG")
+check "herdr-link reopens Claude in the linking file's workspace" has "$calls" '^tab create --workspace w-june --cwd /tmp --label Fix the thing --focus$'
+check "herdr-link resumes Claude by ID" has "$calls" "^pane run p-tab claude --resume $FAKE_SESSION$"
+check "herdr-link attaches to the resumed Claude pane" has "$calls" '^agent attach p-live --takeover$'
 printf '#!/bin/sh\nexit 1\n' >"$fixture/bin/herdr"
+
+# Launch and watch tests exercise the real Org edits and state, with only Herdr mocked.
+cat >"$fixture/launch-tests.el" <<'EOF'
+;;; -*- lexical-binding: t; -*-
+(require 'ert)
+(require 'cl-lib)
+(defvar test-session "01234567-89ab-cdef-0123-456789abcdef")
+(defvar test-calls nil)
+(defvar test-agent "pi")
+(defvar test-live nil)
+(defvar test-status "idle")
+(defvar test-start-blocked nil)
+
+(defun test-herdr (&rest args)
+  (push args test-calls)
+  (pcase (seq-take args 2)
+    (`("workspace" "list") '((result (workspaces . []))))
+    (`("workspace" "create") '((result (root_pane (pane_id . "p-new") (tab_id . "t-new")))))
+    (`("pane" "get")
+     `((result (pane (agent_session (agent . ,test-agent)
+                                   (value . ,(if (equal test-agent "claude") test-session
+                                               (concat "x_" test-session ".jsonl"))))))))
+    (`("agent" "list")
+     `((result (agents . ,(if test-live
+                             `[((agent . ,test-agent) (pane_id . "p-live")
+                                (agent_session (agent . ,test-agent) (value . ,test-session)))]
+                           [])))))
+    (`("agent" "get") `((result (agent (agent_status . ,test-status)))))
+    (`("agent" "start") (when test-start-blocked (error "agent_not_ready: blocked during startup")))
+    (_ nil)))
+
+(defun test-task (agent &optional resume)
+  (let ((file (expand-file-name "launch.org" org-dispatch-root)))
+    (make-directory org-dispatch-root t)
+    (with-temp-file file
+      (insert (format "* AUTO Test launch\n:PROPERTIES:\n:ID: 00000000-0000-0000-0000-000000000099\n:HOST: kit\n:AGENT: %s\n:END:\n" agent))
+      (when resume
+        (insert (format "\n** Sessions\n- [[herdr:kit/%s:%s@p-old][old]]\n" agent test-session))))
+    (org-dispatch--edit file "00000000-0000-0000-0000-000000000099" #'org-dispatch--task)))
+
+(defmacro test-with-herdr (&rest body)
+  `(let ((test-calls nil) (test-live nil) (test-status "idle"))
+     (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))
+     (cl-letf (((symbol-function 'org-dispatch--herdr) #'test-herdr))
+       ,@body)))
+
+(ert-deftest session-formats-and-agent-identity ()
+  (test-with-herdr
+   (dolist (test-agent '("pi" "claude"))
+     (should (equal (org-dispatch--pane-session "p" test-agent) test-session)))
+   (let ((test-agent "pi"))
+     (cl-letf (((symbol-function 'sleep-for) #'ignore))
+       (should-error (org-dispatch--pane-session "p" "claude"))))))
+
+(ert-deftest live-pane-matches-the-agent-kind ()
+  (test-with-herdr
+   (let ((test-agent "claude") (test-live t))
+     (should (equal (org-dispatch--live-pane test-session "claude") "p-live"))
+     (should-not (org-dispatch--live-pane test-session "pi")))))
+
+(ert-deftest task-resumes-only-the-resolved-agent-and-host ()
+  (let* ((task (test-task "claude" t)) (file (plist-get task :file)))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (goto-char (point-max))
+      (insert "- [[herdr:kit/pi:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa@p][pi]]\n"
+              "- [[herdr:cog/claude:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb@p][other host]]\n")
+      (write-region (point-min) (point-max) file nil 'silent))
+    (should (equal (plist-get (org-dispatch--edit file (plist-get task :id) #'org-dispatch--task) :session)
+                   test-session))))
+
+(ert-deftest pi-model-default-does-not-leak-to-claude ()
+  (let ((org-dispatch-model "provider/pi-model:high"))
+    (should (equal (plist-get (test-task "pi") :model) org-dispatch-model))
+    (let* ((task (test-task "claude")) (file (plist-get task :file)))
+      (should-not (plist-get task :model))
+      (org-dispatch--edit file (plist-get task :id) (lambda () (org-entry-put nil "MODEL" "sonnet")))
+      (should (equal (plist-get (org-dispatch--edit file (plist-get task :id) #'org-dispatch--task) :model)
+                     "sonnet")))))
+
+(ert-deftest fresh-launches-claim-and-record-the-right-agent ()
+  (test-with-herdr
+   (dolist (test-agent '("pi" "claude"))
+     (setq test-calls nil)
+     (let ((task (plist-put (test-task test-agent) :model "test-model")))
+       (should (org-dispatch--launch task))
+       (let* ((start (seq-find (lambda (args) (equal (seq-take args 2) '("agent" "start"))) test-calls))
+              (native (cdr (member "--" start)))
+              (state (car (org-dispatch--states))))
+         (should (equal (cadr (member "--kind" start)) test-agent))
+         (should (equal (car native) (if (equal test-agent "claude") "--dangerously-skip-permissions" "--no-approve")))
+         (should (equal (cadr (member "--name" native)) "auto · Test launch"))
+         (should (equal (cadr (member "--model" native)) "test-model"))
+         (should-not (member "--resume" native))
+         (should-not (member "--session" native))
+         (should (equal (plist-get state :agent) test-agent))
+         (should (equal (plist-get state :session) test-session))
+         (should (equal (plist-get state :status) "running")))
+       (org-dispatch--edit
+        (plist-get task :file) (plist-get task :id)
+        (lambda ()
+          (should (equal (org-get-todo-state) "PROG"))
+          (should (string-search (format "herdr:kit/%s:%s@p-new][%s@kit/" test-agent test-session test-agent)
+                                 (org-dispatch--subtree-text)))))
+       (should (seq-find (lambda (args) (and (equal (seq-take args 2) '("agent" "prompt"))
+                                           (string-search "Test launch" (nth 3 args)))) test-calls))
+       ;; Even if stale AUTO text is scanned, a running record prevents another launch.
+       (should-not (org-dispatch--eligible (list task) (org-dispatch--states) t))))))
+
+(ert-deftest resume-reuses-a-live-pane-and-does-not-duplicate-the-link ()
+  (test-with-herdr
+   (dolist (test-agent '("pi" "claude"))
+     (let ((task (test-task test-agent t)) (test-live t))
+       (setq test-calls nil)
+       (should (org-dispatch--launch task))
+       (should-not (seq-find (lambda (args) (member (cadr args) '("create" "start"))) test-calls))
+       (should (equal (plist-get (car (org-dispatch--states)) :pane) "p-live"))
+       (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                           (lambda () (should (= 1 (how-many "herdr:kit/" (point-min) (point-max))))))))))
+
+(ert-deftest resume-starts-a-closed-session-with-native-flags ()
+  (test-with-herdr
+   (dolist (test-agent '("pi" "claude"))
+     (let* ((task (test-task test-agent t))
+            (session-file (expand-file-name (concat "~/.pi/agent/sessions/x/2026_" test-session ".jsonl"))))
+       (make-directory (file-name-directory session-file) t)
+       (with-temp-file session-file (insert "{}\n"))
+       (setq test-calls nil)
+       (should (org-dispatch--launch task))
+       (let ((start (seq-find (lambda (args) (equal (seq-take args 2) '("agent" "start"))) test-calls)))
+         (if (equal test-agent "claude")
+             (progn (should (equal (cadr (member "--resume" start)) test-session))
+                    (should-not (member "--session" start)))
+           (should (equal (cadr (member "--session" start)) session-file))
+           (should-not (member "--resume" start))))))))
+
+(ert-deftest startup-dialog-holds-instead-of-launching-again ()
+  (test-with-herdr
+   (let ((task (plist-put (test-task "claude") :id nil))
+         (test-agent "claude") (test-status "blocked") (test-start-blocked t))
+     (should-not (org-dispatch--launch task))
+     (should-not (org-dispatch--states))
+     (should-not (org-dispatch--tasks))
+     (org-dispatch--edit
+      (plist-get task :file) nil
+      (lambda ()
+        (should (org-entry-get nil "ID"))
+        (should (equal (org-get-todo-state) "HOLD"))
+        (should-not (org-dispatch--section-bounds "Sessions"))
+        (should (string-search "claude is blocked during startup in Herdr pane p-new" (org-dispatch--subtree-text))))
+      "Test launch"))))
+
+(ert-deftest watch-uses-claude-in-blocked-and-missing-notices ()
+  (test-with-herdr
+   (let* ((task (test-task "claude"))
+          (state (list :id (plist-get task :id) :file (plist-get task :file)
+                       :heading "Test launch" :agent "claude" :pane "p-new"
+                       :status "running" :started (float-time) :nudges 0 :blocked 0)))
+     (org-dispatch--edit (plist-get task :file) (plist-get task :id) (lambda () (org-todo "PROG")))
+     (let ((test-status "blocked")) (org-dispatch--watch state))
+     (should (seq-find (lambda (args) (member "claude is waiting on an approval prompt." args)) test-calls))
+     (let ((test-status nil)) (org-dispatch--watch state))
+     (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                         (lambda ()
+                           (should (equal (org-get-todo-state) "HOLD"))
+                           (should (string-search "claude is no longer running" (org-dispatch--subtree-text))))))))
+
+(ert-run-tests-batch-and-exit)
+EOF
+check "launch, resume, session identity, and watch for pi and Claude" \
+  env XDG_STATE_HOME="$fixture/launch-state" ORG_DISPATCH_ROOT="$fixture/launch-org" \
+  emacs -Q --batch -l "$org/dispatch/org-dispatch.el" -l "$fixture/launch-tests.el"
 
 # The source byte-compiles without warnings.
 cp "$org/dispatch/org-dispatch.el" "$fixture/org-dispatch.el"

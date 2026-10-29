@@ -333,7 +333,7 @@ when it claims the task, as it does `:ID:`: from one host tag (`:kit:`, `:cog:`,
 `:lux:`) or agent tag (`:pi:`, `:claude:`) on the heading or in `#+FILETAGS`,
 else from June's `dispatch.host` and `dispatch.agent` defaults. Two host or two
 agent tags hold the task until fixed; once the drawer is set, tags are only
-decoration. Only pi can be started for now. A task runs once its text has stopped changing for
+decoration. Both pi and Claude Code can be started. A task runs once its text has stopped changing for
 `org-dispatch-settle` (headings June writes, marked `:JUNE_REQUEST:`, launch at
 once); `org-dispatch scan` shows what that host would launch
 now. `SCHEDULED` delays it and a repeater makes it recur. Jon adjusts a run with the
