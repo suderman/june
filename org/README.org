@@ -44,7 +44,9 @@ the resolved host acts, and it writes the values into the drawer when it claims
 the task, as it does =ID=. From then on the drawer decides and the tags are
 decoration. A task with two host tags, two agent tags, or an unknown =HOST= or
 =AGENT= is skipped, with a log line, until that is fixed. Only pi can be started
-for now, so an =AGENT: claude= task waits. =SCHEDULED= delays a task and a
+for now, so an =AGENT: claude= task waits. A heading the user typed launches
+once it has stayed unchanged for =dispatch.settle= seconds (120 by default); one
+June wrote launches at once. =SCHEDULED= delays a task and a
 repeater makes it recur. Properties adjust a run:
 
 | Property  | Default          | Effect                                      |

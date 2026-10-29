@@ -56,8 +56,10 @@
 (defvar org-dispatch-max-nudges
   (string-to-number (org-dispatch--env "ORG_DISPATCH_MAX_NUDGES" "3")))
 (defvar org-dispatch-settle
-  (string-to-number (org-dispatch--env "ORG_DISPATCH_SETTLE" "120"))
-  "Seconds a heading must stay unchanged before it launches.")
+  (let ((value (org-dispatch--env "ORG_DISPATCH_SETTLE" nil)))
+    (and value (string-to-number value)))
+  "Seconds a heading must stay unchanged before it launches.
+Nil takes dispatch.settle from June's config.json, else 120.")
 (defvar org-dispatch-nudge-after
   (string-to-number (org-dispatch--env "ORG_DISPATCH_NUDGE_AFTER" "300"))
   "Seconds pi must stay idle in PROG before each nudge.")
@@ -380,7 +382,8 @@ with NOTE, moving the Sessions links into it, then trim the log."
 
 (defvar org-dispatch--defaults nil)
 (defun org-dispatch--default (key fallback)
-  "June's dispatch KEY (\"host\" or \"agent\"), or FALLBACK without one."
+  "June's dispatch KEY, such as \"host\" or \"settle\", or FALLBACK when it
+has none of FALLBACK's type."
   (unless org-dispatch--defaults
     (setq org-dispatch--defaults
           (or (ignore-errors
@@ -390,7 +393,9 @@ with NOTE, moving the Sessions links into it, then trim the log."
                     (and (hash-table-p dispatch) dispatch))))
               (make-hash-table :test 'equal))))
   (let ((value (gethash key org-dispatch--defaults)))
-    (if (and (stringp value) (not (string-empty-p value))) value fallback)))
+    (cond ((and (stringp fallback) (stringp value) (not (string-empty-p value))) value)
+          ((and (numberp fallback) (natnump value)) value)
+          (t fallback))))
 
 (defun org-dispatch--resolve (property known default)
   "The entry's PROPERTY: from its drawer, else the one tag among KNOWN on the
@@ -795,7 +800,8 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
          ((and (plist-get task :scheduled) (time-less-p now (plist-get task :scheduled))))
          ((seq-find (lambda (s) (equal (plist-get s :id) (plist-get task :id))) running))
          ((and (not (plist-get task :june))
-               (< (- now (gethash "seen" entry)) org-dispatch-settle))
+               (< (- now (gethash "seen" entry))
+                  (or org-dispatch-settle (org-dispatch--default "settle" 120))))
           (when dry-run (push (plist-put task :waiting t) eligible)))
          ((seq-find (lambda (s) (equal (plist-get s :dir) (plist-get task :dir)))
                     (append running eligible)))

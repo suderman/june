@@ -73,6 +73,10 @@ test("the rhythm, reflection, heartbeat, and patter timing have defaults, take o
 	assert.deepEqual(defaults.dispatch, { hosts: ["kit", "cog"], host: "kit", agent: "pi" });
 	const spaced = await layer("spaced", { dispatch: { hosts: ["kit"], agent: "pi claude" } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: spaced }), /dispatch\.agent must be a plain name/);
+	const settle = loadConfig({ ...tmp.paths, config: await layer("settle", { dispatch: { hosts: ["kit"], settle: 90 } }) });
+	assert.equal(settle.dispatch.settle, 90);
+	const negative = await layer("negative", { dispatch: { hosts: ["kit"], settle: -1 } });
+	assert.throws(() => loadConfig({ ...tmp.paths, config: negative }), /dispatch\.settle must be whole seconds/);
 	const fortnightly = await layer("fortnightly", { reflection: { periods: ["week", "fortnight"] } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: fortnightly }), /reflection\.periods may hold only week, month, quarter, year/);
 	assert.deepEqual(plain.situation, { calendars: [], homeAssistant: { people: [], pollSeconds: 300 } });

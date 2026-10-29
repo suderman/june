@@ -9,7 +9,7 @@
   "skillDirs": ["~/.agents/skills"],
   "org": { "root": "~/org" },
   "herdr": { "session": "default", "hosts": {} },
-  "dispatch": { "hosts": [], "agent": "pi" },
+  "dispatch": { "hosts": [], "agent": "pi", "settle": 120 },
   "rhythm": { "wake": "05:00", "quiet": "22:00", "sleep": "01:00" },
   "reflection": { "enabled": true, "quietMinutes": 60, "recentDays": 3, "periods": ["week", "month", "quarter", "year"] },
   "heartbeat": { "enabled": true, "everyMinutes": 60, "chattingMinutes": 15 },

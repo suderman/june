@@ -103,6 +103,13 @@ printf '* AUTO Written by June :kit:\n:PROPERTIES:\n:JUNE_REQUEST: test:1\n:END:
 scan=$(ORG_DISPATCH_SETTLE=600 run scan | grep $'\t' || true)
 check "scan holds a typed heading while it settles" has "$scan" $'Typed by Jon\t.*\tsettling'
 check "scan launches a June heading without settling" has "$scan" $'Written by June\t.*\tnew'
+mkdir -p "$HOME/.config/june"
+printf '{"dispatch": {"settle": 600}}\n' >"$HOME/.config/june/config.json"
+scan=$(ORG_DISPATCH_SETTLE= run scan | grep $'\t' || true)
+check "June's dispatch.settle applies without the variable" has "$scan" $'Typed by Jon\t.*\tsettling'
+scan=$(run scan | grep $'\t' || true)
+check "the variable beats dispatch.settle" has "$scan" $'Typed by Jon\t.*\tnew'
+rm -r "$HOME/.config/june"
 rm -r "$ORG_DISPATCH_ROOT/typed" "$ORG_DISPATCH_ROOT/june"
 
 # Retry: allowed, refused, and what it leaves behind.
