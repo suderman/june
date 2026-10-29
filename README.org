@@ -24,7 +24,7 @@ june init [NAME]     # copy the starting files into place
 june serve           # the daemon
 #+end_src
 
-Exit codes: 0 answered, 1 unanswered or failed, 2 usage, 3 daemon not running. In the client, Enter sends (as a steer while June is working), Alt+Enter queues a follow-up, Esc runs =/stop=, Ctrl+D detaches.
+Exit codes: 0 answered, 1 unanswered or failed, 2 usage, 3 daemon not running. In the client, Enter sends (as a steer while June is working), Shift+Enter queues a follow-up, Alt+Enter starts a new line, Up and Down recall earlier prompts, Esc runs =/stop=, Ctrl+D detaches.
 
 The terminal client, =june ask=, and Telegram share these slash commands:
 

@@ -7,6 +7,7 @@ import {
 	Container,
 	Editor,
 	type EditorTheme,
+	getKeybindings,
 	Markdown,
 	type MarkdownTheme,
 	matchesKey,
@@ -174,8 +175,10 @@ export async function runTui(socketPath: string): Promise<void> {
 	const header = new Line();
 	const view = new TranscriptView();
 	const status = new Line();
+	// As in Jon's pi: Alt+Enter breaks the line, Shift+Enter queues, and Up recalls earlier prompts.
+	getKeybindings().setUserBindings({ "tui.input.newLine": ["alt+enter", "ctrl+j"] });
 	const editor = new Editor(tui, editorTheme, { paddingX: 1 });
-	const footer = new Line(c.muted("enter send · alt+enter queue while busy · esc /stop · /help · ctrl+d detach"));
+	const footer = new Line(c.muted("enter send · shift+enter queue while busy · alt+enter newline · ↑ history · esc /stop · ctrl+d detach"));
 	tui.setLayoutRoot(
 		new VStack([
 			{ component: header, basis: "auto" },
@@ -226,6 +229,7 @@ export async function runTui(socketPath: string): Promise<void> {
 
 	const send = async (text: string, whenBusy: "steer" | "followUp") => {
 		if (!text.trim()) return;
+		editor.addToHistory(text);
 		if (client === undefined || connection !== "online") {
 			flash = "not connected; message not sent";
 			editor.setText(text);
@@ -277,7 +281,7 @@ export async function runTui(socketPath: string): Promise<void> {
 			if (transcript.running || transcript.background.size > 0) void run("stop");
 			return { consume: true };
 		}
-		if (matchesKey(data, "alt+enter")) {
+		if (matchesKey(data, "shift+enter")) {
 			const text = editor.getText();
 			editor.setText("");
 			void send(text, "followUp");
@@ -291,6 +295,8 @@ export async function runTui(socketPath: string): Promise<void> {
 	redraw();
 
 	// Attach, and on any disconnect try again with a capped backoff. Each attach starts from a fresh snapshot.
+	// The first snapshot seeds the history with what Jon typed before this client opened.
+	let seeded = false;
 	void (async () => {
 		let delay = 250;
 		let stopped = false;
@@ -300,7 +306,11 @@ export async function runTui(socketPath: string): Promise<void> {
 				const next = await Client.open(socketPath);
 				client = next;
 				next.on((reply: Reply) => {
-					if (reply.type === "snapshot") transcript.load(reply.snapshot, reply.omitted);
+					if (reply.type === "snapshot") {
+						transcript.load(reply.snapshot, reply.omitted);
+						if (!seeded) for (const item of transcript.items) if (item.kind === "user" && item.source === "kitty") editor.addToHistory(item.text);
+						seeded = true;
+					}
 					else if (reply.type === "events") transcript.apply(reply.events);
 					else return;
 					redraw();
