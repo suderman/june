@@ -176,10 +176,7 @@ test("a brief asked for from Telegram reports back to the chat; one asked for in
 	const client = await Client.open(tmp.paths.socket);
 	t.after(() => client.close());
 	transcript.load(((await client.request({ op: "attach", requestId: "a" })) as Extract<Reply, { type: "snapshot" }>).snapshot);
-	assert.ok(
-		transcript.items.some((i) => i.kind === "user" && i.source === "work" && i.text === "Report: seven wombats."),
-		"the terminal shows the delivered report as one short work line",
-	);
+	assert.ok(!transcript.items.some((i) => i.kind === "user" && i.source === "work"), "the terminal shows June's words about the report, not the report");
 
 	const before = tg.sent.length;
 	assert.equal((await ask(tmp.paths.socket, "now count the desk ones")).text, "on it at the desk");

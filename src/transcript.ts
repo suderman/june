@@ -6,7 +6,7 @@ export const QUIET = "QUIET";
 export const isQuiet = (text: string) => /^\s*QUIET\.?\s*$/i.test(text);
 
 /** June's own looks, by their june.input source or [tag]: only a real message to the user shows, never the prompt or her tools. */
-const PRIVATE = new Set(["heartbeat", "watch"]);
+const PRIVATE = new Set(["heartbeat", "watch", "work", "follow"]);
 
 type Block = { type: string; text?: string; thinking?: string; name?: string; arguments?: unknown; id?: string };
 

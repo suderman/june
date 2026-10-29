@@ -45,7 +45,7 @@ test("June's Org replies render as Markdown in the terminal, leaving paths and M
 	assert.equal(orgToMarkdown("set =a b= then =c=, not ==x=="), "set `a b` then `c`, not ==x==", "each span ends at its own marker");
 });
 
-test("a watch or heartbeat notice shows only June's words, whether it came through Telegram or the terminal", () => {
+test("a watch, work, follow, or heartbeat notice shows only June's words, whether it came through Telegram or the terminal", () => {
 	const user = (id: number, text: string) => ({ id, kind: "pi.user", model: [{ role: "user", content: text }] });
 	const said = (id: number, text: string, tool = false) => ({
 		id,
@@ -65,9 +65,12 @@ test("a watch or heartbeat notice shows only June's words, whether it came throu
 		said(10, "QUIET"),
 		user(11, "[follow] The task «Ship» is EVAL."),
 		said(12, "Ship is ready."),
+		{ id: 13, kind: "june.input", data: { source: "work", text: "report: Jon asks about Home Assistant" } },
+		user(14, "[work] Home Assistant runs on hub."),
+		said(15, "yes, it runs on hub."),
 	];
 	const transcript = new Transcript();
 	transcript.load({ entries, inbox: [], tools: [], compactions: [], agent: {} } as never);
 	const shown = transcript.items.map((i) => (i.kind === "user" ? `${i.source} › ${i.text}` : i.kind === "assistant" ? `june: ${i.blocks.map((b) => b.text ?? "").join("")}` : i.kind));
-	assert.deepEqual(shown, ["telegram › hi", "june: hello", "june: Snape's uptime report is at EVAL.", "june: The pirate report is done.", "follow › The task «Ship» is EVAL.", "june: Ship is ready."]);
+	assert.deepEqual(shown, ["telegram › hi", "june: hello", "june: Snape's uptime report is at EVAL.", "june: The pirate report is done.", "june: Ship is ready.", "june: yes, it runs on hub."]);
 });
