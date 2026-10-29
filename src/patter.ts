@@ -154,7 +154,7 @@ export function createPatter(options: {
 			if (wait === undefined && work === undefined) {
 				if (relay === key) return;
 				const latest = (await root.context(BG)).messages.findLast((m) => m.role === "user");
-				if (latest !== undefined && /^\[(work|follow|reminder|heartbeat)\b/.test(userText(latest))) {
+				if (latest !== undefined && /^\[(work|follow|reminder|heartbeat|watch)\b/.test(userText(latest))) {
 					relay = key;
 					return;
 				}
@@ -189,7 +189,7 @@ export function createPatter(options: {
 
 		/** Whether the user's latest own message came from Telegram: terminal messages carry a [kitty] or [cli] tag. */
 		const onTelegram = async () => {
-			const latest = (await root.context(BG)).messages.findLast((m) => m.role === "user" && !/^\[(\/stop|work|follow|reminder|heartbeat)\b/.test(userText(m)));
+			const latest = (await root.context(BG)).messages.findLast((m) => m.role === "user" && !/^\[(\/stop|work|follow|reminder|heartbeat|watch)\b/.test(userText(m)));
 			return latest !== undefined && !/^\[(kitty|cli)\]/.test(userText(latest));
 		};
 

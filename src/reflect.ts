@@ -35,7 +35,7 @@ Say what the ${period} was about, the threads that ran through it, what changed,
 The supplied identity and operating rules still apply.`;
 
 /** Own inputs June's tasks write; they say nothing about whether the user is still up. */
-const OWN = /^\[(\/stop|work|follow|reminder|heartbeat)\b/;
+const OWN = /^\[(\/stop|work|follow|reminder|heartbeat|watch)\b/;
 
 export function createReflection(options: {
 	models: Models;

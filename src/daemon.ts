@@ -36,9 +36,10 @@ import { createMemoryExtension } from "./memory.ts";
 import { ChatInfo, ChatMap } from "./notify.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
 import { createReflection } from "./reflect.ts";
+import { createWatch } from "./watch.ts";
 import { readLines, type Reply, type Request, type Status, writeLine } from "./protocol.ts";
 import { createCodingExtension } from "./tools/coding.ts";
-import { createHerdrExtension, Herdr, type Run } from "./tools/herdr.ts";
+import { createHerdrExtension, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
 import { createWorkExtension, WorkDoc } from "./tools/work.ts";
 import { createOrgExtension, Org } from "./tools/org.ts";
@@ -66,6 +67,8 @@ export type DaemonOptions = {
 	readonly heartbeatClock?: { now: () => Date; tickMs: number };
 	/** Tests answer notmuch themselves. */
 	readonly mailRun?: Run;
+	/** Tests set the watch's clock, loop speed, home directory for local run records, and commands. */
+	readonly watchClock?: { now: () => Date; tickMs: number; home: string; run: Run };
 };
 
 export type Daemon = {
@@ -188,6 +191,25 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				}).start(harness, root)
 			: undefined;
 
+		const watchRun = options.watchClock?.run ?? runProcess;
+		const stopWatch =
+			config.watch.enabled && config.dispatch.hosts.length > 0
+				? createWatch({
+						config: config.watch,
+						hosts: config.dispatch.hosts,
+						host: config.herdr.host,
+						ssh: config.herdr.hosts,
+						window: { start: config.rhythm.wake, end: config.rhythm.quiet },
+						org,
+						registry,
+						herdr: options.watchClock ? new Herdr(config.herdr, watchRun) : herdr,
+						run: watchRun,
+						state: paths.state,
+						log,
+						...(options.watchClock ? { now: options.watchClock.now, tickMs: options.watchClock.tickMs, home: options.watchClock.home } : {}),
+					}).start(harness, root)
+				: undefined;
+
 		const status = async (): Promise<Status> => {
 			const inspection = await harness.inspect(BG);
 			const mine = inspection.submissions.filter((s) => s.conversationId === root.id);
@@ -232,6 +254,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				stopReflection?.();
 				stopSituation();
 				stopHeartbeat?.();
+				stopWatch?.();
 				await telegram?.stop();
 				await harness.close(BG);
 				rmSync(paths.socket, { force: true });

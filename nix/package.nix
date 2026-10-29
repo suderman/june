@@ -46,7 +46,7 @@ in
       buildPhase = ''
         runHook preBuild
         export HOME=$TMPDIR
-        node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/follow.test.ts test/heartbeat.test.ts test/mail.test.ts test/memory.test.ts test/patter.test.ts test/situation.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts
+        node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/follow.test.ts test/heartbeat.test.ts test/mail.test.ts test/memory.test.ts test/patter.test.ts test/situation.test.ts test/watch.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts
         runHook postBuild
       '';
       installPhase = "touch $out";

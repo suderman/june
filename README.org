@@ -79,6 +79,7 @@ Keys of =config.json=, with their defaults:
   "reflection": { "enabled": true, "quietMinutes": 60, "recentDays": 3, "periods": ["week", "month", "quarter", "year"] },
   "heartbeat": { "enabled": false, "everyMinutes": 60, "chattingMinutes": 15 },
   "mail": { "enabled": false, "query": "tag:inbox and tag:unread", "accounts": {} },
+  "watch": { "enabled": false, "gapMinutes": 10 },
   "patter": { "openAfterSeconds": 8, "gapsSeconds": [25, 25, 25, 40, 60, 90, 120, 180] },
   "situation": { "calendars": [], "homeAssistant": { "people": [], "weather": null, "pollSeconds": 300 } }
 }
@@ -96,6 +97,7 @@ Keys of =config.json=, with their defaults:
 - =reflection= runs the nightly pass once the user has been quiet for =quietMinutes=; =recentDays= is how many recent "Day's end" entries June sees in her prompt; =periods= are the longer digests that follow it.
 - =heartbeat= enables a private look every =everyMinutes= in waking hours; the user counts as chatting if they wrote within =chattingMinutes=.
 - =mail= gives each heartbeat the new mail matching =query= in notmuch since the last look; =accounts= names each top-level maildir folder, such as ={"personal": "home"}=.
+- =watch= tells June about dispatched tasks she did not queue on =dispatch.hosts=, in waking hours and at most every =gapMinutes=.
 - =situation= feeds the =now= section: =calendars= are Org files read for today and tomorrow, =homeAssistant.people= are =person.*= entities, =homeAssistant.weather= a =weather.*= entity, polled every =pollSeconds= when =HASS_URL= and =HASS_TOKEN= are set.
 - =patter= sets when patter speaks: a run busy =openAfterSeconds= becomes a wait, and =gapsSeconds= are the pauses between lines, the last repeating.
 
@@ -110,6 +112,10 @@ June's prompt ends with a =now= section: the weekday, the rough hour, when the s
 Every =heartbeat.everyMinutes= between =wake= and =quiet=, June takes a private look at the moment in the main conversation, with her standing instructions from =HEARTBEAT.org=, what changed in her =now= section since the last look, and whether the user is chatting. She answers =QUIET= or a message. The user never sees the look itself: the terminal hides its input, tools, and quiet answers, and Telegram gets only a real message. A heartbeat waits while June is busy, and a receipt in the state directory keeps a restart from repeating one. June updates =HEARTBEAT.org= when told what to watch for.
 
 With =mail= on, each look also lists the mail that arrived since the last one, sorted before June sees it. Messages from people come first, marked when the user has written to them before; automated senders (no-reply and alert addresses, mail domains such as =updates.=, auto-replies) follow in one line each; newsletters and list mail (=List-Unsubscribe=, =List-Id=, bulk =Precedence=) are only counted; the user's own messages are left out. She sees senders and subjects only, framed as outside text, and reads a message with notmuch when it may matter.
+
+** Watching dispatched work
+
+June follows the tasks she queues herself. With =watch= on, she also hears about every other task org-dispatch runs on =dispatch.hosts=, such as ones the user set to =AUTO=: once a minute, with no model call, June reads the dispatcher's run records on each host (=~/.local/state/org-dispatch=, over SSH for other hosts), checks each live run's Org state and its agent's Herdr status, and notes when a run reaches =EVAL=, =HOLD=, or =DONE=, or its agent is blocked. Pending news waits for waking hours and at least =gapMinutes= since the last such notice, then reaches her as one =[watch]= input, and she tells the user what came of it. She leaves those tasks' states alone. The first look only learns what is already there.
 
 ** Shell and files
 
@@ -149,7 +155,7 @@ She never writes =asana.org=, =inbox.org=, archives, or conflict copies. The dis
 3. Set =TELEGRAM_ALLOWED_USERS= to the user's numeric id.
 4. Restart June. =june status= shows =telegram polling=.
 
-Only allowed users reach the model, and private chats share the primary conversation. What June says on her own initiative, such as a =[work]= report, a =[follow]= update, or a heartbeat message, goes where the user last spoke to her. She answers the terminal in Org markup and Telegram in Markdown.
+Only allowed users reach the model, and private chats share the primary conversation. What June says on her own initiative, such as a =[work]= report, a =[follow]= or =[watch]= update, or a heartbeat message, goes where the user last spoke to her. She answers the terminal in Org markup and Telegram in Markdown.
 
 * Development
 

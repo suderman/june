@@ -14,6 +14,7 @@
   "reflection": { "enabled": true, "quietMinutes": 60, "recentDays": 3, "periods": ["week", "month", "quarter", "year"] },
   "heartbeat": { "enabled": true, "everyMinutes": 60, "chattingMinutes": 15 },
   "mail": { "enabled": true, "query": "tag:inbox and tag:unread", "accounts": { "personal": "home", "work": "work" } },
+  "watch": { "enabled": true, "gapMinutes": 10 },
   "situation": {
     "calendars": ["~/org/calendar/family.org", "~/org/calendar/work.org"],
     "homeAssistant": { "people": ["person.you"], "weather": "weather.home", "pollSeconds": 300 }

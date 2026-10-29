@@ -14,7 +14,7 @@ import { isQuiet, QUIET } from "./transcript.ts";
 import { User, user } from "./user.ts";
 
 /** Own inputs June's tasks write; they say nothing about where the user is or whether they are chatting. */
-const OWN = /^\[(\/stop|work|follow|reminder|heartbeat)\b/;
+const OWN = /^\[(\/stop|work|follow|reminder|heartbeat|watch)\b/;
 
 type Receipt = { at: number; lines: string[] };
 

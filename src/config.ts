@@ -76,6 +76,8 @@ export type Config = {
 	};
 	/** New mail for the heartbeat, from a notmuch query; accounts name each maildir folder, such as {"work": "work"}. */
 	readonly mail: { readonly enabled: boolean; readonly query: string; readonly accounts: Readonly<Record<string, string>> };
+	/** Dispatched tasks June did not queue, on `dispatch.hosts`: news reaches her in waking hours, at most every `gapMinutes`. */
+	readonly watch: { readonly enabled: boolean; readonly gapMinutes: number };
 	/** The "now" prompt section: calendars read for today and tomorrow, and Home Assistant people (with HASS_URL and HASS_TOKEN). */
 	readonly situation: {
 		readonly calendars: readonly string[];
@@ -139,6 +141,7 @@ const DEFAULTS = {
 	reflection: { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"] },
 	heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
 	mail: { enabled: false, query: "tag:inbox and tag:unread", accounts: {} as Record<string, string> },
+	watch: { enabled: false, gapMinutes: 10 },
 	patter: { openAfterSeconds: 8, gapsSeconds: [25, 25, 25, 40, 60, 90, 120, 180] },
 	situation: { calendars: [] as string[], homeAssistant: { people: [] as string[], pollSeconds: 300 } },
 };
@@ -188,6 +191,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 		reflection: reflection({ ...DEFAULTS.reflection, ...raw.reflection }),
 		heartbeat: heartbeat({ ...DEFAULTS.heartbeat, ...raw.heartbeat }),
 		mail: mail({ ...DEFAULTS.mail, ...raw.mail }),
+		watch: watch({ ...DEFAULTS.watch, ...raw.watch }),
 		patter: patterTiming({ ...DEFAULTS.patter, ...raw.patter }),
 		situation: situation(raw.situation ?? {}),
 		// Telegram is on where the module names who may use it; the token sits beside the ids in June's secret.
@@ -221,6 +225,11 @@ function reflection(given: Config["reflection"] & { start?: unknown; end?: unkno
 function heartbeat(given: Config["heartbeat"]): Config["heartbeat"] {
 	if (!(typeof given.everyMinutes === "number" && given.everyMinutes >= 5)) throw new Error("heartbeat.everyMinutes must be 5 or more");
 	if (!(typeof given.chattingMinutes === "number" && given.chattingMinutes >= 0)) throw new Error("heartbeat.chattingMinutes must be 0 or more");
+	return given;
+}
+
+function watch(given: Config["watch"]): Config["watch"] {
+	if (!(typeof given.gapMinutes === "number" && given.gapMinutes >= 0)) throw new Error("watch.gapMinutes must be 0 or more");
 	return given;
 }
 
