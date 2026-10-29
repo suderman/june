@@ -25,6 +25,7 @@ test("config.json and AGENTS.md come from the config directory, SOUL.org and her
 	assert.deepEqual(loaded.model, { chat: { thinkingLevel: "medium", provider: "p", modelId: "m" } });
 	assert.deepEqual(loaded.skillDirs, ["/a"]);
 	assert.deepEqual(loaded.herdr.hosts, { cog: {} });
+	assert.equal(loaded.herdr.allowPrompt, true, "worker follow-ups are on by default");
 	assert.equal(loaded.soulFile, join(data, "SOUL.org"));
 	assert.equal(loaded.memoryFile, join(data, "MEMORY.org"), "chosen even before it exists");
 	assert.equal(loaded.journalFile, join(data, "JOURNAL.org"));
@@ -57,7 +58,8 @@ test("the rhythm, reflection, heartbeat, and patter timing have defaults, take o
 	assert.deepEqual(plain.reflection, { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"] });
 	assert.deepEqual(plain.heartbeat, { enabled: false, everyMinutes: 60, chattingMinutes: 15 }, "off unless configured");
 	assert.equal(plain.patter.openAfterSeconds, 8);
-	const tuned = loadConfig({ ...tmp.paths, config: await layer("tuned", { rhythm: { sleep: "00:30" }, heartbeat: { enabled: true, everyMinutes: 30 }, patter: { openAfterSeconds: 15 } }) });
+	const tuned = loadConfig({ ...tmp.paths, config: await layer("tuned", { herdr: { allowPrompt: false }, rhythm: { sleep: "00:30" }, heartbeat: { enabled: true, everyMinutes: 30 }, patter: { openAfterSeconds: 15 } }) });
+	assert.equal(tuned.herdr.allowPrompt, false, "an explicit opt-out is preserved");
 	assert.deepEqual(tuned.rhythm, { wake: "05:00", quiet: "22:00", sleep: "00:30" }, "an override keeps the other defaults");
 	assert.deepEqual(tuned.heartbeat, { enabled: true, everyMinutes: 30, chattingMinutes: 15 });
 	assert.equal(tuned.patter.openAfterSeconds, 15);

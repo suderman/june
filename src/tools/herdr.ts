@@ -1,4 +1,4 @@
-// Herdr tools: structured reads of live agent panes through the herdr CLI's JSON API, and an opt-in prompt.
+// Herdr tools: structured reads and user-requested follow-ups through the herdr CLI's JSON API.
 import { execFile } from "node:child_process";
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
@@ -78,7 +78,7 @@ export class Herdr {
 	}
 
 	prompt(target: string, text: string): Promise<any> {
-		return this.json(this.#config.host, ["agent", "prompt", checkTarget(target), "--", text]);
+		return this.json(this.#config.host, ["agent", "prompt", checkTarget(target), text]);
 	}
 }
 
@@ -163,7 +163,7 @@ export function createHerdrExtension(config: Config, herdr = new Herdr(config.he
 		tools.push(
 			defineTool({
 				name: "herdr_prompt_agent",
-				description: `Send a follow-up prompt to an existing agent on ${config.herdr.host}. Use only when the user asked for this message to be sent to that agent. It types into the agent's terminal; it is not repeated after a restart.`,
+				description: `Send a follow-up prompt to an existing agent on ${config.herdr.host}, only when the user explicitly asks. First inspect the agent and its recent output to confirm the target and that it is ready for normal input. Never answer an approval or question dialog with this tool; blocked agents need the user. Herdr rejects recognized blocked dialogs without typing. Success means submitted, not started or finished; read the agent again before reporting its response. An error or restart may follow delivery, so inspect before any retry. The call is not repeated after a restart.`,
 				parameters: Type.Object({ target: Type.String(), text: Type.String({ minLength: 1, maxLength: 4000 }) }),
 				execute: async (args) => json((await herdr.prompt(args.target, args.text)).result ?? { sent: true }),
 			}) as never,

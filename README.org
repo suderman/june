@@ -74,7 +74,7 @@ Keys of =config.json=, with their defaults:
   "skillDirs": [],
   "org": { "root": "~/org", "people": "~/org/people.org" },
   "dispatch": { "hosts": [], "agent": "pi" },
-  "herdr": { "session": "default", "host": "<hostname>", "hosts": {}, "allowPrompt": false },
+  "herdr": { "session": "default", "host": "<hostname>", "hosts": {}, "allowPrompt": true },
   "rhythm": { "wake": "05:00", "quiet": "22:00", "sleep": "01:00" },
   "reflection": { "enabled": true, "quietMinutes": 60, "recentDays": 3, "periods": ["week", "month", "quarter", "year"] },
   "heartbeat": { "enabled": false, "everyMinutes": 60, "chattingMinutes": 15 },
@@ -91,7 +91,7 @@ Keys of =config.json=, with their defaults:
 - =model.patter= is a cheap model for company during long waits; =provider= comes from chat. Without it there is no patter.
 - =envFiles= are dotenv files read for keys at startup, for development. A service should get keys from its environment.
 - =skillDirs= are read in place; =skill_read= only reads inside a listed skill's directory.
-- =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"laptop": {}}=; ={"ssh": "target"}= overrides the destination. =herdr.allowPrompt= enables =herdr_prompt_agent=, which types a follow-up into an agent on this host.
+- =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"laptop": {}}=; ={"ssh": "target"}= overrides the destination. =herdr.allowPrompt= defaults to true; false removes =herdr_prompt_agent=.
 - =dispatch.hosts= are the machines June may queue AUTO tasks for. Empty leaves out the task-writing tools. =dispatch.host= (the first of =hosts= by default) and =dispatch.agent= (pi by default) are what the dispatcher writes into an AUTO task's drawer when it has no =HOST= or =AGENT= and no tag names one; June's own tasks use them too. =dispatch.settle= is how many seconds a heading the user typed must stay unchanged before the dispatcher launches it (120 by default; =ORG_DISPATCH_SETTLE= overrides it). Headings June writes launch at once.
 - =rhythm= is the user's day in local =HH:MM=: heartbeats run from =wake= until =quiet=, and the nightly reflection from =sleep= until =wake=.
 - =reflection= runs the nightly pass once the user has been quiet for =quietMinutes=; =recentDays= is how many recent "Day's end" entries June sees in her prompt; =periods= are the longer digests that follow it.
@@ -116,6 +116,10 @@ With =mail= on, each look also lists the mail that arrived since the last one, s
 ** Watching dispatched work
 
 June follows the tasks she queues herself. With =watch= on, she also hears about every other task org-dispatch runs on =dispatch.hosts=, such as ones the user set to =AUTO=: once a minute, with no model call, June reads the dispatcher's run records on each host (=~/.local/state/org-dispatch=, over SSH for other hosts), checks each live run's Org state and its agent's Herdr status, and notes when a run reaches =EVAL=, =HOLD=, or =DONE=, or its agent is blocked. Pending news waits for waking hours and at least =gapMinutes= since the last such notice, then reaches her as one =[watch]= input, and she tells the user what came of it. She leaves those tasks' states alone. The first look only learns what is already there.
+
+** Steering a worker
+
+When the user asks June to send directions or a question to an existing worker, she inspects its Herdr pane and sends the follow-up in the same session, then reads its output to relay the response. This works on the daemon host; other hosts remain read-only. It does not resume a closed session or change an Org task's state. Approval and question dialogs need the user, and Herdr rejects recognized blocked dialogs without typing. A successful submission is not proof the worker has started or finished. Prompts are not replayed after a restart; after an error, June checks the pane before retrying because delivery may already have happened.
 
 ** Shell and files
 

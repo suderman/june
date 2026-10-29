@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { Herdr } from "../src/tools/herdr.ts";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { Client } from "../src/protocol.ts";
+import { createHerdrExtension, Herdr } from "../src/tools/herdr.ts";
 import { Org, outline, parseHeading } from "../src/tools/org.ts";
-import { tempDir } from "./helpers.ts";
+import { ask, openTestDaemon, tempDir, testConfig, until } from "./helpers.ts";
 
 const PROJECT = `#+TITLE: Portal
 #+CATEGORY: portal
@@ -158,6 +160,85 @@ test("herdr runs argv without a shell and summarizes agents", async () => {
 	assert.deepEqual(calls[0], ["herdr", "--session", "default", "agent", "list"]);
 	await herdr.agents("cog");
 	assert.deepEqual(calls[2]!.slice(0, 6), ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "cog"]);
+});
+
+test("herdr submits a follow-up as one local argument and propagates blocked errors without retrying", async () => {
+	const calls: string[][] = [];
+	let blocked = false;
+	const herdr = new Herdr(config, async (argv) => {
+		calls.push([...argv]);
+		return JSON.stringify(blocked
+			? { error: { code: "agent_blocked", message: "Agent is waiting for approval" } }
+			: { result: { submitted: true } });
+	});
+	const text = "--leave deployment out\nKeep the user's helper; $(touch /tmp/nope)";
+	assert.deepEqual(await herdr.prompt("w1:p2", text), { result: { submitted: true } });
+	assert.deepEqual(calls, [["herdr", "--session", "default", "agent", "prompt", "w1:p2", text]]);
+	blocked = true;
+	await assert.rejects(herdr.prompt("w1:p2", "continue"), /agent_blocked.*approval/);
+	assert.equal(calls.length, 2, "one attempt, no fallback to terminal keys");
+	assert.throws(() => herdr.prompt("-bad-target", text), /Invalid Herdr target/);
+	assert.equal(calls.length, 2, "invalid targets never reach Herdr");
+});
+
+test("the follow-up tool is optional, returns submission only, and lets June read the worker's response", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const cfg = testConfig(tmp.dir, { herdr: { ...config, allowPrompt: true } });
+	const calls: string[][] = [];
+	const herdr = new Herdr(cfg.herdr, async (argv) => {
+		calls.push([...argv]);
+		return JSON.stringify({ result: argv.includes("prompt") ? { submitted: true } : { text: "I'll leave deployment out." } });
+	});
+	const extension = createHerdrExtension(cfg, herdr);
+	assert.equal(createHerdrExtension({ ...cfg, herdr: config }, herdr).tools!.some((tool) => tool.name === "herdr_prompt_agent"), false);
+	const faux = fauxProvider();
+	faux.setResponses([
+		fauxAssistantMessage([fauxToolCall("herdr_prompt_agent", { target: "w1:p2", text: "Leave deployment out." })], { stopReason: "toolUse" }),
+		(ctx) => {
+			assert.match(JSON.stringify(ctx.messages.at(-1)), /submitted/);
+			return fauxAssistantMessage([fauxToolCall("herdr_read_agent", { target: "w1:p2" })], { stopReason: "toolUse" });
+		},
+		(ctx) => {
+			assert.match(JSON.stringify(ctx.messages.at(-1)), /leave deployment out/);
+			return fauxAssistantMessage("The worker agreed to leave deployment out.");
+		},
+	]);
+	const daemon = await openTestDaemon({ ...tmp, faux, config: cfg, extensions: [extension] });
+	t.after(() => daemon.close());
+	assert.equal((await ask(tmp.paths.socket, "Tell the worker to leave deployment out.")).text, "The worker agreed to leave deployment out.");
+	assert.equal(calls.filter((argv) => argv.includes("prompt")).length, 1);
+	assert.equal(calls.filter((argv) => argv.includes("read")).length, 1);
+});
+
+test("a Herdr prompt interrupted after submission is not sent again on restart", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const cfg = testConfig(tmp.dir, { herdr: { ...config, allowPrompt: true } });
+	let submissions = 0;
+	const extension = () => createHerdrExtension(cfg, new Herdr(cfg.herdr, async () => {
+		submissions++;
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		throw new Error("Herdr connection lost after submission");
+	}));
+	const faux = fauxProvider();
+	faux.setResponses([fauxAssistantMessage([fauxToolCall("herdr_prompt_agent", { target: "w1:p2", text: "Leave deployment out." })], { stopReason: "toolUse" })]);
+	let daemon = await openTestDaemon({ ...tmp, faux, config: cfg, extensions: [extension()] });
+	t.after(() => daemon.close());
+	const client = await Client.open(tmp.paths.socket);
+	t.after(() => client.close());
+	await client.request({ op: "submit", requestId: "proxy", text: "Tell the worker to leave deployment out.", source: "kitty" });
+	await until(() => submissions === 1);
+	await daemon.close();
+	client.close();
+	const next = fauxProvider();
+	next.setResponses([(ctx) => {
+		assert.match(JSON.stringify(ctx.messages.at(-1)), /interrupted/i);
+		return fauxAssistantMessage("Delivery is uncertain; I'll inspect the worker before retrying.");
+	}]);
+	daemon = await openTestDaemon({ ...tmp, faux: next, config: cfg, extensions: [extension()] });
+	assert.match((await ask(tmp.paths.socket, "Tell the worker to leave deployment out.", "proxy", "kitty")).text!, /inspect the worker/);
+	assert.equal(submissions, 1);
 });
 
 test("herdr rejects bad targets, unknown hosts, and reports Herdr errors", async () => {

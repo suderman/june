@@ -141,7 +141,7 @@ const DEFAULTS = {
 	contextCap: 200_000,
 	skillDirs: [] as string[],
 	org: { root: "~/org", agendaFiles: "~/.local/state/org-dispatch/agenda-files", people: "~/org/people.org" },
-	herdr: { session: "default", hosts: {}, allowPrompt: false },
+	herdr: { session: "default", hosts: {}, allowPrompt: true },
 	rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
 	reflection: { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"] },
 	heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
