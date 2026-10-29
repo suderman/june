@@ -5,6 +5,7 @@
   makeWrapper,
   ripgrep,
   openssh,
+  wl-clipboard,
   emacs-nox,
   git,
   jq,
@@ -43,7 +44,7 @@ in
       cp -r package.json src templates node_modules $out/lib/june/
       makeWrapper ${nodejs}/bin/node $out/bin/june \
         --add-flags "--disable-warning=ExperimentalWarning $out/lib/june/src/cli.ts" \
-        --suffix PATH : ${lib.makeBinPath [ripgrep openssh]}
+        --suffix PATH : ${lib.makeBinPath [ripgrep openssh wl-clipboard]}
       runHook postInstall
     '';
 

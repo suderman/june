@@ -1,9 +1,127 @@
 import assert from "node:assert/strict";
+import { writeFile, truncate } from "node:fs/promises";
+import { join } from "node:path";
 import { test } from "node:test";
+import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import { DEFAULT_IMAGE_LIMITS } from "@earendil-works/pi-durable/tools";
+import { clipboardInput, imageInput, validateImages } from "../src/images.ts";
+import { Client, type Reply } from "../src/protocol.ts";
+import { ask, openTestDaemon, tempDir } from "./helpers.ts";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { orgToMarkdown } from "../src/org.ts";
 import { Transcript } from "../src/transcript.ts";
 import { compactingStatus } from "../src/tui.ts";
+
+// A valid 2x2 PNG, with red, green, blue and white pixels.
+const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGP4z8DAAMIM/4EAAB/uBfsL2WiLAAAAAElFTkSuQmCC";
+const IMAGE = { type: "image" as const, mimeType: "image/png", data: PNG };
+
+test("pasted screenshot paths and clipboard markers become inline images, leaving text and URLs alone", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const path = join(tmp.dir, "screen shot.png");
+	await writeFile(path, Buffer.from(PNG, "base64"));
+	const pasted = new Map([["[image 1]", IMAGE], ["[image 2]", IMAGE]]);
+	for (const token of [`'${path}'`, `"${path}"`, path.replaceAll(" ", "\\ ")]) {
+		const input = await imageInput(`explain ${token}\n[image 1]`, pasted);
+		assert.equal(input.text, "explain");
+		assert.deepEqual(input.images, [IMAGE, IMAGE], "Buffer-backed files decode and survive the worker transfer");
+	}
+	assert.deepEqual(await imageInput("[image 2]", pasted), { text: "", images: [IMAGE] }, "image-only input and deleted markers work");
+	assert.deepEqual(await imageInput("hi https://example.com/shot.png"), { text: "hi https://example.com/shot.png", images: [] });
+	assert.deepEqual(await imageInput("plain text\n"), { text: "plain text\n", images: [] });
+	assert.equal((await imageInput(`'${path}' https://example.com/shot.png`)).text, "https://example.com/shot.png");
+	await assert.rejects(imageInput("[image 1]"), /no longer attached/);
+	await assert.rejects(imageInput(join(tmp.dir, "missing.png")), /ENOENT/);
+	await writeFile(path, "not a PNG");
+	await assert.rejects(imageInput(`'${path}'`), /cannot be decoded/);
+	await truncate(path, 21 * 1024 * 1024);
+	await assert.rejects(imageInput(`'${path}'`), /exceeds 20 MiB/);
+	assert.throws(() => validateImages(Array(11).fill(IMAGE)), /at most 10/);
+	assert.throws(() => validateImages([{ ...IMAGE, data: "not base64" }]), /Invalid image/);
+	assert.throws(() => validateImages([{ ...IMAGE, data: "A".repeat(DEFAULT_IMAGE_LIMITS.maxBytes + 1) }]), /Invalid image/);
+	validateImages([{ ...IMAGE, data: "A".repeat(4 * 1024 * 1024) }]);
+	assert.throws(() => validateImages(Array(6).fill({ ...IMAGE, data: "A".repeat(4 * 1024 * 1024) })), /exceed 20 MiB/);
+});
+
+test("Wayland clipboard paste prefers the current image, preserves text, and reports unavailable or invalid contents", async () => {
+	const calls: string[][] = [];
+	const run = async (args: readonly string[]) => {
+		calls.push([...args]);
+		return args[0] === "--list-types" ? Buffer.from("text/plain;charset=utf-8\nimage/png\n") : Buffer.from(PNG, "base64");
+	};
+	assert.deepEqual(await clipboardInput(run), { image: IMAGE });
+	assert.deepEqual(calls, [["--list-types"], ["--type", "image/png", "--no-newline"]]);
+	assert.deepEqual(await clipboardInput(async (args) => Buffer.from(args[0] === "--list-types" ? "text/plain;charset=utf-8" : "one\ntwo\n")), { text: "one\ntwo\n" });
+	await assert.rejects(clipboardInput(async () => { throw new Error("no Wayland clipboard"); }), /no Wayland/);
+	await assert.rejects(clipboardInput(async () => Buffer.from("application/octet-stream")), /no image or text/);
+	await assert.rejects(clipboardInput(async (args) => Buffer.from(args[0] === "--list-types" ? "image/png" : "bad PNG")), /cannot be decoded/);
+});
+
+test("terminal images reach the model, persist through restart, and reconnect with attachment counts", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const faux = fauxProvider();
+	faux.setResponses([(ctx) => {
+		const user = ctx.messages.findLast((m) => m.role === "user");
+		assert.deepEqual(user?.content, [{ type: "text", text: "[kitty] what is this?" }, IMAGE]);
+		return fauxAssistantMessage("four pixels");
+	}]);
+	let daemon = await openTestDaemon({ ...tmp, faux });
+	t.after(() => daemon.close());
+	const client = await Client.open(tmp.paths.socket);
+	try {
+		const settled = new Promise<Reply>((resolve) => client.on((r) => r.type === "settled" && resolve(r)));
+		assert.equal((await client.request({ op: "submit", requestId: "image", text: "what is this?", images: [IMAGE], source: "kitty", wait: true })).type, "accepted");
+		assert.deepEqual(await settled, { type: "settled", requestId: "image", status: "done", text: "four pixels" });
+		const duplicate = await client.request({ op: "submit", requestId: "image", text: "what is this?", images: [IMAGE], source: "kitty" });
+		assert.equal(duplicate.type, "accepted");
+		assert.equal(faux.state.callCount, 1, "socket retries do not resubmit an image");
+		const bad = await client.request({ op: "submit", requestId: "bad", text: "", images: [{ ...IMAGE, data: "invalid" }], source: "kitty" });
+		assert.equal(bad.type, "error");
+	} finally { client.close(); }
+	await daemon.close();
+	const resumed = fauxProvider();
+	resumed.setResponses([(ctx) => {
+		assert.ok(ctx.messages.some((m) => m.role === "user" && Array.isArray(m.content) && m.content.some((b) => b.type === "image" && b.data === PNG)), "the image is still in context after restart");
+		return fauxAssistantMessage("still four pixels");
+	}]);
+	daemon = await openTestDaemon({ ...tmp, faux: resumed });
+	assert.equal((await ask(tmp.paths.socket, "remember?", "text", "kitty")).text, "still four pixels");
+	const snapshot = await daemon.root.context(BG);
+	const transcript = new Transcript();
+	const watcher = await Client.open(tmp.paths.socket);
+	try {
+		const attached = await watcher.request({ op: "attach", requestId: "reconnect" });
+		assert.equal(attached.type, "snapshot");
+		if (attached.type === "snapshot") transcript.load(attached.snapshot);
+	} finally { watcher.close(); }
+	const user = transcript.items.find((i) => i.kind === "user" && i.imageCount);
+	assert.deepEqual(user, { kind: "user", id: String(snapshot.entries.find((e) => e.kind === "june.input")!.id), source: "kitty", text: "what is this?", imageCount: 1 });
+	assert.equal(JSON.stringify(snapshot.entries.find((e) => e.kind === "june.input")?.data).includes(PNG), false, "metadata does not duplicate base64");
+});
+
+test("image-only submission is allowed, but text-only models and malformed image payloads reject before submission", async (t) => {
+	for (const input of [["text", "image"], ["text"]] as const) {
+		const tmp = await tempDir();
+		t.after(tmp.cleanup);
+		const faux = fauxProvider({ models: [{ id: "faux-1", input: [...input] }] });
+		faux.setResponses([fauxAssistantMessage("image received")]);
+		const daemon = await openTestDaemon({ ...tmp, faux });
+		t.after(() => daemon.close());
+		const client = await Client.open(tmp.paths.socket);
+		try {
+			const reply = await client.request({ op: "submit", requestId: "only", text: "", images: [IMAGE], source: "kitty" });
+			if (input.length === 2) assert.equal(reply.type, "accepted");
+			else {
+				assert.deepEqual(reply, { type: "error", requestId: "only", message: "The current model does not support images" });
+				assert.equal((await daemon.root.context(BG)).entries.some((e) => e.kind === "june.input"), false);
+				assert.equal(faux.state.callCount, 0);
+			}
+		} finally { client.close(); }
+	}
+});
 
 test("the compaction line hops, changes chores, counts time, and keeps its width", () => {
 	const plain = (ms: number) => compactingStatus(ms).replace(/\x1b\[[0-9;]*m/g, "");

@@ -11,7 +11,7 @@ const PRIVATE = new Set(["heartbeat", "watch", "work", "follow"]);
 type Block = { type: string; text?: string; thinking?: string; name?: string; arguments?: unknown; id?: string };
 
 export type Item =
-	| { kind: "user"; id: string; source: string; text: string; telegram?: true }
+	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; telegram?: true }
 	| { kind: "assistant"; id: string; blocks: Block[]; streaming: boolean; error?: string }
 	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; output: string }
 	| { kind: "note"; id: string; text: string }
@@ -167,7 +167,7 @@ export class Transcript {
 		switch (entry.kind) {
 			case "june.input":
 				this.#private = PRIVATE.has(entry.data?.source);
-				if (!this.#private) this.items.push({ kind: "user", id, source: entry.data?.source ?? "?", text: entry.data?.text ?? "" });
+				if (!this.#private) this.items.push({ kind: "user", id, source: entry.data?.source ?? "?", text: entry.data?.text ?? "", ...(entry.data?.imageCount ? { imageCount: entry.data.imageCount } : {}) });
 				return;
 			case "june.patter":
 				this.items.push({ kind: "patter", id, text: entry.data?.text ?? "" });

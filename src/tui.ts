@@ -1,6 +1,8 @@
 // The terminal client. It attaches to the daemon's primary conversation, renders the shared transcript, and sends
 // input. Closing it never touches running work; it reconnects on its own when the daemon restarts.
 import { randomUUID } from "node:crypto";
+import type { ImageContent } from "@earendil-works/pi-ai";
+import { clipboardInput, imageInput } from "./images.ts";
 import {
 	CombinedAutocompleteProvider,
 	type Component,
@@ -128,7 +130,8 @@ function component(item: Item, org: boolean): Component[] {
 	switch (item.kind) {
 		case "user": {
 			const tag = item.source === "kitty" ? "" : c.muted(`${item.source} `);
-			return [new Line(), new Wrapped(c.user(item.text), `${tag}${c.user("› ")}`)];
+			const images = item.imageCount ? `[${item.imageCount} image${item.imageCount === 1 ? "" : "s"}]` : "";
+			return [new Line(), new Wrapped(c.user([item.text, images].filter(Boolean).join("\n")), `${tag}${c.user("› ")}`)];
 		}
 		case "assistant": {
 			const parts: Component[] = [new Line()];
@@ -178,7 +181,7 @@ export async function runTui(socketPath: string): Promise<void> {
 	// As in Jon's pi: Alt+Enter breaks the line, Shift+Enter queues, and Up recalls earlier prompts.
 	getKeybindings().setUserBindings({ "tui.input.newLine": ["alt+enter", "ctrl+j"] });
 	const editor = new Editor(tui, editorTheme, { paddingX: 1 });
-	const footer = new Line(c.muted("enter send · shift+enter queue while busy · alt+enter newline · ↑ history · esc /stop · ctrl+d detach"));
+	const footer = new Line(c.muted("enter send · ctrl+v / shift+insert paste · alt+enter newline · ↑ history · shift+enter queue · esc /stop · ctrl+d detach"));
 	tui.setLayoutRoot(
 		new VStack([
 			{ component: header, basis: "auto" },
@@ -192,6 +195,9 @@ export async function runTui(socketPath: string): Promise<void> {
 	let client: Client | undefined;
 	let connection: "connecting" | "online" | "offline" = "connecting";
 	let flash: string | undefined;
+	let inputBusy = false;
+	let imageNumber = 0;
+	const pasted = new Map<string, ImageContent>();
 	// /compact's own start, before the daemon's compaction event arrives; the transcript's wins once it does.
 	let compactStarted: number | undefined;
 	let ticker: ReturnType<typeof setInterval> | undefined;
@@ -208,6 +214,7 @@ export async function runTui(socketPath: string): Promise<void> {
 		if (transcript.queued) parts.push(c.muted(`${transcript.queued} queued`));
 		if (transcript.notice) parts.push(c.err(transcript.notice));
 		if (flash) parts.push(c.err(flash));
+		if (inputBusy) parts.push(c.muted("preparing input…"));
 		const since = transcript.compacting ?? compactStarted;
 		if (since !== undefined) parts.push(compactingStatus(Date.now() - since));
 		if (since !== undefined && ticker === undefined) ticker = setInterval(redraw, 250);
@@ -228,8 +235,8 @@ export async function runTui(socketPath: string): Promise<void> {
 	};
 
 	const send = async (text: string, whenBusy: "steer" | "followUp") => {
-		if (!text.trim()) return;
-		editor.addToHistory(text);
+		if (!text.trim() || inputBusy) return;
+		editor.setText(text);
 		if (client === undefined || connection !== "online") {
 			flash = "not connected; message not sent";
 			editor.setText(text);
@@ -237,10 +244,51 @@ export async function runTui(socketPath: string): Promise<void> {
 		}
 		flash = undefined;
 		const command = parseCommand(text);
-		if (command !== undefined) return run(command.name, command.args);
-		const reply = await client.request({ op: "submit", requestId: randomUUID(), text, source: "kitty", whenBusy });
-		if (reply.type === "error") {
-			flash = reply.message;
+		if (command !== undefined) {
+			editor.addToHistory(text);
+			editor.setText("");
+			pasted.clear();
+			try { await run(command.name, command.args); }
+			catch (error) {
+				flash = error instanceof Error ? error.message : String(error);
+				redraw();
+			}
+			return;
+		}
+		inputBusy = true;
+		redraw();
+		try {
+			const input = await imageInput(text, pasted);
+			const reply = await client.request({ op: "submit", requestId: randomUUID(), ...input, source: "kitty", whenBusy });
+			if (reply.type === "error") throw new Error(reply.message);
+			editor.addToHistory(text);
+			editor.setText("");
+			pasted.clear();
+		} catch (error) {
+			flash = error instanceof Error ? error.message : String(error);
+		} finally {
+			inputBusy = false;
+			redraw();
+		}
+	};
+
+	const paste = async () => {
+		inputBusy = true;
+		flash = undefined;
+		redraw();
+		try {
+			if (process.env.SSH_CONNECTION) throw new Error("Clipboard access is unavailable over SSH; use a path on the daemon host");
+			const input = await clipboardInput();
+			if ("text" in input) editor.insertTextAtCursor(input.text);
+			else {
+				const marker = `[image ${++imageNumber}]`;
+				pasted.set(marker, input.image);
+				editor.insertTextAtCursor(`${marker} `);
+			}
+		} catch (error) {
+			flash = `Paste failed: ${error instanceof Error ? error.message : String(error)}. Paste an image file path instead.`;
+		} finally {
+			inputBusy = false;
 			redraw();
 		}
 	};
@@ -264,12 +312,19 @@ export async function runTui(socketPath: string): Promise<void> {
 	};
 
 	editor.onSubmit = (text) => {
-		editor.setText("");
 		void send(text, transcript.running ? "steer" : "followUp");
 	};
 	tui.addInputListener((data) => {
+		if (inputBusy) return { consume: true };
+		if (matchesKey(data, "ctrl+v") || matchesKey(data, "shift+insert")) {
+			void paste();
+			return { consume: true };
+		}
 		if (matchesKey(data, "ctrl+c")) {
-			if (editor.getText()) editor.setText("");
+			if (editor.getText()) {
+				editor.setText("");
+				pasted.clear();
+			}
 			else exit();
 			return { consume: true };
 		}
@@ -282,9 +337,7 @@ export async function runTui(socketPath: string): Promise<void> {
 			return { consume: true };
 		}
 		if (matchesKey(data, "shift+enter")) {
-			const text = editor.getText();
-			editor.setText("");
-			void send(text, "followUp");
+			void send(editor.getExpandedText(), "followUp");
 			return { consume: true };
 		}
 		return undefined;

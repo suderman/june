@@ -1,6 +1,7 @@
 // Client/daemon protocol: one JSON object per line over a Unix socket. Conversation updates are Pi Durable's own
 // agent events (`watchEvents`), passed through unchanged after a trimmed snapshot.
 import { connect, type Socket } from "node:net";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentEvent, SnapshotEvent } from "@earendil-works/pi-durable";
 
 export type Source = "kitty" | "cli" | "follow";
@@ -25,7 +26,7 @@ export function parseCommand(text: string): { name: string; args: string } | und
 export type Request =
 	| { op: "status"; requestId: string }
 	| { op: "attach"; requestId: string }
-	| { op: "submit"; requestId: string; text: string; source: Source; whenBusy?: "steer" | "followUp"; wait?: boolean }
+	| { op: "submit"; requestId: string; text: string; images?: ImageContent[]; source: Source; whenBusy?: "steer" | "followUp"; wait?: boolean }
 	| { op: "command"; requestId: string; name: string; args?: string };
 
 export type Status = {

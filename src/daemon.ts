@@ -32,6 +32,7 @@ import { createPromptExtension } from "./prompt.ts";
 import { createHeartbeat } from "./heartbeat.ts";
 import { createSituation } from "./situation.ts";
 import { setUser } from "./user.ts";
+import { validateImages } from "./images.ts";
 import { createMemoryExtension } from "./memory.ts";
 import { ChatInfo, ChatMap } from "./notify.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
@@ -347,14 +348,22 @@ function serve(socket: Socket, scope: Scope): void {
 				return;
 			}
 			case "submit": {
-				if (typeof request.text !== "string" || request.text.trim() === "") throw new Error("Empty message");
+				const images = request.images ?? [];
+				validateImages(images);
+				if (typeof request.text !== "string" || (!request.text.trim() && images.length === 0)) throw new Error("Empty message");
+				if (images.length) {
+					const model = (await scope.root.agent(context)).model;
+					if (model === undefined || !scope.models.getModel(model.provider, model.modelId)?.input.includes("image"))
+						throw new Error("The current model does not support images");
+				}
+				const inputText = `[${request.source}] ${request.text}`;
 				const submission = await scope.root.submit(
 					{
 						type: "input",
 						requestId: `${request.source}:${request.requestId}`,
-						content: `[${request.source}] ${request.text}`,
+						content: images.length ? [{ type: "text", text: inputText }, ...images] : inputText,
 						whenBusy: request.whenBusy ?? "followUp",
-						entry: { kind: "june.input", data: { source: request.source, text: request.text } },
+						entry: { kind: "june.input", data: { source: request.source, text: request.text, ...(images.length ? { imageCount: images.length } : {}) } },
 					},
 					context,
 				);

@@ -26,6 +26,12 @@ june serve           # the daemon
 
 Exit codes: 0 answered, 1 unanswered or failed, 2 usage, 3 daemon not running. In the client, Enter sends (as a steer while June is working), Shift+Enter queues a follow-up, Alt+Enter starts a new line, Up and Down recall earlier prompts, Esc runs =/stop=, Ctrl+D detaches.
 
+To attach a screenshot in the terminal client, press Ctrl+V or Shift+Insert on a Wayland desktop. June inserts an =[image N]= marker; add a message or send the image alone. Delete the marker to leave it out. Text on the clipboard still pastes as text. Clipboard access uses =wl-paste= from =wl-clipboard=, included in the Nix package. If the terminal handles Shift+Insert itself, configure that key to send Ctrl+V to June.
+
+Pasting an image file path also attaches it. Quote paths with spaces or escape the spaces with backslashes. Supported files are PNG, JPEG, WebP, GIF, and BMP. Up to ten images can accompany one message, with a 20 MiB limit per source file and 20 MiB total after preparation. Images are resized to fit the model and stored in the conversation; the transcript shows their count. A missing or invalid file, or a text-only model, leaves the draft unsent. Clipboard markers recalled from history need a fresh paste. This attachment handling is for the interactive client, not =june ask=.
+
+With Herdr, Ctrl+V can upload a clipboard image from the connecting machine and paste its path on the daemon host. June attaches that file through the same image-path handling; she does not need direct access to the connecting machine's clipboard. Herdr must intercept the paste key for this upload, so June's Shift+Insert binding alone does not add Shift+Insert uploads to Herdr. Over plain SSH without a clipboard-uploading client, paste a path to an image already on the daemon host. June refuses direct clipboard access over SSH rather than read the daemon host's unrelated clipboard.
+
 The terminal client, =june ask=, and Telegram share these slash commands:
 
 | Command                   | Effect                                                                                 |

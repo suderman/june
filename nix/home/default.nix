@@ -16,7 +16,7 @@ self: {
   # package. A host without the checkout, or JUNE_SOURCE=none, runs the package.
   wrapper = pkgs.writeShellApplication {
     name = "june";
-    runtimeInputs = [pkgs.coreutils pkgs.ripgrep pkgs.openssh];
+    runtimeInputs = [pkgs.coreutils pkgs.ripgrep pkgs.openssh pkgs.wl-clipboard];
     text = ''
       ${daemonHostLine}
       source="''${JUNE_SOURCE:-${lib.optionalString (cfg.source != null) cfg.source}}"
