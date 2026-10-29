@@ -138,10 +138,18 @@ export function createWatch(options: {
 						if (NEWS.has(seen.signal)) ledger.pending[key] = seen;
 						else delete ledger.pending[key];
 					}
+					// org-dispatch drops a run's record once its task leaves PROG, often between two looks; a run whose
+					// record is gone gets one last look at its Org state before it is forgotten.
+					for (const [key, last] of Object.entries(ledger.runs)) {
+						if (first || live.has(key) || !key.startsWith(`${host}:`) || SETTLED.has(last.signal)) continue;
+						const id = key.split(":")[1]!;
+						if (followed.has(id)) continue;
+						const seen = { ...(await observe(host, { id, heading: last.title, status: "finished" })), host };
+						if (seen.signal !== last.signal && NEWS.has(seen.signal)) ledger.pending[key] = seen;
+					}
 					if (first) ledger.hosts.push(host);
 				}
 				for (const key of Object.keys(ledger.runs)) if (!live.has(key)) delete ledger.runs[key];
-				for (const key of Object.keys(ledger.pending)) if (!live.has(key)) delete ledger.pending[key];
 
 				const pending = Object.values(ledger.pending);
 				const due = pending.length > 0 && within(at, options.window) && at.getTime() - ledger.notified >= config.gapMinutes * 60_000;

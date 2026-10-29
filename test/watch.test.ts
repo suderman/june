@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { rmSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -21,7 +22,9 @@ test("the watch learns what is there, then gathers dispatched news into one noti
 	await mkdir(records, { recursive: true });
 	const tasks = join(org, "work.org");
 	let mine = "PROG";
-	const write = (a: string, c: string) => writeFile(tasks, [task(a, "Ship the site", "task-ship-0001"), task("DONE", "Old audit", "task-old-0002"), task(c, "Fix the build", "task-build-0003"), task(mine, "June's own", "task-mine-0004")].join("\n"));
+	let tidy = "PROG";
+	const text = (a: string, c: string) => [task(a, "Ship the site", "task-ship-0001"), task("DONE", "Old audit", "task-old-0002"), task(c, "Fix the build", "task-build-0003"), task(mine, "June's own", "task-mine-0004"), task(tidy, "Tidy notes", "task-tidy-0005")].join("\n");
+	const write = (a: string, c: string) => writeFile(tasks, text(a, c));
 	await write("PROG", "PROG");
 	await writeFile(join(records, "task-mine-0004.json"), JSON.stringify({ id: "task-mine-0004", heading: "June's own", status: "running", started: 100 }));
 	await writeFile(join(records, "task-ship-0001.json"), JSON.stringify({ id: "task-ship-0001", heading: "Ship the site", status: "running", started: 100, pane: "w1:p1" }));
@@ -47,7 +50,7 @@ test("the watch learns what is there, then gathers dispatched news into one noti
 		notices.push(lastInput(ctx));
 		return fauxAssistantMessage("noted");
 	};
-	faux.setResponses([answer, answer, answer, answer]);
+	faux.setResponses([answer, answer, answer, answer, answer]);
 	const daemon = await openTestDaemon({
 		...tmp,
 		faux,
@@ -110,6 +113,16 @@ test("the watch learns what is there, then gathers dispatched news into one noti
 	await new Promise((r) => setTimeout(r, 150));
 	assert.equal(notices.length, 3, "nothing is news after cog wakes or lux is first reached");
 	assert.ok((await readFile(ledger, "utf8")).includes("cog:task-build-0003:300"), "cog's run was kept while it slept");
+
+	// org-dispatch drops a run's record as soon as its task leaves PROG; the watch still hears how it ended.
+	await writeFile(join(records, "task-tidy-0005.json"), JSON.stringify({ id: "task-tidy-0005", heading: "Tidy notes", status: "running", started: 600 }));
+	await until(async () => (await readFile(ledger, "utf8")).includes("kit:task-tidy-0005:600"));
+	tidy = "EVAL";
+	writeFileSync(tasks, text("EVAL", "DONE"));
+	rmSync(join(records, "task-tidy-0005.json"));
+	await until(() => notices.length === 4);
+	assert.match(notices[3]!, /«Tidy notes» \(work\.org\) on kit is now EVAL/);
+	await until(async () => !(await readFile(ledger, "utf8")).includes("task-tidy-0005"));
 });
 
 test("the notice names each task once, with where it lives and what it needs", () => {
