@@ -14,6 +14,9 @@
       default = pkgs.callPackage ./nix/package.nix {};
     });
 
+    # programs.june for Home Manager: the client, the daemon service, and the Org dispatcher.
+    homeModules.default = import ./nix/home self;
+
     checks = forAll (pkgs: {
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default.tests;
     });

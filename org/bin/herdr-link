@@ -63,7 +63,7 @@ EOF
 # Org file, its project; a reopened run goes back there under the same tab label.
 # The Org file is the one whose Sessions link names this session.
 open_tab() {
-  local dir=$1 label project= workspace created
+  local dir=$1 label project='' workspace created
   if [[ $name == "auto · "* ]]; then
     project=$(grep -rlF --include='*.org' --exclude='archive*' --exclude='*.sync-conflict-*' \
       ":$session@" "$HOME/org" 2>/dev/null | head -n1 || true)

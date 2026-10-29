@@ -1,6 +1,6 @@
 // Paths and runtime configuration, in XDG directories. The config directory holds config.json and AGENTS.md, which
 // `agents apply` copies there from ~/.agents; the data directory holds what June keeps herself: SOUL.org, MEMORY.org,
-// and JOURNAL.org. Machine plumbing comes from the environment the NixOS module sets: JUNE_DAEMON_HOST, and
+// and JOURNAL.org. Machine plumbing comes from the environment June's Home Manager module sets: JUNE_DAEMON_HOST, and
 // TELEGRAM_ALLOWED_USERS beside the bot token.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
@@ -162,7 +162,7 @@ export function readConfigFile(p: Paths): Record<string, any> {
 	}
 }
 
-/** The daemon's host, from the environment the NixOS module sets; undefined runs June here. */
+/** The daemon's host, from the environment June's Home Manager module sets; undefined runs June here. */
 export const daemonHost = (env: NodeJS.ProcessEnv = process.env) => env.JUNE_DAEMON_HOST?.trim() || undefined;
 
 /** config.json over the defaults, with the machine's settings from the environment. */
@@ -170,7 +170,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 	const raw = readConfigFile(p);
 	const file = join(p.config, "config.json");
 	if (!raw.model?.chat?.provider || !raw.model?.chat?.modelId) throw new Error(`No model.chat configured in ${file}`);
-	for (const key of ["daemonHost", "telegram"]) if (key in raw) throw new Error(`${file}: ${key} now comes from the NixOS module, not config.json`);
+	for (const key of ["daemonHost", "telegram"]) if (key in raw) throw new Error(`${file}: ${key} now comes from the Home Manager module, not config.json`);
 	const allowed = (env.TELEGRAM_ALLOWED_USERS ?? "").split(/[\s,]+/).filter(Boolean);
 	if (allowed.some((id) => !/^\d+$/.test(id))) throw new Error("TELEGRAM_ALLOWED_USERS must be numeric user ids, separated by commas");
 	const herdr = { ...DEFAULTS.herdr, ...raw.herdr };

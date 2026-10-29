@@ -174,4 +174,21 @@ Tests use pi-ai's faux model and a fake Telegram port, never a real provider. Un
 
 * Deployment
 
-The flake exports =packages.<system>.default=. Logs go to stdout and stderr as =level event key=value= lines with secrets redacted. A Home Manager module that runs =june serve= as a user service, with its keys and the dispatcher timer, is =programs.june= in [[https://github.com/suderman/nixos][suderman/nixos]]. Its =june= wrapper runs a local checkout instead of the package when one with =node_modules= is present (=JUNE_SOURCE=none= forces the package), and =june status= shows which is in use.
+The flake exports =packages.<system>.default= and a Home Manager module, =homeModules.default=. Logs go to stdout and stderr as =level event key=value= lines with secrets redacted.
+
+The module sets up =programs.june=: the =june= client, =org-edit=, and =herdr-link= wherever it is enabled; with =daemon.enable=, =june serve= as a user service; with =dispatch.enable=, the Org dispatcher every minute. Secrets, persistence, and the agents June drives belong to the host's own configuration. It passes key files through =environmentFiles= and provides pi, Herdr (=herdrPackage=, from =programs.herdr= when present), and Emacs (=emacsPackage=, from =programs.emacs= when enabled).
+
+#+begin_src nix
+{
+  imports = [inputs.june.homeModules.default];
+  programs.june = {
+    enable = true;
+    daemon.enable = true;   # on the host that runs her
+    dispatch.enable = true; # on each host that runs AUTO tasks
+    daemonHost = "kit";
+    environmentFiles = ["/run/user/1000/june.env"];
+  };
+}
+#+end_src
+
+config.json and AGENTS.md are not part of the module; place them in =~/.config/june=. The =june= wrapper runs a local checkout instead of the package when one with =node_modules= is present (=JUNE_SOURCE=none= forces the package), and =june status= shows which is in use.

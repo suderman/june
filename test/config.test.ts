@@ -34,7 +34,7 @@ test("config.json and AGENTS.md come from the config directory, SOUL.org and her
 	assert.throws(() => loadConfig(dirs, { TELEGRAM_ALLOWED_USERS: "alex" }), /TELEGRAM_ALLOWED_USERS must be numeric/);
 	assert.throws(() => loadConfig({ ...dirs, config: data }, {}), /No model\.chat configured/);
 	await writeFile(join(config, "config.json"), JSON.stringify({ model: { chat: { provider: "p", modelId: "m" } }, daemonHost: "kit" }));
-	assert.throws(() => loadConfig(dirs, {}), /daemonHost now comes from the NixOS module/, "an old personal setting is refused, not ignored");
+	assert.throws(() => loadConfig(dirs, {}), /daemonHost now comes from the Home Manager module/, "an old personal setting is refused, not ignored");
 	await writeFile(join(config, "config.json"), JSON.stringify({ model: { chat: { provider: "p", modelId: "m" }, focus: { modelId: "careful" }, patter: { modelId: "chatty" } } }));
 	const modes = loadConfig(dirs, {}).model;
 	assert.deepEqual(modes.focus, { provider: "p", thinkingLevel: "medium", modelId: "careful" }, "focus inherits what it leaves out");
