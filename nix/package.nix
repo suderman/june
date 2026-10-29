@@ -5,12 +5,21 @@
   makeWrapper,
   ripgrep,
   openssh,
+  emacs-nox,
+  git,
+  jq,
+  tzdata,
 }: let
   # Node 22: Node 24 aborts when GC collects node:sqlite objects (nodejs/node#65446), and Pi Durable uses node:sqlite.
   nodejs = nodejs_22;
   src = lib.fileset.toSource {
     root = ../.;
     fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test];
+  };
+  # The tests also cover org-dispatch and org-edit, whose Emacs Lisp lives beside the daemon.
+  testSrc = lib.fileset.toSource {
+    root = ../.;
+    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test ../org];
   };
 in
   buildNpmPackage (finalAttrs: {
@@ -40,12 +49,16 @@ in
 
     passthru.tests = buildNpmPackage {
       pname = "june-tests";
-      inherit (finalAttrs) version src npmDepsHash nodejs;
-      nativeBuildInputs = [ripgrep];
+      inherit (finalAttrs) version npmDepsHash nodejs;
+      src = testSrc;
+      nativeBuildInputs = [ripgrep emacs-nox git jq];
       dontNpmInstall = true;
       buildPhase = ''
         runHook preBuild
-        export HOME=$TMPDIR
+        export HOME=$TMPDIR TZDIR=${tzdata}/share/zoneinfo
+        patchShebangs org
+        org/tests/test-org-dispatch
+        org/tests/test-org-edit
         node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/follow.test.ts test/heartbeat.test.ts test/mail.test.ts test/memory.test.ts test/patter.test.ts test/situation.test.ts test/watch.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts
         runHook postBuild
       '';

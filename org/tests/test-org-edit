@@ -8,6 +8,8 @@ fixture="$(mktemp -d)"
 trap 'rm -rf -- "$fixture"' EXIT
 export HOME="$fixture/home"
 export XDG_CONFIG_HOME="$HOME/.config"
+# The date checks compare against Calgary time, which needs zone data; NixOS keeps it in /etc/zoneinfo.
+if [[ -z ${TZDIR:-} && ! -d /usr/share/zoneinfo && -d /etc/zoneinfo ]]; then export TZDIR=/etc/zoneinfo; fi
 unset JUNE_CONFIG_DIR
 mkdir -p "$HOME/org"
 
@@ -159,7 +161,7 @@ check "a heading with no body gets its own deadline" has "$(sed -n 3p "$bare")" 
 check "and the next heading none" has "$(tail -n 1 "$bare")" '^\* Next$'
 
 check "date prints a timestamp" has "$(run date '2026-11-03 9:00-10:30 +1w')" '^<2026-11-03 Tue 09:00-10:30 +1w>$'
-check "date takes a relative day" has "$(run date '+0d')" "^<$(date +'%Y-%m-%d %a')>$"
+check "date takes a relative day" has "$(run date '+0d')" "^<$(TZ=America/Edmonton date +'%Y-%m-%d %a')>$"
 check "date refuses words Org would read as today" has "$(run date 'next tuesday')" 'not a date'
 check "missing zone data stops instead of using UTC" has "$(TZDIR=/nonexistent run date '+0d')" 'No zone data for America/Edmonton'
 

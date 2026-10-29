@@ -163,8 +163,9 @@ Only allowed users reach the model, and private chats share the primary conversa
 nix develop           # node 22 and ripgrep
 npm ci
 npm run typecheck
-npm test              # also: nix flake check
+npm test
 org/tests/test-org-dispatch && org/tests/test-org-edit
+nix flake check       # all of the above in the sandbox; GitHub Actions runs it on every push
 JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june serve
 JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june
 #+end_src

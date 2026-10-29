@@ -256,6 +256,8 @@ case "$1 $2" in
   *) echo '{}' ;;
 esac
 EOF
+# The Nix sandbox has no /usr/bin/env, so point the script at this bash.
+sed -i "1s|.*|#!$BASH|" "$fixture/bin/herdr"
 chmod +x "$fixture/bin/herdr"
 export FAKE_HERDR_LOG="$fixture/herdr.log"
 pane_in() {
