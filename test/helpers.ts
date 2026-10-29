@@ -31,7 +31,7 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 		herdr: { session: "default", host: "kit", hosts: {}, allowPrompt: false },
 		// Off unless a test turns it on, so no test depends on the hour it runs.
 		rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
-		reflection: { enabled: false, quietMinutes: 60, recentDays: 3 },
+		reflection: { enabled: false, quietMinutes: 60, recentDays: 3, periods: [] },
 		heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
 		mail: { enabled: false, query: "tag:inbox and tag:unread", accounts: {} },
 		patter: { openAfterSeconds: 8, gapsSeconds: [25] },

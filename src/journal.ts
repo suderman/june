@@ -16,30 +16,89 @@ export function localStamp(now = new Date()): { date: string; time: string } {
 
 /** `text` with the entry filed under its day, creating the year, month, and day headings in order as needed. */
 export function insertEntry(text: string, entry: JournalEntry): string {
-	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(entry.date);
-	if (match === null) throw new Error(`Journal date must be YYYY-MM-DD, not ${entry.date}`);
-	const [, year, month, day] = match as unknown as [string, string, string, string];
-	const when = new Date(Number(year), Number(month) - 1, Number(day));
-	if (when.getMonth() !== Number(month) - 1) throw new Error(`No such date ${entry.date}`);
+	const path = datePath(entry.date);
 	const title = entry.title.replace(/\s+/g, " ").trim();
 	if (!title) throw new Error("A journal entry needs a title");
 	const body = paragraphs(entry.text);
 	if (body.length === 0) throw new Error("A journal entry needs some text");
 
 	const lines = (text.trim() ? text : header()).replace(/\n+$/, "").split("\n");
-	const monthName = when.toLocaleString("en-CA", { month: "long" });
-	const weekday = when.toLocaleString("en-CA", { weekday: "long" });
 	let [start, end] = [0, lines.length];
-	for (const [level, key, heading] of [
-		[1, year, year],
-		[2, `${year}-${month}`, `${year}-${month} ${monthName}`],
-		[3, entry.date, `${entry.date} ${weekday}`],
-	] as const) {
-		[start, end] = node(lines, start, end, level, key, heading);
-	}
+	for (const [level, key, heading] of path) [start, end] = node(lines, start, end, level, key, heading);
 	put(lines, end, [`**** ${entry.time ? `${entry.time} ` : ""}${title}`, ...body]);
 	return `${lines.join("\n").replace(/\n+$/, "")}\n`;
 }
+
+/** The year, month, and day headings a date files under, as [level, key, heading]. */
+function datePath(date: string): [number, string, string][] {
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+	if (match === null) throw new Error(`Journal date must be YYYY-MM-DD, not ${date}`);
+	const [, year, month, day] = match as unknown as [string, string, string, string];
+	const when = new Date(Number(year), Number(month) - 1, Number(day));
+	if (when.getMonth() !== Number(month) - 1) throw new Error(`No such date ${date}`);
+	return [
+		[1, year, year],
+		[2, `${year}-${month}`, `${year}-${month} ${when.toLocaleString("en-CA", { month: "long" })}`],
+		[3, date, `${date} ${when.toLocaleString("en-CA", { weekday: "long" })}`],
+	];
+}
+
+export type Period = "week" | "month" | "quarter" | "year";
+
+/**
+ * Each longer reflection's digest is an entry titled like the nightly "Day's end", closing the date-tree node of the
+ * period's last day: a week under its Sunday, a month and a quarter under the last month, a year under the year.
+ */
+export const DIGEST: Record<Period, { title: string; depth: number }> = {
+	week: { title: "Week's end", depth: 3 },
+	month: { title: "Month's end", depth: 2 },
+	quarter: { title: "Quarter's end", depth: 2 },
+	year: { title: "Year's end", depth: 1 },
+};
+
+/** `text` with the period's digest written, or rewritten, as the last child of the node of its last day `end`. */
+export function putDigest(text: string, period: Period, end: string, digest: string): string {
+	const { title, depth } = DIGEST[period];
+	const body = paragraphs(digest);
+	if (body.length === 0) throw new Error("A digest needs some text");
+	const lines = (text.trim() ? text : header()).replace(/\n+$/, "").split("\n");
+	let [start, stop] = [0, lines.length];
+	for (const [level, key, heading] of datePath(end).slice(0, depth)) [start, stop] = node(lines, start, stop, level, key, heading);
+	const old = child(lines, start, stop, depth + 1, title);
+	if (old !== undefined) {
+		lines.splice(old[0], old[1] - old[0]);
+		stop -= old[1] - old[0];
+	}
+	put(lines, stop, [`${"*".repeat(depth + 1)} ${title}`, ...body]);
+	return `${lines.join("\n").replace(/\n+$/, "")}\n`;
+}
+
+/** The text of the entry titled `title` under the node of `date` at `depth`, such as a day's "Day's end"; none when missing. */
+export function entryUnder(text: string, date: string, depth: number, title: string): string | undefined {
+	const lines = text.split("\n");
+	let range: [number, number] | undefined = [0, lines.length];
+	for (const [level, key] of datePath(date).slice(0, depth)) if (range !== undefined) range = find(lines, range[0], range[1], level, key);
+	const found = range && child(lines, range[0], range[1], depth + 1, title);
+	return found && bodyText(lines.slice(found[0] + 1, found[1]));
+}
+
+/** The latest entry titled `title`, with the heading of the node it closes, such as the last "Week's end" and its Sunday. */
+export function latestEntry(text: string, title: string): { under: string; text: string } | undefined {
+	const lines = text.split("\n");
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const stars = /^(\*+) (.*)$/.exec(lines[i]!);
+		if (stars === null || stars[2]!.trim() !== title) continue;
+		const level = stars[1]!.length;
+		let end = i + 1;
+		while (end < lines.length && !/^\*+ /.test(lines[end]!)) end++;
+		let parent = i - 1;
+		while (parent >= 0 && !lines[parent]!.startsWith(`${"*".repeat(level - 1)} `)) parent--;
+		return { under: parent < 0 ? "" : lines[parent]!.replace(/^\*+ /, ""), text: bodyText(lines.slice(i + 1, end)) };
+	}
+	return undefined;
+}
+
+const bodyText = (lines: string[]) => lines.map((l) => l.trim()).filter(Boolean).join(" ");
 
 /** Each paragraph on one physical line, as Org prose is kept; a line starting with a star would become a heading. */
 function paragraphs(text: string): string[] {
@@ -54,24 +113,44 @@ function paragraphs(text: string): string[] {
 
 /** The line range of the child heading `key` at `level` within [start, end), created in date order when missing. */
 function node(lines: string[], start: number, end: number, level: number, key: string, heading: string): [number, number] {
+	const found = find(lines, start, end, level, key);
+	if (found !== undefined) return found;
 	const stars = `${"*".repeat(level)} `;
 	let at = end;
 	for (let i = start; i < end; i++) {
 		const line = lines[i]!;
-		if (!line.startsWith(stars)) continue;
-		const title = line.slice(stars.length);
-		if (title === key || title.startsWith(`${key} `)) {
-			let close = i + 1;
-			while (close < end && (/^(\*+) /.exec(lines[close]!)?.[1]!.length ?? Infinity) > level) close++;
-			return [i, close];
-		}
-		if (title.split(" ")[0]! > key) {
+		if (line.startsWith(stars) && line.slice(stars.length).split(" ")[0]! > key) {
 			at = i;
 			break;
 		}
 	}
 	const inserted = put(lines, at, [`${stars}${heading}`]);
 	return [inserted, inserted + 1];
+}
+
+/** The line range of the child heading at `level` whose title is `key` or starts with it and a space; none when missing. */
+function find(lines: string[], start: number, end: number, level: number, key: string): [number, number] | undefined {
+	const stars = `${"*".repeat(level)} `;
+	for (let i = start; i < end; i++) {
+		const line = lines[i]!;
+		if (!line.startsWith(stars)) continue;
+		const title = line.slice(stars.length);
+		if (title === key || title.startsWith(`${key} `)) return [i, close(lines, i, end, level)];
+	}
+	return undefined;
+}
+
+/** The line range of the child heading at `level` titled exactly `title`. */
+function child(lines: string[], start: number, end: number, level: number, title: string): [number, number] | undefined {
+	const i = lines.slice(start, end).findIndex((line) => line.trimEnd() === `${"*".repeat(level)} ${title}`);
+	return i < 0 ? undefined : [start + i, close(lines, start + i, end, level)];
+}
+
+/** Where the subtree of the heading at `i` ends: the next heading at `level` or above, or `end`. */
+function close(lines: string[], i: number, end: number, level: number): number {
+	let at = i + 1;
+	while (at < end && (/^(\*+) /.exec(lines[at]!)?.[1]!.length ?? Infinity) > level) at++;
+	return at;
 }
 
 /** Insert a heading block at `at`, keeping one blank line between finished text and the next heading. Returns its index. */

@@ -54,7 +54,7 @@ test("the rhythm, reflection, heartbeat, and patter timing have defaults, take o
 	};
 	const plain = loadConfig({ ...tmp.paths, config: await layer("plain", {}) });
 	assert.deepEqual(plain.rhythm, { wake: "05:00", quiet: "22:00", sleep: "01:00" });
-	assert.deepEqual(plain.reflection, { enabled: true, quietMinutes: 60, recentDays: 3 });
+	assert.deepEqual(plain.reflection, { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"] });
 	assert.deepEqual(plain.heartbeat, { enabled: false, everyMinutes: 60, chattingMinutes: 15 }, "off unless configured");
 	assert.equal(plain.patter.openAfterSeconds, 8);
 	const tuned = loadConfig({ ...tmp.paths, config: await layer("tuned", { rhythm: { sleep: "00:30" }, heartbeat: { enabled: true, everyMinutes: 30 }, patter: { openAfterSeconds: 15 } }) });
@@ -69,6 +69,8 @@ test("the rhythm, reflection, heartbeat, and patter timing have defaults, take o
 	assert.throws(() => loadConfig({ ...tmp.paths, config: eager }), /heartbeat\.everyMinutes/);
 	const forgetful = await layer("forgetful", { reflection: { recentDays: -1 } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: forgetful }), /reflection\.recentDays/);
+	const fortnightly = await layer("fortnightly", { reflection: { periods: ["week", "fortnight"] } });
+	assert.throws(() => loadConfig({ ...tmp.paths, config: fortnightly }), /reflection\.periods may hold only week, month, quarter, year/);
 	assert.deepEqual(plain.situation, { calendars: [], homeAssistant: { people: [], pollSeconds: 300 } });
 	const placed = loadConfig({ ...tmp.paths, config: await layer("placed", { situation: { calendars: ["~/org/calendar/family.org"], homeAssistant: { people: ["person.alex"] } } }) });
 	assert.equal(placed.situation.calendars[0], join(process.env.HOME!, "org/calendar/family.org"), "calendar paths expand ~");

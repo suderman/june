@@ -5,6 +5,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
+import { DIGEST, type Period } from "./journal.ts";
 
 export type HerdrHost = { readonly ssh?: string };
 
@@ -63,6 +64,8 @@ export type Config = {
 		readonly quietMinutes: number;
 		/** How many recent days' "Day's end" entries June sees in her prompt; 0 shows none. */
 		readonly recentDays: number;
+		/** The longer digests written after the nightly pass on each period's last day, such as ["week", "month"]. */
+		readonly periods: readonly Period[];
 	};
 	/** June's periodic private look at the moment, which she may turn into a message to the user, or not. */
 	readonly heartbeat: {
@@ -133,7 +136,7 @@ const DEFAULTS = {
 	org: { root: "~/org", agendaFiles: "~/.local/state/org-dispatch/agenda-files", people: "~/org/people.org" },
 	herdr: { session: "default", hosts: {}, allowPrompt: false },
 	rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
-	reflection: { enabled: true, quietMinutes: 60, recentDays: 3 },
+	reflection: { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"] },
 	heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
 	mail: { enabled: false, query: "tag:inbox and tag:unread", accounts: {} as Record<string, string> },
 	patter: { openAfterSeconds: 8, gapsSeconds: [25, 25, 25, 40, 60, 90, 120, 180] },
@@ -211,6 +214,7 @@ function rhythm(given: Config["rhythm"]): Config["rhythm"] {
 function reflection(given: Config["reflection"] & { start?: unknown; end?: unknown }): Config["reflection"] {
 	if ("start" in given || "end" in given) throw new Error("reflection.start and end are gone: the reflection runs from rhythm.sleep to rhythm.wake");
 	if (!Number.isInteger(given.recentDays) || given.recentDays < 0) throw new Error("reflection.recentDays must be a whole number, 0 or more");
+	if (!Array.isArray(given.periods) || given.periods.some((p) => !Object.hasOwn(DIGEST, p))) throw new Error(`reflection.periods may hold only ${Object.keys(DIGEST).join(", ")}`);
 	return given;
 }
 

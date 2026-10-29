@@ -4,7 +4,7 @@ import { basename, dirname, join, relative, sep } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension, section } from "@earendil-works/pi-durable";
 import { type Config, type Paths, type PromptFiles, promptFiles } from "./config.ts";
-import { recentDayEnds } from "./journal.ts";
+import { latestEntry, recentDayEnds } from "./journal.ts";
 import { DEFAULT_BASH_TIMEOUT } from "./tools/coding.ts";
 import { User, user } from "./user.ts";
 
@@ -88,8 +88,9 @@ async function personalSection(files: PromptFiles, memory: () => Promise<string>
 		`${basename(files.memoryFile)} is the page of what is true about ${user()}'s life that you must never get wrong: who they are and where they live, their household and people, what they do, their routine, where their records live, and the corrections that shape how you work with them. When they tell you a lasting fact or correct one, update it with edit in the same turn, in its own section; keep it to a page or two, replacing what changed. What happened on a given day goes in the journal instead. A nightly reflection also tidies the day's journal and carries lasting facts here.`,
 		...(files.journalFile
 			? [
-					`Your journal, ${files.journalFile}, is an Org date tree you write with the journal tool: "* YYYY", "** YYYY-MM Month", "*** YYYY-MM-DD Weekday", then entries. When you need your past with ${user()}, search it yourself, a quick check rather than a brief, instead of reading it whole: find a day by its heading (rg -n '^\\*\\*\\* YYYY-MM-DD') and read from that line, or search words with context (rg -i -C3). Each night's reflection ends a day with a "**** Day's end" entry, its summary of the day, so to skim further back than the days below, list a month's days and summaries (rg -n -A1 "^\\*\\*\\* YYYY-MM|^\\*\\*\\*\\* Day's end") and then read the days that matter in full. When something ${user()} says seems to connect to an earlier day, look before answering rather than guessing.`,
+					`Your journal, ${files.journalFile}, is an Org date tree you write with the journal tool: "* YYYY", "** YYYY-MM Month", "*** YYYY-MM-DD Weekday", then entries. When you need your past with ${user()}, search it yourself, a quick check rather than a brief, instead of reading it whole: find a day by its heading (rg -n '^\\*\\*\\* YYYY-MM-DD') and read from that line, or search words with context (rg -i -C3). Each night's reflection ends a day with a "**** Day's end" entry, its summary of the day, so to skim further back than the days below, list a month's days and summaries (rg -n -A1 "^\\*\\*\\* YYYY-MM|^\\*\\*\\*\\* Day's end") and then read the days that matter in full. Longer reflections add the long view: a "**** Week's end" under each Sunday, a "*** Month's end" and, at a quarter's close, a "*** Quarter's end" under the month, and a "** Year's end" under the year; list them (rg -n -A1 "^\\*+ (Week|Month|Quarter|Year)'s end") to see how a stretch of time went. When something ${user()} says seems to connect to an earlier day, look before answering rather than guessing.`,
 					...dayEnds(await journal(), recentDays),
+					...longView(await journal()),
 				]
 			: []),
 		...(files.heartbeatFile
@@ -114,6 +115,18 @@ function dayEnds(journal: string, count: number): string[] {
 	const ends = recentDayEnds(journal, count);
 	if (ends.length === 0) return [];
 	return ["Your recent days, from each night's reflection:", ...ends.map((end) => `- ${end.day}: ${end.text}`)];
+}
+
+/** The latest week and month as the longer reflections summed them up. */
+function longView(journal: string): string[] {
+	const week = latestEntry(journal, "Week's end");
+	const month = latestEntry(journal, "Month's end");
+	if (week === undefined && month === undefined) return [];
+	return [
+		"Your last week and month, from the longer reflections:",
+		...(week ? [`- The week ending ${week.under}: ${week.text}`] : []),
+		...(month ? [`- ${month.under}: ${month.text}`] : []),
+	];
 }
 
 /** With `dirs`, reload looks for the prompt files again, so a file made since startup is found. */

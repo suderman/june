@@ -10,7 +10,8 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { runCommand } from "../src/commands.ts";
 import { createMemoryExtension, MemoryReview } from "../src/memory.ts";
 import { createPromptExtension } from "../src/prompt.ts";
-import { dayFor } from "../src/reflect.ts";
+import { entryUnder, insertEntry, latestEntry, putDigest } from "../src/journal.ts";
+import { dayFor, gather, lastClosed, periodLabel } from "../src/reflect.ts";
 import { ask, fakeTelegram, openTestDaemon, tempDir, testConfig, until, type Faux } from "./helpers.ts";
 
 const lesson = "#+TITLE: Memory\n\n* 2026-10-26 Trust and judgment\nAlex said: judge when to act directly, rather than force delegation by missing tools.\n\nI had mistaken delegation for a universal rule. Use available tools for bounded checks, delegate sustained work, and keep approval rules. Source: conversation 1.\n";
@@ -424,14 +425,14 @@ test("June's prompt carries the last few days' endings and says where to look fu
 	const journal = join(tmp.dir, "JOURNAL.org");
 	await writeFile(soul, "* June\nBe observant.\n");
 	const day = (date: string, end?: string) => `*** ${date}\n**** 09:00 Morning\nCoffee on ${date}.\n${end ? `\n**** Day's end\n${end}\n` : ""}`;
-	await writeFile(journal, `#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${day("2026-10-24 Saturday", "Biscuit's birthday.")}\n${day("2026-10-25 Sunday", "Church and a nap.")}\n${day("2026-10-26 Monday")}\n${day("2026-10-27 Tuesday", "Meeting the boys.\n\nThe site check is still open.")}`);
+	await writeFile(journal, `#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${day("2026-10-24 Saturday", "Biscuit's birthday.")}\n${day("2026-10-25 Sunday", "Church and a nap.")}\n**** Week's end\nA week of birthdays and church.\n\n${day("2026-10-26 Monday")}\n${day("2026-10-27 Tuesday", "Meeting the boys.\n\nThe site check is still open.")}`);
 	let prompt = "";
 	const faux = fauxProvider();
 	faux.setResponses([(ctx) => {
 		prompt = (JSON.parse(effectivePrompt(ctx)) as { memory: string }).memory;
 		return fauxAssistantMessage("hi");
 	}]);
-	const config = { soulFile: soul, memoryFile: join(tmp.dir, "MEMORY.org"), journalFile: journal, reflection: { enabled: false, quietMinutes: 60, recentDays: 2 } };
+	const config = { soulFile: soul, memoryFile: join(tmp.dir, "MEMORY.org"), journalFile: journal, reflection: { enabled: false, quietMinutes: 60, recentDays: 2, periods: [] } };
 	const daemon = await openTestDaemon({ ...tmp, faux, config });
 	t.after(() => daemon.close());
 	await (await daemon.root.submit({ type: "input", content: "hello", requestId: "r1" }, BG)).wait(BG);
@@ -439,6 +440,8 @@ test("June's prompt carries the last few days' endings and says where to look fu
 	assert.doesNotMatch(prompt, /Biscuit's birthday/, "only the last two endings");
 	assert.doesNotMatch(prompt, /Coffee on/, "and never the entries themselves");
 	assert.ok(prompt.includes(`rg -n -A1 "^\\*\\*\\* YYYY-MM|^\\*\\*\\*\\* Day's end"`), "with a way to skim a month");
+	assert.match(prompt, /Your last week and month, from the longer reflections:\n- The week ending 2026-10-25 Sunday: A week of birthdays and church\./);
+	assert.ok(prompt.includes(`rg -n -A1 "^\\*+ (Week|Month|Quarter|Year)'s end"`), "with a way to list the long view");
 });
 
 test("June writes her journal with a tool, under today's date", async (t) => {
@@ -495,7 +498,7 @@ test("the nightly reflection rewrites the day, carries a lasting fact into memor
 	const daemon = await openTestDaemon({
 		...tmp,
 		faux,
-		config: { soulFile: soul, memoryFile: memory, journalFile: journal, reflection: { enabled: true, quietMinutes: 60, recentDays: 3 }, rhythm: { wake: "06:00", quiet: "22:00", sleep: "03:00" } },
+		config: { soulFile: soul, memoryFile: memory, journalFile: journal, reflection: { enabled: true, quietMinutes: 60, recentDays: 3, periods: [] }, rhythm: { wake: "06:00", quiet: "22:00", sleep: "03:00" } },
 		reflectionClock: { now: () => new Date(2026, 9, 28, 3, 30), tickMs: 50 },
 	});
 	t.after(() => daemon.close());
@@ -520,7 +523,7 @@ test("the nightly reflection waits while Alex is still talking, and refuses a da
 	let clock = Date.now();
 	const at = () => new Date(clock);
 	const hhmm = (ms: number) => `${String(new Date(ms).getHours()).padStart(2, "0")}:${String(new Date(ms).getMinutes()).padStart(2, "0")}`;
-	const reflection = { enabled: true, quietMinutes: 60, recentDays: 3 };
+	const reflection = { enabled: true, quietMinutes: 60, recentDays: 3, periods: [] };
 	const rhythm = { wake: hhmm(clock + 3 * 3_600_000), quiet: "22:00", sleep: hhmm(clock - 60_000) };
 	const date = dayFor(at(), { start: rhythm.sleep, end: rhythm.wake })!;
 	const text = `#+TITLE: June's journal\n\n* ${date.slice(0, 4)}\n** ${date.slice(0, 7)}\n*** ${date}\n**** 18:04 Meeting Biscuit\nAlex shared a photo of Biscuit.\n`;
@@ -544,3 +547,98 @@ test("the nightly reflection waits while Alex is still talking, and refuses a da
 	assert.ok(!existsSync(join(tmp.paths.state, "reflection.json")), "and the night is not marked done");
 });
 
+
+test("digests close their date-tree node, are rewritten in place, and later days still file before a month's end", () => {
+	let text = "#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n*** 2026-10-25 Sunday\n**** 09:00 Church\nChurch.\n\n**** Day's end\nA quiet Sunday.\n\n*** 2026-10-26 Monday\n**** 09:00 Work\nWork.\n";
+	text = putDigest(text, "week", "2026-10-25", "A week of church and work.");
+	text = putDigest(text, "month", "2026-10-31", "October.");
+	text = putDigest(text, "month", "2026-10-31", "October, revised.");
+	text = putDigest(text, "quarter", "2026-12-31", "Autumn.");
+	text = putDigest(text, "year", "2026-12-31", "The year.");
+	text = insertEntry(text, { date: "2026-10-27", time: "08:00", title: "Coffee", text: "Coffee." });
+	assert.equal(
+		text,
+		"#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n*** 2026-10-25 Sunday\n**** 09:00 Church\nChurch.\n\n**** Day's end\nA quiet Sunday.\n\n**** Week's end\nA week of church and work.\n\n*** 2026-10-26 Monday\n**** 09:00 Work\nWork.\n\n*** 2026-10-27 Tuesday\n**** 08:00 Coffee\nCoffee.\n\n*** Month's end\nOctober, revised.\n\n** 2026-12 December\n*** Quarter's end\nAutumn.\n\n** Year's end\nThe year.\n",
+	);
+	assert.equal(entryUnder(text, "2026-10-25", 3, "Week's end"), "A week of church and work.");
+	assert.equal(entryUnder(text, "2026-10-31", 2, "Month's end"), "October, revised.");
+	assert.equal(entryUnder(text, "2026-11-30", 2, "Month's end"), undefined);
+	assert.deepEqual(latestEntry(text, "Week's end"), { under: "2026-10-25 Sunday", text: "A week of church and work." });
+	assert.throws(() => putDigest(text, "week", "2026-10-25", "* not a heading"), /stars/);
+});
+
+test("each period closes on its last day, and longer ones read the digests below them", () => {
+	assert.equal(lastClosed("week", "2026-10-25"), "2026-10-25", "a Sunday closes its week");
+	assert.equal(lastClosed("week", "2026-10-28"), "2026-10-25", "midweek, the last week closed on Sunday");
+	assert.equal(lastClosed("month", "2026-10-31"), "2026-10-31");
+	assert.equal(lastClosed("month", "2026-11-01"), "2026-10-31");
+	assert.equal(lastClosed("quarter", "2026-10-31"), "2026-09-30");
+	assert.equal(lastClosed("year", "2026-12-31"), "2026-12-31");
+	assert.equal(lastClosed("year", "2027-01-01"), "2026-12-31");
+	assert.equal(lastClosed("week", "2027-01-02"), "2026-12-27", "a week back across the year");
+	assert.equal(periodLabel("week", "2026-11-01"), "The week of 2026-10-26 to 2026-11-01");
+	assert.equal(periodLabel("month", "2026-10-31"), "October 2026");
+	assert.equal(periodLabel("quarter", "2026-12-31"), "2026 Q4");
+
+	const journal = putDigest(putDigest(putDigest(
+		"* 2026\n** 2026-09 September\n*** 2026-09-27 Sunday\n**** 10:00 Hike\nA hike.\n\n**** Day's end\nA good hike.\n\n*** 2026-09-28 Monday\n**** 08:00 School\nBack to school.\n\n**** 12:00 Lunch\nLunch out.\n",
+		"week", "2026-09-27", "Hiking week."), "month", "2026-09-30", "September."), "month", "2026-08-31", "August.");
+	assert.deepEqual(gather(journal, "week", "2026-09-27"), ["*** 2026-09-27 Sunday\n**** 10:00 Hike\nA hike.\n\n**** Day's end\nA good hike.\n\n**** Week's end\nHiking week."]);
+	assert.deepEqual(gather(journal, "month", "2026-09-30"), ["2026-09-27 Sunday: A good hike.", "Week ending 2026-09-27 Sunday: Hiking week.", "2026-09-28 Monday (entries): School; Lunch"]);
+	assert.deepEqual(gather(journal, "quarter", "2026-09-30"), ["August 2026: August.", "September 2026: September."]);
+	assert.deepEqual(gather(journal, "year", "2026-12-31"), ["August 2026: August.", "September 2026: September."]);
+	assert.deepEqual(gather(journal, "month", "2026-10-31"), [], "nothing to read, nothing to write");
+});
+
+test("after the night's pass, the week and month that closed get digests, a period with nothing is skipped, and none repeats", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const soul = join(tmp.dir, "SOUL.org");
+	const journal = join(tmp.dir, "JOURNAL.org");
+	await writeFile(soul, "* June\nBe observant.\n");
+	const sunday = "*** 2026-10-25 Sunday\n**** 10:00 Church\nAlex took the boys to church.\n\n**** Day's end\nChurch and a nap.";
+	const saturday = "*** 2026-10-31 Saturday\n**** 18:00 Halloween\nThe boys went trick-or-treating.";
+	await writeFile(journal, `#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${sunday}\n\n${saturday}\n`);
+	const asked: string[] = [];
+	const faux = fauxProvider();
+	faux.setResponses([
+		(ctx) => {
+			asked.push(JSON.stringify(ctx.messages));
+			return fauxAssistantMessage(JSON.stringify({ day: `${saturday}\n\n**** Day's end\nHalloween night.`, memory: null }));
+		},
+		(ctx) => {
+			asked.push(JSON.stringify(ctx.messages));
+			return fauxAssistantMessage(JSON.stringify({ digest: "A churchgoing week." }));
+		},
+		(ctx) => {
+			asked.push(JSON.stringify(ctx.messages));
+			return fauxAssistantMessage(JSON.stringify({ digest: "October ended with Halloween." }));
+		},
+	]);
+	const daemon = await openTestDaemon({
+		...tmp,
+		faux,
+		config: {
+			soulFile: soul,
+			memoryFile: join(tmp.dir, "MEMORY.org"),
+			journalFile: journal,
+			reflection: { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"] },
+			rhythm: { wake: "06:00", quiet: "22:00", sleep: "03:00" },
+		},
+		reflectionClock: { now: () => new Date(2026, 10, 1, 3, 30), tickMs: 20 },
+	});
+	t.after(() => daemon.close());
+	const receipt = join(tmp.paths.state, "reflection.json");
+	await until(() => existsSync(receipt) && "year" in JSON.parse(readFileSync(receipt, "utf8")));
+	assert.deepEqual(JSON.parse(readFileSync(receipt, "utf8")), { day: "2026-10-31", week: "2026-10-25", month: "2026-10-31", quarter: "2026-09-30", year: "2025-12-31" });
+	assert.match(asked[1]!, /The week of 2026-10-19 to 2026-10-25 has just ended/);
+	assert.match(asked[1]!, /Alex took the boys to church/, "a week reads its days in full");
+	assert.match(asked[2]!, /October 2026 has just ended/);
+	assert.match(asked[2]!, /2026-10-25 Sunday: Church and a nap\..*Week ending 2026-10-25 Sunday: A churchgoing week\..*2026-10-31 Saturday: Halloween night\./, "a month reads the night's fresh Day's end and the week's digest");
+	assert.equal(
+		readFileSync(journal, "utf8"),
+		`#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${sunday}\n\n**** Week's end\nA churchgoing week.\n\n${saturday}\n\n**** Day's end\nHalloween night.\n\n*** Month's end\nOctober ended with Halloween.\n`,
+	);
+	await new Promise((r) => setTimeout(r, 200));
+	assert.equal(faux.state.callCount, 3, "the quarter and year had nothing to read, and nothing runs twice");
+});
