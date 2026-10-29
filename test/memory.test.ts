@@ -476,7 +476,7 @@ test("the reflection window looks back on the day before it opened", () => {
 	assert.equal(dayFor(new Date(2026, 9, 28, 1, 0), late), "2026-10-27", "and still on that day after midnight");
 });
 
-test("the nightly reflection rewrites the day, carries a lasting fact into memory, keeps what it replaced, and runs once", async (t) => {
+test("the nightly reflection rewrites the day, carries a lasting fact into memory and people into the rolodex, keeps what it replaced, and runs once", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const soul = join(tmp.dir, "SOUL.org");
@@ -489,11 +489,19 @@ test("the nightly reflection rewrites the day, carries a lasting fact into memor
 	await writeFile(journal, `#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n${day}\n\n${after}\n`);
 	const revised = "*** 2026-10-27 Tuesday\n**** 18:04 Biscuit turns five\nAlex shared a photo of Biscuit, who turned five on Saturday, and she had a greasy sausage for breakfast.\n\n**** Day's end\nA warm family evening.";
 	const remembered = "#+TITLE: June's memory\n\n* Household\n- Biscuit: the family's golden dog. Turned five on 2026-10-24.\n";
+	const people = join(tmp.dir, "org", "people.org");
+	await mkdir(join(tmp.dir, "org"), { recursive: true });
+	const rolodex = "#+TITLE: People\n\n* Family\n** Biscuit\n:PROPERTIES:\n:WHO: the family's dog\n:END:\n- 2026-10-01: Golden retriever. Source: Alex.\n";
+	await writeFile(people, rolodex);
+	const updates = [
+		{ name: "Biscuit", summary: "The family's golden retriever, five now, and fond of sausages.", notes: ["Turned five; Alex marked it with a sausage breakfast."] },
+		{ name: "Dana Cho", who: "Biscuit's vet", summary: null, notes: ["Sent Biscuit a birthday card."] },
+	];
 	let asked: TranscriptContext | undefined;
 	const faux = fauxProvider();
 	faux.setResponses([(ctx) => {
 		asked = ctx;
-		return fauxAssistantMessage(JSON.stringify({ day: revised, memory: remembered }));
+		return fauxAssistantMessage(JSON.stringify({ day: revised, memory: remembered, people: updates }));
 	}]);
 	const daemon = await openTestDaemon({
 		...tmp,
@@ -509,6 +517,13 @@ test("the nightly reflection rewrites the day, carries a lasting fact into memor
 	assert.equal(readFileSync(memory, "utf8"), remembered);
 	assert.equal(readFileSync(join(tmp.paths.state, "reflection", "2026-10-27.org"), "utf8"), `${day}\n`, "the day as it was is kept");
 	assert.match(readFileSync(join(tmp.paths.state, "reflection", "2026-10-27.MEMORY.org"), "utf8"), /the family's dog\./, "and so is the memory it replaced");
+	assert.match(JSON.stringify(asked!.messages.at(-1)), /Golden retriever\. Source: Alex/, "it reads the rolodex");
+	assert.match(JSON.stringify(asked!.messages[0]), /a child's joke counts, a work contact's lunch order does not/, "and is told how to keep it");
+	assert.equal(
+		readFileSync(people, "utf8"),
+		"#+TITLE: People\n\n* Family\n** Biscuit\n:PROPERTIES:\n:WHO: the family's dog\n:END:\nThe family's golden retriever, five now, and fond of sausages.\n\n- 2026-10-01: Golden retriever. Source: Alex.\n- 2026-10-27: Turned five; Alex marked it with a sausage breakfast. Source: June's journal, 2026-10-27.\n\n* New\n** Dana Cho\n:PROPERTIES:\n:WHO: Biscuit's vet\n:END:\n- 2026-10-27: Sent Biscuit a birthday card. Source: June's journal, 2026-10-27.\n",
+	);
+	assert.equal(readFileSync(join(tmp.paths.state, "reflection", "2026-10-27.people.org"), "utf8"), rolodex, "and the rolodex as it was");
 	await new Promise((r) => setTimeout(r, 300));
 	assert.equal(faux.state.callCount, 1, "one pass a night");
 });

@@ -175,7 +175,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const stopPatter = patter?.start(harness, root);
 		const stopSituation = situation.start();
 		const stopReflection = config.reflection.enabled
-			? createReflection({ models: options.models, model: config.model.chat, config: config.reflection, window: { start: config.rhythm.sleep, end: config.rhythm.wake }, files: prompt.files, state: paths.state, log, ...options.reflectionClock }).start(harness, root)
+			? createReflection({ models: options.models, model: config.model.chat, config: config.reflection, window: { start: config.rhythm.sleep, end: config.rhythm.wake }, files: prompt.files, people: config.org.people, state: paths.state, log, ...options.reflectionClock }).start(harness, root)
 			: undefined;
 		const stopHeartbeat = config.heartbeat.enabled
 			? createHeartbeat({
