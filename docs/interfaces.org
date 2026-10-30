@@ -20,7 +20,7 @@ The plan builds on these seams rather than beside them.
 ** Recommended
 - Keep the existing Request and Reply shapes and add only what new clients need. No second protocol, no separate gateway service.
 - Add an attach mode that sends folded transcript items and their changes instead of raw Durable events, computed in the daemon by the same =Transcript= code the terminal uses. QML or Kotlin clients then render items and never reimplement privacy rules. The terminal client can stay on raw events or move over; that choice belongs to the implementation task.
-- Add sources for the new clients, such as =desktop= and =android=, with a flag on voice input. June's prompt learns what each source means, as it does for the terminal, whose source is renamed from =kitty= to =terminal=.
+- Add sources for the new clients, =gui= for the overlay and =apk= for the Android app, with a flag on voice input. June's prompt learns what each source means, as it does for the terminal, whose source is renamed from =kitty= to =tui=.
 - Add a WebSocket listener carrying the same JSON, on loopback behind the host's Traefik and off by default. Each device gets its own bearer token, stored hashed in the state directory, listed and revoked by a =june= command. The desktop overlay uses the same WebSocket, so each client has one transport.
 - Reconnection reloads the snapshot, as the terminal does today. Event replay from a cursor can wait until the 200-entry snapshot proves too slow on the phone.
 

@@ -35,7 +35,7 @@ pi-durable-telegram 0.1.5 depends on =@earendil-works/*= 1.2.0 exactly. Running 
 Delivery is per admitted Telegram message: a =tg.deliver= task submits it and sends the answer back, so answers to terminal input stay in the terminal.
 
 ** Source tags instead of separate conversations
-Terminal input is a =june.input= entry with ={source, text}=, which the model sees prefixed =[kitty]= or =[cli]=. Telegram input is a plain =pi.user= entry, and the prompt says untagged messages come from Telegram. June's own inputs use the same entry with sources =work=, =follow=, =reminder=, and =heartbeat=; anything that asks "where is the user, and when did they last speak" skips those.
+Terminal input is a =june.input= entry with ={source, text}=, which the model sees prefixed =[tui]= or =[cli]= (=[kitty]= before the rename). Telegram input is a plain =pi.user= entry, and the prompt says untagged messages come from Telegram. June's own inputs use the same entry with sources =work=, =follow=, =reminder=, and =heartbeat=; anything that asks "where is the user, and when did they last speak" skips those.
 
 ** Transport: newline-delimited JSON over a Unix socket
 The socket is mode 0600 in a 0700 directory, with no network listener. Requests are =status=, =attach=, =submit=, and =command=. After =attach= the daemon sends a snapshot of the last 200 entries, then Pi Durable's own events from =watchEvents()= unchanged. Request ids map to Durable =requestId=s namespaced by source, so a retried =submit= returns the same submission. Remote use is =ssh -t host june=, which needs no new authentication.
@@ -135,8 +135,8 @@ Set aside: binding the tailnet address (it would make Tailscale a requirement on
 
 type ViewItem =
 	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; voice?: true; private?: true }
-	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: "desktop" | "android"; error?: string; heard?: number; thinking?: string; private?: true }
-	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; output?: string; private?: true }
+	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: "gui" | "apk"; error?: string; heard?: number; thinking?: string; private?: true }
+	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; error?: string; output?: string; private?: true }
 	| { kind: "note"; id: string; text: string }
 	| { kind: "patter"; id: string; text: string };
 
@@ -148,7 +148,7 @@ type ViewState = { running: boolean; background: number; queued: number; model: 
 - The streaming reply is the item with id =live=. When the message ends it is dropped and the stored reply is put with its entry id, as =Transcript= already does.
 - Assistant =text= is always Markdown. The daemon applies =orgToMarkdown= where the terminal does today (a reply to anything but a Telegram message), so both clients need only a Markdown renderer.
 - =answers= is the source of the input the reply follows: a client source, =telegram=, or one of June's own (=work=, =follow=, =watch=, =heartbeat=, =reminder=). =alert= is described under "Which messages alert".
-- By default the view is simple: no thinking, no tool output (tool items show name, summary, and status), and June's private looks hidden, with heartbeat and watch looks, quiet answers, and her own inputs hidden exactly as in the terminal, because it is the same code.
+- By default the view is simple and matches what the terminal shows of tools: every tool call appears as a line with its name, a one-line summary of its arguments, and its status, so a journal entry or a =work= brief is visible as it happens; a failed call adds the first line of its output as =error=. Left out: thinking, full tool output, and June's private looks, with heartbeat and watch looks, quiet answers, and her own inputs hidden exactly as in the terminal, because it is the same code.
 - Detail is the complete view, for checking what is going on, like showing hidden files in a file browser. A client turns it on or off with =detail= (or =detail: true= on =attach=, so it survives a reconnect), and the daemon answers with a reset. With detail on, assistant items carry =thinking=, tool items carry =output= (the same retained window the terminal shows), and June's private looks appear as items marked =private: true=, including heartbeat looks that ended quiet. Detail belongs to the connection, so turning it on in the overlay leaves the phone simple. The overlay binds it to a key; the Android app puts it in a menu. =Transcript= gains an option to keep private looks instead of dropping them.
 - Command replies are not view items: =command= still answers with a =reply=, which the client shows locally, as the terminal does.
 - History is the last 200 entries, as for the terminal; =omitted= says how many were left out. Older history is not paged in this view: a separate log browsed by day or week is planned instead, so the conversation never becomes one endless list.
@@ -156,9 +156,14 @@ type ViewState = { running: boolean; background: number; queued: number; model: 
 Built by the task "Serve a folded transcript view to clients" in the Org plan. The terminal may move to the items view later; nothing requires it.
 
 ** Sources, submitting, and reconnecting
-- Sources name June's clients, never the program around them: =terminal= for the terminal client in any terminal emulator, local or over SSH (kitty today, Termux on the phone, anything later), =cli= for =june ask=, =desktop= for the overlay on any machine, and =android= for the phone app. Telegram stays untagged. The terminal's source is renamed from =kitty= to =terminal=: stored entries keep =kitty=, so every reader (=src/notify.ts=, =src/patter.ts=, =src/heartbeat.ts=, the TUI) treats =kitty= as =terminal=, and June's prompt says older messages may carry =[kitty]=.
-- June answers =[desktop]= and =[android]= in Org like the terminal, since the daemon converts. The host an overlay runs on is not part of the source; the desktop-context task adds it as a separate field with the context it sends.
-- Notice routing: =desktop= counts as the terminal surface. =android= becomes its own surface in the task "Route June's own notices to the new surfaces".
+- Sources name June's clients, never the program around them, in three letters to match =cli=:
+  - =tui=: the terminal client in any terminal emulator, local or over SSH (kitty today, Termux on the phone, anything later);
+  - =cli=: =june ask= and other one-shot commands;
+  - =gui=: the Hyprland overlay, on any machine;
+  - =apk=: the Android app, including its assistant session.
+- Telegram stays untagged. The terminal's source is renamed from =kitty= to =tui=: stored entries keep =kitty=, so every reader (=src/notify.ts=, =src/patter.ts=, =src/heartbeat.ts=, the TUI) treats =kitty= as =tui=, and June's prompt says older messages may carry =[kitty]=.
+- June answers =[gui]= and =[apk]= in Org like the terminal, since the daemon converts. The host an overlay runs on is not part of the source; the desktop-context task adds it as a separate field with the context it sends.
+- Notice routing: =gui= counts as the terminal surface. =apk= becomes its own surface in the task "Route June's own notices to the new surfaces".
 - A submit is retried with the same =requestId= until it is =accepted=. Clients keep the id with the draft, generated once when the user presses send, so a retry after a dropped connection returns the same submission instead of a second message. The daemon already namespaces ids by source.
 - Graphical clients send =submit= with =whenBusy= as the terminal does (follow-up by default, steer on request), never =wait=. Stop is =command= =stop=. They never offer =/new=.
 - On a dropped connection the client reconnects with backoff from 1 to 30 seconds, sends =hello=, attaches again, and takes the reset as the truth. There is no event cursor: Pi Durable's =watchEvents= has none, and a 200-entry snapshot is small enough. Revisit only if attach proves slow on the phone.
@@ -167,16 +172,16 @@ Built by the task "Serve a folded transcript view to clients" in the Org plan. T
 Every client shows the whole conversation; what differs is which messages interrupt the user. Telegram keeps its narrower behaviour as a fallback client: it shows only answers to messages sent there, plus notices routed there.
 
 - The daemon sets =alert= on a finished assistant reply, never on a streaming one, naming the client kind that should interrupt the user:
-  - a reply to an =android= message alerts =android=, and a reply to a =desktop= message alerts =desktop=;
-  - a reply to one of June's own notices alerts the surface the notice was routed to, which the notice records in its =june.input= data as =surface= when it is committed: =android= for the phone, =desktop= when the terminal surface was chosen;
-  - replies to =terminal=, =cli=, or Telegram messages alert nothing here; the user is looking at that client already.
+  - a reply to an =apk= message alerts =apk=, and a reply to a =gui= message alerts =gui=;
+  - a reply to one of June's own notices alerts the surface the notice was routed to, which the notice records in its =june.input= data as =surface= when it is committed: =apk= for the phone, =gui= when the terminal surface was chosen;
+  - replies to =tui=, =cli=, or Telegram messages alert nothing here; the user is looking at that client already.
 - Everything else arrives quietly: when the user chats from the desktop, the phone app shows those messages when opened, without a buzz.
-- The phone: the Android app connects only while it is on screen, so the daemon treats a connected =android= device as on screen. A reply with =alert: "android"= while no =android= device is connected goes to the phone through ntfy, and tapping it opens the app; while the app is on screen it only appears. A push is sent at most once; losing one in a crash is acceptable, sending it twice is not.
-- The overlay is resident and stays connected while hidden. It shows a desktop notification for =alert: "desktop"= while it is hidden.
+- The phone: the Android app connects only while it is on screen, so the daemon treats a connected =apk= device as on screen. A reply with =alert: "apk"= while no =apk= device is connected goes to the phone through ntfy, and tapping it opens the app; while the app is on screen it only appears. A push is sent at most once; losing one in a crash is acceptable, sending it twice is not.
+- The overlay is resident and stays connected while hidden. It shows a desktop notification for =alert: "gui"= while it is hidden.
 - The mechanics (ntfy, the =surface= field, the at-most-once record) belong to the tasks "Route June's own notices to the new surfaces" and the ntfy notification task; the protocol only carries =answers= and =alert=.
 
 ** Voice flag
-=submit= takes an optional =voice: true= for speech transcribed from that client. The model sees the tag as =[android voice]= or =[desktop voice]=, the =june.input= entry records =voice: true=, and the user item carries it. June's prompt says a voice-tagged message was spoken and her answer will be heard. The flag says nothing about playback; the client that sent the voice turn owns playback of its answer. Built by the task "Make June's replies speakable"; audio framing belongs to the push-to-talk tasks.
+=submit= takes an optional =voice: true= for speech transcribed from that client. The model sees the tag as =[apk voice]= or =[gui voice]=, the =june.input= entry records =voice: true=, and the user item carries it. June's prompt says a voice-tagged message was spoken and her answer will be heard. The flag says nothing about playback; the client that sent the voice turn owns playback of its answer. Built by the task "Make June's replies speakable"; audio framing belongs to the push-to-talk tasks.
 
 ** Presentation entries
 Presentation is stored as display-only entries, like =june.patter=: appended at once, kept out of every model context, replayed in the snapshot. The terminal's fold ignores kinds it does not know, so it is unaffected.
