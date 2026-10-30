@@ -157,7 +157,7 @@ Presentation is stored as display-only entries, like =june.patter=: appended at 
 
 - =june.expression= ={name}=: the face to show. The items view puts the newest one in =state.expression=, ="idle"= when there is none in the snapshot. Built by the task "Send expression and activity to clients".
 - =june.playback= ={entry, chars}=: how far playback of an assistant reply got before it stopped, by that reply's entry id. The items view sets =heard= on that item so a client can mark the unheard rest. Built by the push-to-talk tasks.
-- Activity is not an entry. It is derived from runtime state and sent as =state.activity=; its values are settled by the avatar tasks. Connection state is the client's own.
+- Activity is not an entry. It is derived from runtime state and sent as =state.activity=, one of the names in =ACTIVITIES= in =src/avatar.ts=, absent when none holds. =offline= is the client's own connection state and never sent.
 
 * Known risks
 

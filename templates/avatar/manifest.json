@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "size": [256, 256],
+  "expressions": {
+    "idle": { "file": "idle.png", "play": "still" },
+    "warm": { "file": "warm.png", "play": "still" },
+    "wry": { "file": "wry.png", "play": "still" },
+    "curious": { "file": "curious.png", "play": "still" },
+    "skeptical": { "file": "skeptical.png", "play": "still" },
+    "determined": { "file": "determined.png", "play": "still" },
+    "serious": { "file": "serious.png", "play": "still" },
+    "gentle": { "file": "gentle.png", "play": "still" },
+    "smug": { "file": "smug.png", "play": "still" },
+    "exasperated": { "file": "exasperated.png", "play": "still" },
+    "indignant": { "file": "indignant.png", "play": "still" },
+    "pout": { "file": "pout.png", "play": "still" },
+    "bashful": { "file": "bashful.png", "play": "still" },
+    "delighted": { "file": "delighted.png", "play": "still" },
+    "cheering": { "file": "cheering.png", "play": "once", "frames": 4, "fps": 6 }
+  }
+}

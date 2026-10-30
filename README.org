@@ -60,7 +60,7 @@ The socket is =$XDG_RUNTIME_DIR/june/june.sock= (=JUNE_RUNTIME_DIR=, =JUNE_SOCKE
 
 Machine settings come from the environment: =JUNE_DAEMON_HOST= (the machine that runs June) and =TELEGRAM_ALLOWED_USERS= (comma-separated ids; Telegram is off without it). A =config.json= that sets =daemonHost= or =telegram= is refused.
 
-=templates/= holds starting points that name nobody: =SOUL.org= (her role, judgment, and voice, with a character section to write), =MEMORY.org= and =HEARTBEAT.org= (their shape, with placeholders), and an example =config.json=. ={{name}}= stands for the user. =june init [NAME]= copies whichever are missing into the data and config directories with the name filled in, taking =user.name= from =config.json= when no name is given, and never overwrites a file. June has no identity until =SOUL.org= exists; she creates =MEMORY.org= and =JOURNAL.org= when she first writes to them.
+=templates/= holds starting points that name nobody: =SOUL.org= (her role, judgment, and voice, with a character section to write), =MEMORY.org= and =HEARTBEAT.org= (their shape, with placeholders), and an example =config.json=. ={{name}}= stands for the user. =avatar/= is the base avatar set of labelled placeholders, used in place; =june init= does not copy it. =june init [NAME]= copies whichever are missing into the data and config directories with the name filled in, taking =user.name= from =config.json= when no name is given, and never overwrites a file. June has no identity until =SOUL.org= exists; she creates =MEMORY.org= and =JOURNAL.org= when she first writes to them.
 
 * Configuration
 

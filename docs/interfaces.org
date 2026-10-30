@@ -65,7 +65,7 @@ The user already knows GrapheneOS lets them pick a custom assistant, so the proo
 * Avatar
 ** Two signals
 - Expression: chosen for character, from a fixed vocabulary, never authoritative.
-- Activity: derived from runtime state, never chosen by a model: idle, thinking (a run is busy), working (briefs in =WorkDoc.active=), watching workers (followed tasks), listening, transcribing, speaking, offline (no connection).
+- Activity: derived from runtime state, never chosen by a model. See [[*Activities]].
 
 Clients show both: the expression on the face, activity as a small badge or pose. A client without images ignores them.
 
@@ -76,8 +76,65 @@ Clients show both: the expression on the face, activity as a small badge or pose
 
 The choice is recorded as a display-only =june.expression= entry, so a reconnect shows the current face.
 
+** Vocabulary
+Fifteen names, defined in =src/avatar.ts= with a one-line meaning, a frequency, and a fallback. Each comes from a moment the character section of =SOUL.org= describes, and none claims something only runtime state knows: there is no thinking, listening, or busy face, and =determined= is an attitude, not a sign that work started.
+
+| Name        | Meaning                                       | Frequency  | Falls back to | Moment in =SOUL.org=                                             |
+|-------------+-----------------------------------------------+------------+---------------+------------------------------------------------------------------|
+| idle        | composed and attentive                        | common     |               | most of the time; nothing interesting is happening               |
+| warm        | a sincere, open smile                         | common     | idle          | thanks, chatting, good news said plainly                         |
+| wry         | a dry half-smile                              | common     | idle          | a dry one-liner, affectionate teasing                            |
+| curious     | interested, a little head tilt                | common     | idle          | asking about the user's day, having a look at something          |
+| skeptical   | one eyebrow up                                | common     | wry           | checking a worker's homework, a questionable idea                |
+| determined  | chin up, taking charge                        | common     | idle          | the user is overwhelmed; the bossy streak                        |
+| serious     | level and plain, no smile                     | common     | idle          | bad news first; serious, urgent, or family matters               |
+| gentle      | soft and kind                                 | common     | warm          | the user is worried, frustrated, or vulnerable                   |
+| smug        | pleased with herself                          | occasional | wry           | everything running smoothly; pride when she was right            |
+| exasperated | an eye roll                                   | occasional | skeptical     | a worker went sideways or claimed success without evidence       |
+| indignant   | a brief theatrical huff                       | rare       | exasperated   | indignation at something spectacularly daft                      |
+| pout        | reluctant surrender                           | rare       | wry           | playful defeat when the user wins a joke or an argument          |
+| bashful     | flustered                                     | rare       | warm          | a compliment, or being caught sentimental                        |
+| delighted   | composure slipping                            | rare       | warm          | something unexpectedly good                                      |
+| cheering    | open celebration                              | rare       | delighted     | a real win worth celebrating together                            |
+
+Rules for whatever picks the face:
+- Rare faces stay rare. The charm is the contrast with her composure, and =SOUL.org= says not to pout on cue.
+- When =SOUL.org= drops the teasing (bad news, worry, serious matters), so does the face: =serious= or =gentle=, never =wry=, =smug=, or =pout=.
+- The template =SOUL.org= has no character section, so the vocabulary names moments, not a character. A user who writes a different character keeps the same names.
+
+** Activities
+Activity comes from runtime state and is sent as =state.activity= (see the architecture notes). A client shows the first that holds, in this order, and no badge when none does:
+
+1. offline: the client has no connection. The client's own state; the daemon never sends it.
+2. listening: a voice session on this client is capturing speech.
+3. transcribing: captured speech is being turned into text.
+4. speaking: this client is playing a spoken answer.
+5. thinking: a run in the main conversation is busy or compacting.
+6. working: briefs are running in the working context (=WorkDoc.active=).
+7. watching: June is following dispatched tasks (=Follows=).
+
+The voice activities belong to the client holding the voice session; other clients see the next activity that holds.
+
 ** Assets
-A manifest maps each name to a file and its playback (still, loop, play once then return to idle), with a fallback chain ending at =idle=. The manifest format and a placeholder set belong in this repository; the character's art is personal and lives in the data directory beside =SOUL.org=. The art is generated anime, made in rounds with the user choosing at each step. Consistency across expressions and later seasonal sets is the hard part: keep a character reference sheet and the prompts, seeds, and settings beside the images, so a new set can be regenerated to match. Animated WebP or PNG sprite sheets play in both QML and Compose. Mouth movement synced to speech can come later from TTS timestamps or audio amplitude.
+An avatar set is a directory holding =manifest.json= and its images. =templates/avatar/= is the base set: labelled placeholders that name nobody, covering every expression, with =cheering= as a sprite sheet so clients exercise that path. The character's art is personal and lives in the data directory beside =SOUL.org=, in =avatar/= until the theme task decides where a theme keeps its set.
+
+#+begin_src json
+{
+  "version": 1,
+  "size": [256, 256],
+  "expressions": {
+    "idle": { "file": "idle.png", "play": "still" },
+    "smug": { "file": "smug.webp", "play": "loop" },
+    "cheering": { "file": "cheering.png", "play": "once", "frames": 4, "fps": 6 }
+  }
+}
+#+end_src
+
+- =size= is one frame in pixels; clients scale it. =file= is a PNG or WebP path inside the set.
+- =play= is =still=, =loop=, or =once=; =once= plays and then shows =idle=. Animation is an animated WebP, or a horizontal PNG sprite sheet with =frames= (2 or more) and =fps=.
+- Fallbacks belong to the vocabulary, not the manifest. To show a name, each name in its chain is looked up in every set in order (the active theme, then the base) before the next name, so a theme can replace a few faces. Every chain ends at =idle=, and an unknown name is =idle=. =parseManifest= and =resolveExpression= in =src/avatar.ts= implement this; a base set must have =idle=.
+
+The art is generated anime, made in rounds with the user choosing at each step. Consistency across expressions and later seasonal sets is the hard part: keep a character reference sheet and the prompts, seeds, and settings beside the images, so a new set can be regenerated to match. Animated WebP and PNG sprite sheets play in both QML and Compose. Mouth movement synced to speech can come later from TTS timestamps or audio amplitude.
 
 * Themes
 The user wants to change the look seasonally, so presentation comes from a theme rather than from each client's code.
