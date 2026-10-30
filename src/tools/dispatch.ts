@@ -281,6 +281,7 @@ export function createDispatchExtension(
 ): Extension {
 	const dispatch = new Dispatch(org, config, run);
 	const followTask = createFollowTask(org, herdr, followOptions);
+	const minute = followOptions.minuteMs ?? 60_000;
 	const hosts = config.dispatch.hosts;
 	const defaultHost = config.dispatch.host ?? hosts[0];
 	return defineExtension({
@@ -364,6 +365,40 @@ export function createDispatchExtension(
 						)
 						: " That host's dispatcher will pick it up on its timer.";
 					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\nYou are following this task and will get [follow] reports.${started} Tell the user you will report back. Existing SCHEDULED dates still apply.` }] };
+				},
+			}),
+			defineTool({
+				name: "org_follow_task",
+				description: `When ${user()} asks for regular updates on a task or the agent working on it, follow the task: every everyMinutes while it is PROG you get a [follow] message to read its agent and report, and you hear when it blocks, holds, or finishes, as for tasks you queue. Works for any Org task, including ones you did not queue. Never sends the agent anything. Following a task again replaces the earlier follow, so everyMinutes 0 stops the timed updates and keeps the rest.`,
+				parameters: Type.Object({
+					file: Type.String({ description: "Path under ~/org, as org_search returns it" }),
+					heading: Type.String({ description: "Exact title, outline path, or id:UUID, as org_read_task accepts" }),
+					everyMinutes: Type.Number({ description: "Minutes between updates, at least 2; 0 stops timed updates" }),
+					hours: Type.Optional(Type.Number({ description: "How long timed updates last, 1 to 24; default 4" })),
+				}),
+				// A replay finds the follow its first run started, by request key.
+				replay: "safe",
+				execute: async (args, api, context) => {
+					if (args.everyMinutes !== 0 && !(args.everyMinutes >= 2)) throw new Error("everyMinutes must be 0 or at least 2");
+					const hours = args.hours ?? 4;
+					if (!(hours >= 1 && hours <= 24)) throw new Error("hours must be from 1 to 24");
+					const task = await org.read(args.file, args.heading);
+					const own = task.text.split(/\n(?=\*+ )/)[0]!;
+					const id = /^\s*:ID:\s+(\S+)\s*$/m.exec(own)?.[1];
+					const host = /^\s*:HOST:\s+(\S+)\s*$/m.exec(own)?.[1] ?? task.herdrSessions.filter((s) => s.pane).at(-1)?.host ?? config.herdr.host;
+					const now = Date.now();
+					const input = {
+						// Without an ID, the outline path finds the heading again, as org_read_task does.
+						...(id ? { id, title: parseHeading(own.split("\n")[0]!, task.line)!.title } : { id: `${task.file}::${task.outline}`, title: task.outline, file: task.file }),
+						host,
+						queuedAt: now,
+						request: `${instance}:${api.taskId}`,
+						adopted: true,
+						...(args.everyMinutes > 0 ? { everyMs: args.everyMinutes * minute, updatesUntil: now + hours * 60 * minute } : {}),
+					};
+					await api.commit((tx) => follow(tx, followTask, input, Number(api.conversationId)), context);
+					const updates = args.everyMinutes > 0 ? `a progress update every ${args.everyMinutes} minutes while it is PROG, for ${hours} hours, and ` : "";
+					return { output: [{ type: "text", text: `Following «${input.title}» on ${host}: you will get ${updates}[follow] messages when it blocks, holds, or finishes.` }] };
 				},
 			}),
 			defineTool({

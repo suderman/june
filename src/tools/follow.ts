@@ -1,13 +1,29 @@
-// Follow the tasks June queued: a durable background task per heading checks Org and Herdr on a timer, without a
-// model call, and tells June only when something changed that the user would want to hear.
+// Follow the tasks June queued, or any the user asks her to: a durable background task per heading checks Org and
+// Herdr on a timer, without a model call, and tells June only when something changed that the user would want to hear,
+// or when a progress update the user asked for is due.
 import { defineDoc, defineTask, type Tx } from "@earendil-works/pi-durable";
 import { deliverIn, type Notice, noticeSurface, submitNotice, type Surface } from "../notify.ts";
 import type { Herdr } from "./herdr.ts";
 import type { Org } from "./org.ts";
 import { User, user } from "../user.ts";
 
-export type FollowInput = { id: string; title: string; host: string; queuedAt: number; request?: string };
-type FollowState = { phase: "watch"; due: number; checks: number; last: string };
+export type FollowInput = {
+	/** The heading's Org ID, or for a heading without one, a key made from `file` and `title`. */
+	id: string;
+	title: string;
+	host: string;
+	queuedAt: number;
+	request?: string;
+	/** Set for a heading without an ID: it is found by `title` in this file. */
+	file?: string;
+	/** Asked for by the user rather than queued by June. */
+	adopted?: boolean;
+	/** Ask June for a progress update this often while the task is in PROG, until `updatesUntil`. */
+	everyMs?: number;
+	updatesUntil?: number;
+};
+/** `reported` is when June was last asked for a progress update. */
+type FollowState = { phase: "watch"; due: number; checks: number; last: string; reported?: number };
 
 /** Org ID → follow task, so a task is followed once however often it is queued or replayed. */
 export const Follows = defineDoc<{ ids: Record<string, number> }>({
@@ -31,6 +47,8 @@ export type FollowOptions = {
 	readonly launchMs: number;
 	/** Stop following after this long, so an abandoned task does not keep a timer forever. */
 	readonly maxMs: number;
+	/** What org_follow_task counts as a minute; tests shorten it. */
+	readonly minuteMs?: number;
 };
 
 export const FOLLOW_DEFAULTS: FollowOptions = { intervalMs: 60_000, launchMs: 7 * 60_000, maxMs: 7 * 24 * 3600_000 };
@@ -41,7 +59,7 @@ export const FOLLOW_DEFAULTS: FollowOptions = { intervalMs: 60_000, launchMs: 7 
  */
 export function decide(input: FollowInput, seen: Observation, last: string, now: number, options: FollowOptions) {
 	const where = seen.file ? ` (${seen.file})` : "";
-	const name = `the task «${input.title}»${where} you queued`;
+	const name = `the task «${input.title}»${where} you ${input.adopted ? "are following" : "queued"}`;
 	const Name = name[0]!.toUpperCase() + name.slice(1);
 	if (seen.missing) return { signal: "missing", done: true, say: `${Name} is no longer in Org; it was moved, archived, or deleted. You are no longer following it.` };
 	if (now - input.queuedAt > options.maxMs) return { signal: "expired", done: true, say: undefined };
@@ -71,9 +89,20 @@ export function decide(input: FollowInput, seen: Observation, last: string, now:
 	}
 }
 
+/** Whether a check with nothing else to say, `signal` being the task's, is due the progress update the user asked for. */
+export function progressDue(input: FollowInput, signal: string, reported: number, now: number): boolean {
+	if (!input.everyMs || signal !== "PROG") return false;
+	return now - reported >= input.everyMs && now <= (input.updatesUntil ?? Number.POSITIVE_INFINITY);
+}
+
+function progress(input: FollowInput, file: string | undefined): string {
+	const where = file ? ` (${file})` : "";
+	return `Time for the regular update ${user()} asked for on the task «${input.title}»${where}. Read its agent with herdr_read_agent, sending it nothing, and tell ${user()} in a line or two what it is doing now and what is left.`;
+}
+
 export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions = FOLLOW_DEFAULTS) {
 	const observe = async (input: FollowInput): Promise<Observation> => {
-		const task = await org.byId(input.id);
+		const task = input.file !== undefined ? await org.byHeading(input.file, input.title) : await org.byId(input.id);
 		if (task === undefined) return { state: undefined, missing: true };
 		const session = task.herdrSessions.filter((s) => s.host === input.host && s.pane).at(-1);
 		let agent: string | undefined;
@@ -109,15 +138,22 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 				});
 				const now = runtime.now();
 				const next = seen === undefined ? undefined : decide(task.input, seen, last, now, options);
+				const reported = task.state.checkpoint.reported ?? task.input.queuedAt;
+				const changed = next?.say !== undefined && next.signal !== last;
+				const update = !changed && next !== undefined && progressDue(task.input, next.signal, reported, now);
+				const say = changed ? next.say : update ? progress(task.input, seen?.file) : undefined;
 				const notice: Notice | undefined =
-					next?.say !== undefined && next.signal !== last
+					say !== undefined
 						? {
-								requestId: `follow:${task.input.request ?? task.input.id}:${next.signal}:${checks}`,
-								content: `[follow] ${next.say}`,
+								requestId: `follow:${task.input.request ?? task.input.id}:${update ? "progress" : next!.signal}:${checks}`,
+								content: `[follow] ${say}`,
 								source: "follow",
-								label: next.say,
+								label: say,
 							}
 						: undefined;
+				// Wake for the next update on time rather than up to a check late.
+				const nextUpdate = (update ? now : reported) + (task.input.everyMs ?? Number.POSITIVE_INFINITY);
+				const nextDue = nextUpdate > now ? Math.min(now + options.intervalMs, nextUpdate) : now + options.intervalMs;
 				// To Telegram, the delivery is created with the checkpoint that records it; to the terminal, a rerun after a
 				// crash submits the same request id, which finds the first submission.
 				if (notice !== undefined && surface === "terminal") await submitNotice(await runtime.conversation(runtime.conversationId, context), notice, context);
@@ -125,7 +161,7 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 					if (notice !== undefined && surface === "telegram") await deliverIn(tx, runtime.registry, runtime.conversationId, notice);
 					return next?.done
 						? { status: "terminal", outcome: { status: "completed", result: null } }
-						: { status: "running", checkpoint: { phase: "watch", due: now + options.intervalMs, checks: checks + 1, last: next?.signal ?? last } };
+						: { status: "running", checkpoint: { phase: "watch", due: nextDue, checks: checks + 1, last: next?.signal ?? last, reported: update ? now : reported } };
 				}, context);
 			},
 		},

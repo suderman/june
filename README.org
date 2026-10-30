@@ -154,6 +154,7 @@ June reads Org with ripgrep and writes only through =org-edit= and the dispatche
 - find or create a project file under =~/org/work= (=org_projects=, =org_create_project=);
 - queue a new AUTO task and nudge the dispatcher (=org_queue_task=, =org_dispatch_now=), then follow it and report its transitions;
 - resume an existing TODO, EVAL, or HOLD task when the user asks (=org_resume_task=);
+- follow any task the user names, with a progress update every few minutes while it is PROG (=org_follow_task=);
 - close a task she created once its result is reviewed (=org_complete_task=).
 
 She never writes =asana.org=, =inbox.org=, archives, or conflict copies. The dispatcher, =org-edit=, =herdr-link=, their prompts, and the =project-org-tasks= and =org-triage= skills live in =org/= and =skills/=; see [[file:org/README.org][org/README.org]].

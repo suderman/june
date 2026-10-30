@@ -251,12 +251,30 @@ export class Org {
 		if (!/^[0-9A-Za-z-]{8,64}$/.test(id)) throw new Error("Invalid Org ID");
 		const [hit] = await this.grep(`^\\s*:ID:\\s+${id}\\s*$`, { fixed: false, limit: 1 });
 		if (hit === undefined) return undefined;
-		const lines = await this.lines(hit.path);
-		const heading = outline(lines, hit.line).at(-1);
+		return this.#task(hit.path, await this.lines(hit.path), hit.line);
+	}
+
+	/** The same for a heading named as org_read_task names it; undefined when `file` no longer has it. */
+	async byHeading(file: string, heading: string) {
+		const path = await this.file(file).catch(() => undefined);
+		if (path === undefined) return undefined;
+		const lines = await this.lines(path);
+		let line: number;
+		try {
+			line = locate(lines, heading, file);
+		} catch (error) {
+			if ((error as Error).message.startsWith("No heading")) return undefined;
+			throw error;
+		}
+		return this.#task(path, lines, line);
+	}
+
+	#task(path: string, lines: readonly string[], line: number) {
+		const heading = outline(lines, line).at(-1);
 		if (heading === undefined) return undefined;
 		const { start, end } = subtree(lines, heading.line);
 		const text = lines.slice(start - 1, end).join("\n");
-		return { file: this.rel(hit.path), line: start, state: heading.state, title: heading.title, herdrSessions: herdrLinks(text) };
+		return { file: this.rel(path), line: start, state: heading.state, title: heading.title, herdrSessions: herdrLinks(text) };
 	}
 
 	/** Org headings that link a Herdr session id. */

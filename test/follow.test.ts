@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { createDispatchExtension } from "../src/tools/dispatch.ts";
-import { decide, FOLLOW_DEFAULTS } from "../src/tools/follow.ts";
+import { decide, FOLLOW_DEFAULTS, progressDue } from "../src/tools/follow.ts";
 import { Herdr } from "../src/tools/herdr.ts";
 import { createOrgExtension, Org } from "../src/tools/org.ts";
 import { ask, openTestDaemon, tempDir, testConfig, until } from "./helpers.ts";
@@ -28,6 +28,65 @@ test("follow reports each transition once and stays quiet otherwise", () => {
 	const gone = decide(input, { state: undefined, missing: true }, "PROG", min, FOLLOW_DEFAULTS);
 	assert.equal(gone.done, true);
 	assert.equal(decide(input, { state: "PROG", missing: false }, "PROG", 8 * 24 * 60 * min, FOLLOW_DEFAULTS).done, true, "follows expire");
+});
+
+test("timed updates come only while a task is in PROG, on time, and until their end", () => {
+	const timed = { ...input, everyMs: 5 * min, updatesUntil: 60 * min };
+	assert.equal(progressDue(input, "PROG", 0, 30 * min), false, "no updates unless asked for");
+	assert.equal(progressDue(timed, "PROG", 0, 4 * min), false);
+	assert.equal(progressDue(timed, "PROG", 0, 5 * min), true);
+	assert.equal(progressDue(timed, "HOLD", 0, 5 * min), false, "only while working");
+	assert.equal(progressDue(timed, "blocked", 0, 5 * min), false, "a blocked agent is reported as such");
+	assert.equal(progressDue(timed, "PROG", 58 * min, 63 * min), false, "updates end");
+});
+
+test("June follows a task she did not queue with timed updates until told to stop", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "org");
+	const file = join(root, "work.org");
+	await mkdir(root, { recursive: true });
+	const session = "01a1875e-87d4-7096-b45c-2f3b924ffc06";
+	await writeFile(file, `#+TITLE: Work\n\n* PROG Refresh content\n** Sessions\n- [[herdr:kit/pi:${session}@w5A:p1][pi@kit]]\n`);
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") }, dispatch: { hosts: ["kit"] } };
+	const panes: string[] = [];
+	const herdr = new Herdr(config.herdr, async (args) => {
+		panes.push(args.at(-1)!);
+		return JSON.stringify({ result: { agent: { agent_status: "working" } } });
+	});
+	// A minute is 50 ms and checks are a second apart, so updates every two minutes arrive only by waking on time.
+	const extension = createDispatchExtension(config, new Org(root), herdr, "inst", async () => "", { intervalMs: 1000, launchMs: 60_000, maxMs: 3_600_000, minuteMs: 50 });
+	const faux = fauxProvider();
+	const followIt = (everyMinutes: number) => fauxAssistantMessage([fauxToolCall("org_follow_task", { file: "work.org", heading: "Refresh content", everyMinutes })], { stopReason: "toolUse" });
+	faux.setResponses(Array.from({ length: 80 }, () => (context: { messages: { role: string; content: unknown }[] }) => {
+		const last = context.messages.at(-1)!;
+		if (last.role === "toolResult") return fauxAssistantMessage("Done.");
+		const text = JSON.stringify(last.content);
+		if (text.includes("stop the updates")) return followIt(0);
+		if (text.includes("updates every")) return followIt(2);
+		return fauxAssistantMessage("Update.");
+	}));
+	const daemon = await openTestDaemon({ ...tmp, faux, config, extensions: [extension, createOrgExtension(config)] });
+	t.after(() => daemon.close());
+	const reports = async () =>
+		(await daemon.root.context(BG)).entries.filter((e) => e.kind === "june.input" && (e.data as { source?: string })?.source === "follow").map((e) => JSON.stringify(e.data));
+
+	await ask(tmp.paths.socket, "give me updates every 2 minutes on the refresh");
+	await until(async () => (await reports()).length >= 2);
+	assert.match((await reports())[0]!, /regular update .*«Refresh content» \(work.org\).*herdr_read_agent, sending it nothing/);
+	assert.ok(panes.every((pane) => pane === "w5A:p1"), "reads the linked agent's status");
+
+	await ask(tmp.paths.socket, "stop the updates");
+	await until(async () => !(await daemon.status()).busy);
+	const stopped = (await reports()).length;
+	await new Promise((r) => setTimeout(r, 400));
+	assert.equal((await reports()).length, stopped, "no updates after stopping");
+
+	await writeFile(file, (await readFile(file, "utf8")).replace("* PROG Refresh content", "* EVAL Refresh content"));
+	await until(async () => (await reports()).length === stopped + 1, 5000);
+	assert.match((await reports()).at(-1)!, /«Refresh content» \(work.org\) you are following is now EVAL/);
+	await until(async () => (await daemon.harness.inspect(BG)).tasks.filter((task) => task.record.kind === "june.follow").length === 0);
+	assert.doesNotMatch(await readFile(file, "utf8"), /:ID:/, "following writes nothing to Org");
 });
 
 test("June reads and closes her own reviewed EVAL task before reporting through the daemon", async (t) => {
