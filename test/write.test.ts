@@ -89,6 +89,18 @@ test("without a parent, a TODO is a first heading after the preamble, newest fir
 	assert.deepEqual(f.runs, [], "no dates, no Org call");
 });
 
+test("a plain heading has no keyword, sits where a TODO would, and is written once", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	const meeting = { file: "work/home/garden/garden.org", title: "Garden planning meeting", body: "- [[file:2026-10-30-planning/notes.txt][Transcript]]", todo: false };
+	assert.equal((await f.writes.addTask(meeting)).written, true);
+	assert.equal((await f.writes.addTask(meeting)).written, false);
+	assert.equal(
+		await readFile(f.garden, "utf8"),
+		"#+TITLE: Garden\n#+CATEGORY: garden\n\n* Garden planning meeting\n- [[file:2026-10-30-planning/notes.txt][Transcript]]\n\n* PROG Build the raised beds\nCedar, not pine.\n",
+	);
+});
+
 test("June writes only agenda files that are hers to write, and only text that keeps their shape", async (t) => {
 	const f = await fixture();
 	t.after(f.cleanup);

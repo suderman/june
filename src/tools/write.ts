@@ -23,6 +23,8 @@ export type NewTask = {
 	body?: string;
 	scheduled?: string;
 	deadline?: string;
+	/** False writes a plain heading, a record such as meeting notes rather than something to do. */
+	todo?: boolean;
 };
 
 const oneLine = (text: string, what: string) => {
@@ -86,7 +88,7 @@ export class OrgWrites {
 		const path_ = [...(parent === undefined ? [] : outline(lines, parent).map((h) => h.title)), task.title].join(" / ");
 		let written = false;
 		if (same < 0) {
-			const block = [`${"*".repeat(level)} TODO ${task.title}`, ...(body ? body.split("\n") : [])];
+			const block = [`${"*".repeat(level)} ${task.todo === false ? "" : "TODO "}${task.title}`, ...(body ? body.split("\n") : [])];
 			let next: string;
 			if (parent === undefined) {
 				// After the preamble, newest first, as project files keep their threads.
@@ -170,6 +172,18 @@ export function createOrgWriteExtension(config: Config, org: Org, run: Run = run
 				}),
 				replay: "safe",
 				execute: async (args) => json(await writes.addTask(args)),
+			}),
+			defineTool({
+				name: "org_add_heading",
+				description: `Add a plain heading, with no TODO state, for a record that is not something to do: a meeting, reference material, a topic its notes collect under. In a project file, a task directory's heading links its files with file: links relative to the project file. Writes once: a heading with the same title in the same place is reused. Use org_add_task instead when ${user()} has something to do.`,
+				parameters: Type.Object({
+					file,
+					title: Type.String({ description: "Concise title, without keyword or tags" }),
+					under: Type.Optional(Type.String({ description: "Heading to file it under, as heading; omit for a first-level heading after the preamble" })),
+					body: Type.Optional(Type.String({ description: "Optional Org text: one physical line per paragraph or list item" })),
+				}),
+				replay: "safe",
+				execute: async (args) => json(await writes.addTask({ ...args, todo: false })),
 			}),
 			defineTool({
 				name: "org_add_note",
