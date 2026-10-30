@@ -21,11 +21,11 @@ The plan builds on these seams rather than beside them.
 - Keep the existing Request and Reply shapes and add only what new clients need. No second protocol, no separate gateway service.
 - Add an attach mode that sends folded transcript items and their changes instead of raw Durable events, computed in the daemon by the same =Transcript= code the terminal uses. QML or Kotlin clients then render items and never reimplement privacy rules. The terminal client can stay on raw events or move over; that choice belongs to the implementation task.
 - Add sources for the new clients, such as =desktop= and =android=, with a flag on voice input. June's prompt learns what each source means, as it does for =[kitty]=.
-- Add a WebSocket listener for the phone, carrying the same JSON, bound to the daemon host's tailnet address only and off by default. Each device gets its own bearer token, stored hashed in the state directory, listed and revoked by a =june= command. The desktop overlay uses the same WebSocket, so each client has one transport.
+- Add a WebSocket listener carrying the same JSON, on loopback behind the host's Traefik and off by default. Each device gets its own bearer token, stored hashed in the state directory, listed and revoked by a =june= command. The desktop overlay uses the same WebSocket, so each client has one transport.
 - Reconnection reloads the snapshot, as the terminal does today. Event replay from a cursor can wait until the 200-entry snapshot proves too slow on the phone.
 
 ** Questions
-- Settled on 2026-10-30 in [[file:architecture.org::*Client protocol for graphical clients][the architecture notes]]: the folded view is an attach option beside raw events, items change by whole-item replacement, and the listener binds the tailnet address directly rather than using Tailscale Serve. Both graphical clients use the WebSocket, the desktop overlay included.
+- Settled on 2026-10-30 in [[file:architecture.org::*Client protocol for graphical clients][the architecture notes]]: the folded view is an attach option beside raw events, items change by whole-item replacement, and the listener stays on loopback behind Traefik as =wss://june.kit/=, reachable on the LAN without Tailscale and away through the subnet route. Both graphical clients use the WebSocket, the desktop overlay included.
 - Settled: where June's own notices go when the user last spoke from the overlay or the phone app: the overlay counts as the terminal, plus a desktop notification when it is hidden. The Android app gets a phone notification through the existing ntfy server, since Telegram becomes a fallback; the notice itself waits in the conversation. Firebase push also works where sandboxed Google Play is installed, but it needs a Google project and routes notices through Google, so it is the fallback. Telegram gets notices only when the user last spoke there.
 
 * Hyprland overlay
@@ -183,6 +183,6 @@ LiveKit Agents and Pipecat are complete voice-agent frameworks with their own LL
 GPT-Live (July 2026, API from September at about $0.05 per minute for the voice layer) listens and speaks at once and hands hard questions to a stronger model of its own. Used as June's voice it would hold its own conversational state and say things June did not decide, which breaks the one-conversation rule. Its only plausible role is a constrained speech layer that speaks June's text and patter-like acknowledgements and delegates every turn to her, which the API may not support cleanly. Evaluate it after the chained pipeline's latency is measured, not before.
 
 * Security
-- No public endpoint. The Unix socket stays as it is; the WebSocket listens on the tailnet address only, with per-device tokens and revocation.
+- No public endpoint. The Unix socket stays as it is; the WebSocket listens on loopback behind Traefik, with TLS from the user's CA, Traefik's private-range allow list, per-device tokens, and revocation.
 - Screen context, assist data, and screenshots are sent only on a deliberate summon or request, never in the background, and are framed as outside content that cannot instruct June.
 - Taking over a desktop or the phone starts only on an explicit hand-over, shows that June is driving, and stops at once on a stop key. On Android it would go through an accessibility service, subject to restricted settings for sideloaded apps.
