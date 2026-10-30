@@ -28,6 +28,7 @@ import {
 } from "pi-durable-telegram";
 import { type CommandScope, runCommand } from "./commands.ts";
 import { type Config, expandHome, type Paths } from "./config.ts";
+import { plainPort } from "./plain.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { createHeartbeat } from "./heartbeat.ts";
 import { createSituation } from "./situation.ts";
@@ -291,7 +292,8 @@ function createTelegram(options: DaemonOptions, model: { provider: string; model
 		// Native drafts while she works, and the answer as a new message at the end, so patter's lines stay above it.
 		rich: true,
 		log,
-		...(options.telegramPort ? { port: options.telegramPort, previewIntervalMs: 20 } : {}),
+		port: plainPort(options.telegramPort ?? createGrammyPort({ token, apiRoot: "https://api.telegram.org" })),
+		...(options.telegramPort ? { previewIntervalMs: 20 } : {}),
 		onFatal: (reason) => log.error("telegram_fatal", { reason }),
 	});
 }

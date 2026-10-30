@@ -89,7 +89,7 @@ test("Telegram messages land in the primary conversation and are answered to the
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const faux = fauxProvider();
-	faux.setResponses([fauxAssistantMessage("from kitty"), fauxAssistantMessage("from telegram")]);
+	faux.setResponses([fauxAssistantMessage("from kitty"), fauxAssistantMessage("from telegram — it’s “plain”")]);
 	const tg = fakeTelegram();
 	const daemon = await openTestDaemon({
 		...tmp,
@@ -117,6 +117,7 @@ test("Telegram messages land in the primary conversation and are answered to the
 	await daemon.telegram!.handleUpdate(update);
 	await daemon.telegram!.handleUpdate(update); // redelivered by Telegram
 	await until(() => tg.sent.some((m) => m.text.includes("from telegram")));
+	assert.ok(tg.sent.some((m) => m.text.includes(`from telegram, it's "plain"`)), "Telegram gets straight quotes and no em dash");
 
 	const entries = (await daemon.root.context(BG)).entries;
 	assert.equal(entries.filter((e) => e.kind === "pi.user").length, 1, "one shared conversation, no duplicate");

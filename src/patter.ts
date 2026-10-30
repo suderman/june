@@ -8,6 +8,7 @@ import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import { type Conversation, defineExtension, type Extension, type Harness, LiveDoc, section } from "@earendil-works/pi-durable";
 import type { Logger, TelegramPort } from "pi-durable-telegram";
 import type { ModelChoice, PromptFiles } from "./config.ts";
+import { plain } from "./plain.ts";
 import { WorkDoc } from "./tools/work.ts";
 import { User, user } from "./user.ts";
 
@@ -237,8 +238,7 @@ export function createPatter(options: {
 			if (answer.stopReason === "error" || answer.stopReason === "aborted") throw new Error(answer.errorMessage ?? answer.stopReason);
 			// Luna sometimes writes its line twice, as two text blocks; the first is the line.
 			const text = answer.content.find((block) => block.type === "text")?.text ?? "";
-			// Luna reaches for em dashes whatever the rules say; a comma reads as well in a one-liner.
-			const line = text.replace(/\s+/g, " ").replace(/\s*—\s*/g, ", ").trim().replace(/^["“](.*)["”]$/, "$1").slice(0, 280);
+			const line = plain(text.replace(/\s+/g, " ")).trim().replace(/^"(.*)"$/, "$1").slice(0, 280);
 			if (line) {
 				current.updates.push(update);
 				for (const c of steps) current.seen.add(c);

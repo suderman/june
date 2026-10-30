@@ -10,6 +10,7 @@ import { Client, type Reply } from "../src/protocol.ts";
 import { ask, openTestDaemon, tempDir } from "./helpers.ts";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { orgToMarkdown } from "../src/org.ts";
+import { plain } from "../src/plain.ts";
 import { Transcript } from "../src/transcript.ts";
 import { compactingStatus } from "../src/tui.ts";
 
@@ -191,4 +192,9 @@ test("a watch, work, follow, or heartbeat notice shows only June's words, whethe
 	transcript.load({ entries, inbox: [], tools: [], compactions: [], agent: {} } as never);
 	const shown = transcript.items.map((i) => (i.kind === "user" ? `${i.source} › ${i.text}` : i.kind === "assistant" ? `june: ${i.blocks.map((b) => b.text ?? "").join("")}` : i.kind));
 	assert.deepEqual(shown, ["telegram › hi", "june: hello", "june: Snape's uptime report is at EVAL.", "june: The pirate report is done.", "june: Ship is ready.", "june: yes, it runs on hub."]);
+});
+
+test("June's text reaches Jon as a keyboard types it: straight quotes, no em dashes, ranges kept", () => {
+	assert.equal(plain("“flaff” is what i’d say — and ‘faff’ too"), "\"flaff\" is what i'd say, and 'faff' too");
+	assert.equal(plain("— first\nnine–five stays"), "first\nnine–five stays");
 });

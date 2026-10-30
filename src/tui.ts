@@ -21,6 +21,7 @@ import {
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { orgToMarkdown } from "./org.ts";
+import { plain } from "./plain.ts";
 import { Client, COMMANDS, parseCommand, type Reply } from "./protocol.ts";
 import { type Item, Transcript } from "./transcript.ts";
 
@@ -136,7 +137,7 @@ function component(item: Item, org: boolean): Component[] {
 		case "assistant": {
 			const parts: Component[] = [new Line()];
 			for (const block of item.blocks) {
-				if (block.type === "text" && block.text) parts.push(new Markdown(org ? orgToMarkdown(block.text) : block.text, 0, 0, markdownTheme));
+				if (block.type === "text" && block.text) parts.push(new Markdown(org ? orgToMarkdown(plain(block.text)) : plain(block.text), 0, 0, markdownTheme));
 				else if (block.type === "thinking" && block.thinking)
 					parts.push(new Line(c.italic(c.muted(`∴ ${block.thinking.replace(/\s+/g, " ")}`))));
 			}
