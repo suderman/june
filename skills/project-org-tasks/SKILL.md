@@ -98,6 +98,10 @@ Repositories:
 - Preserve existing metadata unless it is missing or demonstrably stale.
 - Every first-level heading is one task, idea, bug, feature, or continuing
   thread. Never create a catch-all heading such as "Maintain this project".
+- Never nest a heading with a TODO keyword under another one. When work
+  splits into several tasks, give the parent no keyword and put the states
+  on the children. A thread with a state keeps its sections, such as
+  `Scope` and `Checklist`, as plain child headings.
 - Add new first-level headings directly after the preamble, newest first.
 
 ## Task directories and runtime files
