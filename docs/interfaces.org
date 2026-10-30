@@ -91,7 +91,7 @@ Eighteen names, defined in =src/avatar.ts= with a one-line meaning, a frequency,
 | gentle      | soft and kind                                 | common     | warm          | the user is worried, frustrated, or vulnerable                   |
 | smug        | pleased with herself                          | occasional | wry           | everything running smoothly; pride when she was right            |
 | exasperated | an eye roll                                   | occasional | skeptical     | a worker went sideways or claimed success without evidence       |
-| laughing    | laughing at something funny                   | occasional | wry           | the user's joke lands; she finds him hilarious                   |
+| laughing    | laughing at something funny                   | occasional | wry           | the user's joke lands; laughing at the good jokes                |
 | surprised   | caught off guard                              | occasional | curious       | an "oh!" at news she did not expect, good or bad                 |
 | confused    | not following                                 | occasional | curious       | unsure what is meant, or a report does not add up                |
 | indignant   | a brief theatrical huff                       | rare       | exasperated   | indignation at something spectacularly daft                      |
