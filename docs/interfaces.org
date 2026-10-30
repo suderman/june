@@ -21,12 +21,11 @@ The plan builds on these seams rather than beside them.
 - Keep the existing Request and Reply shapes and add only what new clients need. No second protocol, no separate gateway service.
 - Add an attach mode that sends folded transcript items and their changes instead of raw Durable events, computed in the daemon by the same =Transcript= code the terminal uses. QML or Kotlin clients then render items and never reimplement privacy rules. The terminal client can stay on raw events or move over; that choice belongs to the implementation task.
 - Add sources for the new clients, such as =desktop= and =android=, with a flag on voice input. June's prompt learns what each source means, as it does for =[kitty]=.
-- Add a WebSocket listener for the phone, carrying the same JSON, bound to the daemon host's tailnet address only and off by default. Each device gets its own bearer token, stored hashed in the state directory, listed and revoked by a =june= command. A desktop client may use the Unix socket or a loopback WebSocket, whichever its toolkit handles more simply.
+- Add a WebSocket listener for the phone, carrying the same JSON, bound to the daemon host's tailnet address only and off by default. Each device gets its own bearer token, stored hashed in the state directory, listed and revoked by a =june= command. The desktop overlay uses the same WebSocket, so each client has one transport.
 - Reconnection reloads the snapshot, as the terminal does today. Event replay from a cursor can wait until the 200-entry snapshot proves too slow on the phone.
 
-** Open questions
-- Whether the folded view should be the only view, and how item changes are expressed (whole item replacement is the simple default).
-- Tailscale Serve versus binding the tailnet address directly. Binding keeps one fewer moving part; Serve adds TLS and identity headers.
+** Questions
+- Settled on 2026-10-30 in [[file:architecture.org::*Client protocol for graphical clients][the architecture notes]]: the folded view is an attach option beside raw events, items change by whole-item replacement, and the listener binds the tailnet address directly rather than using Tailscale Serve. Both graphical clients use the WebSocket, the desktop overlay included.
 - Settled: where June's own notices go when the user last spoke from the overlay or the phone app: the overlay counts as the terminal, plus a desktop notification when it is hidden. The Android app gets a phone notification through the existing ntfy server, since Telegram becomes a fallback; the notice itself waits in the conversation. Firebase push also works where sandboxed Google Play is installed, but it needs a Google project and routes notices through Google, so it is the fallback. Telegram gets notices only when the user last spoke there.
 
 * Hyprland overlay

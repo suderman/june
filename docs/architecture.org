@@ -38,7 +38,7 @@ Delivery is per admitted Telegram message: a =tg.deliver= task submits it and se
 Terminal input is a =june.input= entry with ={source, text}=, which the model sees prefixed =[kitty]= or =[cli]=. Telegram input is a plain =pi.user= entry, and the prompt says untagged messages come from Telegram. June's own inputs use the same entry with sources =work=, =follow=, =reminder=, and =heartbeat=; anything that asks "where is the user, and when did they last speak" skips those.
 
 ** Transport: newline-delimited JSON over a Unix socket
-The socket is mode 0600 in a 0700 directory, with no network listener. Requests are =status=, =attach=, =submit=, and =abort=. After =attach= the daemon sends a snapshot of the last 200 entries, then Pi Durable's own events from =watchEvents()= unchanged. Request ids map to Durable =requestId=s namespaced by source, so a retried =submit= returns the same submission. Remote use is =ssh -t host june=, which needs no new authentication.
+The socket is mode 0600 in a 0700 directory, with no network listener. Requests are =status=, =attach=, =submit=, and =command=. After =attach= the daemon sends a snapshot of the last 200 entries, then Pi Durable's own events from =watchEvents()= unchanged. Request ids map to Durable =requestId=s namespaced by source, so a retried =submit= returns the same submission. Remote use is =ssh -t host june=, which needs no new authentication.
 
 ** Terminal client from pi-tui
 The client uses =@earendil-works/pi-tui=. =src/transcript.ts= folds the snapshot and events into display items with no terminal dependency, so it is testable. June answers the terminal in Org; =src/org.ts= converts Org's own syntax to Markdown for the =Markdown= component, and replies to Telegram messages, already Markdown, render as they are.
@@ -90,6 +90,74 @@ Pi Durable needs Node 22.19 or later for =node:sqlite=. Node 24 aborts when GC c
 
 ** A user service, not a system account
 June needs the user's Herdr socket, Org files, SSH agent, and Emacs config, which a separate account would need shared and Herdr does not support cleanly, so she runs as the user's lingering service. Hardening is limited to =NoNewPrivileges= and =UMask=0077=: in a user unit, =PrivateTmp= and =ProtectSystem= create a user namespace in which store-owned files appear owned by nobody, and ssh then refuses =~/.ssh/config=. With a shell as the user, her boundary is her instructions, not the tool list.
+
+* Client protocol for graphical clients
+Settled on 2026-10-30, not yet built. The Quickshell overlay and the Android app use the existing =Request= and =Reply= shapes with the additions below, on the desktop and the phone alike. Nothing here adds a service: the daemon keeps one root conversation, Pi Durable orders and deduplicates input, and =Transcript= keeps the privacy rules. Each addition names the task that builds it. Additions are additive: clients ignore reply types, item kinds, and fields they do not know, and the daemon ignores unknown optional request fields.
+
+** Transports
+- The Unix socket is unchanged: newline-delimited JSON, mode 0600, no handshake. The terminal client and =june= subcommands stay on it.
+- A WebSocket listener carries the same objects, one JSON object per text frame with no trailing newline. Binary frames are reserved for voice audio and refused until a voice task defines them. It is off by default.
+- Both graphical clients use the WebSocket, the overlay on kit included, so each has one transport. If the Quickshell spike finds QtWebSockets unusable in Quickshell, the overlay on kit falls back to Quickshell's =Socket= on the Unix socket and only that point changes.
+- The listener uses =ws=, already in the lock file through chord, pinned as a direct dependency rather than a second copy. Limits: 32 MiB per message (images are inline, base64), a ping every 30 seconds with the connection dropped if the next ping finds no pong, and a connection dropped when more than 8 MiB of replies are waiting to be sent, since a reconnect costs only a snapshot.
+
+** Address: a direct tailnet bind, not Tailscale Serve
+The daemon binds the address in =remote.address= on =remote.port= (default 7347), set through a Home Manager option. Config validation accepts only a tailnet address (100.64.0.0/10 or fd7a:115c:a1e0::/48) or loopback, so a typo cannot open the LAN or the internet. If the address is not up yet when the daemon starts, it logs =remote_waiting= and retries the bind every 10 seconds; it never falls back to another address. Clients connect to =ws://<address>:<port>/=; any other path is refused.
+
+Serve was set aside. WireGuard already encrypts tailnet traffic, so its TLS adds nothing. Its identity headers name a user, not a device, so per-device tokens are needed for revocation anyway. Its configuration lives in tailscaled's state, outside both the June flake and the NixOS repository's declarations. The cost of binding directly: kit's firewall only opens ports on =tailscale0= that are listed in the NixOS configuration (as Sunshine's are), so the user adds the port to =networking.firewall.interfaces.tailscale0.allowedTCPPorts= on kit; Home Manager cannot. The Android app needs a network security config that permits cleartext to that address or name.
+
+** Devices and the handshake
+- A device is a name and a token. =june device add NAME= prints a new token once (32 random bytes, base64url). =june device list= shows names, creation times, and live connections. =june device revoke NAME= removes it and closes its open connections at once.
+- These go through a new Unix-socket-only request, ={op: "device", requestId, action: "add" | "list" | "revoke", name?}=, so the daemon alone writes the device file and can close live connections. The WebSocket refuses it.
+- The device file is =$XDG_STATE_HOME/june/devices.json=, mode 0600, replaced atomically, holding each device's name, creation time, and the SHA-256 of its token. A random 32-byte token needs no slow hash. Tokens are compared with =timingSafeEqual=.
+- The first frame on a WebSocket must be ={op: "hello", requestId, token, protocol: 1}=. The daemon answers ={type: "hello", requestId, device, protocol: 1}=. A wrong, revoked, or missing token, or any other first frame, or no hello within 10 seconds, closes with code 4401; a client stops reconnecting on 4401 and shows that pairing is needed. An unsupported protocol number closes with 4400. The token goes in a frame rather than a header so no client depends on its WebSocket library setting headers.
+- Clients keep their token out of the Nix store: the overlay reads a 0600 file named by its Home Manager option, the Android app keeps it in its private storage. Pairing on the phone is pasting the address and token; a QR code can come later.
+
+** Attaching to the folded view
+=attach= takes an optional =view=. ="events"=, the default, is today's behaviour: a snapshot, then Pi Durable's events unchanged; the terminal client stays on it. ="items"= sends display items computed in the daemon by the same =Transcript= class, one per connection:
+
+#+begin_src typescript
+{ op: "attach"; requestId: string; view?: "events" | "items" }
+
+// replies on view "items"
+{ type: "view"; requestId?: string; reset: true; items: ViewItem[]; state: ViewState; omitted: number }
+{ type: "view"; changes: ({ op: "put"; item: ViewItem; after: string | null } | { op: "drop"; id: string })[]; state?: ViewState }
+
+type ViewItem =
+	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; voice?: true }
+	| { kind: "assistant"; id: string; text: string; streaming: boolean; error?: string; heard?: number }
+	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error" }
+	| { kind: "note"; id: string; text: string }
+	| { kind: "patter"; id: string; text: string };
+
+type ViewState = { running: boolean; background: number; queued: number; model: string; notice?: string; compacting: boolean; expression: string; activity?: string };
+#+end_src
+
+- A reset replaces everything the client holds. It is sent at attach, and again whenever Pi Durable's stream overflows and sends a fresh snapshot.
+- After each event batch the daemon diffs the item list against what it last sent that connection: a new or changed item is a =put= of the whole item, placed after the item whose id is =after= (=null= for first); a removed item is a =drop=. =state= is sent whole when any field changed. Changes are flushed at most ten times a second per connection, so a streaming reply resends its text at most ten times a second; that is fine on the tailnet and keeps clients to a single "replace this item" operation.
+- The streaming reply is the item with id =live=. When the message ends it is dropped and the stored reply is put with its entry id, as =Transcript= already does.
+- Assistant =text= is always Markdown. The daemon applies =orgToMarkdown= where the terminal does today (a reply to anything but a Telegram message), so both clients need only a Markdown renderer. Thinking blocks and tool output are left out of items; tool items show name, summary, and status. A client that wants more uses the events view.
+- Heartbeat and watch looks, quiet answers, and June's own inputs are hidden exactly as in the terminal, because it is the same code.
+- Command replies are not view items: =command= still answers with a =reply=, which the client shows locally, as the terminal does.
+- History is the last 200 entries, as for the terminal; =omitted= says how many were left out. Paging older history waits until someone needs it.
+
+Built by the task "Serve a folded transcript view to clients" in the Org plan. The terminal may move to the items view later; nothing requires it.
+
+** Sources, submitting, and reconnecting
+- New sources: =desktop= for the overlay on any machine and =android= for the phone app. The model sees =[desktop]= and =[android]= as it sees =[kitty]=. June answers them in Org like the terminal, since the daemon converts. The host an overlay runs on is not part of the source; the desktop-context task adds it as a separate field with the context it sends.
+- Notice routing: =desktop= counts as the terminal surface. =android= becomes its own surface in the task "Route June's own notices to the new surfaces".
+- A submit is retried with the same =requestId= until it is =accepted=. Clients keep the id with the draft, generated once when the user presses send, so a retry after a dropped connection returns the same submission instead of a second message. The daemon already namespaces ids by source.
+- Graphical clients send =submit= with =whenBusy= as the terminal does (follow-up by default, steer on request), never =wait=. Stop is =command= =stop=. They never offer =/new=.
+- On a dropped connection the client reconnects with backoff from 1 to 30 seconds, sends =hello=, attaches again, and takes the reset as the truth. There is no event cursor: Pi Durable's =watchEvents= has none, and a 200-entry snapshot is small enough. Revisit only if attach proves slow on the phone.
+
+** Voice flag
+=submit= takes an optional =voice: true= for speech transcribed from that client. The model sees the tag as =[android voice]= or =[desktop voice]=, the =june.input= entry records =voice: true=, and the user item carries it. June's prompt says a voice-tagged message was spoken and her answer will be heard. The flag says nothing about playback; the client that sent the voice turn owns playback of its answer. Built by the task "Make June's replies speakable"; audio framing belongs to the push-to-talk tasks.
+
+** Presentation entries
+Presentation is stored as display-only entries, like =june.patter=: appended at once, kept out of every model context, replayed in the snapshot. The terminal's fold ignores kinds it does not know, so it is unaffected.
+
+- =june.expression= ={name}=: the face to show. The items view puts the newest one in =state.expression=, ="idle"= when there is none in the snapshot. Built by the task "Send expression and activity to clients".
+- =june.playback= ={entry, chars}=: how far playback of an assistant reply got before it stopped, by that reply's entry id. The items view sets =heard= on that item so a client can mark the unheard rest. Built by the push-to-talk tasks.
+- Activity is not an entry. It is derived from runtime state and sent as =state.activity=; its values are settled by the avatar tasks. Connection state is the client's own.
 
 * Known risks
 
