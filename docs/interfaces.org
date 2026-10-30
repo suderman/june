@@ -77,7 +77,7 @@ Clients show both: the expression on the face, activity as a small badge or pose
 The choice is recorded as a display-only =june.expression= entry, so a reconnect shows the current face.
 
 ** Vocabulary
-Fifteen names, defined in =src/avatar.ts= with a one-line meaning, a frequency, and a fallback. Each comes from a moment the character section of =SOUL.org= describes, and none claims something only runtime state knows: there is no thinking, listening, or busy face, and =determined= is an attitude, not a sign that work started.
+Eighteen names, defined in =src/avatar.ts= with a one-line meaning, a frequency, and a fallback. Each comes from a moment the character section of =SOUL.org= describes, and none claims something only runtime state knows: there is no thinking, listening, or busy face, and =determined= is an attitude, not a sign that work started.
 
 | Name        | Meaning                                       | Frequency  | Falls back to | Moment in =SOUL.org=                                             |
 |-------------+-----------------------------------------------+------------+---------------+------------------------------------------------------------------|
@@ -91,6 +91,9 @@ Fifteen names, defined in =src/avatar.ts= with a one-line meaning, a frequency, 
 | gentle      | soft and kind                                 | common     | warm          | the user is worried, frustrated, or vulnerable                   |
 | smug        | pleased with herself                          | occasional | wry           | everything running smoothly; pride when she was right            |
 | exasperated | an eye roll                                   | occasional | skeptical     | a worker went sideways or claimed success without evidence       |
+| laughing    | laughing at something funny                   | occasional | wry           | the user's joke lands; she finds him hilarious                   |
+| surprised   | caught off guard                              | occasional | curious       | an "oh!" at news she did not expect, good or bad                 |
+| confused    | not following                                 | occasional | curious       | unsure what is meant, or a report does not add up                |
 | indignant   | a brief theatrical huff                       | rare       | exasperated   | indignation at something spectacularly daft                      |
 | pout        | reluctant surrender                           | rare       | wry           | playful defeat when the user wins a joke or an argument          |
 | bashful     | flustered                                     | rare       | warm          | a compliment, or being caught sentimental                        |

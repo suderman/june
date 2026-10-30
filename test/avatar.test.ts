@@ -9,7 +9,7 @@ const image = (bytes: Buffer) => ({ width: bytes.readUInt32BE(16), height: bytes
 
 test("the vocabulary stays small, every chain ends at idle, and no expression shares a name with an activity", () => {
 	const names = Object.keys(EXPRESSIONS);
-	assert.ok(names.length >= 12 && names.length <= 16, `${names.length} expressions`);
+	assert.ok(names.length >= 12 && names.length <= 18, `${names.length} expressions`);
 	for (const name of names) assert.equal(fallbacks(name).at(-1), "idle", name);
 	for (const activity of Object.keys(ACTIVITIES)) assert.ok(!names.includes(activity), activity);
 	assert.deepEqual(fallbacks("indignant"), ["indignant", "exasperated", "skeptical", "wry", "idle"]);
