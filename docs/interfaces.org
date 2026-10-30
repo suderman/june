@@ -1,0 +1,132 @@
+#+TITLE: June's graphical and voice interfaces
+
+Design notes for a desktop overlay, an Android assistant, an avatar, and voice. Nothing here is built yet. The work is tracked as Org tasks; this file holds the reasoning those tasks refer to. The recommendations here were accepted as the plan; spikes and experiments still settle their details, and anything still open says so. Research dates from October 2026; recheck versions and prices before relying on them.
+
+* What already exists
+The plan builds on these seams rather than beside them.
+
+- One conversation. The daemon owns one root conversation. Telegram's chat map points every allowed user at it, and terminal clients attach to it. =/new= starts a fresh context but keeps the same conversation, so no client needs a conversation list. Graphical clients should not offer =/new= at all.
+- A client protocol. Newline-delimited JSON over a 0600 Unix socket (=src/protocol.ts=): =status=, =attach=, =submit=, =command=. =attach= returns a snapshot of the last 200 entries, then Pi Durable's events unchanged, including =text_delta=, tool, run, and inbox events. =submit= carries a client request id namespaced by source, so a retried submit returns the same submission; =whenBusy= chooses steer or follow-up; images travel inline. Durable orders every input in the one conversation, so concurrent clients already serialize. There is no network listener; remote use is =ssh -t host june=.
+- A display fold. =src/transcript.ts= turns the snapshot and events into display items with no terminal dependency. It holds the rules other clients would otherwise have to copy: heartbeat and watch looks hidden, patter shown apart, background work tracked, quiet answers dropped. It imports only types from Pi Durable.
+- Display-only entries. =june.patter= and =june.work= entries are appended at once, even mid-run, kept out of every model context, compaction, and memory review, and replayed in the snapshot. This is the existing mechanism for presentation events.
+- The working context. What the interface brief calls "focus" is the =work= tool in the code: a background =june.work= task that owns a child conversation, runs a brief, and posts one report back as a =[work]= follow-up that June relays. Several briefs can run at once (=WorkDoc.active=), each tied to the run that started it, so stopping that run stops its brief and a stopped brief never reports. Results already return to June rather than writing into the conversation. The code's =focus= tool is a different thing: it switches the main conversation to the careful model. Plans and prompts should keep the code's names.
+- Patter. A cheap model writes display-only lines during long waits, sees the real activity, has no tools, and its lines reach chat and focus only as a section marked "not information". It already edits a single Telegram message per wait. It is the natural home for other inconsequential presentation, such as avatar reactions and spoken acknowledgements.
+- Notice routing. =src/notify.ts= sends June's own notices (=[work]=, =[follow]=, =[watch]=, heartbeat) to Telegram when the user last spoke there, otherwise to the terminal. It knows two surfaces.
+- Telegram voice notes. pi-durable-telegram can transcribe voice notes with Deepgram when =DEEPGRAM_API_KEY= is set, behind a pluggable =Stt= interface (=transcribe(bytes, mime, signal)=). The plan does not use it, since Telegram becomes a fallback client once the Android app exists, but the =Stt= shape is worth reusing.
+- Notifications. An ntfy server already runs on the tailnet for Herdr.
+- Network. The desktop and the phone are on the same tailnet. The desktop already shares its Hyprland session over it.
+
+* Clients and protocol
+** Recommended
+- Keep the existing Request and Reply shapes and add only what new clients need. No second protocol, no separate gateway service.
+- Add an attach mode that sends folded transcript items and their changes instead of raw Durable events, computed in the daemon by the same =Transcript= code the terminal uses. QML or Kotlin clients then render items and never reimplement privacy rules. The terminal client can stay on raw events or move over; that choice belongs to the implementation task.
+- Add sources for the new clients, such as =desktop= and =android=, with a flag on voice input. June's prompt learns what each source means, as it does for =[kitty]=.
+- Add a WebSocket listener for the phone, carrying the same JSON, bound to the daemon host's tailnet address only and off by default. Each device gets its own bearer token, stored hashed in the state directory, listed and revoked by a =june= command. A desktop client may use the Unix socket or a loopback WebSocket, whichever its toolkit handles more simply.
+- Reconnection reloads the snapshot, as the terminal does today. Event replay from a cursor can wait until the 200-entry snapshot proves too slow on the phone.
+
+** Open questions
+- Whether the folded view should be the only view, and how item changes are expressed (whole item replacement is the simple default).
+- Tailscale Serve versus binding the tailnet address directly. Binding keeps one fewer moving part; Serve adds TLS and identity headers.
+- Settled: where June's own notices go when the user last spoke from the overlay or the phone app: the overlay counts as the terminal, plus a desktop notification when it is hidden. The Android app gets a phone notification through the existing ntfy server, since Telegram becomes a fallback; the notice itself waits in the conversation. Firebase push also works where sandboxed Google Play is installed, but it needs a Google project and routes notices through Google, so it is the fallback. Telegram gets notices only when the user last spoke there.
+
+* Hyprland overlay
+** Requirements that drive the choice
+A layer-shell surface on the =overlay= layer draws above fullscreen windows, which an ordinary floating window does not. Exclusive keyboard interactivity while shown, Escape to hide, a Hyprland bind that toggles a resident process so scrollback survives, and placement on the focused output. Those are protocol behaviours shared by every toolkit, so the toolkit choice is mostly about ergonomics, rendering, and upkeep.
+
+A layer surface is not a window, so the application beneath stays the active window while the user types to June; she can read it at any time. Two variants are planned: a full one that dims the screen like a launcher and shows the transcript and avatar, built first, and a subtle one that sits small and out of the way and expands into the full one. The terminal client stays as the plain console client.
+
+** Toolkit
+Quickshell: Qt/QML with native layer-shell and Hyprland integration, pre-1.0 (0.3.x in August 2026) and the current momentum among Hyprland shells. The user already runs it on Hyprland, and Hyprland's author endorses it. QML handles animated images and sprite animation well. Reported memory use is a few hundred MB for full shells, which matters less for a single panel.
+
+Set aside: AGS/Astal (GTK4, TypeScript and CSS), whose momentum has moved to Quickshell, and a web view in a GTK4 layer-shell host, which would be the most custom option. An ordinary Electron or Tauri window cannot take the overlay layer.
+
+A half-day Quickshell spike retires the remaining risks before the build: overlay above a fullscreen video, keyboard focus in and out, the window beneath staying active, multi-monitor, toggle by bind, memory at rest, an animated avatar frame, and a WebSocket or socket connection.
+
+** Desktop context and taking over, later
+Read =hyprctl activewindow -j= (class, title, workspace); offer an explicit screenshot of the active window with =grim=; read the primary selection with =wl-paste --primary=. Each is sent only when the user asks, and framed as outside content as mail already is.
+
+Taking over is wanted: when the user hands over in words, June acts in the window they are in and hands back. Prefer each application's own control (=emacsclient=, Chromium DevTools, CLIs) over synthetic input, and fall back to =hyprctl= dispatches and =wtype= or =ydotool=, checked with screenshots. The overlay shows while she is driving, and a stop key halts her. This works on the daemon host, where she already has a shell.
+
+The overlay also runs on other machines and talks to the one daemon over the tailnet, so June stays one assistant everywhere. Seeing works the same on every machine, because the overlay gathers its own machine's context and sends it with the message, naming the host. Driving another machine is open: the overlay could carry out a narrow set of actions on her behalf, she could reach it over SSH, or a small agent there could take orders only from her. A second daemon on that machine is ruled out, since it would be a different assistant.
+
+* Android assistant
+** Platform facts
+- A third-party app becomes eligible for the digital assistant role by declaring a =VoiceInteractionService= with its =VoiceInteractionSessionService=. The automotive guide says voice interaction apps should also declare a =RecognitionService=; whether GrapheneOS lists the app without one is a proof-of-concept question. The app can ask for the role through =RoleManager.ROLE_ASSISTANT=, and the user confirms it under default apps.
+- Invocation on GrapheneOS: forum reports say the gesture-navigation corner swipe works and that the power button offers double press but not "hold for assistant". Verify on the phone. An assistant reachable from the lock screen is a privacy risk; while the keyguard is up the session shows only a prompt to unlock.
+- Screen context: a session receives =onHandleAssist= (structure of the foreground app) and a screenshot only when the user has enabled "use text from screen" and "use screenshot" for the assistant. No Google services are needed. Some apps mark windows secure and return nothing.
+- One developer reported that reinstalling an APK on Android 16 clears the assistant selection, which will make development tedious; worth confirming early.
+- No persistent connection is needed: connect when a session opens. Microphone use inside a visible session needs only the runtime permission. No wake word or always-on listening is planned on the phone, so no foreground service is needed for the microphone.
+
+** Reference
+Hermes Relay (MIT, Kotlin, active in October 2026) implements =VoiceInteractionService=, =VoiceInteractionSessionService=, role checks through =RoleManager=, session phases (listening, transcribing, thinking, speaking), and a redacted lock-screen view. Read it for platform patterns; its backend and transport do not apply.
+
+** Recommended
+The user already knows GrapheneOS lets them pick a custom assistant, so the proof of concept is about June's own app taking the role and opening cleanly. A native Kotlin and Jetpack Compose app in an =android/= directory of this repository, built with the Android SDK through Nix. Prove role selection and invocation with a placeholder session before connecting it to June. Voice processing runs on the daemon host rather than on the phone, so the phone and the desktop share one pipeline.
+
+* Avatar
+** Two signals
+- Expression: chosen for character, from a fixed vocabulary, never authoritative.
+- Activity: derived from runtime state, never chosen by a model: idle, thinking (a run is busy), working (briefs in =WorkDoc.active=), watching workers (followed tasks), listening, transcribing, speaking, offline (no connection).
+
+Clients show both: the expression on the face, activity as a small badge or pose. A client without images ignores them.
+
+** Choosing an expression
+- A patter pass (recommended to try first): after June's reply, and optionally when a user message arrives, the patter model picks one name from the vocabulary. It cannot change content, adds nothing to the model context, and costs a fraction of a cent. It may lag the reply by about a second.
+- A tool call: June calls =react(name)= in her turn. Exact, but it adds a tool round trip and puts presentation into her context.
+- Reply metadata: a trailing tag stripped by the daemon. Fragile across Telegram and the terminal, and the tag would sit in the stored message.
+
+The choice is recorded as a display-only =june.expression= entry, so a reconnect shows the current face.
+
+** Assets
+A manifest maps each name to a file and its playback (still, loop, play once then return to idle), with a fallback chain ending at =idle=. The manifest format and a placeholder set belong in this repository; the character's art is personal and lives in the data directory beside =SOUL.org=. The art is generated anime, made in rounds with the user choosing at each step. Consistency across expressions and later seasonal sets is the hard part: keep a character reference sheet and the prompts, seeds, and settings beside the images, so a new set can be regenerated to match. Animated WebP or PNG sprite sheets play in both QML and Compose. Mouth movement synced to speech can come later from TTS timestamps or audio amplitude.
+
+* Themes
+The user wants to change the look seasonally, so presentation comes from a theme rather than from each client's code.
+
+- A theme holds design tokens (palette, type, spacing, corner radius), fonts, a backdrop for the full overlay, and an avatar asset set described by the expression manifest. Later it could add sounds.
+- A base theme lives in =templates/= and names nobody. Personal themes live in the data directory. Every theme falls back to the base, token by token and expression by expression, so a seasonal theme can change only the palette and a few faces.
+- The daemon serves the active theme to clients, so the overlay and the Android app always match. A =june= command lists and switches themes; clients apply a switch live, without a rebuild.
+- The format stays plain data (Org or JSON plus image files) that both QML and Compose read without a theme engine.
+
+* Voice
+** Recommended architecture
+A chained pipeline, with June as the only conversational authority:
+
+#+begin_src text
+client mic -> audio over the client connection -> daemon -> STT -> submit as an ordinary input (source, voice flag)
+June's reply text deltas -> speakable rendering -> sentence chunks -> TTS -> audio back to the client that spoke
+#+end_src
+
+- The daemon hosts the pipeline, so desktop and phone share it and providers sit behind two small interfaces, =Stt= (reusing pi-durable-telegram's shape) and =Tts=.
+- The client that started a voice turn owns playback of the answer. Other clients show the text and stay silent. Spoken answers to June's own notices play only if a voice session is open on that client.
+- Spoken rendering removes Org and Markdown markup, reads paths and identifiers sensibly, and summarizes code instead of reading it. June's prompt learns that a voice-flagged input will be heard, so she answers briefly and without lists.
+- Stopping playback does not abort generation by default; the full text stays in the conversation, and a display-only entry records how far playback got. Barge-in stops playback at once and, if the user keeps talking, submits their speech as a steer.
+- Audio is not stored. Transcripts are stored as the user's message, as typed text is.
+
+** Progression
+1. Push-to-talk on the desktop overlay, completed utterances, sentence-chunked TTS.
+2. Push-to-talk in the Android assistant session.
+3. Voice activity detection, end-of-turn detection, streaming transcription, and barge-in.
+4. Spoken patter during long waits, and avatar mouth sync.
+
+** Speech recognition
+- Local: NVIDIA Parakeet TDT 0.6B v2 (English, strong accuracy, batch) and Nemotron Speech Streaming 0.6B (cache-aware streaming, made for live agents) both fit easily in 16 GB beside a TTS model. sherpa-onnx runs Parakeet and Silero VAD from C++ with Node bindings, which might keep everything inside the daemon process without a Python service; NeMo is the fallback.
+- Cloud: Deepgram (Nova-3, and Flux with built-in end-of-turn detection, about $0.0065 per minute), ElevenLabs Scribe v2 Realtime (about $0.39 per hour), and OpenAI's transcription models.
+- Unknowns to measure: accuracy on the user's own technical vocabulary and family names, keyword boosting, latency to final transcript, and how much a local model costs in GPU memory and power while idle.
+- Rough cost: an hour of speech a day is about 30 hours a month, roughly $12 at the cloud rates above.
+
+** Speech synthesis
+- Local: Kokoro (82M, Apache 2.0, very fast, fixed voices, little expressiveness), Chatterbox and Chatterbox Turbo (MIT, zero-shot voice design from a reference clip, an exaggeration control), and Orpheus or Sesame CSM as more expressive options with heavier models.
+- Cloud: ElevenLabs, Cartesia Sonic, and OpenAI's instructable TTS.
+- Choose by audition, not by benchmark: one script of identical lines through each engine, covering playful, the pout, plain conversation, technical text with paths and commands, quiet late-night, and celebration, plus time to first audio measured from the desktop. The voice must be designed or licensed, never cloned from a real person. Accent is part of the user's choice, and it narrows the field: check which engines offer the wanted accent before rendering samples.
+
+** Frameworks
+LiveKit Agents and Pipecat are complete voice-agent frameworks with their own LLM loop and a Python service (LiveKit also a media server). June would replace their LLM step through a custom node, and their real gains (turn detection, echo cancellation, interruption) only matter at step 3. Start with a plain audio stream over the existing client connection; Android's =VOICE_COMMUNICATION= audio source and PipeWire's echo-cancel module provide echo cancellation. Revisit a framework only if step 4 stalls.
+
+** Realtime speech models
+GPT-Live (July 2026, API from September at about $0.05 per minute for the voice layer) listens and speaks at once and hands hard questions to a stronger model of its own. Used as June's voice it would hold its own conversational state and say things June did not decide, which breaks the one-conversation rule. Its only plausible role is a constrained speech layer that speaks June's text and patter-like acknowledgements and delegates every turn to her, which the API may not support cleanly. Evaluate it after the chained pipeline's latency is measured, not before.
+
+* Security
+- No public endpoint. The Unix socket stays as it is; the WebSocket listens on the tailnet address only, with per-device tokens and revocation.
+- Screen context, assist data, and screenshots are sent only on a deliberate summon or request, never in the background, and are framed as outside content that cannot instruct June.
+- Taking over a desktop or the phone starts only on an explicit hand-over, shows that June is driving, and stops at once on a stop key. On Android it would go through an accessibility service, subject to restricted settings for sideloaded apps.
