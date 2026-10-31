@@ -46,6 +46,8 @@ export type Config = {
 	 * dispatcher writes into an AUTO task's drawer when it lacks them and no tag names one: `host` defaults to the first
 	 * of `hosts`, `agent` to pi. `agents` are the ones June may choose for a task, `agent` alone without it. `settle` is
 	 * how many seconds a heading the user typed must stay unchanged before the dispatcher launches it (120 without it).
+	 * `improve` turns on june_improve: the Org file under the root its tasks go in, and the agent and host that run them
+	 * (`agent` and `host` without them).
 	 */
 	readonly dispatch: {
 		readonly hosts: readonly string[];
@@ -53,6 +55,7 @@ export type Config = {
 		readonly agent?: string;
 		readonly agents?: readonly string[];
 		readonly settle?: number;
+		readonly improve?: { readonly file: string; readonly agent?: string; readonly host?: string };
 	};
 	readonly herdr: {
 		readonly session: string;
@@ -250,12 +253,20 @@ function dispatch(given: Partial<Config["dispatch"]> | undefined): Config["dispa
 			throw new Error("dispatch.agents must be a list of plain names");
 		if (given?.agent !== undefined && !agents.includes(given.agent)) throw new Error("dispatch.agent must be one of dispatch.agents");
 	}
+	const improve = given?.improve;
+	if (improve !== undefined) {
+		if (!(typeof improve?.file === "string" && improve.file.endsWith(".org"))) throw new Error("dispatch.improve.file must be an Org file");
+		if (improve.agent !== undefined && !(agents ?? [given?.agent ?? "pi"]).includes(improve.agent))
+			throw new Error("dispatch.improve.agent must be one of dispatch.agents");
+		if (improve.host !== undefined && !hosts.includes(improve.host)) throw new Error("dispatch.improve.host must be one of dispatch.hosts");
+	}
 	return {
 		hosts,
 		...(given?.host ? { host: given.host } : {}),
 		...(given?.agent ? { agent: given.agent } : {}),
 		...(agents ? { agents } : {}),
 		...(given?.settle !== undefined ? { settle: given.settle } : {}),
+		...(improve ? { improve } : {}),
 	};
 }
 

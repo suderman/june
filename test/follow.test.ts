@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
-import { createDispatchExtension } from "../src/tools/dispatch.ts";
+import { createDispatchExtension, improveBody } from "../src/tools/dispatch.ts";
 import { decide, FOLLOW_DEFAULTS, progressDue } from "../src/tools/follow.ts";
 import { Herdr } from "../src/tools/herdr.ts";
 import { createOrgExtension, Org } from "../src/tools/org.ts";
@@ -87,6 +87,51 @@ test("June follows a task she did not queue with timed updates until told to sto
 	assert.match((await reports()).at(-1)!, /«Refresh content» \(work.org\) you are following is now EVAL/);
 	await until(async () => (await daemon.harness.inspect(BG)).tasks.filter((task) => task.record.kind === "june.follow").length === 0);
 	assert.doesNotMatch(await readFile(file, "utf8"), /:ID:/, "following writes nothing to Org");
+});
+
+test("june_improve writes the user's words, June's reading, and the transcript command, and follows the task", async (t) => {
+	const body = improveBody("you can't do\n* updates every 5 minutes?", "I only have an hourly heartbeat.", new Date(Date.UTC(2026, 9, 30, 22, 30)), "kit");
+	assert.doesNotMatch(body, /^\* /m, "the user's words cannot start a heading");
+	assert.match(body, /In their words: «you can't do \* updates every 5 minutes\?»/);
+	assert.match(body, /=june transcript --since 2026-10-30T22:30:00\.000Z --detail=/);
+
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "org");
+	const file = join(root, "june.org");
+	await mkdir(root, { recursive: true });
+	await writeFile(file, "#+TITLE: June\n");
+	await writeFile(join(tmp.dir, "agenda"), `${file}\n`);
+	const config = {
+		...testConfig(tmp.dir),
+		org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") },
+		dispatch: { hosts: ["kit"], agents: ["pi", "claude"], improve: { file: "june.org", agent: "claude" } },
+	};
+	const kicks: string[][] = [];
+	const extension = createDispatchExtension(config, new Org(root), new Herdr(config.herdr, async () => "{}"), "inst", async (args) => {
+		kicks.push([...args]);
+		return "";
+	}, { intervalMs: 40, launchMs: 60_000, maxMs: 3_600_000 });
+	const faux = fauxProvider();
+	faux.setResponses([
+		fauxAssistantMessage([fauxToolCall("june_improve", { title: "Let June give timed updates", complaint: "why can't you update me every 5 minutes?", gap: "No timer shorter than the hourly heartbeat.", minutes: 20 })], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Queued a fix."),
+		fauxAssistantMessage("The fix is ready for review."),
+	]);
+	const daemon = await openTestDaemon({ ...tmp, faux, config, extensions: [extension] });
+	t.after(() => daemon.close());
+	const before = Date.now();
+	assert.equal((await ask(tmp.paths.socket, "can you get that fixed?")).text, "Queued a fix.");
+	const text = await readFile(file, "utf8");
+	assert.match(text, /^\* AUTO Let June give timed updates\n:PROPERTIES:\n:ID: [0-9a-f-]{36}\n:AGENT: claude\n:HOST: kit\n:JUNE_REQUEST: inst:\d+\n:DIR: \/.+\n:END:\nQueued by June: /m);
+	assert.doesNotMatch(text, /:REVIEW: no/, "review stays on");
+	assert.match(text, /In their words: «why can't you update me every 5 minutes\?»/);
+	const since = Date.parse(/--since (\S+) --detail/.exec(text)![1]!);
+	assert.ok(Math.abs(since - (before - 20 * min)) < 5000, "the transcript starts where the exchange began");
+	assert.ok(kicks.some((args) => args[0] === "systemctl"), "this host's dispatcher is started");
+
+	await writeFile(file, text.replace("* AUTO Let June", "* EVAL Let June"));
+	await until(async () => (await daemon.root.context(BG)).entries.some((e) => (e.data as { source?: string })?.source === "follow"));
 });
 
 test("June reads and closes her own reviewed EVAL task before reporting through the daemon", async (t) => {

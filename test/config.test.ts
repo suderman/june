@@ -81,6 +81,16 @@ test("the rhythm, reflection, heartbeat, and patter timing have defaults, take o
 	assert.throws(() => loadConfig({ ...tmp.paths, config: outside }), /dispatch\.agent must be one of dispatch\.agents/);
 	const empty = await layer("empty", { dispatch: { hosts: ["kit"], agents: [] } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: empty }), /dispatch\.agents must be a list of plain names/);
+	const improve = loadConfig({ ...tmp.paths, config: await layer("improve", { dispatch: { hosts: ["kit"], agents: ["pi", "claude"], improve: { file: "work/june/june.org", agent: "claude" } } }) });
+	assert.deepEqual(improve.dispatch.improve, { file: "work/june/june.org", agent: "claude" });
+	for (const [name, bad, message] of [
+		["improve-file", { file: "june.txt" }, /dispatch\.improve\.file must be an Org file/],
+		["improve-agent", { file: "june.org", agent: "claude" }, /dispatch\.improve\.agent must be one of dispatch\.agents/],
+		["improve-host", { file: "june.org", host: "lux" }, /dispatch\.improve\.host must be one of dispatch\.hosts/],
+	] as const) {
+		const dir = await layer(name, { dispatch: { hosts: ["kit"], improve: bad } });
+		assert.throws(() => loadConfig({ ...tmp.paths, config: dir }), message);
+	}
 	const settle = loadConfig({ ...tmp.paths, config: await layer("settle", { dispatch: { hosts: ["kit"], settle: 90 } }) });
 	assert.equal(settle.dispatch.settle, 90);
 	const negative = await layer("negative", { dispatch: { hosts: ["kit"], settle: -1 } });

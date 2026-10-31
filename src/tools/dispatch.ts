@@ -8,7 +8,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import { type Config, expandHome } from "../config.ts";
 import { type Run, runProcess } from "./herdr.ts";
-import { createFollowTask, FOLLOW_DEFAULTS, type FollowOptions, follow } from "./follow.ts";
+import { createFollowTask, FOLLOW_DEFAULTS, type FollowInput, type FollowOptions, follow } from "./follow.ts";
 import type { Herdr } from "./herdr.ts";
 import { type Org, parseHeading } from "./org.ts";
 import { User, user } from "../user.ts";
@@ -76,6 +76,37 @@ export function taskBody(parts: TaskParts): string {
 	if (parts.checklist.length === 0) throw new Error("checklist needs at least one item");
 	const items = parts.checklist.map((item) => `- [ ] ${line(item, "Each checklist item").replace(/^-\s*(\[[ X]\]\s*)?/, "")}`);
 	return [`Queued by June: ${line(parts.reason, "reason")}`, "", "** Scope", scope, "", "** Checklist", ...items].join("\n");
+}
+
+/** The checkout June runs from, where a fix to her goes; a Nix store copy cannot be changed. */
+const SOURCE = join(import.meta.dirname, "..", "..");
+
+/**
+ * The task june_improve writes: the user's words on one line, so nothing in them can start a heading, June's reading,
+ * and where the agent reads the conversation itself, which stays on the daemon's host rather than in synced Org.
+ */
+export function improveBody(complaint: string, gap: string, since: Date, host: string): string {
+	const words = complaint.replace(/\s+/g, " ").trim();
+	if (words === "") throw new Error("complaint is required");
+	const scope = [
+		`${User()} hit a gap while talking to June and asked for it to be fixed. In their words: «${words}»`,
+		"",
+		`June's reading: ${gap.replace(/\s+/g, " ").trim()}`,
+		"",
+		`The conversation is on ${host}: read it there with =june transcript --since ${since.toISOString()} --detail=, or =--json= for the raw entries, rather than relying on the summary above. Keep it out of Org, which syncs to other devices.`,
+		"",
+		`Fix it in June's code, prompt, skills, or tools, whichever fits. If the cause is somewhere else, such as org-dispatch or a skill in another repository, say so, and fix it there only when that is clearly within reach. Do not restart =june.service= or rebuild the system; say in the outcome what ${user()} must do to apply the change.`,
+	].join("\n");
+	return taskBody({
+		reason: `${User()} asked June to fix a gap in what she can do.`,
+		scope,
+		checklist: [
+			"Read the conversation with june transcript and work out what June did and why.",
+			"Find the cause and make the smallest change that closes the gap.",
+			"Add or adjust tests and run the full check.",
+			`Record what changed and what ${user()} must do to apply it, such as restarting June or rebuilding.`,
+		],
+	});
 }
 
 /** Insert `text` before the first heading, newest first, as project files keep their threads. */
@@ -301,6 +332,23 @@ export function createDispatchExtension(
 	const defaultAgent = config.dispatch.agent ?? "pi";
 	const agents = dispatchAgents(config.dispatch);
 	const agentParameter = (description: string) => Type.Optional(Type.Union(agents.map((agent) => Type.Literal(agent)), { description }));
+	/** Write the task, follow it once whether this call wrote it or a replay found it, and start this host's dispatcher. */
+	const queueAndFollow = async (request: QueueRequest, followIt: (input: FollowInput) => Promise<unknown>): Promise<string> => {
+		const result = await dispatch.queue(request);
+		if (result.id !== undefined) await followIt({ id: result.id, title: request.title, host: request.host, queuedAt: Date.now() });
+		// The dispatcher launches headings June wrote without settling, so start it now instead of waiting a minute.
+		let started = "";
+		if (result.written && request.host === config.herdr.host)
+			started = await dispatch.kick().then(
+				() => " The dispatcher was started and launches it now.",
+				(error: Error) => ` Starting the dispatcher failed (${error.message}); its timer runs within a minute.`,
+			);
+		const note = `You are following this task and will get [follow] messages when it fails to launch, blocks, holds, or finishes.${started} Tell the user you will report back.`;
+		return `${JSON.stringify(result, null, 1)}\n${note}`;
+	};
+	const improve = config.dispatch.improve;
+	const improveHost = improve?.host ?? defaultHost;
+	const improveAgent = improve?.agent ?? defaultAgent;
 	return defineExtension({
 		name: "dispatch",
 		tasks: [followTask],
@@ -336,28 +384,38 @@ export function createDispatchExtension(
 				replay: "safe",
 				execute: async (args, api, context) => {
 					const { reason, scope, checklist, ...rest } = args;
-					const result = await dispatch.queue({
-						...rest,
-						body: taskBody({ reason, scope, checklist }),
-						review: args.review ?? true,
-						key: `${instance}:${api.taskId}`,
-					});
-					// Follow it, once, whether this call wrote the heading or a replay found it.
-					if (result.id !== undefined) {
-						const input = { id: result.id, title: args.title, host: args.host, queuedAt: Date.now() };
-						await api.commit((tx) => follow(tx, followTask, input, Number(api.conversationId)), context);
-					}
-					// The dispatcher launches headings June wrote without settling, so start it now instead of waiting a minute.
-					let started = "";
-					if (result.written && args.host === config.herdr.host)
-						started = await dispatch.kick().then(
-							() => " The dispatcher was started and launches it now.",
-							(error: Error) => ` Starting the dispatcher failed (${error.message}); its timer runs within a minute.`,
-						);
-					const note = `You are following this task and will get [follow] messages when it fails to launch, blocks, holds, or finishes.${started} Tell the user you will report back.`;
-					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\n${note}` }] };
+					const request = { ...rest, body: taskBody({ reason, scope, checklist }), review: args.review ?? true, key: `${instance}:${api.taskId}` };
+					const text = await queueAndFollow(request, (input) => api.commit((tx) => follow(tx, followTask, input, Number(api.conversationId)), context));
+					return { output: [{ type: "text", text }] };
 				},
 			}),
+			...(improve === undefined ? [] : [defineTool({
+				name: "june_improve",
+				description: `When ${user()} says you could not do something they expected, or did it badly, and wants it fixed, or agrees when you offer: queue a task for a coding agent to change your own code, prompt, skills, or tools. It goes in ${improve.file} for ${improveAgent} on ${improveHost}, with ${user()}'s words, your reading of the gap, and the june transcript command for that stretch of conversation, which the agent reads itself. It ends at EVAL for ${user()}'s review, and you follow it as for org_queue_task. Never use it on your own initiative, and not for work on ${user()}'s projects.`,
+				parameters: Type.Object({
+					title: Type.String({ description: "Concise verb-led title for the fix, without keyword or tags, such as \"Let June give timed updates on a task\"" }),
+					complaint: Type.String({ description: `${User()}'s own words about the gap, copied exactly from their messages` }),
+					gap: Type.String({ description: "One line: what you could not do or did badly, and why, as far as you can tell" }),
+					minutes: Type.Optional(Type.Number({ description: "How many minutes ago the relevant exchange began, so the agent reads from there; default 30, at most 1440" })),
+				}),
+				replay: "safe",
+				execute: async (args, api, context) => {
+					const minutes = args.minutes ?? 30;
+					if (!(minutes >= 1 && minutes <= 1440)) throw new Error("minutes must be from 1 to 1440");
+					const request = {
+						file: improve.file,
+						title: args.title,
+						body: improveBody(args.complaint, args.gap, new Date(Date.now() - minutes * 60_000), improveHost),
+						host: improveHost,
+						agent: improveAgent,
+						...(SOURCE.startsWith("/nix/store/") ? {} : { dir: SOURCE }),
+						review: true,
+						key: `${instance}:${api.taskId}`,
+					};
+					const text = await queueAndFollow(request, (input) => api.commit((tx) => follow(tx, followTask, input, Number(api.conversationId)), context));
+					return { output: [{ type: "text", text }] };
+				},
+			})]),
 			defineTool({
 				name: "org_resume_task",
 				description: "When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and deploy off, and select one host. Refuse an active agent. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work.",
