@@ -1,6 +1,6 @@
 #+TITLE: June's graphical and voice interfaces
 
-Design notes for a desktop overlay, an Android assistant, an avatar, and voice. Nothing here is built yet. The work is tracked as Org tasks; this file holds the reasoning those tasks refer to. The recommendations here were accepted as the plan; spikes and experiments still settle their details, and anything still open says so. Research dates from October 2026; recheck versions and prices before relying on them.
+Design notes for a desktop overlay, an Android assistant, an avatar, and voice. Only the avatar vocabulary and the Android proof of concept are built so far. The work is tracked as Org tasks; this file holds the reasoning those tasks refer to. The recommendations here were accepted as the plan; spikes and experiments still settle their details, and anything still open says so. Research dates from October 2026; recheck versions and prices before relying on them.
 
 * What already exists
 The plan builds on these seams rather than beside them.
@@ -61,6 +61,27 @@ Hermes Relay (MIT, Kotlin, active in October 2026) implements =VoiceInteractionS
 
 ** Recommended
 The user already knows GrapheneOS lets them pick a custom assistant, so the proof of concept is about June's own app taking the role and opening cleanly. A native Kotlin and Jetpack Compose app in an =android/= directory of this repository, built with the Android SDK through Nix. Prove role selection and invocation with a placeholder session before connecting it to June. Voice processing runs on the daemon host rather than on the phone, so the phone and the desktop share one pipeline.
+
+** Proof of concept
+=android/= holds a placeholder assistant: a =VoiceInteractionService=, its session service, a stub =RecognitionService=, and a launcher activity. It has no dependencies beyond the Kotlin standard library, so it builds with the SDK's own tools (=aapt2=, =kotlinc=, =d8=, =zipalign=) inside a Nix derivation, with no Gradle. Compose will need Gradle and a Maven dependency lock; that move belongs to the task that connects the app to June.
+
+#+begin_src sh
+nix build .#android                 # result/june.apk, unsigned
+nix run .#android-install           # sign with ~/.android/debug.keystore, then adb install -r
+#+end_src
+
+The session records each invocation and shows it: =showFlags= by name, the =args= bundle (whose =invocation_type= tells a gesture from a power-button press), whether the keyguard was up, what =onHandleAssist= returned (app, windows, view nodes, nodes with text), and the screenshot's size or =null=. The launcher activity shows whether the app holds =ROLE_ASSISTANT=, its install and update times, and the last invocation's report, and offers buttons for Default apps and for =RoleManager.createRequestRoleIntent=. The same lines go to logcat under the tag =June=, so =adb logcat -s June= collects them.
+
+Built and checked on kit: the APK targets API 36 with minimum 33, its manifest and voice interaction metadata are as intended, all classes are in the dex, and the install app signs it with APK Signature Scheme v3. d8 warns that it cannot rewrite Kotlin 2.3's class metadata; nothing reads that metadata at runtime.
+
+Still to check on the phone:
+- Whether June appears under Default apps, Digital assistant app, without Google Play services, and whether it does without the stub =RecognitionService=.
+- Whether the role request button works or Android refuses it, since the assistant role is normally not requestable.
+- Which gestures and power-button options invoke the session, and their =invocation_type=.
+- What shows over the lock screen.
+- What =onHandleAssist= and the screenshot return with "use text from screen" and "use screenshot" on and off.
+- Whether =nix run .#android-install= (a reinstall) clears the role.
+- Whether selecting June also makes the stub the system speech recognizer, which would break voice typing in other apps.
 
 * Avatar
 ** Two signals
