@@ -44,10 +44,16 @@ export type Config = {
 	/**
 	 * Hosts June may queue AUTO tasks for; empty turns the dispatch tools off. `host` and `agent` are the defaults the
 	 * dispatcher writes into an AUTO task's drawer when it lacks them and no tag names one: `host` defaults to the first
-	 * of `hosts`, `agent` to pi. `settle` is how many seconds a heading the user typed must stay unchanged before the
-	 * dispatcher launches it (120 without it).
+	 * of `hosts`, `agent` to pi. `agents` are the ones June may choose for a task, `agent` alone without it. `settle` is
+	 * how many seconds a heading the user typed must stay unchanged before the dispatcher launches it (120 without it).
 	 */
-	readonly dispatch: { readonly hosts: readonly string[]; readonly host?: string; readonly agent?: string; readonly settle?: number };
+	readonly dispatch: {
+		readonly hosts: readonly string[];
+		readonly host?: string;
+		readonly agent?: string;
+		readonly agents?: readonly string[];
+		readonly settle?: number;
+	};
 	readonly herdr: {
 		readonly session: string;
 		/** This machine's name, as Org host tags and herdr: links use it. */
@@ -238,7 +244,19 @@ function dispatch(given: Partial<Config["dispatch"]> | undefined): Config["dispa
 	for (const key of ["host", "agent"] as const)
 		if (given?.[key] !== undefined && !(typeof given[key] === "string" && /^[a-z0-9-]+$/.test(given[key]!))) throw new Error(`dispatch.${key} must be a plain name`);
 	if (given?.settle !== undefined && !(Number.isInteger(given.settle) && given.settle >= 0)) throw new Error("dispatch.settle must be whole seconds, 0 or more");
-	return { hosts, ...(given?.host ? { host: given.host } : {}), ...(given?.agent ? { agent: given.agent } : {}), ...(given?.settle !== undefined ? { settle: given.settle } : {}) };
+	const agents = given?.agents;
+	if (agents !== undefined) {
+		if (!(Array.isArray(agents) && agents.length > 0 && agents.every((agent) => typeof agent === "string" && /^[a-z0-9-]+$/.test(agent))))
+			throw new Error("dispatch.agents must be a list of plain names");
+		if (given?.agent !== undefined && !agents.includes(given.agent)) throw new Error("dispatch.agent must be one of dispatch.agents");
+	}
+	return {
+		hosts,
+		...(given?.host ? { host: given.host } : {}),
+		...(given?.agent ? { agent: given.agent } : {}),
+		...(agents ? { agents } : {}),
+		...(given?.settle !== undefined ? { settle: given.settle } : {}),
+	};
 }
 
 function watch(given: Config["watch"]): Config["watch"] {

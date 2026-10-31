@@ -28,7 +28,7 @@ async function fixture() {
 	await writeFile(join(root, "other.org"), "* TODO not on the agenda\n");
 	const agenda = join(tmp.dir, "agenda");
 	await writeFile(agenda, `${project}\n${join(root, "asana.org")}\n`);
-	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: agenda, people: join(root, "people.org") }, dispatch: { hosts: ["kit", "cog"] } };
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: agenda, people: join(root, "people.org") }, dispatch: { hosts: ["kit", "cog"], agents: ["pi", "claude"] } };
 	const runs: string[][] = [];
 	const dispatch = new Dispatch(new Org(root), config, async (argv) => {
 		runs.push([...argv]);
@@ -59,6 +59,16 @@ test("a queued task is a new first heading with its agent and host in the drawer
 		text,
 		/Repositories:\n- portal: \[\[file:~\/src\/studio\/portal\/\]\[local\]\]\n\n\* AUTO Investigate the flaky login test\n:PROPERTIES:\n:ID: [0-9a-f-]{36}\n:AGENT: pi\n:HOST: kit\n:JUNE_REQUEST: inst:7\n:END:\nJune queued this because Alex asked for it.\n\n\*\* Scope\nFind why login fails one run in ten.\n\n\* PROG Existing thread\n/,
 	);
+});
+
+test("June can choose the agent for a queued task", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	await f.dispatch.queue({ ...request, body, agent: "claude" });
+	assert.match(await readFile(f.project, "utf8"), /^:AGENT: claude\n:HOST: kit$/m);
+	await assert.rejects(f.dispatch.queue({ ...request, body, key: "inst:8", agent: "cobol" }), /agent is one of pi, claude/);
+	const only = new Dispatch(new Org(f.root), { ...f.config, dispatch: { hosts: ["kit"], agent: "pi" } }, async () => "");
+	await assert.rejects(only.queue({ ...request, body, key: "inst:9", agent: "claude" }), /agent is one of pi$/, "without dispatch.agents, only the default agent");
 });
 
 test("queueing refuses files and requests the dispatcher should not get", async (t) => {
@@ -138,6 +148,9 @@ test("resume uses the shared org-edit command with an expected state and request
 	assert.deepEqual(f.runs.at(-1), ["org-edit", "todo", f.project, "Existing thread", "AUTO", "--expect", "HOLD", "--request", "inst:8", "--host", "kit", "--note", "Alex chose option A."]);
 	assert.equal((await readFile(f.project, "utf8")).match(/^\* /gm)?.length, 1, "no duplicate heading written by June");
 	await assert.rejects(f.dispatch.resume({ file: request.file, heading: "Existing thread", expected: "TODO", host: "lux", note: "Alex asked.", key: "inst:9" }, herdr), /No allowed dispatcher/);
+	await f.dispatch.resume({ file: request.file, heading: "Existing thread", expected: "HOLD", host: "cog", agent: "claude", note: "Alex asked for Claude.", key: "inst:10" }, herdr);
+	assert.deepEqual(f.runs.at(-1)!.slice(-6), ["--host", "cog", "--agent", "claude", "--note", "Alex asked for Claude."]);
+	await assert.rejects(f.dispatch.resume({ file: request.file, heading: "Existing thread", expected: "HOLD", host: "kit", agent: "cobol", note: "Alex asked.", key: "inst:11" }, herdr), /agent is one of/);
 	await assert.rejects(f.dispatch.resume({ file: "asana.org", heading: "mirrored", expected: "TODO", host: "kit", note: "Alex asked.", key: "inst:9" }, herdr), /does not write/);
 });
 

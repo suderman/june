@@ -1,7 +1,7 @@
 ;;; org-edit.el --- Let Org make agents' state and date changes  -*- lexical-binding: t; -*-
 
 ;; Batch entry points, run through the org-edit wrapper:
-;;   org-edit-todo      FILE HEADING STATE [--expect STATE] [--request KEY --host HOST --note TEXT]
+;;   org-edit-todo      FILE HEADING STATE [--expect STATE] [--request KEY --host HOST [--agent AGENT] --note TEXT]
 ;;   org-edit-schedule  FILE HEADING WHEN
 ;;   org-edit-deadline  FILE HEADING WHEN
 ;;   org-edit-date      WHEN
@@ -135,14 +135,15 @@ Print the heading unless QUIET is non-nil."
 
 (defun org-edit-todo ()
   "Set FILE HEADING to STATE, optionally checking --expect STATE.
-June uses --request KEY --host HOST --note TEXT to resume a task once.
+June uses --request KEY --host HOST --note TEXT to resume a task once, and --agent
+AGENT to change who runs it.
 Coding workers must not set AUTO; that permission lives in instructions."
   (let* ((args command-line-args-left)
          (file (pop args)) (heading (pop args)) (state (upcase (or (pop args) "")))
-         expected request host note result)
+         expected request host agent note result)
     (setq command-line-args-left nil)
     (unless (and file heading (not (string-empty-p state)))
-      (error "usage: org-edit todo FILE HEADING STATE [--expect STATE] [--request KEY --host HOST --note TEXT]"))
+      (error "usage: org-edit todo FILE HEADING STATE [--expect STATE] [--request KEY --host HOST [--agent AGENT] --note TEXT]"))
     (while args
       (let ((flag (pop args)) (value (pop args)))
         (unless (and value (not (string-empty-p value))) (error "missing value for %s" flag))
@@ -150,12 +151,14 @@ Coding workers must not set AUTO; that permission lives in instructions."
           ("--expect" (setq expected (upcase value)))
           ("--request" (setq request value))
           ("--host" (setq host value))
+          ("--agent" (setq agent value))
           ("--note" (setq note value))
           (_ (error "unknown option %s" flag)))))
-    (when (or request host note)
+    (when (or request host agent note)
       (unless (and (equal state "AUTO") request host note (member expected '("TODO" "EVAL" "HOLD")))
         (error "resuming needs AUTO, --expect TODO|EVAL|HOLD, --request, --host, and --note"))
       (unless (member host org-dispatch-hosts) (error "unknown dispatcher host %s" host))
+      (when (and agent (not (member agent org-dispatch-launchable))) (error "unknown agent %s" agent))
       (when (or (string-match-p "[\n\r]" request) (string-match-p "[\n\r]" note))
         (error "request and note must each be one line")))
     (org-edit--at
@@ -172,8 +175,10 @@ Coding workers must not set AUTO; that permission lives in instructions."
            (when request
              (org-id-get-create)
              ;; The drawer decides where and how it runs; tags are left as they are.
-             (unless (org-entry-get nil "AGENT")
-               (org-entry-put nil "AGENT" (org-dispatch--default "agent" "pi")))
+             (if agent
+                 (org-entry-put nil "AGENT" agent)
+               (unless (org-entry-get nil "AGENT")
+                 (org-entry-put nil "AGENT" (org-dispatch--default "agent" "pi"))))
              (org-entry-put nil "HOST" host)
              (org-entry-put nil "JUNE_REQUEST" request)
              (org-entry-put nil "REVIEW" "yes")

@@ -35,8 +35,19 @@ export function renderTask(request: QueueRequest, id: string): string {
 	return [`* AUTO ${request.title}`, ":PROPERTIES:", ...properties, ":END:", ...(body ? [body] : []), ""].join("\n");
 }
 
-export function checkRequest(request: QueueRequest, hosts: readonly string[]): void {
+/** The agents June may choose for a task: `dispatch.agents`, or her default agent alone. */
+export function dispatchAgents(dispatch: Config["dispatch"]): readonly string[] {
+	return dispatch.agents ?? [dispatch.agent ?? "pi"];
+}
+
+function checkAgent(agent: string | undefined, agents: readonly string[]): void {
+	if (agent !== undefined && !agents.includes(agent)) throw new Error(`The agent is one of ${agents.join(", ")}`);
+}
+
+export function checkRequest(request: QueueRequest, dispatch: Config["dispatch"]): void {
+	const { hosts } = dispatch;
 	if (!hosts.includes(request.host)) throw new Error(`June may queue only for ${hosts.join(", ")}; ${request.host} has no dispatcher she may use`);
+	checkAgent(request.agent, dispatchAgents(dispatch));
 	if (/[\n\r]/.test(request.title) || request.title.trim() !== request.title || request.title === "")
 		throw new Error("The title is one line without surrounding spaces");
 	if (/^(TODO|AUTO|PROG|EVAL|HOLD|DONE)\b/.test(request.title) || /\s:[\w@#%:]+:$/.test(request.title))
@@ -108,6 +119,8 @@ export type ResumeRequest = {
 	heading: string;
 	expected: "TODO" | "EVAL" | "HOLD";
 	host: string;
+	/** Unset keeps the task's agent, or org-edit fills the default. */
+	agent?: string;
 	note: string;
 	key: string;
 };
@@ -178,7 +191,7 @@ export class Dispatch {
 
 	/** Write the task once. A replay with the same key returns the heading it already wrote. */
 	async queue(request: QueueRequest) {
-		checkRequest(request, this.#config.dispatch.hosts);
+		checkRequest(request, this.#config.dispatch);
 		if (request.dir !== undefined) {
 			const dir = await stat(expandHome(request.dir)).catch(() => undefined);
 			if (!dir?.isDirectory()) throw new Error(`dir ${request.dir} is not a directory; use one of the project's repository links`);
@@ -205,6 +218,7 @@ export class Dispatch {
 	async resume(request: ResumeRequest, herdr: Herdr) {
 		if (!this.#config.dispatch.hosts.includes(request.host)) throw new Error(`No allowed dispatcher on ${request.host}`);
 		if (!["TODO", "EVAL", "HOLD"].includes(request.expected)) throw new Error("Only TODO, EVAL, or HOLD tasks can resume");
+		checkAgent(request.agent, dispatchAgents(this.#config.dispatch));
 		if (!request.note.trim() || /[\n\r]/.test(request.note)) throw new Error(`note must be one non-empty line recording ${user()}'s instruction`);
 		const path = await this.#target(request.file);
 		const task = await this.#org.read(request.file, request.heading);
@@ -219,7 +233,7 @@ export class Dispatch {
 		}
 		const out = await this.#run([
 			"org-edit", "todo", path, request.heading, "AUTO", "--expect", request.expected,
-			"--request", request.key, "--host", request.host, "--note", request.note.trim(),
+			"--request", request.key, "--host", request.host, ...(request.agent ? ["--agent", request.agent] : []), "--note", request.note.trim(),
 		], 60_000);
 		try {
 			const result = JSON.parse(out) as { id: string; title: string; host: string; written: boolean };
@@ -284,6 +298,9 @@ export function createDispatchExtension(
 	const minute = followOptions.minuteMs ?? 60_000;
 	const hosts = config.dispatch.hosts;
 	const defaultHost = config.dispatch.host ?? hosts[0];
+	const defaultAgent = config.dispatch.agent ?? "pi";
+	const agents = dispatchAgents(config.dispatch);
+	const agentParameter = (description: string) => Type.Optional(Type.Union(agents.map((agent) => Type.Literal(agent)), { description }));
 	return defineExtension({
 		name: "dispatch",
 		tasks: [followTask],
@@ -311,6 +328,7 @@ export function createDispatchExtension(
 					scope: Type.String({ description: "Outcome, constraints, and success criteria in Org; one physical line per paragraph" }),
 					checklist: Type.Array(Type.String(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
 					host: Type.String({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` }),
+					agent: agentParameter(`Coding agent the dispatcher starts: ${agents.join(" or ")}; default ${defaultAgent}. Choose one when ${user()} names it`),
 					dir: Type.Optional(Type.String({ description: "Existing working directory override, usually one of the project's local repository links. Omit for one-offs without a checkout: the dispatcher uses the project directory" })),
 					review: Type.Optional(Type.Boolean({ description: `Default true: the worker stops at EVAL for human or agent review, including read-only lookups you will review yourself. Set false only when ${user()} explicitly waives review` })),
 				}),
@@ -348,6 +366,7 @@ export function createDispatchExtension(
 					heading: Type.String({ description: "Exact title or id:UUID, as org_read_task accepts" }),
 					expected: Type.Union([Type.Literal("TODO"), Type.Literal("EVAL"), Type.Literal("HOLD")], { description: "Current state just read; a stale request is refused" }),
 					host: Type.String({ description: `Keep the existing host unless the user changes it; otherwise default ${defaultHost}. Allowed: ${hosts.join(", ")}` }),
+					agent: agentParameter(`Only when ${user()} asks for a different agent: ${agents.join(" or ")}. Omit to keep the task's agent`),
 					note: Type.String({ description: `One line recording ${user()}'s request and any answer or revised scope, naming ${user()} rather than writing you` }),
 				}),
 				replay: "safe",

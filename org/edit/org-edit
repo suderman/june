@@ -4,7 +4,7 @@ set -euo pipefail
 # Let Org make agents' state and date changes.
 #
 #   org-edit todo FILE HEADING STATE [--expect STATE]
-#     June may also pass --request KEY --host HOST --note TEXT when granting AUTO.
+#     June may also pass --request KEY --host HOST [--agent AGENT] --note TEXT when granting AUTO.
 #     Coding workers never grant AUTO; Jon and June may.
 #   org-edit schedule FILE HEADING WHEN|none    set or remove SCHEDULED
 #   org-edit deadline FILE HEADING WHEN|none    set or remove DEADLINE

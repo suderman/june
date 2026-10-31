@@ -75,6 +75,12 @@ test("the rhythm, reflection, heartbeat, and patter timing have defaults, take o
 	assert.deepEqual(defaults.dispatch, { hosts: ["kit", "cog"], host: "kit", agent: "pi" });
 	const spaced = await layer("spaced", { dispatch: { hosts: ["kit"], agent: "pi claude" } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: spaced }), /dispatch\.agent must be a plain name/);
+	const agents = loadConfig({ ...tmp.paths, config: await layer("agents", { dispatch: { hosts: ["kit"], agent: "pi", agents: ["pi", "claude"] } }) });
+	assert.deepEqual(agents.dispatch.agents, ["pi", "claude"]);
+	const outside = await layer("outside", { dispatch: { hosts: ["kit"], agent: "codex", agents: ["pi", "claude"] } });
+	assert.throws(() => loadConfig({ ...tmp.paths, config: outside }), /dispatch\.agent must be one of dispatch\.agents/);
+	const empty = await layer("empty", { dispatch: { hosts: ["kit"], agents: [] } });
+	assert.throws(() => loadConfig({ ...tmp.paths, config: empty }), /dispatch\.agents must be a list of plain names/);
 	const settle = loadConfig({ ...tmp.paths, config: await layer("settle", { dispatch: { hosts: ["kit"], settle: 90 } }) });
 	assert.equal(settle.dispatch.settle, 90);
 	const negative = await layer("negative", { dispatch: { hosts: ["kit"], settle: -1 } });

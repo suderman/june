@@ -116,6 +116,11 @@ check "TODO resume creates a missing ID" has "$out" '"id":"[0-9a-f-]*"'
 check "TODO can start as AUTO" line "$tasks" '^\* AUTO Plan$'
 check "a started TODO gets its host in the drawer" line "$tasks" '^:HOST: *kit$'
 run todo "$tasks" Plan HOLD >/dev/null
+out=$(run todo "$tasks" Plan AUTO --expect HOLD --request inst:5 --host kit --agent claude --note 'Jon asked for Claude.')
+check "resume can change the agent" line "$tasks" '^:AGENT: *claude$'
+run todo "$tasks" Plan HOLD >/dev/null
+out=$(run todo "$tasks" Plan AUTO --expect HOLD --request inst:6 --host kit --agent cobol --note 'Jon asked.')
+check "resume refuses an unknown agent" has "$out" 'unknown agent cobol'
 
 out=$(run todo "$tasks" "Twin" PROG)
 check "a duplicate title is refused" has "$out" '2 headings'
