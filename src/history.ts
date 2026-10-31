@@ -3,8 +3,10 @@
 // output, and her private looks (heartbeat, watch, work, follow), marked private.
 import { clip, isQuiet, PRIVATE, summarize, textOf } from "./transcript.ts";
 
-/** Tool output and private prompts in detail are clipped to this many characters. */
+/** Tool output and private prompts in detail are cut to this many characters, keeping their line breaks. */
 const DETAIL_CHARS = 2000;
+
+const cut = (text: string) => (text.length > DETAIL_CHARS ? `${text.slice(0, DETAIL_CHARS - 1)}…` : text);
 
 /** Each entry's time: its message's, or for entries without one, such as patter, the time of the entry before. */
 export function entryTimes(entries: readonly any[]): number[] {
@@ -38,7 +40,7 @@ export function renderHistory(entries: readonly any[], options: { detail?: boole
 		const when = new Date(times[index]!);
 		const date = when.toLocaleDateString("en-CA");
 		if (times[index] && date !== day) lines.push(`== ${(day = date)}`);
-		const say = (who: string, text: string) => lines.push(`${when.toTimeString().slice(0, 5)} ${who}: ${text.trim().replace(/\n/g, "\n      ")}`);
+		const say = (who: string, text: string) => lines.push(`${when.toTimeString().slice(0, 5)} ${who}: ${text.trim().replace(/\n/g, "\n      ").replace(/ +$/gm, "")}`);
 		const message = entry.model?.[0];
 		const mark = looking ? " (private)" : "";
 		switch (entry.kind) {
@@ -46,7 +48,7 @@ export function renderHistory(entries: readonly any[], options: { detail?: boole
 				const source = String(entry.data?.source ?? "?");
 				looking = PRIVATE.has(source);
 				if (!looking) say(`${user} (${source})`, `${entry.data?.text ?? ""}${entry.data?.imageCount ? ` [${entry.data.imageCount} image(s)]` : ""}`);
-				else if (detail) say(`[${source}] (private)`, clip(textOf(message?.content), DETAIL_CHARS));
+				else if (detail) say(`[${source}] (private)`, cut(textOf(message?.content)));
 				return;
 			}
 			case "pi.user": {
@@ -55,7 +57,7 @@ export function renderHistory(entries: readonly any[], options: { detail?: boole
 				looking = PRIVATE.has(tag);
 				if (tag === "/stop") say("--", "stopped");
 				else if (!looking) say(tag ? `[${tag}]` : `${user} (telegram)`, text);
-				else if (detail) say(`[${tag}] (private)`, clip(text, DETAIL_CHARS));
+				else if (detail) say(`[${tag}] (private)`, cut(text));
 				return;
 			}
 			case "pi.assistant": {
@@ -77,7 +79,7 @@ export function renderHistory(entries: readonly any[], options: { detail?: boole
 			case "pi.tool-result": {
 				if (looking && !detail) return;
 				const output = textOf(message?.content);
-				if (detail) say(`  <- ${message?.toolName ?? "tool"}${message?.isError ? " failed" : ""}${mark}`, clip(output, DETAIL_CHARS) || "(no output)");
+				if (detail) say(`  <- ${message?.toolName ?? "tool"}${message?.isError ? " failed" : ""}${mark}`, cut(output).trim() || "(no output)");
 				else if (message?.isError) say(`  <- ${message?.toolName ?? "tool"} failed`, clip(output, 200));
 				return;
 			}

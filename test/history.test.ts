@@ -19,7 +19,7 @@ const entries = [
 	result(3, 0, "herdr_read_agent", "running checks"),
 	said(4, 1, [{ type: "text", text: "he is running checks." }]),
 	{ id: 5, kind: "june.patter", data: { text: "poor little bloke." } },
-	input(6, 5, "heartbeat", "heartbeat", "[heartbeat] A private heartbeat: look at the moment."),
+	input(6, 5, "heartbeat", "heartbeat", "[heartbeat] A private heartbeat: look at the moment.\n* Worth a nudge\n- Collection days"),
 	said(7, 5, [{ type: "toolCall", id: "c2", name: "org_read_task", arguments: { file: "x.org" } }]),
 	result(8, 5, "org_read_task", "secret task text"),
 	said(9, 5, [{ type: "text", text: "QUIET" }]),
@@ -44,7 +44,7 @@ test("the plain view shows what the terminal shows, and detail adds thinking, to
 	assert.match(detail, /June thinking: Finding the worker\n {6}then reading it/);
 	assert.match(detail, /-> herdr_read_agent: \{"target":"w5A:p1"\}/);
 	assert.match(detail, /<- herdr_read_agent: running checks/);
-	assert.match(detail, /\[heartbeat\] \(private\): \[heartbeat\] A private heartbeat/);
+	assert.match(detail, /\[heartbeat\] \(private\): \[heartbeat\] A private heartbeat: look at the moment\.\n {6}\* Worth a nudge\n {6}- Collection days\n/, "private prompts keep their lines");
 	assert.match(detail, /<- org_read_task \(private\): secret task text/);
 	assert.match(detail, /June \(private\): QUIET/);
 	assert.match(detail, /June: still checking\./, "her message from a look reached the user, so it is not private");
