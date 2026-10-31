@@ -23,7 +23,7 @@ export type FollowInput = {
 	updatesUntil?: number;
 };
 /** `reported` is when June was last asked for a progress update. */
-type FollowState = { phase: "watch"; due: number; checks: number; last: string; reported?: number };
+type FollowState = { phase: "watch"; due: number; checks: number; last: string; reported?: number; missing?: boolean };
 
 /** Org ID → follow task, so a task is followed once however often it is queued or replayed. */
 export const Follows = defineDoc<{ ids: Record<string, number> }>({
@@ -137,7 +137,9 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 					return undefined;
 				});
 				const now = runtime.now();
-				const next = seen === undefined ? undefined : decide(task.input, seen, last, now, options);
+				const missing = seen?.missing ?? false;
+				// A save can briefly hide the heading. Confirm on the next poll before ending the follow.
+				const next = seen === undefined || (missing && !task.state.checkpoint.missing) ? undefined : decide(task.input, seen, last, now, options);
 				const reported = task.state.checkpoint.reported ?? task.input.queuedAt;
 				const changed = next?.say !== undefined && next.signal !== last;
 				const update = !changed && next !== undefined && progressDue(task.input, next.signal, reported, now);
@@ -161,7 +163,7 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 					if (notice !== undefined && surface === "telegram") await deliverIn(tx, runtime.registry, runtime.conversationId, notice);
 					return next?.done
 						? { status: "terminal", outcome: { status: "completed", result: null } }
-						: { status: "running", checkpoint: { phase: "watch", due: nextDue, checks: checks + 1, last: next?.signal ?? last, reported: update ? now : reported } };
+						: { status: "running", checkpoint: { phase: "watch", due: nextDue, checks: checks + 1, last: next?.signal ?? last, reported: update ? now : reported, missing } };
 				}, context);
 			},
 		},

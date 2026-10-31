@@ -1,17 +1,24 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
+import { defineExtension } from "@earendil-works/pi-durable";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { createDispatchExtension, improveBody } from "../src/tools/dispatch.ts";
-import { decide, FOLLOW_DEFAULTS, progressDue } from "../src/tools/follow.ts";
+import { createFollowTask, decide, follow, FOLLOW_DEFAULTS, progressDue } from "../src/tools/follow.ts";
 import { Herdr } from "../src/tools/herdr.ts";
 import { createOrgExtension, Org } from "../src/tools/org.ts";
 import { ask, openTestDaemon, tempDir, testConfig, until } from "./helpers.ts";
 
 const input = { id: "abc12345", title: "Check docs", host: "kit", queuedAt: 0 };
 const min = 60_000;
+
+// Readers see either the old fixture or the new one, never writeFile's truncation gap.
+async function replaceFile(file: string, text: string): Promise<void> {
+	await writeFile(`${file}.tmp`, text);
+	await rename(`${file}.tmp`, file);
+}
 
 test("follow reports each transition once and stays quiet otherwise", () => {
 	const at = (state: string, last: string, now = 3 * min, agent?: string) =>
@@ -82,7 +89,7 @@ test("June follows a task she did not queue with timed updates until told to sto
 	await new Promise((r) => setTimeout(r, 400));
 	assert.equal((await reports()).length, stopped, "no updates after stopping");
 
-	await writeFile(file, (await readFile(file, "utf8")).replace("* PROG Refresh content", "* EVAL Refresh content"));
+	await replaceFile(file, (await readFile(file, "utf8")).replace("* PROG Refresh content", "* EVAL Refresh content"));
 	await until(async () => (await reports()).length === stopped + 1, 5000);
 	assert.match((await reports()).at(-1)!, /«Refresh content» \(work.org\) you are following is now EVAL/);
 	await until(async () => (await daemon.harness.inspect(BG)).tasks.filter((task) => task.record.kind === "june.follow").length === 0);
@@ -130,7 +137,7 @@ test("june_improve writes the user's words, June's reading, and the transcript c
 	assert.ok(Math.abs(since - (before - 20 * min)) < 5000, "the transcript starts where the exchange began");
 	assert.ok(kicks.some((args) => args[0] === "systemctl"), "this host's dispatcher is started");
 
-	await writeFile(file, text.replace("* AUTO Let June", "* EVAL Let June"));
+	await replaceFile(file, text.replace("* AUTO Let June", "* EVAL Let June"));
 	await until(async () => (await daemon.root.context(BG)).entries.some((e) => (e.data as { source?: string })?.source === "follow"));
 });
 
@@ -148,7 +155,7 @@ test("June reads and closes her own reviewed EVAL task before reporting through 
 	const dispatch = createDispatchExtension(config, new Org(root), herdr, "inst", async (args) => {
 		if (args[0] === "org-edit") {
 			edits.push([...args]);
-			await writeFile(file, (await readFile(file, "utf8")).replace("* EVAL Check docs", "* DONE Check docs"));
+			await replaceFile(file, (await readFile(file, "utf8")).replace("* EVAL Check docs", "* DONE Check docs"));
 		}
 		return "";
 	}, {
@@ -176,11 +183,11 @@ test("June reads and closes her own reviewed EVAL task before reporting through 
 
 	// The dispatcher launches it, then the agent finishes at EVAL.
 	const text = await readFile(file, "utf8");
-	await writeFile(file, text.replace("* AUTO Check docs", "* PROG Check docs"));
+	await replaceFile(file, text.replace("* AUTO Check docs", "* PROG Check docs"));
 	await new Promise((r) => setTimeout(r, 200));
 	assert.equal((await follows()).length, 0, "launch and work are silent");
 	assert.doesNotMatch(text, /^:REVIEW: no$/m, "review remains enabled by default");
-	await writeFile(file, (await readFile(file, "utf8")).replace("* PROG Check docs", "* EVAL Check docs") + "\n** Outcome\nDocs match the code. Verified by comparing the documented commands with their implementations.\n");
+	await replaceFile(file, (await readFile(file, "utf8")).replace("* PROG Check docs", "* EVAL Check docs") + "\n** Outcome\nDocs match the code. Verified by comparing the documented commands with their implementations.\n");
 	await until(async () => (await follows()).length === 1);
 	assert.match(JSON.stringify((await follows())[0]!.data), /is now EVAL/);
 	await until(async () => !(await daemon.status()).busy && faux.state.callCount === 5);
@@ -210,7 +217,7 @@ test("resuming after EVAL and HOLD follows each new run without duplicate report
 		const expected = args[args.indexOf("--expect") + 1]!;
 		assert.ok(text.includes(`* ${expected} Check docs`));
 		const key = args[args.indexOf("--request") + 1]!;
-		await writeFile(file, text.replace(`* ${expected} Check docs`, "* AUTO Check docs").replace(/:JUNE_REQUEST: .+/, `:JUNE_REQUEST: ${key}`));
+		await replaceFile(file, text.replace(`* ${expected} Check docs`, "* AUTO Check docs").replace(/:JUNE_REQUEST: .+/, `:JUNE_REQUEST: ${key}`));
 		const id = /^:ID: (.+)$/m.exec(text)![1]!;
 		return JSON.stringify({ id, title: "Check docs", host: "kit", written: true });
 	}, { intervalMs: 40, launchMs: 60_000, maxMs: 3_600_000 });
@@ -231,7 +238,7 @@ test("resuming after EVAL and HOLD follows each new run without duplicate report
 	const originalId = /^:ID: (.+)$/m.exec(await readFile(file, "utf8"))![1];
 	for (const [index, state] of ["EVAL", "HOLD", "DONE"].entries()) {
 		if (index > 0) await ask(tmp.paths.socket, "resume it");
-		await writeFile(file, (await readFile(file, "utf8")).replace("* AUTO Check docs", `* ${state} Check docs`));
+		await replaceFile(file, (await readFile(file, "utf8")).replace("* AUTO Check docs", `* ${state} Check docs`));
 		await until(async () => (await reports()).length === index + 1 && !(await daemon.status()).busy && faux.state.callCount === (index + 1) * 3);
 		assert.match(JSON.stringify((await reports()).at(-1)!.data), new RegExp(state));
 	}
@@ -243,6 +250,75 @@ test("resuming after EVAL and HOLD follows each new run without duplicate report
 	assert.equal(final.match(/^\* /gm)?.length, 1, "resume never creates another task");
 	const inspection = await daemon.harness.inspect(BG);
 	assert.equal(inspection.tasks.filter((task) => task.record.kind === "june.follow").length, 0, "superseded HOLD watcher also ended");
+});
+
+test("following ignores isolated missing reads, resets after recovery or errors, and keeps HOLD deduplicated", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "org");
+	const file = join(root, "todo.org");
+	await mkdir(root, { recursive: true });
+	const org = new Org(root);
+	const byId = org.byId.bind(org);
+	const states = ["", "PROG", "", "HOLD", "", "HOLD", "", new Error("read failed"), "", "DONE"];
+	let reads = 0;
+	t.mock.method(org, "byId", async (id: string) => {
+		const state = states[reads++];
+		if (state instanceof Error) throw state;
+		assert.notEqual(state, undefined, "the follow ends at DONE");
+		await replaceFile(file, state ? `* ${state} Check docs\n:PROPERTIES:\n:ID: ${input.id}\n:END:\n` : "");
+		return byId(id);
+	});
+	const task = createFollowTask(org, new Herdr(testConfig(tmp.dir).herdr, async () => "{}"), { intervalMs: 40, launchMs: 60_000, maxMs: 3_600_000 });
+	const faux = fauxProvider();
+	faux.setResponses([fauxAssistantMessage("On hold."), fauxAssistantMessage("Finished.")]);
+	const daemon = await openTestDaemon({ ...tmp, faux, extensions: [defineExtension({ name: "follow-test", tasks: [task] })] });
+	t.after(() => daemon.close());
+	await daemon.harness.commit((tx) => follow(tx, task, { ...input, queuedAt: Date.now() }, Number(daemon.root.id)), BG);
+	const reports = async () => (await daemon.root.context(BG)).entries.filter((e) => (e.data as { source?: string })?.source === "follow");
+	await until(async () => (await reports()).length >= 1);
+	assert.match(JSON.stringify((await reports())[0]!.data), /is on HOLD/, "an empty read does not end the follow");
+	await until(async () => (await reports()).length >= 2);
+	assert.match(JSON.stringify((await reports())[1]!.data), /is now DONE/);
+	await until(async () => (await daemon.harness.inspect(BG)).tasks.filter((task) => task.record.kind === "june.follow").length === 0);
+	assert.equal(reads, states.length);
+	assert.equal((await reports()).length, 2, "recovery into the same HOLD stays silent");
+});
+
+test("following confirms persistent removal across a restart, including a heading followed without an ID", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "org");
+	await mkdir(root, { recursive: true });
+	const org = new Org(root);
+	const byHeading = org.byHeading.bind(org);
+	let reads = 0;
+	t.mock.method(org, "byHeading", async (file: string, heading: string) => {
+		reads++;
+		return byHeading(file, heading);
+	});
+	const task = createFollowTask(org, new Herdr(testConfig(tmp.dir).herdr, async () => "{}"), { intervalMs: 1000, launchMs: 60_000, maxMs: 3_600_000 });
+	const extensions = [defineExtension({ name: "follow-test", tasks: [task] })];
+	const faux = fauxProvider();
+	faux.setResponses([fauxAssistantMessage("No longer following it.")]);
+	let daemon = await openTestDaemon({ ...tmp, faux, extensions });
+	t.after(() => daemon.close());
+	await daemon.harness.commit((tx) => follow(tx, task, { ...input, file: "todo.org", adopted: true, queuedAt: Date.now() - 1000 }, Number(daemon.root.id)), BG);
+	await until(async () => {
+		const live = (await daemon.harness.inspect(BG)).tasks.find((task) => task.record.kind === "june.follow");
+		assert.ok(live, "the first miss leaves the follow running");
+		return (live.record.state.checkpoint as { checks: number }).checks === 1;
+	});
+	assert.equal(reads, 1);
+	assert.equal(faux.state.callCount, 0, "the first miss stays silent");
+	await daemon.close();
+	daemon = await openTestDaemon({ ...tmp, faux, extensions });
+	const reports = async () => (await daemon.root.context(BG)).entries.filter((e) => (e.data as { source?: string })?.source === "follow");
+	await until(async () => (await reports()).length === 1);
+	assert.match(JSON.stringify((await reports())[0]!.data), /is no longer in Org/);
+	await until(async () => (await daemon.harness.inspect(BG)).tasks.filter((task) => task.record.kind === "june.follow").length === 0);
+	assert.equal(reads, 2, "the second miss confirms removal, even after restarting");
+	assert.equal((await reports()).length, 1);
 });
 
 test("following survives a daemon restart", async (t) => {
@@ -267,7 +343,7 @@ test("following survives a daemon restart", async (t) => {
 	await ask(tmp.paths.socket, "queue it");
 	await daemon.close();
 
-	await writeFile(file, (await readFile(file, "utf8")).replace("* AUTO Check docs", "* DONE Check docs"));
+	await replaceFile(file, (await readFile(file, "utf8")).replace("* AUTO Check docs", "* DONE Check docs"));
 	const after = fauxProvider();
 	after.setResponses([fauxAssistantMessage("It finished.")]);
 	daemon = await openTestDaemon({ ...tmp, faux: after, config, extensions: [extension()] });
