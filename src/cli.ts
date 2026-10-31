@@ -3,8 +3,9 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { createLogger } from "pi-durable-telegram";
-import { daemonHost, loadConfig, paths, readEnvFiles, shortHostname } from "./config.ts";
+import { daemonHost, loadConfig, paths, readConfigFile, readEnvFiles, shortHostname } from "./config.ts";
 import { startDaemon } from "./daemon.ts";
+import { parseSince, renderHistory } from "./history.ts";
 import { createJuneModels, providerFromPiModels } from "./models.ts";
 import { findSkills } from "./prompt.ts";
 import { Client, DaemonUnavailable, parseCommand, type Reply, type Status } from "./protocol.ts";
@@ -14,6 +15,9 @@ const USAGE = `usage:
   june                    open the terminal client
   june ask [--json] TEXT  send one message and print the answer ("-" or no text reads stdin)
   june status [--json]    daemon, model, and conversation state, without a model call
+  june transcript [--last N] [--since WHEN] [--detail] [--json]
+                          the recent conversation as text: the last N entries (200 by default), or those since
+                          WHEN (30m, 2h, 1d, 16:20, or a date); --detail adds thinking, tool output, and private looks
   june doctor             check configuration and dependencies
   june init [NAME]        create missing personal files from the templates, for NAME or user.name
   june serve              run the daemon`;
@@ -24,7 +28,7 @@ async function main(argv: string[]): Promise<number> {
 	const json = rest.includes("--json");
 	const args = rest.filter((a) => a !== "--json");
 	const p = paths();
-	if (["tui", "ask", "status"].includes(command)) {
+	if (["tui", "ask", "status", "transcript"].includes(command)) {
 		const remote = remoteHost(p);
 		if (remote !== undefined) return overSsh(remote, command, argv);
 	}
@@ -40,11 +44,12 @@ async function main(argv: string[]): Promise<number> {
 			return ask(p.socket, args, json);
 		case "status":
 			return status(p.socket, json);
+		case "transcript":
+			return transcript(p, args, json);
 		case "doctor":
 			return doctor();
 		case "init": {
 			const { init } = await import("./init.ts");
-			const { readConfigFile } = await import("./config.ts");
 			const name = args.join(" ") || String(readConfigFile(p).user?.name ?? "");
 			for (const { path, created } of init(p, name)) console.log(`${created ? "created" : "kept   "} ${path}`);
 			return 0;
@@ -149,6 +154,32 @@ async function ask(socket: string, args: string[], json: boolean): Promise<numbe
 	else if (result.status === "done") console.log(result.text ?? "");
 	else console.error(`unanswered: ${result.reason}`);
 	return result.status === "done" ? 0 : 1;
+}
+
+async function transcript(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {
+	let limit: number | undefined;
+	let since: number | undefined;
+	let detail = false;
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === "--detail") detail = true;
+		else if (args[i] === "--last" && /^[1-9]\d*$/.test(args[i + 1] ?? "")) limit = Number(args[++i]);
+		else if (args[i] === "--since" && (since = parseSince(args[i + 1] ?? "")) !== undefined) i++;
+		else {
+			console.error(USAGE);
+			return 2;
+		}
+	}
+	const client = await connect(p.socket);
+	if (client === undefined) return 3;
+	const reply = await client.request({ op: "history", requestId: randomUUID(), ...(limit ? { limit } : {}), ...(since !== undefined ? { since } : {}) });
+	client.close();
+	if (reply.type !== "history") {
+		console.error(reply.type === "error" ? reply.message : "unexpected reply");
+		return 1;
+	}
+	if (json) console.log(JSON.stringify({ omitted: reply.omitted, entries: reply.entries }));
+	else console.log(renderHistory(reply.entries, { detail, user: String(readConfigFile(p).user?.name ?? "") || "user", omitted: reply.omitted }));
+	return 0;
 }
 
 async function status(socket: string, json: boolean): Promise<number> {

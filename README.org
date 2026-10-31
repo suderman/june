@@ -19,6 +19,7 @@ june ask "What are my agents doing?"
 june ask --json "..."    # {"requestId","status","text","reason"}
 echo "..." | june ask -
 june status [--json] # daemon, model, and conversation state; no model call
+june transcript --since 16:20 --detail  # the conversation as text; see below
 june doctor          # configuration and dependency checks
 june init [NAME]     # copy the starting files into place
 june serve           # the daemon
@@ -31,6 +32,8 @@ To attach a screenshot in the terminal client, press Ctrl+V or Shift+Insert on a
 Pasting an image file path also attaches it. Quote paths with spaces or escape the spaces with backslashes. Supported files are PNG, JPEG, WebP, GIF, and BMP. Up to ten images can accompany one message, with a 20 MiB limit per source file and 20 MiB total after preparation. Images are resized to fit the model and stored in the conversation; the transcript shows their count. A missing or invalid file, or a text-only model, leaves the draft unsent. Clipboard markers recalled from history need a fresh paste. This attachment handling is for the interactive client, not =june ask=.
 
 With Herdr, Ctrl+V can upload a clipboard image from the connecting machine and paste its path on the daemon host. June attaches that file through the same image-path handling; she does not need direct access to the connecting machine's clipboard. Herdr must intercept the paste key for this upload, so June's Shift+Insert binding alone does not add Shift+Insert uploads to Herdr. Over plain SSH without a clipboard-uploading client, paste a path to an image already on the daemon host. June refuses direct clipboard access over SSH rather than read the daemon host's unrelated clipboard.
+
+=june transcript= prints the recent conversation as text for a reader outside the terminal, such as a worker looking into something June could not do. It shows the last 200 entries by default, or the last =--last N=, or those since =--since= =30m=, =2h=, =1d=, =16:20=, or a date. The plain view is what the terminal shows, with one line per thinking block and each tool call; =--detail= adds her full thinking, tool arguments and output (clipped at 2,000 characters), and her private heartbeat, watch, work, and follow looks, marked private. =--json= prints the raw entries. It reads through the daemon socket, so the conversation stays on the daemon's host; elsewhere it runs there over SSH, as =june ask= does.
 
 The terminal client, =june ask=, and Telegram share these slash commands:
 

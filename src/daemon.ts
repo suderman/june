@@ -31,6 +31,7 @@ import { type Config, expandHome, type Paths } from "./config.ts";
 import { plainPort } from "./plain.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { createHeartbeat } from "./heartbeat.ts";
+import { entryTimes } from "./history.ts";
 import { createSituation } from "./situation.ts";
 import { setUser } from "./user.ts";
 import { validateImages } from "./images.ts";
@@ -50,6 +51,8 @@ import { createMail } from "./mail.ts";
 
 export const VERSION = "0.1.0";
 const SNAPSHOT_ENTRIES = 200;
+/** The most entries one history request returns. */
+const HISTORY_ENTRIES = 2000;
 
 export type DaemonOptions = {
 	readonly config: Config;
@@ -348,6 +351,17 @@ function serve(socket: Socket, scope: Scope): void {
 					send({ type: "events", events: events.map((e) => (e.type === "snapshot" ? trim(e).snapshot : e)) as AgentEvent[] });
 				});
 				return;
+			}
+			case "history": {
+				// The entries attach would show, without a stream: since a time, newest last.
+				const stream = await watchEvents(scope.harness, scope.root.id, context);
+				await stream.stop();
+				const all = stream.snapshot.entries;
+				const times = entryTimes(all);
+				const from = request.since === undefined ? 0 : times.findIndex((time) => time >= request.since!);
+				const limit = Math.min(Math.max(1, request.limit ?? (request.since === undefined ? SNAPSHOT_ENTRIES : HISTORY_ENTRIES)), HISTORY_ENTRIES);
+				const entries = (from < 0 ? [] : all.slice(from)).slice(-limit);
+				return send({ type: "history", requestId: request.requestId, entries, omitted: all.length - entries.length });
 			}
 			case "submit": {
 				const images = request.images ?? [];

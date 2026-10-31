@@ -69,7 +69,7 @@ export function decide(input: FollowInput, seen: Observation, last: string, now:
 			return {
 				signal: seen.state,
 				done: true,
-				say: `${Name} is now ${seen.state}. Read it with org_read_task, including its outcome and verification evidence.${seen.state === "EVAL" ? ` If you created it, the request is satisfied, and no decision or review from ${user()} remains, use org_complete_task to mark it DONE before reporting. Otherwise leave EVAL and explain what needs ${user()}'s review.` : ""} Tell ${user()} what came of it in a line or two.`,
+				say: `${Name} is now ${seen.state}. Read it with org_read_task, including its outcome and verification evidence.${seen.state === "EVAL" ? ` If you created it, the request is satisfied, and no decision or review from ${user()} remains, use org_complete_task to mark it DONE before reporting. Otherwise leave EVAL and explain what needs ${user()}'s review.` : ""} Tell ${user()} what came of it in a line or two. This ends your follow of it, timed updates included.`,
 			};
 		case "HOLD":
 			return { signal: "HOLD", done: false, say: `${Name} is on HOLD. Read its Dialog with org_read_task and pass the agent's question to the user.` };

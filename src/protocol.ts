@@ -26,6 +26,8 @@ export function parseCommand(text: string): { name: string; args: string } | und
 export type Request =
 	| { op: "status"; requestId: string }
 	| { op: "attach"; requestId: string }
+	/** Entries without a stream: those since `since` (epoch ms), the newest `limit` of them. */
+	| { op: "history"; requestId: string; since?: number; limit?: number }
 	| { op: "submit"; requestId: string; text: string; images?: ImageContent[]; source: Source; whenBusy?: "steer" | "followUp"; wait?: boolean }
 	| { op: "command"; requestId: string; name: string; args?: string };
 
@@ -51,6 +53,7 @@ export type Status = {
 export type Reply =
 	| { type: "status"; requestId: string; status: Status }
 	| { type: "snapshot"; requestId: string; snapshot: SnapshotEvent; omitted: number }
+	| { type: "history"; requestId: string; entries: SnapshotEvent["entries"]; omitted: number }
 	| { type: "events"; events: readonly AgentEvent[] }
 	| { type: "accepted"; requestId: string; submissionId: number }
 	| { type: "settled"; requestId: string; status: "done" | "unanswered"; text?: string; reason?: string }

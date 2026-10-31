@@ -6,7 +6,7 @@ export const QUIET = "QUIET";
 export const isQuiet = (text: string) => /^\s*QUIET\.?\s*$/i.test(text);
 
 /** June's own looks, by their june.input source or [tag]: only a real message to the user shows, never the prompt or her tools. */
-const PRIVATE = new Set(["heartbeat", "watch", "work", "follow"]);
+export const PRIVATE = new Set(["heartbeat", "watch", "work", "follow"]);
 
 type Block = { type: string; text?: string; thinking?: string; name?: string; arguments?: unknown; id?: string };
 
@@ -238,7 +238,7 @@ export function textOf(content: unknown): string {
 		.join("");
 }
 
-function summarize(args: unknown): string {
+export function summarize(args: unknown): string {
 	if (args === null || typeof args !== "object") return "";
 	const values = Object.entries(args as Record<string, unknown>)
 		.filter(([, v]) => typeof v === "string" || typeof v === "number")
@@ -246,7 +246,7 @@ function summarize(args: unknown): string {
 	return values.join(" ");
 }
 
-function clip(text: string, max: number): string {
+export function clip(text: string, max: number): string {
 	const flat = text.replace(/\s+/g, " ").trim();
 	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
