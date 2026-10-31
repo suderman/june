@@ -49,8 +49,10 @@ out=$(run todo "$tasks" "Fix the thing" prog)
 check "todo sets a state by title" line "$tasks" '^\* PROG Fix the thing :kit:$'
 check "todo prints the heading" has "$out" 'PROG Fix the thing'
 
+sed -i 's/^\* PROG Fix the thing :kit:$/* PROG Fix the thing :kit:auto:/' "$tasks"
 run todo "$tasks" "Fix the thing" DONE >/dev/null
 check "DONE writes CLOSED" line "$tasks" '^CLOSED: \[20'
+check "leaving PROG drops :auto:" line "$tasks" '^\* DONE Fix the thing :kit:$'
 
 run todo "$tasks" "Water plants" DONE >/dev/null
 check "DONE on a repeater advances it" line "$tasks" 'SCHEDULED: <2026-10-08 Thu +1w>'

@@ -13,6 +13,7 @@
 ;; tags are decoration. SCHEDULED delays a task; a repeater makes it recur.
 ;; Other settings are properties: REVIEW, DEPLOY, BRANCH, MODEL, DIR, and
 ;; RETRY, the number of times an agent may return the task to AUTO later.
+;; While an agent works on it, a PROG task carries the :auto: tag.
 
 (require 'org)
 (require 'org-id)
@@ -91,6 +92,19 @@ Nil takes dispatch.settle from June's config.json, else 120.")
       make-backup-files nil
       auto-save-default nil
       create-lockfiles nil)
+
+;; :auto: tells a PROG task an agent is working on from one Jon left in PROG.
+;; Claiming adds it. Any other state removes it, however it changes in batch
+;; Org (finish, retry, a hold, org-edit); the watcher covers changes in Jon's Emacs.
+(defun org-dispatch--untag-auto ()
+  "Remove :auto: from the heading at point."
+  (when (member "auto" (org-get-tags nil t))
+    (org-toggle-tag "auto" 'off)))
+
+(defvar org-state)
+(defun org-dispatch--leave-prog ()
+  (unless (equal org-state "PROG") (org-dispatch--untag-auto)))
+(add-hook 'org-after-todo-state-change-hook #'org-dispatch--leave-prog)
 
 (defun org-dispatch--log (format-string &rest args)
   (princ (concat (format-time-string "%F %T ") (apply #'format format-string args) "\n")))
@@ -604,6 +618,7 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
          (org-entry-put nil "REPEAT_TO_STATE" "AUTO")
          (org-dispatch--trim-log (plist-get task :id)))
        (org-todo "PROG")
+       (org-toggle-tag "auto" 'on)
        (when session
          (unless (let ((section (org-dispatch--section-bounds "Sessions")))
                    (and section (string-search link (buffer-substring-no-properties
@@ -739,6 +754,7 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
       (when (member status '("working" "blocked"))
         (ignore-errors (org-dispatch--herdr "agent" "send-keys" pane "esc"))
         (org-dispatch--log "interrupted %s: Jon set %s" id todo))
+      (ignore-errors (org-dispatch--edit (plist-get state :file) id #'org-dispatch--untag-auto))
       (org-dispatch--drop-state id))
      ((> (- (float-time) (plist-get state :started)) org-dispatch-time-limit)
       (ignore-errors (org-dispatch--herdr "agent" "send-keys" pane "esc"))

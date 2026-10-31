@@ -114,7 +114,7 @@ rm -r "$ORG_DISPATCH_ROOT/typed" "$ORG_DISPATCH_ROOT/june"
 # Retry: allowed, refused, and what it leaves behind.
 retry_file="$ORG_DISPATCH_ROOT/retry.org"
 cat >"$retry_file" <<'EOF'
-* PROG Wait for upstream :kit:
+* PROG Wait for upstream :kit:auto:
 :PROPERTIES:
 :ID:       00000000-0000-0000-0000-000000000001
 :RETRY:    1
@@ -152,7 +152,7 @@ SCHEDULED: <2026-10-14 Wed 04:30 +1d>
 EOF
 out=$(run retry 00000000-0000-0000-0000-000000000001 "+1d 06:00" "upstream lacks the fix")
 check "retry reports AUTO with no retries left" has "$out" "is now AUTO, scheduled for .* 06:00> with 0 retries left"
-check "retry sets AUTO without padding tags" line "$retry_file" "^\* AUTO Wait for upstream :kit:$"
+check "retry sets AUTO, drops :auto:, and pads no tags" line "$retry_file" "^\* AUTO Wait for upstream :kit:$"
 check "retry keeps the time of day" line "$retry_file" "^SCHEDULED: <.* 06:00>$"
 check "retry lowers RETRY" line "$retry_file" "^:RETRY: *0$"
 check "retry logs the session link" line "$retry_file" "\[\[herdr:kit/pi:aaaa@w1:p1\].*Retry <"
@@ -171,7 +171,7 @@ check "retry refuses an empty note" has "$(run retry 00000000-0000-0000-0000-000
 # Finish: a repeat returns to AUTO, logs the run, and trims old entries.
 repeat_file="$ORG_DISPATCH_ROOT/repeat.org"
 cat >"$repeat_file" <<'EOF'
-* PROG Daily check :kit:
+* PROG Daily check :kit:auto:
 SCHEDULED: <2026-10-14 Wed 04:30 +1d>
 :PROPERTIES:
 :ID:       00000000-0000-0000-0000-000000000005
@@ -190,14 +190,14 @@ Standing instructions.
 ** Sessions
 
 - [[herdr:kit/pi:bbbb@w2:p1][pi@kit/2026-10-14T0430]]
-* PROG Reviewed one-off :kit:
+* PROG Reviewed one-off :kit:auto:
 :PROPERTIES:
 :ID:       00000000-0000-0000-0000-000000000006
 :END:
 EOF
 out=$(run finish 00000000-0000-0000-0000-000000000005 DONE "No change.")
 check "finish returns a repeat to AUTO" has "$out" "is now AUTO"
-check "finish advances the repeat without padding tags" line "$repeat_file" "^\* AUTO Daily check :kit:$"
+check "finish advances the repeat, drops :auto:, and pads no tags" line "$repeat_file" "^\* AUTO Daily check :kit:$"
 check "finish advances SCHEDULED" line "$repeat_file" "^SCHEDULED: <2026-10-15 Thu 04:30 +1d>$"
 check "finish logs the run with its session" line "$repeat_file" "\[\[herdr:kit/pi:bbbb@w2:p1\].*No change.$"
 check "finish keeps ORG_DISPATCH_LOG_KEEP entries" bash -c "[[ \$(grep -c '^- State \"DONE\"' '$repeat_file') -eq 2 ]]"
@@ -205,6 +205,7 @@ check "finish archives the oldest entry" line "$ORG_DISPATCH_ROOT/archive.org" "
 check "the archive names the task" line "$ORG_DISPATCH_ROOT/archive.org" "^:ARCHIVE_ID: 00000000-0000-0000-0000-000000000005$"
 out=$(run finish 00000000-0000-0000-0000-000000000006 DONE "Done.")
 check "finish turns DONE into EVAL when Jon reviews" has "$out" "is now EVAL"
+check "finish drops :auto:" line "$repeat_file" "^\* EVAL Reviewed one-off :kit:$"
 check "finish refuses HOLD without a question" has "$(run finish 00000000-0000-0000-0000-000000000006 HOLD)" "HOLD needs a question for Jon"
 check "finish refuses AUTO" has "$(run finish 00000000-0000-0000-0000-000000000006 AUTO note)" "STATE must be EVAL, HOLD, or DONE"
 
@@ -240,7 +241,7 @@ claim "Keep my drawer" 00000000-0000-0000-0000-0000000000c2
 check "a claim writes the tagged host" line "$claim_file" '^:HOST: *cog$'
 check "a claim writes the tagged agent" line "$claim_file" '^:AGENT: *pi$'
 check "a claim keeps the ID beside them" line "$claim_file" '^:ID: *00000000-0000-0000-0000-0000000000c1$'
-check "a claim leaves an existing HOST and the tags alone" bash -c "[[ \$(grep -c '^:HOST:' '$claim_file') -eq 2 ]] && ! grep -q '^:HOST: *kit' '$claim_file' && grep -q '^\* PROG Keep my drawer :kit:$' '$claim_file'"
+check "a claim leaves an existing HOST and the tags, adding only :auto:" bash -c "[[ \$(grep -c '^:HOST:' '$claim_file') -eq 2 ]] && ! grep -q '^:HOST: *kit' '$claim_file' && grep -q '^\* PROG Keep my drawer :kit:auto:$' '$claim_file'"
 check "a claim fills the default agent" bash -c "[[ \$(grep -c '^:AGENT: *pi$' '$claim_file') -eq 2 ]]"
 rm "$claim_file"
 
@@ -419,6 +420,7 @@ cat >"$fixture/launch-tests.el" <<'EOF'
         (plist-get task :file) (plist-get task :id)
         (lambda ()
           (should (equal (org-get-todo-state) "PROG"))
+          (should (equal (org-get-tags nil t) '("auto")))
           (should (string-search (format "herdr:kit/%s:%s@p-new][%s@kit/" test-agent test-session test-agent)
                                  (org-dispatch--subtree-text)))))
        (should (seq-find (lambda (args) (and (equal (seq-take args 2) '("agent" "prompt"))
@@ -465,6 +467,7 @@ cat >"$fixture/launch-tests.el" <<'EOF'
       (lambda ()
         (should (org-entry-get nil "ID"))
         (should (equal (org-get-todo-state) "HOLD"))
+        (should-not (org-get-tags nil t))
         (should-not (org-dispatch--section-bounds "Sessions"))
         (should (string-search "claude is blocked during startup in Herdr pane p-new" (org-dispatch--subtree-text))))
       "Test launch"))))
@@ -482,7 +485,28 @@ cat >"$fixture/launch-tests.el" <<'EOF'
      (org-dispatch--edit (plist-get task :file) (plist-get task :id)
                          (lambda ()
                            (should (equal (org-get-todo-state) "HOLD"))
+                           (should-not (org-get-tags nil t))
                            (should (string-search "claude is no longer running" (org-dispatch--subtree-text))))))))
+
+(ert-deftest watch-drops-auto-when-jon-changes-the-state-outside-batch-org ()
+  (test-with-herdr
+   (let* ((task (test-task "pi"))
+          (file (plist-get task :file))
+          (state (list :id (plist-get task :id) :file file :heading "Test launch" :agent "pi" :pane "p-new"
+                       :status "running" :started (float-time) :nudges 0 :blocked 0)))
+     (should (org-dispatch--launch task))
+     ;; As Jon's Emacs would save it, without the dispatcher's hook.
+     (with-temp-file file
+       (insert-file-contents file)
+       (goto-char (point-min))
+       (should (re-search-forward "^\\* PROG Test launch +:auto:$" nil t))
+       (replace-match "* DONE Test launch :auto:"))
+     (org-dispatch--watch state)
+     (should-not (org-dispatch--states))
+     (org-dispatch--edit file (plist-get task :id)
+                         (lambda ()
+                           (should (equal (org-get-todo-state) "DONE"))
+                           (should-not (org-get-tags nil t)))))))
 
 (ert-run-tests-batch-and-exit)
 EOF

@@ -345,8 +345,9 @@ now. `SCHEDULED` delays it and a repeater makes it recur. Jon adjusts a run with
 any level, such as under a heading in a `~/org/life` file; its `Sessions` and
 `Dialog` sections are always one level below it.
 
-The dispatcher sets `PROG` when it launches; the agent ends at `EVAL`, `HOLD`,
-or `DONE`. Jon sets `AUTO` again to resume the agent after answering in
+The dispatcher sets `PROG` and an `:auto:` tag when it launches; the agent ends
+at `EVAL`, `HOLD`, or `DONE`, and leaving `PROG` removes the tag. Never add or
+remove `:auto:` yourself. Jon sets `AUTO` again to resume the agent after answering in
 `Dialog`, or `TODO` to take the task back. A repeating task returns to `AUTO`
 through its `REPEAT_TO_STATE` property, which the dispatcher adds.
 
