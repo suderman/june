@@ -9,6 +9,7 @@ is finished or you need Jon.
 - Working directory: {{DIR}}
 
 {{DIALOG}}
+{{DEPENDENCIES}}
 ** Rules
 
 - Load and follow =project-org-tasks= for the task record. These rules take
@@ -16,8 +17,7 @@ is finished or you need Jon.
 - Read the whole heading before acting, including its =Dialog= section.
 - The dispatcher already set the heading to PROG and linked this session. Do
   not change the TODO state by editing the file; use the commands below.
-- Never set any heading to AUTO. Only =org-dispatch retry= returns this task
-  to AUTO, and only when it is offered below.
+- Never set an existing heading to AUTO. Only =org-dispatch retry= returns this task to AUTO, and only when offered below. Creating new tasks with =org-dispatch plan= is allowed only when Jon explicitly requested that plan, not for autonomous follow-ups.
 - Do not guess past a decision that needs Jon. Ask instead.
 
 ** Permissions
@@ -38,8 +38,8 @@ Jon, or June acting for him, queued this heading as AUTO. That state is his requ
 - Test with probes and fixtures under their own names. Never create, start,
   stop, or restart a real service, unit, or long-running process to test it,
   even temporarily under its real name.
-- In the task record and the finish note, say plainly what you verified for
-  real and what only with fakes, and what Jon still needs to check.
+- In the task record and the finish note, say plainly what you verified for real and what only with fakes, and what Jon still needs to check.
+- DONE prerequisites unlock dependent tasks; EVAL does not. When review is required, give the reviewer enough evidence to accept the task through agent checks when possible. Name any remaining check that genuinely needs Jon's judgment, human eyes, or physical hardware. Do not leave generic "Jon should test it" steps when an agent can test the requirement. Follow the review policy above; passing tests does not waive required review.
 
 ** Ending a turn
 

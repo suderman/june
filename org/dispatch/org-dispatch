@@ -22,10 +22,15 @@ case ${1:-run} in
     shift
     exec "${batch[@]}" -f org-dispatch-finish "$@"
     ;;
+  plan)
+    [[ $# -eq 2 ]] || { echo "usage: org-dispatch plan SPEC.json" >&2; exit 2; }
+    shift
+    exec "${batch[@]}" -f org-dispatch-plan "$@"
+    ;;
   retry)
     [[ $# -ge 4 ]] || { echo "usage: org-dispatch retry ID WHEN NOTE" >&2; exit 2; }
     shift
     exec "${batch[@]}" -f org-dispatch-retry "$@"
     ;;
-  *) echo "usage: org-dispatch [run|scan|finish ID STATE [NOTE]|retry ID WHEN NOTE]" >&2; exit 2 ;;
+  *) echo "usage: org-dispatch [run|scan|plan SPEC.json|finish ID STATE [NOTE]|retry ID WHEN NOTE]" >&2; exit 2 ;;
 esac

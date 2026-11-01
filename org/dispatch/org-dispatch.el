@@ -3,6 +3,7 @@
 ;; Batch entry points:
 ;;   org-dispatch-run      watch running tasks, then launch eligible ones
 ;;   org-dispatch-scan     print the tasks this host would launch
+;;   org-dispatch-plan     SPEC.json, queue a requested plan without starting agents
 ;;   org-dispatch-finish   ID STATE [NOTE], used by the agent to end its task
 ;;   org-dispatch-retry    ID WHEN NOTE, used by the agent to try again later
 ;;
@@ -13,12 +14,14 @@
 ;; tags are decoration. SCHEDULED delays a task; a repeater makes it recur.
 ;; Other settings are properties: REVIEW, DEPLOY, BRANCH, MODEL, DIR, and
 ;; RETRY, the number of times an agent may return the task to AUTO later.
+;; DEPENDS lists id:UUID prerequisites; every one must be DONE before launch.
 ;; While an agent works on it, a PROG task carries the :auto: tag.
 
 (require 'org)
 (require 'org-id)
 (require 'seq)
 (require 'subr-x)
+(require 'cl-lib)
 
 (defun org-dispatch--env (name default)
   (let ((value (getenv name)))
@@ -232,11 +235,13 @@ so a half-edited config does not stop dispatching."
                 files)))
 
 (defun org-dispatch--files (&optional agenda)
-  "AGENDA files, or Jon's agenda files, with an AUTO heading."
+  "Live AGENDA files, or Jon's agenda files, with an AUTO heading."
   (seq-filter (lambda (file)
-                (with-temp-buffer
-                  (insert-file-contents file)
-                  (re-search-forward "^\\*+ AUTO " nil t)))
+                (and (not (equal (file-name-nondirectory file) "archive.org"))
+                     (not (string-match-p "/archive/" file))
+                     (with-temp-buffer
+                       (insert-file-contents file)
+                       (re-search-forward "^\\*+ AUTO " nil t))))
               (or agenda (org-dispatch--agenda-files))))
 
 (defun org-dispatch--edit (file id function &optional heading)
@@ -255,14 +260,44 @@ the file fresh so concurrent edits by agents are not overwritten."
               (when (buffer-modified-p) (save-buffer)))))
       (kill-buffer buffer))))
 
+(defun org-dispatch--org-root ()
+  "Org root above work, or the explicitly configured fixture root."
+  (let ((root (file-name-as-directory org-dispatch-root)))
+    (if (equal (file-name-nondirectory (directory-file-name root)) "work")
+        (file-name-directory (directory-file-name root)) root)))
+
+(defun org-dispatch--lookup-files (&optional agenda)
+  "AGENDA and their archives, nearest directory first, up to the Org root."
+  (let* ((agenda (or agenda (org-dispatch--agenda-files)))
+         (root (org-dispatch--org-root))
+         (seen (make-hash-table :test 'equal))
+         archives)
+    (dolist (file agenda)
+      (let ((dir (file-name-directory file)))
+        (while (and dir (file-in-directory-p dir root))
+          (unless (gethash dir seen)
+            (puthash dir t seen)
+            (let ((archive (expand-file-name "archive.org" dir))
+                  (tree (expand-file-name "archive" dir)))
+              (when (file-readable-p archive) (push archive archives))
+              (when (file-directory-p tree)
+                (setq archives
+                      (append (directory-files-recursively
+                               tree "\\.org\\'" nil
+                               (lambda (dir) (not (string-prefix-p "." (file-name-nondirectory dir)))))
+                              archives)))))
+          (setq dir (unless (equal (directory-file-name dir) (directory-file-name root))
+                      (file-name-directory (directory-file-name dir)))))))
+    (seq-filter (lambda (file) (not (string-search ".sync-conflict-" file)))
+                (delete-dups (append agenda (nreverse archives))))))
+
 (defun org-dispatch--find (id &optional agenda)
-  "Return the file holding the heading with ID.
-Search AGENDA, or Jon's agenda files."
+  "Return the file holding ID in AGENDA or their archives."
   (seq-find (lambda (file)
               (with-temp-buffer
                 (insert-file-contents file)
                 (re-search-forward (format "^[ \t]*:ID:[ \t]+%s[ \t]*$" (regexp-quote id)) nil t)))
-            (or agenda (org-dispatch--agenda-files))))
+            (org-dispatch--lookup-files agenda)))
 
 (defun org-dispatch--stamp ()
   (format-time-string (org-time-stamp-format t t)))
@@ -464,8 +499,9 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
                         (when (plist-get host :fill) (list (cons "HOST" (plist-get host :value)))))
           :scheduled (org-get-scheduled-time (point))
           :repeat (org-get-repeat)
+          :depends (split-string (or (org-entry-get nil "DEPENDS") ""))
           :retry (string-to-number (or (org-entry-get nil "RETRY") "0"))
-          :june (org-entry-get nil "JUNE_REQUEST")
+          :june (or (org-entry-get nil "JUNE_REQUEST") (org-entry-get nil "PLAN_REQUEST"))
           :review (not (equal (downcase (or (org-entry-get nil "REVIEW") "yes")) "no"))
           :deploy (equal (downcase (or (org-entry-get nil "DEPLOY") "no")) "yes")
           :branch (org-entry-get nil "BRANCH")
@@ -508,6 +544,266 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
         (kill-buffer buffer)))
     (nreverse tasks)))
 
+;;; Dependencies
+
+(defun org-dispatch--dependency-entry ()
+  "Dependency facts for the heading at point, without launch settings."
+  (let ((section (org-dispatch--section-bounds "Outcome")))
+    (list :id (org-entry-get nil "ID") :file buffer-file-name
+          :heading (org-get-heading t t t t) :todo (org-get-todo-state)
+          :depends (split-string (or (org-entry-get nil "DEPENDS") ""))
+          :note (org-entry-get nil "DISPATCH_FINISH")
+          :plan-hash (org-entry-get nil "PLAN_HASH")
+          :outcome (when section
+                     (string-trim (buffer-substring-no-properties
+                                   (save-excursion (goto-char (car section)) (forward-line 1) (point))
+                                   (cdr section)))))))
+
+(defun org-dispatch--dependency-index (&optional files)
+  "Index IDs across FILES, including archives. Duplicate IDs fail closed."
+  (let ((index (make-hash-table :test 'equal)))
+    (dolist (file (or files (org-dispatch--lookup-files)))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (setq buffer-file-name file)
+        (org-mode)
+        (org-map-entries
+         (lambda ()
+           (when-let* ((entry (org-dispatch--dependency-entry)) (id (plist-get entry :id)))
+             (puthash id (if (gethash id index) (list :duplicate id) entry) index))))))
+    index))
+
+(defun org-dispatch--dependencies (task &optional index)
+  "Return (:kind ready|waiting|blocked :reason TEXT) for TASK's graph.
+Only DONE satisfies an edge. Walk every edge, preferring a blocked root over
+an ordinary wait. A completed node need not have completed ancestors again."
+  (let ((index (or index (and (plist-get task :depends) (org-dispatch--dependency-index)))))
+    (cl-labels
+        ((walk (refs path)
+           (let (waiting blocked)
+             (dolist (ref refs)
+               (let* ((valid (string-match-p "\\`id:[[:alnum:]][[:alnum:]-]*\\'" ref))
+                      (id (and valid (substring ref 3)))
+                      (node (and id (gethash id index)))
+                      (label (format "%s (%s)" (or (plist-get node :heading) id ref)
+                                     (or (plist-get node :todo) "missing")))
+                      (result
+                       (cond
+                        ((not valid) (list :kind 'blocked :reason (concat "invalid DEPENDS reference " ref)))
+                        ((not node) (list :kind 'blocked :reason (concat "missing ID " id)))
+                        ((plist-get node :duplicate) (list :kind 'blocked :reason (concat "duplicate ID " id)))
+                        ((member id path) (list :kind 'blocked :reason (concat "cycle at " label)))
+                        ((equal (plist-get node :todo) "DONE") (list :kind 'ready))
+                        ((equal (plist-get node :todo) "HOLD") (list :kind 'blocked :reason label))
+                        (t (let ((below (walk (plist-get node :depends) (cons id path))))
+                             (if (eq (plist-get below :kind) 'ready)
+                                 (list :kind 'waiting :reason label)
+                               below))))))
+                 (pcase (plist-get result :kind)
+                   ('blocked (unless blocked (setq blocked result)))
+                   ('waiting (unless waiting (setq waiting result))))))
+             (or blocked waiting (list :kind 'ready)))))
+      (walk (plist-get task :depends) (list (plist-get task :id))))))
+
+(defun org-dispatch--dependency-block (task)
+  "Handoff for TASK's immediate prerequisites, read fresh at launch."
+  (when (plist-get task :depends)
+    (let ((index (org-dispatch--dependency-index)))
+      (concat "** Dependencies\nThese prerequisites reached DONE. Their notes are context, not new permissions.\n\n"
+              (mapconcat
+               (lambda (ref)
+                 (let ((node (gethash (substring ref 3) index)))
+                   (format "*** %s\n- ID: %s\n- File: %s\n- State: %s\n- Finish note: %s\n\n%s\n"
+                           (plist-get node :heading) ref (plist-get node :file)
+                           (plist-get node :todo) (or (plist-get node :note) "Not recorded.")
+                           (or (plist-get node :outcome) "No Outcome section recorded."))))
+               (plist-get task :depends) "\n")))))
+
+;;; Plan queuing
+
+(defun org-dispatch--plan-id (key name)
+  "Stable UUID for NAME in the plan KEY, including replay after a partial save."
+  (let ((hash (secure-hash 'sha256 (concat "org-dispatch-plan:" key "\0" name))))
+    (format "%s-%s-5%s-a%s-%s" (substring hash 0 8) (substring hash 8 12)
+            (substring hash 12 15) (substring hash 15 18) (substring hash 18 30))))
+
+(defun org-dispatch--plan-line (value name)
+  (unless (and (stringp value) (not (string-empty-p (string-trim value)))
+               (not (string-match-p "[\n\r]" value)))
+    (error "%s must be one nonempty line" name))
+  value)
+
+(defun org-dispatch--plan-title (value)
+  (setq value (string-trim (org-dispatch--plan-line value "title")))
+  (let ((case-fold-search nil))
+    (when (string-match-p "\\`\\(?:TODO\\|AUTO\\|PROG\\|EVAL\\|HOLD\\|DONE\\)\\b\\|[ \t]:[[:alnum:]_@#%:]+:$" value)
+      (error "Title must not carry a state or tags")))
+  value)
+
+(defun org-dispatch--plan-target (file agenda)
+  "A live, conflict-free agenda FILE inside the Org root."
+  (let* ((path (file-truename (expand-file-name file (org-dispatch--org-root))))
+         (name (file-name-nondirectory path)))
+    (unless (and (file-in-directory-p path (org-dispatch--org-root))
+                 (member path (mapcar #'file-truename agenda))
+                 (file-writable-p path)
+                 (string-suffix-p ".org" path)
+                 (not (member name '("asana.org" "inbox.org" "archive.org")))
+                 (not (string-match-p "/archive/\\|/\\.stversions/\\|\\.sync-conflict-" path)))
+      (error "Not a writable agenda file: %s" file))
+    (when (file-expand-wildcards
+           (concat (file-name-sans-extension path) ".sync-conflict-*.org"))
+      (error "Resolve Syncthing conflict copies before writing %s" path))
+    path))
+
+(defun org-dispatch--validate-graph (ids index)
+  "Reject missing IDs, duplicate IDs, malformed edges, and cycles from IDS."
+  (let ((visited (make-hash-table :test 'equal)))
+    (cl-labels
+        ((walk (id path)
+           (when (member id path) (error "Dependency cycle at %s" id))
+           (unless (gethash id visited)
+             (let ((node (gethash id index)))
+               (unless node (error "Missing dependency ID %s" id))
+               (when (plist-get node :duplicate) (error "Duplicate dependency ID %s" id))
+               (dolist (ref (plist-get node :depends))
+                 (unless (string-match-p "\\`id:[[:alnum:]][[:alnum:]-]*\\'" ref)
+                   (error "Invalid DEPENDS reference %s" ref))
+                 (walk (substring ref 3) (cons id path)))
+               (puthash id t visited)))))
+      (mapc (lambda (id) (walk id nil)) ids))))
+
+(defun org-dispatch--queue-plan (spec)
+  "Validate SPEC, then publish its tasks and plan table. Return task IDs.
+Each file is replaced atomically. A crash between files is recoverable by
+replaying the same key and spec; missing prerequisites block partial plans."
+  (let* ((key (org-dispatch--plan-line (alist-get 'key spec) "key"))
+         (title (org-dispatch--plan-title (alist-get 'title spec)))
+         (tasks (alist-get 'tasks spec))
+         (hash (secure-hash 'sha256 (prin1-to-string spec)))
+         (agenda (org-dispatch--agenda-files))
+         (table-file (org-dispatch--plan-target (alist-get 'file spec) agenda))
+         (table-id (org-dispatch--plan-id key "table"))
+         (index (org-dispatch--dependency-index (org-dispatch--lookup-files agenda)))
+         (names (make-hash-table :test 'equal))
+         (before (make-hash-table :test 'equal))
+         (texts (make-hash-table :test 'equal))
+         records)
+    (unless (string-match-p "\\`[[:alnum:]_-]+\\'" key) (error "key must be a plain plan name"))
+    (unless (and (listp tasks) tasks) (error "tasks must be a nonempty array"))
+    ;; Assign all IDs before resolving edges, including forward references.
+    (dolist (task tasks)
+      (let ((name (org-dispatch--plan-line (alist-get 'key task) "task key")))
+        (unless (and (string-match-p "\\`[[:alnum:]_-]+\\'" name) (not (gethash name names)))
+          (error "Invalid or duplicate task key %s" name))
+        (puthash name (org-dispatch--plan-id key (concat "task:" name)) names)))
+    (dolist (task tasks)
+      (let* ((name (alist-get 'key task))
+             (id (gethash name names))
+             (file (org-dispatch--plan-target (alist-get 'file task) agenda))
+             (heading (org-dispatch--plan-title (alist-get 'title task)))
+             (body (alist-get 'body task))
+             (host (or (alist-get 'host task) (org-dispatch--default "host" (car org-dispatch-hosts))))
+             (agent (or (alist-get 'agent task) (org-dispatch--default "agent" "pi")))
+             (dir (alist-get 'dir task))
+             (review (alist-get 'review task 'yes))
+             (refs (alist-get 'depends task))
+             (existing (gethash id index))
+             depends)
+        (unless (and (stringp body) (not (string-empty-p (string-trim body)))
+                     (not (string-match-p "^\\*[ \t]\\|^[ \t]*:\\(?:PROPERTIES\\|END\\):" body)))
+          (error "Task body is Org text without top-level headings or property drawers"))
+        (unless (member host org-dispatch-hosts) (error "Unknown host %s" host))
+        (unless (and (member agent org-dispatch-agents) (member agent org-dispatch-launchable))
+          (error "Unknown agent %s" agent))
+        (unless (memq review '(yes t :false)) (error "review must be a boolean"))
+        (when dir
+          (org-dispatch--plan-line dir "dir")
+          (unless (and (or (file-name-absolute-p dir) (string-prefix-p "~/" dir))
+                       (file-directory-p (expand-file-name dir)))
+            (error "dir must be an existing absolute or ~/ directory")))
+        (unless (listp refs) (error "depends must be an array"))
+        (dolist (ref refs)
+          (let ((dependency (and (stringp ref) (gethash ref names))))
+            (push (if dependency (concat "id:" dependency) ref) depends)))
+        (setq depends (delete-dups (nreverse depends)))
+        (when (and existing (not (equal (plist-get existing :plan-hash) hash)))
+          (error "Plan key %s already exists with a different spec or conflicting ID" key))
+        ;; Existing headings keep their state, edits, and archive location on replay.
+        (unless existing
+          (puthash id (list :id id :file file :heading heading :todo "AUTO" :depends depends) index))
+        (push (list :id id :file (if existing (plist-get existing :file) file)
+                    :heading heading :depends depends :existing existing
+                    :text (format "* AUTO %s\n:PROPERTIES:\n:ID: %s\n:HOST: %s\n:AGENT: %s\n:PLAN_REQUEST: %s\n:PLAN_HASH: %s\n%s%s%s:END:\n%s\n"
+                                  heading id host agent key hash
+                                  (if dir (concat ":DIR: " dir "\n") "")
+                                  (if (eq review :false) ":REVIEW: no\n" "")
+                                  (if depends (concat ":DEPENDS: " (string-join depends " ") "\n") "")
+                                  (string-trim body))) records)))
+    (setq records (nreverse records))
+    (org-dispatch--validate-graph (mapcar (lambda (task) (plist-get task :id)) records) index)
+    (when-let* ((table (gethash table-id index)))
+      (unless (equal (plist-get table :plan-hash) hash)
+        (error "Plan key %s already exists with a different spec" key)))
+    (cl-labels
+        ((insert-entry (file text)
+           (let ((content (or (gethash file texts)
+                              (let ((original (with-temp-buffer (insert-file-contents file) (buffer-string))))
+                                (puthash file original before) original))))
+             (with-temp-buffer
+               (insert content)
+               (goto-char (point-min))
+               (if (re-search-forward "^\\* " nil t) (goto-char (match-beginning 0))
+                 (goto-char (point-max)))
+               (skip-chars-backward "\n")
+               (delete-region (point) (progn (skip-chars-forward "\n") (point)))
+               (unless (bobp) (insert "\n\n"))
+               (insert text)
+               (unless (eobp) (insert "\n"))
+               (puthash file (buffer-string) texts)))))
+      ;; Reverse insertion keeps the spec order, with its table above the tasks.
+      (dolist (task (reverse records))
+        (unless (plist-get task :existing)
+          (insert-entry (plist-get task :file) (plist-get task :text))))
+      (unless (gethash table-id index)
+        (insert-entry
+         table-file
+         (format "* %s\n:PROPERTIES:\n:ID: %s\n:PLAN_HASH: %s\n:END:\n| Task | ID | Depends on |\n|------+----+------------|\n%s\n"
+                 (replace-regexp-in-string "|" " " title t t) table-id hash
+                 (mapconcat (lambda (task)
+                              (format "| %s | [[id:%s][%s]] | %s |"
+                                      (replace-regexp-in-string "|" " " (plist-get task :heading) t t)
+                                      (plist-get task :id) (plist-get task :id)
+                                      (string-join (plist-get task :depends) ", ")))
+                            records "\n")))))
+    ;; Check every snapshot before the first write, and again before each rename.
+    (maphash (lambda (file original)
+               (unless (equal original (with-temp-buffer (insert-file-contents file) (buffer-string)))
+                 (error "%s changed while preparing the plan; replay to retry" file))) before)
+    (maphash
+     (lambda (file text)
+       (let ((temp (make-temp-file (expand-file-name ".org-dispatch-plan-" (file-name-directory file)))))
+         (unwind-protect
+             (progn
+               (with-temp-file temp (insert text))
+               (set-file-modes temp (file-modes file))
+               (unless (equal (gethash file before)
+                              (with-temp-buffer (insert-file-contents file) (buffer-string)))
+                 (error "%s changed before publishing the plan; replay to retry" file))
+               (rename-file temp file t))
+           (when (file-exists-p temp) (delete-file temp))))) texts)
+    (mapcar (lambda (task) (list :id (plist-get task :id) :file (plist-get task :file))) records)))
+
+(defun org-dispatch-plan ()
+  "Queue a JSON plan SPEC supplied on the command line. Does not launch agents."
+  (let ((file (pop command-line-args-left)))
+    (unless (and file (null command-line-args-left)) (error "usage: org-dispatch plan SPEC.json"))
+    (let ((spec (with-temp-buffer
+                  (insert-file-contents file)
+                  (json-parse-buffer :object-type 'alist :array-type 'list :false-object :false))))
+      (princ (json-serialize (vconcat (org-dispatch--queue-plan spec))))
+      (princ "\n"))))
+
 ;;; Local state
 
 (defun org-dispatch--state-file (id)
@@ -540,7 +836,7 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
          (list
           (if (plist-get task :review)
               "- Jon or an agent he delegates reviews this task. Finish with EVAL, never DONE."
-            "- No review is needed. Finish with DONE once your verification passes.")
+            "- No separate review is required. Finish with DONE once agent-run checks verify the requested work. Use EVAL only for a remaining review that genuinely needs human judgment, eyes, or physical checks; name it explicitly.")
           (let ((where (if (org-dispatch--git-p (plist-get task :dir))
                            "your work"
                          "your work in each repository you change"))
@@ -587,7 +883,8 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
                    ("HEADING" . ,(plist-get task :heading))
                    ("DIR" . ,(abbreviate-file-name (plist-get task :dir)))
                    ("POLICY" . ,(org-dispatch--policy task))
-                   ("RETRY" . ,(org-dispatch--retry-rule task)))
+                   ("RETRY" . ,(org-dispatch--retry-rule task))
+                   ("DEPENDENCIES" . ,(org-dispatch--dependency-block task)))
                  extra)))
     (dolist (pair values text)
       (setq text (string-replace (format "{{%s}}" (car pair)) (or (cdr pair) "") text)))))
@@ -617,6 +914,7 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
        (when (plist-get task :repeat)
          (org-entry-put nil "REPEAT_TO_STATE" "AUTO")
          (org-dispatch--trim-log (plist-get task :id)))
+       (org-entry-delete nil "DISPATCH_FINISH")
        (org-todo "PROG")
        (org-toggle-tag "auto" 'on)
        (when session
@@ -636,70 +934,77 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
 
 (defun org-dispatch--launch (task)
   "Start or resume TASK's agent in Herdr and claim it. Return non-nil on success."
-  (let* ((id (or (plist-get task :id) (org-id-new)))
-         (task (plist-put (copy-sequence task) :id id))
-         (agent (plist-get task :agent))
-         (resume (plist-get task :session))
-         (pane (and resume (org-dispatch--live-pane resume agent)))
-         (tab nil)
-         (label (truncate-string-to-width (concat "auto · " (plist-get task :heading)) 60))
-         (state (list :id id :file (plist-get task :file) :heading (plist-get task :heading)
-                      :dir (plist-get task :dir) :agent agent :status "starting"
-                      :started (float-time) :nudges 0
-                      :repeat (if (plist-get task :repeat) 1 0))))
-    (org-dispatch--save-state state)
-    (condition-case err
-        (progn
-          (unless pane
-            ;; A project file is named for its project, so this matches Jon's workspaces.
-            (let ((created (org-dispatch--project-pane
-                            (plist-get task :dir)
-                            (truncate-string-to-width (plist-get task :heading) 40)
-                            (file-name-base (plist-get task :file)))))
-              (setq pane (alist-get 'pane_id created)
-                    tab (alist-get 'tab_id created)))
-            (apply #'org-dispatch--herdr "agent" "start"
-                   (format "auto-%s-%s"
-                           (substring (replace-regexp-in-string "[^0-9a-f]" "" id) 0 8)
-                           (format-time-string "%H%M%S"))
-                   "--kind" agent "--pane" pane "--timeout" "60000" "--"
-                   (append
-                    (list (if (equal agent "claude") "--dangerously-skip-permissions" "--no-approve")
-                          "--name" label)
-                    (when (plist-get task :model) (list "--model" (plist-get task :model)))
-                    (when resume
-                      (if (equal agent "claude")
-                          (list "--resume" resume)
-                        (list "--session" (or (org-dispatch--session-file resume) resume)))))))
-          (let ((session (org-dispatch--pane-session pane agent)))
-            (org-dispatch--claim task pane session)
-            (setq state (plist-put state :pane pane))
-            (setq state (plist-put state :tab (or tab "")))
-            (setq state (plist-put state :session session))
-            (setq state (plist-put state :status "running"))
-            (org-dispatch--save-state state)
-            ;; Claimed: a failed prompt leaves the agent idle, which the watcher nudges.
-            (condition-case err
-                (org-dispatch--prompt
-                 pane (org-dispatch--render
-                       "task" task `(("DIALOG" . ,(org-dispatch--dialog-block task resume)))))
-              (error (org-dispatch--log "prompt failed for %s: %s" id (error-message-string err))))
-            (org-dispatch--log "%s %s: %s in %s" (if resume "resumed" "launched")
-                               id (plist-get task :heading) pane)
-            t))
-      (error
-       ;; Trust or login dialogs may block before the agent reports a session.
-       ;; Hold the task for Jon instead of opening another blocked tab each tick.
-       (if (and pane (equal (org-dispatch--agent-status pane) "blocked"))
-           (progn
-             (org-dispatch--claim task pane nil)
-             (org-dispatch--hold
-              state (format "%s is blocked during startup in Herdr pane %s. Inspect it with herdr agent read %s and resolve the prompt before resuming."
-                            agent pane pane)))
-         (org-dispatch--drop-state id))
-       (org-dispatch--log "launch failed for %s: %s"
-                          (plist-get task :heading) (error-message-string err))
-       nil))))
+  ;; Eligibility is only a snapshot. Recheck before opening any Herdr tab.
+  (let ((current (ignore-errors
+                   (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                                       #'org-dispatch--task (plist-get task :heading)))))
+    (when (and (equal (plist-get current :todo) "AUTO")
+               (eq (plist-get (org-dispatch--dependencies current) :kind) 'ready))
+      (setq task (plist-put (copy-sequence task) :depends (plist-get current :depends)))
+      (let* ((id (or (plist-get task :id) (org-id-new)))
+             (task (plist-put (copy-sequence task) :id id))
+             (agent (plist-get task :agent))
+             (resume (plist-get task :session))
+             (pane (and resume (org-dispatch--live-pane resume agent)))
+             (tab nil)
+             (label (truncate-string-to-width (concat "auto · " (plist-get task :heading)) 60))
+             (state (list :id id :file (plist-get task :file) :heading (plist-get task :heading)
+                          :dir (plist-get task :dir) :agent agent :status "starting"
+                          :started (float-time) :nudges 0
+                          :repeat (if (plist-get task :repeat) 1 0))))
+        (org-dispatch--save-state state)
+        (condition-case err
+            (progn
+              (unless pane
+                ;; A project file is named for its project, so this matches Jon's workspaces.
+                (let ((created (org-dispatch--project-pane
+                                (plist-get task :dir)
+                                (truncate-string-to-width (plist-get task :heading) 40)
+                                (file-name-base (plist-get task :file)))))
+                  (setq pane (alist-get 'pane_id created)
+                        tab (alist-get 'tab_id created)))
+                (apply #'org-dispatch--herdr "agent" "start"
+                       (format "auto-%s-%s"
+                               (substring (replace-regexp-in-string "[^0-9a-f]" "" id) 0 8)
+                               (format-time-string "%H%M%S"))
+                       "--kind" agent "--pane" pane "--timeout" "60000" "--"
+                       (append
+                        (list (if (equal agent "claude") "--dangerously-skip-permissions" "--no-approve")
+                              "--name" label)
+                        (when (plist-get task :model) (list "--model" (plist-get task :model)))
+                        (when resume
+                          (if (equal agent "claude")
+                              (list "--resume" resume)
+                            (list "--session" (or (org-dispatch--session-file resume) resume)))))))
+              (let ((session (org-dispatch--pane-session pane agent)))
+                (org-dispatch--claim task pane session)
+                (setq state (plist-put state :pane pane))
+                (setq state (plist-put state :tab (or tab "")))
+                (setq state (plist-put state :session session))
+                (setq state (plist-put state :status "running"))
+                (org-dispatch--save-state state)
+                ;; Claimed: a failed prompt leaves the agent idle, which the watcher nudges.
+                (condition-case err
+                    (org-dispatch--prompt
+                     pane (org-dispatch--render
+                           "task" task `(("DIALOG" . ,(org-dispatch--dialog-block task resume)))))
+                  (error (org-dispatch--log "prompt failed for %s: %s" id (error-message-string err))))
+                (org-dispatch--log "%s %s: %s in %s" (if resume "resumed" "launched")
+                                   id (plist-get task :heading) pane)
+                t))
+          (error
+           ;; Trust or login dialogs may block before the agent reports a session.
+           ;; Hold the task for Jon instead of opening another blocked tab each tick.
+           (if (and pane (equal (org-dispatch--agent-status pane) "blocked"))
+               (progn
+                 (org-dispatch--claim task pane nil)
+                 (org-dispatch--hold
+                  state (format "%s is blocked during startup in Herdr pane %s. Inspect it with herdr agent read %s and resolve the prompt before resuming."
+                                agent pane pane)))
+             (org-dispatch--drop-state id))
+           (org-dispatch--log "launch failed for %s: %s"
+                              (plist-get task :heading) (error-message-string err))
+           nil))))))
 
 ;;; Watching
 
@@ -812,7 +1117,9 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
          (new (make-hash-table :test 'equal))
          (running (seq-filter (lambda (s) (member (plist-get s :status) '("running" "starting")))
                               states))
-         eligible)
+         (index (when (seq-some (lambda (task) (plist-get task :depends)) tasks)
+                  (org-dispatch--dependency-index)))
+         eligible reports)
     (dolist (task tasks)
       (let* ((key (or (plist-get task :id)
                       (concat (plist-get task :file) "::" (plist-get task :heading))))
@@ -822,6 +1129,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                       (let ((entry (make-hash-table :test 'equal)))
                         (puthash "hash" (plist-get task :hash) entry)
                         (puthash "seen" now entry)
+                        (when seen (puthash "dependency" (gethash "dependency" seen) entry))
                         entry))))
         (cond
          ((plist-get task :problem)
@@ -837,6 +1145,21 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
          ;; Record text before checking SCHEDULED, so a task written ahead of
          ;; time starts on schedule instead of settling then.
          ((progn (puthash key entry new) nil))
+         ((let* ((dependency (org-dispatch--dependencies task index))
+                 (kind (plist-get dependency :kind))
+                 (reason (plist-get dependency :reason))
+                 (notice (gethash "dependency" entry)))
+            (if (eq kind 'ready)
+                (progn (remhash "dependency" entry) nil)
+              (when dry-run
+                (push (plist-put (copy-sequence task) :dependency
+                                 (format "%s on %s" kind reason)) reports))
+              (when (and (not dry-run) (eq kind 'blocked) (not (equal notice reason)))
+                (org-dispatch--notify (concat "Blocked · " (plist-get task :heading)) reason)
+                (org-dispatch--log "blocked %s: %s" (plist-get task :heading) reason))
+              (if (eq kind 'blocked) (puthash "dependency" reason entry)
+                (remhash "dependency" entry))
+              t)))
          ((and (plist-get task :scheduled) (time-less-p now (plist-get task :scheduled))))
          ((seq-find (lambda (s) (equal (plist-get s :id) (plist-get task :id))) running))
          ((and (not (plist-get task :june))
@@ -850,7 +1173,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
     (unless dry-run
       (make-directory org-dispatch-state-dir t)
       (with-temp-file file (insert (json-serialize new))))
-    (nreverse eligible)))
+    (append (nreverse eligible) (nreverse reports))))
 
 (defun org-dispatch-run ()
   (dolist (state (org-dispatch--states))
@@ -865,7 +1188,8 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
   (dolist (task (org-dispatch--eligible (org-dispatch--tasks) (org-dispatch--states) t))
     (princ (format "%s\t%s\t%s\n" (plist-get task :heading)
                    (abbreviate-file-name (plist-get task :dir))
-                   (cond ((plist-get task :waiting) "settling")
+                   (cond ((plist-get task :dependency))
+                         ((plist-get task :waiting) "settling")
                          ((plist-get task :session) "resume")
                          (t "new"))))))
 
@@ -899,6 +1223,8 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                 ((and (equal todo "DONE") (plist-get task :repeat))
                  (org-dispatch--remove-section "Dialog")
                  (org-dispatch--log-run id "DONE" (plist-get task :todo) note)))
+               (unless (string-empty-p note)
+                 (org-entry-put nil "DISPATCH_FINISH" (replace-regexp-in-string "[\n\r]+" " " note)))
                (org-todo todo)
                (org-get-todo-state)))))
     (when state

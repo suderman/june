@@ -514,6 +514,9 @@ check "launch, resume, session identity, and watch for pi and Claude" \
   env XDG_STATE_HOME="$fixture/launch-state" ORG_DISPATCH_ROOT="$fixture/launch-org" \
   emacs -Q --batch -l "$org/dispatch/org-dispatch.el" -l "$fixture/launch-tests.el"
 
+check "dependencies, handoffs, and recoverable plan queuing" \
+  emacs -Q --batch -l "$org/dispatch/org-dispatch.el" -l "$org/tests/dependencies.el"
+
 # The source byte-compiles without warnings.
 cp "$org/dispatch/org-dispatch.el" "$fixture/org-dispatch.el"
 compile=$(emacs -Q --batch --eval '(setq byte-compile-error-on-warn t)' -f batch-byte-compile "$fixture/org-dispatch.el" 2>&1 | grep -v '^Loading' || true)

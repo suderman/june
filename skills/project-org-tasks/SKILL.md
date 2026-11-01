@@ -204,8 +204,8 @@ States describe the task from Jon's point of view:
   Record the reason and any known condition for resuming; never invent one.
 - `DONE`: the requested work is complete and verified.
 
-- Verification, not a commit or push, is the threshold for `DONE`. Never leave
-  a thread in `PROG` only because changes are uncommitted.
+- Verification, not a commit or push, is the threshold for `DONE`. Never leave a thread in `PROG` only because changes are uncommitted.
+- Use agent-run checks to verify what agents can test. EVAL is for required review, not a substitute for those checks. Jon or an authorized agent reviewer can accept the evidence and set DONE. Reserve review waiting on Jon for his judgment, human eyes, or physical checks agents cannot perform, and name the actual check. Follow explicit review requirements; tests do not waive them.
 - Write a new heading's keyword as text. Change an existing heading's state,
   `SCHEDULED`, or `DEADLINE` only through Org, which writes `CLOSED`, advances
   repeaters, and logs as Emacs does. Never edit those by hand:
@@ -351,15 +351,17 @@ remove `:auto:` yourself. Jon sets `AUTO` again to resume the agent after answer
 `Dialog`, or `TODO` to take the task back. A repeating task returns to `AUTO`
 through its `REPEAT_TO_STATE` property, which the dispatcher adds.
 
-A one-off task that waits on something outside the agent's control, such as
-an upstream fix, can check again later when Jon sets `:RETRY: N` on it. The
+After Jon deploys the dependency-aware dispatcher, task dependencies use `:DEPENDS: id:UUID id:UUID`. The dispatcher waits without launching a worker until every prerequisite is DONE. EVAL never satisfies a dependency. IDs resolve across agenda files and their archives. `org-dispatch scan` reports waiting tasks and root blockers such as HOLD, missing or duplicate IDs, or a cycle; waiting consumes no slot or retry. The worker prompt includes immediate prerequisites' finish notes and Outcome sections. Repeating tasks return to AUTO and do not remain satisfied after an iteration.
+
+With that dispatcher deployed, when Jon explicitly asks for a new plan, June or a coding agent may run `org-dispatch plan SPEC.json` to create its new AUTO tasks and an ID-linked plan table. This does not authorize resuming existing tasks or autonomous follow-ups. The spec has `key` (a unique plain plan name), `title`, `file` (the writable agenda file for the table), and a `tasks` array. Each task has a plain `key`, `file`, `title`, Org `body` without a top-level heading or drawer, and optional `depends` (task keys or existing `id:UUID` references), `host`, `agent`, `dir`, and `review` (true by default; false only if Jon waives review). Keep the spec under local `org-work` runtime storage. IDs are stable: replay the same key and unchanged spec after an interruption without resetting existing tasks. The graph is validated before writing; each file publishes atomically, not the whole plan. The command starts no agent. Deploy the new dispatcher on all launching hosts before removing existing prose gates, RETRY budgets, or retry schedules; old versions ignore DEPENDS.
+
+A one-off task that waits on something outside the agent's control, such as an upstream fix, can check again later when Jon sets `:RETRY: N` on it. The
 agent runs `org-dispatch retry ID WHEN NOTE`. The dispatcher then lowers
 `RETRY` by one, sets `SCHEDULED`, logs the run in `:LOGBOOK:` and returns the
 task to `AUTO`, and a fresh session picks it up when it is due. Once `RETRY`
 reaches 0 the agent must use `HOLD`.
 
-- Coding agents never set `AUTO` on a heading and set `:HOST:` or `:AGENT:`
-  only when Jon asks: Jon grants their autonomy. June, Jon's assistant, is the one
+- Coding agents never set `AUTO` on an existing heading. Creating new AUTO headings through `org-dispatch plan` is allowed only for a plan Jon explicitly requested; otherwise Jon grants autonomy. Set `:HOST:` or `:AGENT:` only when Jon asks. June, Jon's assistant, is the one
   exception. Under her `AGENTS.md` (from `~/.agents/june`), she may queue new `AUTO` tasks, starting each one's body with a line saying she queued it and why. When Jon explicitly asks, she may also resume an existing TODO, EVAL, or HOLD task through `org_resume_task`, which uses the shared `org-edit` command and records his instruction in Dialog. `org-edit` accepting AUTO does not give coding workers permission to set it.
 - In a dispatched session, follow the dispatch prompt where it differs from
   this skill, and change the TODO state only with `org-dispatch finish`.
