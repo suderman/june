@@ -9,6 +9,7 @@ import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import type { Message } from "@earendil-works/pi-ai";
 import { type Conversation, type Harness, LiveDoc } from "@earendil-works/pi-durable";
 import type { Config, PromptFiles } from "./config.ts";
+import { admitNotice } from "./notify.ts";
 import type { Logger } from "./runtime.ts";
 import { isQuiet, QUIET } from "./transcript.ts";
 import { User, user } from "./user.ts";
@@ -64,17 +65,10 @@ export function createHeartbeat(options: {
 				// Mail since the last look, or the last cadence on a first look, so a restart does not replay the morning.
 				const mail = options.mail ? await options.mail.render(new Date(before.at || at.getTime() - config.everyMinutes * 60_000), at) : "";
 				const content = prompt({ chatting, since: before, lines, mail, instructions: instructions(options.files().heartbeatFile), at });
-				const submission = await root.submit(
-					{
-						type: "input",
-						requestId: `heartbeat:${at.getTime()}`,
-						content,
-						whenBusy: "followUp",
-						entry: { kind: "june.input", data: { source: "heartbeat", text: "heartbeat" } },
-					},
-					BG,
-				);
-				const settled = await submission.wait(BG);
+				// Routed like any notice, so a message that is not quiet alerts where the user last spoke.
+				const notice = { requestId: `heartbeat:${at.getTime()}`, content, source: "heartbeat", label: "heartbeat" };
+				const id = await root.commit((tx) => admitNotice(tx, root, root.id, notice), BG);
+				const settled = await (await harness.submission(id, BG))!.wait(BG);
 				if (settled.status !== "done") return log.warn("heartbeat_unanswered", { status: settled.status });
 				const answer = reply((await root.commit((tx) => tx.entry(settled.answer!), BG))?.model?.[0]);
 				if (isQuiet(answer) || answer.trim() === "") return log.info("heartbeat_quiet", {});

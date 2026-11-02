@@ -63,7 +63,7 @@ test("work runs a brief in the background and only its report reaches the main t
 	assert.deepEqual(await marks(daemon), ["started", "finished"]);
 	assert.deepEqual((await daemon.harness.snapshot(WorkDoc, BG))?.active, {});
 	const reports = (await daemon.root.context(BG)).entries.filter((e) => e.kind === "june.input").map((e) => e.data as { source: string; text: string });
-	assert.deepEqual(reports.at(-1), { source: "work", text: "report: Find the secret word in the scratch file." });
+	assert.deepEqual(reports.at(-1), { source: "work", text: "report: Find the secret word in the scratch file.", surface: "gui" });
 });
 
 test("June talks with Alex while her working context runs", async (t) => {

@@ -11,7 +11,7 @@ import type { Conversation, Harness, RegistrySnapshot, TaskId } from "@earendil-
 import type { Logger } from "./runtime.ts";
 import type { Config } from "./config.ts";
 import { within } from "./heartbeat.ts";
-import { type Notice, submitNotice } from "./notify.ts";
+import { admitNotice, type Notice } from "./notify.ts";
 import { Follows } from "./tools/follow.ts";
 import type { Herdr, Run } from "./tools/herdr.ts";
 import type { Org } from "./tools/org.ts";
@@ -157,7 +157,7 @@ export function createWatch(options: {
 				const notice: Notice = { requestId: `watch:${at.getTime()}`, content: `[watch] ${message(pending)}`, source: "watch", label: `${pending.length} dispatched task${pending.length === 1 ? "" : "s"} changed` };
 				// The ledger first: a crash after it loses one notice; one before it would repeat it.
 				save({ ...ledger, pending: {}, notified: at.getTime() });
-				await submitNotice(root as never, notice, BG);
+				await root.commit((tx) => admitNotice(tx, root, root.id, notice), BG);
 				log.info("watch_notified", { count: pending.length });
 			} finally {
 				busy = false;

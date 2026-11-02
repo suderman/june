@@ -2,7 +2,7 @@
 // Herdr on a timer, without a model call, and tells June only when something changed that the user would want to hear,
 // or when a progress update the user asked for is due.
 import { defineDoc, defineTask, type Tx } from "@earendil-works/pi-durable";
-import { type Notice, submitNotice } from "../notify.ts";
+import { admitNotice, type Notice } from "../notify.ts";
 import type { Herdr } from "./herdr.ts";
 import type { Org } from "./org.ts";
 import { User, user } from "../user.ts";
@@ -178,9 +178,10 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 				// Wake for the next update on time rather than up to a check late.
 				const nextUpdate = (update ? now : reported) + (task.input.everyMs ?? Number.POSITIVE_INFINITY);
 				const nextDue = nextUpdate > now ? Math.min(now + options.intervalMs, nextUpdate) : now + options.intervalMs;
-				// A rerun after a crash submits the same request id, which finds the first submission.
-				if (notice !== undefined) await submitNotice(await runtime.conversation(runtime.conversationId, context), notice, context);
-				await runtime.commit(() => {
+				// One commit admits the notice and moves the checkpoint on, so a rerun after a crash admits it once.
+				const root = notice !== undefined ? (await runtime.conversation(runtime.conversationId, context))! : undefined;
+				await runtime.commit(async (tx) => {
+					if (notice !== undefined) await admitNotice(tx, root!, runtime.conversationId, notice);
 					return next?.done
 						? { status: "terminal", outcome: { status: "completed", result: null } }
 						: { status: "running", checkpoint: { phase: "watch", due: nextDue, checks: checks + 1, last: next?.signal ?? last, reported: update ? now : reported, missing, ...(waited !== undefined ? { waited } : {}) } };

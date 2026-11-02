@@ -5,7 +5,7 @@
 import { bool, obj, opt, str } from "@earendil-works/pi-schema";
 import { type ConversationId, configure, defineDoc, LiveDoc, defineExtension, defineTask, defineTool, type Extension, section, type Tx } from "@earendil-works/pi-durable";
 import type { Config, ModelChoice } from "../config.ts";
-import { type Notice, submitNotice } from "../notify.ts";
+import { admitNotice, type Notice } from "../notify.ts";
 import { User, user } from "../user.ts";
 
 export const WORK = "june.work";
@@ -97,9 +97,12 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 					source: "work",
 					label: `report: ${clip(task.input.brief, 80)}`,
 				};
-				// A rerun after a crash submits the same request id, which finds the first submission.
-				await submitNotice(await runtime.conversation(runtime.conversationId, context), notice, context);
-				await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
+				// One commit admits the report and ends the task, so a rerun after a crash admits it once.
+				const root = (await runtime.conversation(runtime.conversationId, context))!;
+				await runtime.commit(async (tx) => {
+					await admitNotice(tx, root, runtime.conversationId, notice);
+					return { status: "terminal", outcome: { status: "completed", result: null } };
+				}, context);
 			},
 		},
 		abort: (task, runtime, context) =>
