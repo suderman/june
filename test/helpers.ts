@@ -7,7 +7,7 @@ import type { Extension } from "@earendil-works/pi-durable";
 import type { PatterTiming } from "../src/patter.ts";
 import type { Config, Paths } from "../src/config.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
-import { Client, type Reply } from "../src/protocol.ts";
+import { Client, type Reply, type Source } from "../src/protocol.ts";
 import { createLogger } from "../src/runtime.ts";
 import { applyChanges, type ViewItem, type ViewState } from "../src/transcript.ts";
 
@@ -92,7 +92,7 @@ export async function openTestDaemon(options: {
 }
 
 /** Submit over the socket and wait for the answer. */
-export async function ask(socket: string, text: string, requestId: string = randomUUID(), source: "cli" | "kitty" = "cli") {
+export async function ask(socket: string, text: string, requestId: string = randomUUID(), source: Source = "cli") {
 	const client = await Client.open(socket);
 	try {
 		const settled = new Promise<Extract<Reply, { type: "settled" }>>((resolve) =>
@@ -107,7 +107,10 @@ export async function ask(socket: string, text: string, requestId: string = rand
 }
 
 /** A client attached to the folded view, as the terminal is: it holds the items and state the daemon sends. */
-export async function attachView(socket: string): Promise<{ items(): ViewItem[]; state(): ViewState; earlier(): boolean; replies: Extract<Reply, { type: "view" }>[]; close(): void }> {
+export async function attachView(
+	socket: string,
+	options: { detail?: boolean } = {},
+): Promise<{ items(): ViewItem[]; state(): ViewState; earlier(): boolean; replies: Extract<Reply, { type: "view" }>[]; detail(on: boolean): Promise<Reply>; close(): void }> {
 	const client = await Client.open(socket);
 	let items: ViewItem[] = [];
 	let state: ViewState | undefined;
@@ -122,9 +125,16 @@ export async function attachView(socket: string): Promise<{ items(): ViewItem[];
 		} else items = applyChanges(items, reply.changes);
 		if (reply.state !== undefined) state = reply.state;
 	});
-	const attached = await client.request({ op: "attach", requestId: randomUUID() });
+	const attached = await client.request({ op: "attach", requestId: randomUUID(), ...options });
 	if (attached.type !== "view") throw new Error(JSON.stringify(attached));
-	return { items: () => items, state: () => state!, earlier: () => earlier, replies, close: () => client.close() };
+	return {
+		items: () => items,
+		state: () => state!,
+		earlier: () => earlier,
+		replies,
+		detail: (on) => client.request({ op: "detail", requestId: randomUUID(), on }),
+		close: () => client.close(),
+	};
 }
 
 /** Items as short lines: "alex: hi", "june: hello", "tool: name", "note: text", "patter: text". */

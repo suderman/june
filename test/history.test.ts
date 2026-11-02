@@ -31,7 +31,7 @@ const entries = [
 test("the plain view shows what the terminal shows, and detail adds thinking, tool output, and private looks", () => {
 	const plain = renderHistory(entries, { user: "Robin", earlier: true });
 	assert.match(plain, /^\(earlier entries not shown\)\n== 2026-10-30\n/);
-	assert.match(plain, /\d\d:\d\d Robin \(kitty\): can you check the worker\?/);
+	assert.match(plain, /\d\d:\d\d Robin \(tui\): can you check the worker\?/);
 	assert.match(plain, /June thinking: Finding the worker then reading it\n/, "thinking is one line");
 	assert.match(plain, / {2}-> herdr_read_agent: target=w5A:p1/);
 	assert.doesNotMatch(plain, /<- herdr_read_agent/, "output of a tool that worked stays out");

@@ -12,12 +12,26 @@ export const isQuiet = (text: string) => /^\s*QUIET\.?\s*$/i.test(text);
 /** June's own looks, by their june.input source or [tag]: only a real message to the user shows, never the prompt or her tools. */
 export const PRIVATE = new Set(["heartbeat", "watch", "work", "follow"]);
 
+/** June's own inputs whose answer goes where the notice was routed, recorded as `surface` in its june.input data. */
+const NOTICES = new Set(["work", "follow", "watch", "reminder", "heartbeat"]);
+/** Surfaces a reply can alert: graphical clients, and Telegram for notices routed there. */
+const SURFACES = new Set(["gui", "apk", "telegram"]);
+export type Surface = "gui" | "apk" | "telegram";
+
+/** A client source as stored: the terminal client was `kitty` before it was `tui`. */
+export const sourceName = (source: string) => (source === "kitty" ? "tui" : source);
+
 export type ViewItem =
-	| { kind: "user"; id: string; source: string; text: string; imageCount?: number }
-	/** `text` is Markdown. `thinking` holds one flattened line per thinking block. */
-	| { kind: "assistant"; id: string; text: string; streaming: boolean; error?: string; thinking?: string }
-	/** `error` is the first line of a failed call's output. */
-	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; error?: string }
+	/** `private` marks June's own look, shown only in detail. */
+	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; private?: true }
+	/**
+	 * `text` is Markdown. `thinking` holds one flattened line per thinking block, or in detail the full text. `answers` is
+	 * the source of the input the reply follows, empty when that input is before the transcript. `alert` names the client
+	 * kind that should interrupt the user, on a finished reply only.
+	 */
+	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: Surface; error?: string; thinking?: string; private?: true }
+	/** `error` is the first line of a failed call's output; `output`, in detail only, is all of what the call kept. */
+	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; error?: string; output?: string; private?: true }
 	| { kind: "note"; id: string; text: string }
 	| { kind: "patter"; id: string; text: string };
 
@@ -36,27 +50,55 @@ export type Change = { op: "put"; item: ViewItem; after: string | null } | { op:
 /** One value of the view as a client sees it: the transcript the client holds, then the conversation's documents. */
 export type Folded = { items: ViewItem[]; state: ViewState; earlier: boolean };
 
+/** `detail` is the complete view: full thinking, tool output, and June's private looks, marked private. */
+export type FoldOptions = { readonly detail?: boolean };
+
 type Entry = { readonly id: unknown; readonly kind: string; readonly data?: any; readonly model?: readonly any[] };
 type Block = { type: string; text?: string; thinking?: string; name?: string; arguments?: unknown; id?: string };
 
 /**
  * Fold the entries a client holds and the view's documents into items. Inside one of June's private looks (a heartbeat,
  * a watch or work report, a followed task) only her final words show, and only when they are a message rather than the
- * quiet answer; her tools, thinking, and streaming reply stay out.
+ * quiet answer; her tools, thinking, and streaming reply stay out, unless `detail` asks for them, marked private.
  */
-export function fold(entries: readonly Entry[], docs: Readonly<Record<string, unknown>>, earlier = false): Folded {
+export function fold(entries: readonly Entry[], docs: Readonly<Record<string, unknown>>, earlier = false, options: FoldOptions = {}): Folded {
+	const detail = options.detail === true;
 	const items: ViewItem[] = [];
 	const tools = new Map<string, Extract<ViewItem, { kind: "tool" }>>();
 	const background = new Set<string>();
 	let hidden = false;
 	/** The reply follows a Telegram message, already Markdown; anything else June answers in Org. */
 	let markdown = false;
+	/** The source of the input being answered, and where a notice was routed. */
+	let answering = "";
+	let surface: Surface | undefined;
+	const mark = (shown: boolean) => (shown ? {} : { private: true as const });
 	const text = (raw: string) => (markdown ? plain(raw) : orgToMarkdown(plain(raw)));
-	const assistant = (id: string, content: readonly Block[], streaming: boolean, error?: string) => {
+	const alert = (): Surface | undefined => (answering === "gui" || answering === "apk" ? answering : NOTICES.has(answering) ? surface : undefined);
+	/**
+	 * An assistant item. A finished one that ends its turn alerts; one in the middle of a tool round does not, nor does a
+	 * private one. In a look, only real words are a message to the user; the rest is private.
+	 */
+	const assistant = (id: string, content: readonly Block[], options: { streaming?: boolean; error?: string; final?: boolean; shown?: boolean } = {}) => {
+		const { streaming = false, error, final = true } = options;
 		const words = content.filter((b) => b.type === "text" && b.text).map((b) => b.text!).join("\n\n");
-		const thinking = content.filter((b) => b.type === "thinking" && b.thinking?.trim()).map((b) => flatten(b.thinking!));
-		if (words === "" && thinking.length === 0 && !error && !streaming) return;
-		items.push({ kind: "assistant", id, text: text(words), streaming, ...(thinking.length ? { thinking: thinking.join("\n") } : {}), ...(error ? { error } : {}) });
+		const blocks = content.filter((b) => b.type === "thinking" && b.thinking?.trim());
+		const thinking = detail ? blocks.map((b) => b.thinking!.trim()).join("\n\n") : blocks.map((b) => flatten(b.thinking!)).join("\n");
+		const shown = options.shown ?? (!hidden || (words.trim() !== "" && !isQuiet(words)));
+		if (!shown && !detail) return;
+		if (words === "" && thinking === "" && !error && !streaming) return;
+		const notify = shown && !streaming && final && (words.trim() !== "" || error !== undefined) ? alert() : undefined;
+		items.push({
+			kind: "assistant",
+			id,
+			text: text(words),
+			streaming,
+			answers: answering,
+			...(notify ? { alert: notify } : {}),
+			...(error ? { error } : {}),
+			...(thinking ? { thinking } : {}),
+			...mark(shown),
+		});
 	};
 
 	for (const entry of entries) {
@@ -64,11 +106,14 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 		const message = entry.model?.[0];
 		switch (entry.kind) {
 			case "june.input": {
-				const source = String(entry.data?.source ?? "?");
+				const source = sourceName(String(entry.data?.source ?? "?"));
 				hidden = PRIVATE.has(source);
+				answering = source;
+				surface = SURFACES.has(entry.data?.surface) ? entry.data.surface : undefined;
 				// A private look is answered in the markup of where the user last spoke, so it leaves the markup alone.
-				if (!hidden) markdown = false;
-				if (!hidden) items.push({ kind: "user", id, source, text: entry.data?.text ?? "", ...(entry.data?.imageCount ? { imageCount: entry.data.imageCount } : {}) });
+				if (!hidden) markdown = source === "telegram";
+				const said = hidden ? textOf(message?.content) || (entry.data?.text ?? "") : (entry.data?.text ?? "");
+				if (!hidden || detail) items.push({ kind: "user", id, source, text: said, ...(entry.data?.imageCount ? { imageCount: entry.data.imageCount } : {}), ...mark(!hidden) });
 				break;
 			}
 			case "june.patter":
@@ -80,45 +125,55 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 				break;
 			case "pi.user": {
 				const words = textOf(message?.content);
-				hidden = PRIVATE.has(/^\[(\w+)\]/.exec(words)?.[1] ?? "");
-				if (hidden) break;
-				// Untagged user entries came from Telegram, and so did notices relayed there before the bridge.
-				const own = /^\[(work|follow|reminder)[\] ]\s*/.exec(words);
+				const tag = /^\[(\w+)\]/.exec(words)?.[1] ?? "";
 				// /stop, from either surface, writes this boundary so queued messages can be placed.
-				if (words.startsWith("[/stop]")) items.push({ kind: "note", id, text: "stopped" });
-				else if (own) items.push({ kind: "user", id, source: own[1]!, text: clip(words.slice(own[0].length), 80) });
-				else items.push({ kind: "user", id, source: "telegram", text: words });
-				if (!words.startsWith("[/stop]")) markdown = true;
+				if (words.startsWith("[/stop]")) {
+					hidden = false;
+					items.push({ kind: "note", id, text: "stopped" });
+					break;
+				}
+				hidden = PRIVATE.has(tag);
+				surface = undefined;
+				if (hidden) {
+					answering = tag;
+					if (detail) items.push({ kind: "user", id, source: tag, text: words, private: true });
+					break;
+				}
+				// Untagged user entries came from Telegram before the bridge, and so did notices relayed there.
+				const own = /^\[(work|follow|reminder)[\] ]\s*/.exec(words);
+				answering = own ? own[1]! : "telegram";
+				items.push({ kind: "user", id, source: answering, text: own ? clip(words.slice(own[0].length), 80) : words });
+				markdown = true;
 				break;
 			}
 			case "pi.assistant": {
 				const content: readonly Block[] = message?.content ?? [];
-				if (hidden) {
-					const words = textOf(content.filter((b) => b.type === "text"));
-					if (words.trim() !== "" && !isQuiet(words)) items.push({ kind: "assistant", id, text: text(words), streaming: false });
+				const error = message?.stopReason === "error" || message?.stopReason === "aborted" ? String(message.errorMessage ?? message.stopReason) : undefined;
+				if (hidden && !detail) {
+					assistant(id, content.filter((b) => b.type === "text"), { final: message?.stopReason !== "toolUse" });
 					break;
 				}
-				const error = message?.stopReason === "error" || message?.stopReason === "aborted" ? String(message.errorMessage ?? message.stopReason) : undefined;
-				assistant(id, content, false, error);
+				assistant(id, content, { ...(error ? { error } : {}), final: message?.stopReason !== "toolUse" });
 				for (const b of content) {
 					if (b.type !== "toolCall" || !b.id) continue;
 					// Prefixed, so a provider's call id never collides with an entry's; a repeated one also takes the entry's.
-					const item = { kind: "tool" as const, id: tools.has(b.id) ? `call:${id}:${b.id}` : `call:${b.id}`, name: b.name ?? "tool", summary: summarize(b.arguments), status: "running" as const };
+					const item: Extract<ViewItem, { kind: "tool" }> = { kind: "tool", id: tools.has(b.id) ? `call:${id}:${b.id}` : `call:${b.id}`, name: b.name ?? "tool", summary: summarize(b.arguments), status: "running", ...mark(!hidden) };
 					tools.set(b.id, item);
 					items.push(item);
 				}
 				break;
 			}
 			case "pi.tool-result": {
-				if (hidden) break;
+				if (hidden && !detail) break;
 				const callId = String(message?.toolCallId ?? id);
 				const status = message?.isError ? ("error" as const) : ("done" as const);
-				const error = message?.isError ? textOf(message.content).split("\n")[0] : undefined;
-				const done = { status, ...(error ? { error } : {}) };
+				const output = textOf(message?.content);
+				const error = message?.isError ? output.split("\n")[0] : undefined;
+				const done = { status, ...(error ? { error } : {}), ...(detail ? { output } : {}) };
 				const known = tools.get(callId);
 				if (known !== undefined) Object.assign(known, done);
 				// The call itself is before the transcript the client holds.
-				else items.push({ kind: "tool", id: `call:${callId}`, name: message?.toolName ?? "tool", summary: "", ...done });
+				else items.push({ kind: "tool", id: `call:${callId}`, name: message?.toolName ?? "tool", summary: "", ...done, ...mark(!hidden) });
 				break;
 			}
 			case "pi.reset":
@@ -132,20 +187,23 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 
 	const live = (docs["pi.live"] ?? {}) as LiveState;
 	const running = live.run !== undefined;
-	if (!hidden) {
+	if (!hidden || detail) {
 		const message = live.generation?.message as { content?: Block[] } | undefined;
-		if (message !== undefined) assistant("live", message.content ?? [], true);
+		// A look's reply is private until it is committed and shows whether it is a message.
+		if (message !== undefined) assistant("live", message.content ?? [], { streaming: true, shown: !hidden });
 		for (const slot of live.tools ?? []) {
-			if (slot.status === "done") continue;
 			const known = tools.get(slot.callId);
-			if (known === undefined) items.push({ kind: "tool", id: `call:${slot.callId}`, name: slot.name, summary: "", status: "running" });
+			if (detail && known !== undefined && slot.status !== "done" && slot.output !== undefined) known.output = slot.output;
+			if (slot.status === "done" || known !== undefined) continue;
+			items.push({ kind: "tool", id: `call:${slot.callId}`, name: slot.name, summary: "", status: "running", ...(detail && slot.output !== undefined ? { output: slot.output } : {}), ...mark(!hidden) });
 		}
 		// A run that ended without an answer says why, unless the user stopped it or started afresh.
 		const failure = live.runFailure;
 		if (!running && failure !== undefined && !["aborted", "reset", "nothing_to_answer"].includes(failure.reason)) {
 			const last = items.at(-1);
+			// In a look, a failure is never a message to the user.
 			if (!(last?.kind === "assistant" && last.error))
-				items.push({ kind: "assistant", id: `failure:${String(failure.taskId)}`, text: "", streaming: false, error: [failure.reason.replace(/_/g, " "), failure.detail].filter(Boolean).join(": ") });
+				assistant(`failure:${String(failure.taskId)}`, [], { error: [failure.reason.replace(/_/g, " "), failure.detail].filter(Boolean).join(": "), shown: !hidden });
 		}
 	}
 	// A call without a result once its run has ended was cut off.
@@ -167,9 +225,9 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 }
 
 /** The items of a view the daemon holds through a `ConversationTranscript`: its entries, in order, and whether more precede them. */
-export function foldView(view: Omit<ConversationView, "entries" | "before"> & { readonly items: readonly { kind: string; entry?: unknown }[] }): Folded {
+export function foldView(view: Omit<ConversationView, "entries" | "before"> & { readonly items: readonly { kind: string; entry?: unknown }[] }, options: FoldOptions = {}): Folded {
 	const entries = view.items.flatMap((item) => (item.kind === "entry" ? [item.entry as Entry] : []));
-	return fold(entries, view.docs, view.items[0]?.kind === "earlier");
+	return fold(entries, view.docs, view.items[0]?.kind === "earlier", options);
 }
 
 /**

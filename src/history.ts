@@ -1,7 +1,7 @@
 // June's conversation as text for a reader outside the terminal, such as a worker looking into a gap the user hit:
 // `june transcript`. The plain view is what the terminal shows; detail adds her thinking in full, tool arguments and
 // output, and her private looks (heartbeat, watch, work, follow), marked private.
-import { clip, isQuiet, PRIVATE, summarize, textOf } from "./transcript.ts";
+import { clip, isQuiet, PRIVATE, sourceName, summarize, textOf } from "./transcript.ts";
 
 /** Tool output and private prompts in detail are cut to this many characters, keeping their line breaks. */
 const DETAIL_CHARS = 2000;
@@ -45,7 +45,7 @@ export function renderHistory(entries: readonly any[], options: { detail?: boole
 		const mark = looking ? " (private)" : "";
 		switch (entry.kind) {
 			case "june.input": {
-				const source = String(entry.data?.source ?? "?");
+				const source = sourceName(String(entry.data?.source ?? "?"));
 				looking = PRIVATE.has(source);
 				if (!looking) say(`${user} (${source})`, `${entry.data?.text ?? ""}${entry.data?.imageCount ? ` [${entry.data.imageCount} image(s)]` : ""}`);
 				else if (detail) say(`[${source}] (private)`, cut(textOf(message?.content)));

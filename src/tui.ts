@@ -131,7 +131,7 @@ class Wrapped implements Component {
 function component(item: Item): Component[] {
 	switch (item.kind) {
 		case "user": {
-			const tag = item.source === "kitty" ? "" : c.muted(`${item.source} `);
+			const tag = item.source === "tui" ? "" : c.muted(`${item.source} `);
 			const images = item.imageCount ? `[${item.imageCount} image${item.imageCount === 1 ? "" : "s"}]` : "";
 			return [new Line(), new Wrapped(c.user([item.text, images].filter(Boolean).join("\n")), `${tag}${c.user("› ")}`)];
 		}
@@ -288,7 +288,7 @@ export async function runTui(socketPath: string): Promise<void> {
 		redraw();
 		try {
 			const input = await imageInput(text, pasted);
-			const reply = await client.request({ op: "submit", requestId: randomUUID(), ...input, source: "kitty", whenBusy });
+			const reply = await client.request({ op: "submit", requestId: randomUUID(), ...input, source: "tui", whenBusy });
 			if (reply.type === "error") throw new Error(reply.message);
 			editor.addToHistory(text);
 			editor.setText("");
@@ -391,7 +391,7 @@ export async function runTui(socketPath: string): Promise<void> {
 					if (reply.type !== "view") return;
 					transcript.apply(reply);
 					if (!seeded && "reset" in reply) {
-						for (const item of transcript.items) if (item.kind === "user" && item.source === "kitty") editor.addToHistory(item.text);
+						for (const item of transcript.items) if (item.kind === "user" && item.source === "tui") editor.addToHistory(item.text);
 						seeded = true;
 					}
 					redraw();

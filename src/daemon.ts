@@ -22,7 +22,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { type CommandScope, runCommand } from "./commands.ts";
 import { type Config, expandHome, type Paths } from "./config.ts";
 import { acquireDataDirLock, createLogger, createSettings, type Logger } from "./runtime.ts";
-import { diff, type Folded, foldView } from "./transcript.ts";
+import { diff, type Folded, foldView, sourceName } from "./transcript.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { createHeartbeat } from "./heartbeat.ts";
 import { entryTimes } from "./history.ts";
@@ -33,7 +33,7 @@ import { createMemoryExtension } from "./memory.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
 import { createReflection } from "./reflect.ts";
 import { createWatch } from "./watch.ts";
-import { readLines, type Reply, type Request, type Status, writeLine } from "./protocol.ts";
+import { readLines, type Reply, type Request, SOURCES, type Status, writeLine } from "./protocol.ts";
 import { createCodingExtension } from "./tools/coding.ts";
 import { createHerdrExtension, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
@@ -285,11 +285,11 @@ type Scope = CommandScope & { log: Logger };
 function serve(socket: Socket, scope: Scope): void {
 	const abort = new AbortController();
 	const context = withAbortSignal(abort.signal, BG);
-	let stopView: (() => Promise<unknown>) | undefined;
+	let view: View | undefined;
 	socket.on("error", () => {});
 	socket.on("close", () => {
 		abort.abort();
-		void stopView?.();
+		void view?.stop();
 	});
 	const send = (reply: Reply) => writeLine(socket, reply);
 
@@ -310,10 +310,13 @@ function serve(socket: Socket, scope: Scope): void {
 				return send({ type: "status", requestId: request.requestId, status: await scope.status() });
 			case "attach": {
 				// A second attach on one connection starts the view over.
-				await stopView?.();
-				stopView = await attachView(scope.root, context, send, request.requestId);
+				await view?.stop();
+				view = await attachView(scope.root, context, send, request.requestId, { detail: request.detail === true });
 				return;
 			}
+			case "detail":
+				if (view === undefined) throw new Error("Not attached");
+				return view.detail(request.on === true, request.requestId);
 			case "history": {
 				const limit = Math.min(Math.max(1, request.limit ?? (request.since === undefined ? SNAPSHOT_ENTRIES : HISTORY_ENTRIES)), HISTORY_ENTRIES);
 				const { entries, earlier } = await history(scope.root, request.since, limit, context);
@@ -328,14 +331,17 @@ function serve(socket: Socket, scope: Scope): void {
 					if (model === undefined || !scope.models.getModel(model.provider, model.modelId)?.input.includes("image"))
 						throw new Error("The current model does not support images");
 				}
-				const inputText = `[${request.source}] ${request.text}`;
+				const source = sourceName(String(request.source));
+				if (!(SOURCES as readonly string[]).includes(source)) throw new Error(`Unknown source ${String(request.source)}`);
+				// Telegram stays untagged for the model, so June's prompt and her Markdown there hold.
+				const inputText = source === "telegram" ? request.text : `[${source}] ${request.text}`;
 				const submission = await scope.root.submit(
 					{
 						type: "input",
-						requestId: `${request.source}:${request.requestId}`,
+						requestId: `${source}:${request.requestId}`,
 						content: images.length ? [{ type: "text", text: inputText }, ...images] : inputText,
 						whenBusy: request.whenBusy ?? "followUp",
-						entry: { kind: "june.input", data: { source: request.source, text: request.text, ...(images.length ? { imageCount: images.length } : {}) } },
+						entry: { kind: "june.input", data: { source, text: request.text, ...(images.length ? { imageCount: images.length } : {}) } },
 					},
 					context,
 				);
@@ -373,12 +379,22 @@ export function assistantText(message: unknown): string {
 		.join("");
 }
 
+/** A connection's view: `detail` switches between the simple and complete view with a reset, `stop` ends it. */
+export type View = { detail(on: boolean, requestId: string): void; stop(): Promise<unknown> };
+
 /**
  * Attach a connection to the folded view: a watch of the root conversation, a `ConversationTranscript` that keeps entries
  * the window drops, and the items last sent, so each flush sends only what changed. A root replacement (the watch fell
- * 10,000 operations behind) starts the transcript over and sends a reset. Returns what stops it.
+ * 10,000 operations behind) starts the transcript over and sends a reset.
  */
-export async function attachView(root: Pick<Conversation, "watch" | "entries">, context: Context, send: (reply: Reply) => void, requestId: string): Promise<() => Promise<unknown>> {
+export async function attachView(
+	root: Pick<Conversation, "watch" | "entries">,
+	context: Context,
+	send: (reply: Reply) => void,
+	requestId: string,
+	options: { detail?: boolean } = {},
+): Promise<View> {
+	let detail = options.detail === true;
 	const load = (query: Parameters<Conversation["entries"]>[0], limit: number, ctx: Context) => root.entries(query, limit, undefined, ctx);
 	let transcript = new ConversationTranscript(load);
 	const watch = await root.watch(context, WINDOW);
@@ -387,7 +403,7 @@ export async function attachView(root: Pick<Conversation, "watch" | "entries">, 
 	let state = "";
 	const sent = new Map<string, string>();
 	const reset = (id?: string) => {
-		shown = foldView(latest);
+		shown = foldView(latest, { detail });
 		sent.clear();
 		for (const item of shown.items) sent.set(item.id, JSON.stringify(item));
 		state = JSON.stringify(shown.state);
@@ -404,7 +420,7 @@ export async function attachView(root: Pick<Conversation, "watch" | "entries">, 
 			replaced = false;
 			return reset();
 		}
-		const next = foldView(latest);
+		const next = foldView(latest, { detail });
 		const changes = diff(shown!.items, next.items, sent);
 		const nextState = JSON.stringify(next.state);
 		if (changes.length > 0 || nextState !== state) send({ type: "view", changes, ...(nextState !== state ? { state: next.state } : {}) });
@@ -420,9 +436,19 @@ export async function attachView(root: Pick<Conversation, "watch" | "entries">, 
 		latest = transcript.merge(call.value);
 		timer ??= setTimeout(flush, Math.max(0, flushed + FLUSH_MS - Date.now()));
 	});
-	return async () => {
-		clearTimeout(timer);
-		await watch.stop();
+	return {
+		// The reset holds everything a pending flush would send.
+		detail(on, id) {
+			detail = on;
+			clearTimeout(timer);
+			timer = undefined;
+			replaced = false;
+			reset(id);
+		},
+		async stop() {
+			clearTimeout(timer);
+			await watch.stop();
+		},
 	};
 }
 

@@ -32,16 +32,16 @@ test("the fold: thinking as one line each, tool lines with their status, Org as 
 	];
 	const { items, state } = fold(entries, { "pi.agent": { model: { modelId: "terra" }, thinkingLevel: "medium" } });
 	assert.deepEqual(items, [
-		{ kind: "user", id: "1", source: "kitty", text: "find the heading" },
-		{ kind: "assistant", id: "2", text: "", streaming: false, thinking: "Finding project heading" },
+		{ kind: "user", id: "1", source: "tui", text: "find the heading" },
+		{ kind: "assistant", id: "2", text: "", streaming: false, answers: "tui", thinking: "Finding project heading" },
 		{ kind: "tool", id: "call:c1", name: "org_search", summary: "query=june", status: "done" },
 		{ kind: "tool", id: "call:c2", name: "bash", summary: "command=false", status: "error", error: "exit 1" },
-		{ kind: "assistant", id: "5", text: "It is **here**, in `june.org`.", streaming: false },
+		{ kind: "assistant", id: "5", text: "It is **here**, in `june.org`.", streaming: false, answers: "tui" },
 		{ kind: "patter", id: "6", text: "rummaging" },
 		{ kind: "note", id: "7", text: "earlier conversation compacted" },
 		{ kind: "note", id: "8", text: "new context" },
 		{ kind: "user", id: "9", source: "telegram", text: "and from the phone?" },
-		{ kind: "assistant", id: "10", text: "Markdown *stays*.", streaming: false },
+		{ kind: "assistant", id: "10", text: "Markdown *stays*.", streaming: false, answers: "telegram" },
 	]);
 	assert.deepEqual(state, { running: false, background: 0, queued: 0, model: "terra:medium", compacting: false });
 });
@@ -56,7 +56,7 @@ test("the fold: the streaming reply, running tools, the queue, and a retry come 
 	const { items, state } = fold(entries, { "pi.live": live, "pi.inbox": { items: [{}, {}] } });
 	assert.deepEqual(items.slice(1), [
 		{ kind: "tool", id: "call:c1", name: "bash", summary: "command=make", status: "running" },
-		{ kind: "assistant", id: "live", text: "Nearly **done**", streaming: true },
+		{ kind: "assistant", id: "live", text: "Nearly **done**", streaming: true, answers: "tui" },
 	]);
 	assert.equal(state.running, true);
 	assert.equal(state.queued, 2);
@@ -68,11 +68,11 @@ test("the fold: the streaming reply, running tools, the queue, and a retry come 
 test("the fold: a run that failed shows why, unless the user stopped it or started afresh", () => {
 	const entries = [user(1, "kitty", "hi")];
 	const failed = (reason: string, detail?: string) => fold(entries, { "pi.live": { runFailure: { taskId: 4, inputs: [1], reason, ...(detail ? { detail } : {}) } } }).items;
-	assert.deepEqual(failed("model_error", "429 Too Many Requests").at(-1), { kind: "assistant", id: "failure:4", text: "", streaming: false, error: "model error: 429 Too Many Requests" });
+	assert.deepEqual(failed("model_error", "429 Too Many Requests").at(-1), { kind: "assistant", id: "failure:4", text: "", streaming: false, answers: "tui", error: "model error: 429 Too Many Requests" });
 	assert.equal(failed("aborted").length, 1);
 	assert.equal(failed("reset").length, 1);
 	const shown = fold([...entries, said(2, [], { stopReason: "error", errorMessage: "boom" })], { "pi.live": { runFailure: { taskId: 4, inputs: [1], reason: "model_error", detail: "boom" } } }).items;
-	assert.deepEqual(shown.at(-1), { kind: "assistant", id: "2", text: "", streaming: false, error: "boom" }, "an error entry already says it");
+	assert.deepEqual(shown.at(-1), { kind: "assistant", id: "2", text: "", streaming: false, answers: "tui", error: "boom" }, "an error entry already says it");
 	const running = fold(entries, { "pi.live": { run: { taskId: 5, inputs: [2], turns: 0 }, runFailure: { taskId: 4, inputs: [1], reason: "model_error" } } }).items;
 	assert.equal(running.length, 1, "a new run clears it");
 });
@@ -125,7 +125,7 @@ test("a root replacement starts the view over with a reset", async () => {
 	await listener!({ kind: "value", value: replacement, ops: [["r", replacement]], retired: false }, BG);
 	await until(() => sent.length === 3);
 	assert.deepEqual(sent[2], { type: "view", reset: true, items: [{ kind: "patter", id: "1", text: "fresh" }], state: { running: false, background: 0, queued: 0, model: "", compacting: false }, earlier: false });
-	await stop();
+	await stop.stop();
 });
 
 test("a streaming reply grows in place as the live item, at most ten times a second, then becomes its entry", async (t) => {

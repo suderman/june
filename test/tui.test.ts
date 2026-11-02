@@ -66,7 +66,7 @@ test("terminal images reach the model, persist through restart, and reconnect wi
 	const faux = fauxProvider();
 	faux.setResponses([(ctx) => {
 		const user = ctx.messages.findLast((m) => m.role === "user");
-		assert.deepEqual(user?.content, [{ type: "text", text: "[kitty] what is this?" }, IMAGE]);
+		assert.deepEqual(user?.content, [{ type: "text", text: "[tui] what is this?" }, IMAGE]);
 		return fauxAssistantMessage("four pixels");
 	}]);
 	let daemon = await openTestDaemon({ ...tmp, faux });
@@ -74,12 +74,12 @@ test("terminal images reach the model, persist through restart, and reconnect wi
 	const client = await Client.open(tmp.paths.socket);
 	try {
 		const settled = new Promise<Reply>((resolve) => client.on((r) => r.type === "settled" && resolve(r)));
-		assert.equal((await client.request({ op: "submit", requestId: "image", text: "what is this?", images: [IMAGE], source: "kitty", wait: true })).type, "accepted");
+		assert.equal((await client.request({ op: "submit", requestId: "image", text: "what is this?", images: [IMAGE], source: "tui", wait: true })).type, "accepted");
 		assert.deepEqual(await settled, { type: "settled", requestId: "image", status: "done", text: "four pixels" });
-		const duplicate = await client.request({ op: "submit", requestId: "image", text: "what is this?", images: [IMAGE], source: "kitty" });
+		const duplicate = await client.request({ op: "submit", requestId: "image", text: "what is this?", images: [IMAGE], source: "tui" });
 		assert.equal(duplicate.type, "accepted");
 		assert.equal(faux.state.callCount, 1, "socket retries do not resubmit an image");
-		const bad = await client.request({ op: "submit", requestId: "bad", text: "", images: [{ ...IMAGE, data: "invalid" }], source: "kitty" });
+		const bad = await client.request({ op: "submit", requestId: "bad", text: "", images: [{ ...IMAGE, data: "invalid" }], source: "tui" });
 		assert.equal(bad.type, "error");
 	} finally { client.close(); }
 	await daemon.close();
@@ -89,12 +89,12 @@ test("terminal images reach the model, persist through restart, and reconnect wi
 		return fauxAssistantMessage("still four pixels");
 	}]);
 	daemon = await openTestDaemon({ ...tmp, faux: resumed });
-	assert.equal((await ask(tmp.paths.socket, "remember?", "text", "kitty")).text, "still four pixels");
+	assert.equal((await ask(tmp.paths.socket, "remember?", "text", "tui")).text, "still four pixels");
 	const snapshot = await daemon.root.context(BG);
 	const view = await attachView(tmp.paths.socket);
 	view.close();
 	const user = view.items().find((i) => i.kind === "user" && i.imageCount);
-	assert.deepEqual(user, { kind: "user", id: String(snapshot.entries.find((e) => e.kind === "june.input")!.id), source: "kitty", text: "what is this?", imageCount: 1 });
+	assert.deepEqual(user, { kind: "user", id: String(snapshot.entries.find((e) => e.kind === "june.input")!.id), source: "tui", text: "what is this?", imageCount: 1 });
 	assert.equal(JSON.stringify(snapshot.entries.find((e) => e.kind === "june.input")?.data).includes(PNG), false, "metadata does not duplicate base64");
 });
 
@@ -108,7 +108,7 @@ test("image-only submission is allowed, but text-only models and malformed image
 		t.after(() => daemon.close());
 		const client = await Client.open(tmp.paths.socket);
 		try {
-			const reply = await client.request({ op: "submit", requestId: "only", text: "", images: [IMAGE], source: "kitty" });
+			const reply = await client.request({ op: "submit", requestId: "only", text: "", images: [IMAGE], source: "tui" });
 			if (input.length === 2) assert.equal(reply.type, "accepted");
 			else {
 				assert.deepEqual(reply, { type: "error", requestId: "only", message: "The current model does not support images" });
@@ -187,9 +187,9 @@ test("June's text reaches Jon as a keyboard types it: straight quotes, no em das
 test("a command reply stays where it was given, after the streaming reply it interrupted is replaced", () => {
 	const t = new Transcript();
 	const state = { running: true, background: 0, queued: 0, model: "", compacting: false };
-	t.apply({ type: "view", reset: true, earlier: false, state, items: [{ kind: "user", id: "1", source: "kitty", text: "go" }, { kind: "assistant", id: "live", text: "on it", streaming: true }] });
+	t.apply({ type: "view", reset: true, earlier: false, state, items: [{ kind: "user", id: "1", source: "kitty", text: "go" }, { kind: "assistant", id: "live", text: "on it", streaming: true, answers: "tui" }] });
 	t.reply("stop", "Stopped.");
-	t.apply({ type: "view", changes: [{ op: "drop", id: "live" }, { op: "put", item: { kind: "assistant", id: "2", text: "on it", streaming: false, error: "aborted" }, after: "1" }, { op: "put", item: { kind: "note", id: "3", text: "stopped" }, after: "2" }] });
+	t.apply({ type: "view", changes: [{ op: "drop", id: "live" }, { op: "put", item: { kind: "assistant", id: "2", text: "on it", streaming: false, answers: "tui", error: "aborted" }, after: "1" }, { op: "put", item: { kind: "note", id: "3", text: "stopped" }, after: "2" }] });
 	t.apply({ type: "view", changes: [{ op: "put", item: { kind: "user", id: "4", source: "kitty", text: "you there?" }, after: "3" }] });
 	assert.deepEqual(t.shown().map((i) => i.id), ["1", "reply:0", "2", "3", "4"]);
 });

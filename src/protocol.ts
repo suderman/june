@@ -5,7 +5,12 @@ import type { ImageContent } from "@earendil-works/pi-ai";
 import type { EntryRecord } from "@earendil-works/pi-durable";
 import type { Change, ViewItem, ViewState } from "./transcript.ts";
 
-export type Source = "kitty" | "cli" | "follow";
+/**
+ * June's clients, in three letters: the terminal client in any emulator, one-shot commands, the Hyprland overlay, and the
+ * Android app; and the Telegram bridge. `kitty` is what the terminal sent before it was `tui`, and is recorded as `tui`.
+ */
+export const SOURCES = ["tui", "cli", "gui", "apk", "telegram"] as const;
+export type Source = (typeof SOURCES)[number] | "kitty";
 
 /** Terminal commands. All except /reload are also Telegram's. */
 export const COMMANDS = [
@@ -26,7 +31,10 @@ export function parseCommand(text: string): { name: string; args: string } | und
 
 export type Request =
 	| { op: "status"; requestId: string }
-	| { op: "attach"; requestId: string }
+	/** `detail` asks for the complete view; it is the connection's until a `detail` request changes it. */
+	| { op: "attach"; requestId: string; detail?: boolean }
+	/** Turn the complete view on or off; answered with a reset. */
+	| { op: "detail"; requestId: string; on: boolean }
 	/** Entries without a view: those since `since` (epoch ms), the newest `limit` of them. */
 	| { op: "history"; requestId: string; since?: number; limit?: number }
 	| { op: "submit"; requestId: string; text: string; images?: ImageContent[]; source: Source; whenBusy?: "steer" | "followUp"; wait?: boolean }
