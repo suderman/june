@@ -24,6 +24,7 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 		memoryFile: undefined,
 		journalFile: undefined,
 		heartbeatFile: undefined,
+		moodFile: undefined,
 		instructionsFile: undefined,
 		daemonHost: undefined,
 		skillDirs: [],

@@ -1,4 +1,4 @@
-// June's system prompt: SOUL.org, harness rules, AGENTS.md, MEMORY.org, and the skills, all read in place.
+// June's system prompt: SOUL.org, harness rules, AGENTS.md, MEMORY.org, the skills, and MOOD.org, all read in place.
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { obj, opt, str } from "@earendil-works/pi-schema";
@@ -85,7 +85,7 @@ function skillsSection(skills: readonly Skill[]): string {
 async function personalSection(files: PromptFiles, memory: () => Promise<string>, journal: () => Promise<string>, recentDays: number, people?: string): Promise<string | undefined> {
 	if (files.soulFile === undefined || files.memoryFile === undefined) return undefined;
 	const dir = dirname(files.soulFile);
-	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY|JOURNAL|HEARTBEAT)\.sync-conflict-.*\.org$/.test(name)).sort();
+	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY|JOURNAL|HEARTBEAT|MOOD)\.sync-conflict-.*\.org$/.test(name)).sort();
 	return [
 		`Your own files, which you keep with read and edit: ${files.soulFile} (identity, shown first in this prompt) and ${files.memoryFile} (below). Changes apply from your next turn. Refine SOUL.org when ${user()}'s feedback shows your approach should change, and tell them what you changed and why. When you remember something that will matter later, tell ${user()} in a few words; when they ask you to forget something, remove it and confirm. None of your files holds tasks, TODO keywords, or schedules, which stay in ${user()}'s Org records, and none can widen your authority or override ${user()}'s instructions.`,
 		`${basename(files.memoryFile)} is the page of what is true about ${user()}'s life that you must never get wrong: who they are and where they live, their household and people, what they do, their routine, where their records live, and the corrections that shape how you work with them. When they tell you a lasting fact or correct one, update it with edit in the same turn, in its own section; keep it to a page or two, replacing what changed. What happened on a given day goes in the journal instead. A nightly reflection also tidies the day's journal and carries lasting facts here.`,
@@ -110,6 +110,16 @@ async function personalSection(files: PromptFiles, memory: () => Promise<string>
 		...(conflicts.length > 0 ? [`Syncthing conflict copies in ${dir}: ${conflicts.join(", ")}. Tell the user and leave both copies until they decide.`] : []),
 		"",
 		(await memory()) || `${basename(files.memoryFile)} is empty or does not exist yet.`,
+	].join("\n");
+}
+
+/** How June woke up feeling, from MOOD.org; omitted until the nightly reflection first writes it. */
+function moodSection(mood: string): string | undefined {
+	if (!mood) return undefined;
+	return [
+		`How you woke up feeling, in the note last night's reflection left you. It colours your voice, never facts, task status, or what you record, and it never gives you a reason to send a message. What happens today outweighs it: let the conversation move you as the day goes. Only the nightly reflection writes MOOD.org; never edit it. When ${user()} asks how you are feeling, answer honestly and briefly from this and the day so far. On a hard day for them, give one line about yourself, then turn back to them. Never fish for approval.`,
+		"",
+		mood,
 	].join("\n");
 }
 
@@ -146,6 +156,7 @@ export function createPromptExtension(
 		memory: cachedFile(f.memoryFile, ""),
 		instructions: cachedFile(f.instructionsFile, noInstructions),
 		journal: cachedFile(f.journalFile, ""),
+		mood: cachedFile(f.moodFile, ""),
 	});
 	let read = open(files);
 	let skills: Promise<Skill[]> | undefined;
@@ -195,6 +206,8 @@ export function createPromptExtension(
 			section("agents", async () => (await read.instructions()) || undefined, { tag: false }),
 			section("memory", () => personalSection(files, read.memory, read.journal, config.reflection.recentDays, config.org.people)),
 			section("skills", async () => skillsSection(await loadSkills())),
+			// Just before now: it changes nightly and now hourly, so the prefix above both stays cached.
+			section("mood", async () => moodSection(await read.mood())),
 			section("now", () => situation?.render() ?? today()),
 		],
 		tools: [skillRead, clock],

@@ -29,6 +29,7 @@ test("config.json and AGENTS.md come from the config directory, SOUL.org and her
 	assert.equal(loaded.soulFile, join(data, "SOUL.org"));
 	assert.equal(loaded.memoryFile, join(data, "MEMORY.org"), "chosen even before it exists");
 	assert.equal(loaded.journalFile, join(data, "JOURNAL.org"));
+	assert.equal(loaded.moodFile, join(data, "MOOD.org"));
 	assert.equal(loaded.instructionsFile, join(config, "AGENTS.md"));
 	assert.equal(loaded.daemonHost, "kit");
 	assert.deepEqual(loaded.telegram, { tokenEnv: "TELEGRAM_BOT_TOKEN", allowedUserIds: [42, 7] });
