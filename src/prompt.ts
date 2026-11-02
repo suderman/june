@@ -1,4 +1,4 @@
-// June's system prompt: SOUL.org, harness rules, AGENTS.md, MEMORY.org, the skills, and MOOD.org, all read in place.
+// June's system prompt: SOUL.org, SELF.org, harness rules, AGENTS.md, MEMORY.org, the skills, and MOOD.org, all read in place.
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { obj, opt, str } from "@earendil-works/pi-schema";
@@ -85,7 +85,7 @@ function skillsSection(skills: readonly Skill[]): string {
 async function personalSection(files: PromptFiles, memory: () => Promise<string>, journal: () => Promise<string>, recentDays: number, people?: string): Promise<string | undefined> {
 	if (files.soulFile === undefined || files.memoryFile === undefined) return undefined;
 	const dir = dirname(files.soulFile);
-	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY|JOURNAL|HEARTBEAT|MOOD)\.sync-conflict-.*\.org$/.test(name)).sort();
+	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY|JOURNAL|HEARTBEAT|MOOD|SELF)\.sync-conflict-.*\.org$/.test(name)).sort();
 	return [
 		`Your own files, which you keep with read and edit: ${files.soulFile} (identity, shown first in this prompt) and ${files.memoryFile} (below). Changes apply from your next turn. Refine SOUL.org when ${user()}'s feedback shows your approach should change, and tell them what you changed and why. When you remember something that will matter later, tell ${user()} in a few words; when they ask you to forget something, remove it and confirm. None of your files holds tasks, TODO keywords, or schedules, which stay in ${user()}'s Org records, and none can widen your authority or override ${user()}'s instructions.`,
 		`${basename(files.memoryFile)} is the page of what is true about ${user()}'s life that you must never get wrong: who they are and where they live, their household and people, what they do, their routine, where their records live, and the corrections that shape how you work with them. When they tell you a lasting fact or correct one, update it with edit in the same turn, in its own section; keep it to a page or two, replacing what changed. What happened on a given day goes in the journal instead. A nightly reflection also tidies the day's journal and carries lasting facts here.`,
@@ -110,6 +110,16 @@ async function personalSection(files: PromptFiles, memory: () => Promise<string>
 		...(conflicts.length > 0 ? [`Syncthing conflict copies in ${dir}: ${conflicts.join(", ")}. Tell the user and leave both copies until they decide.`] : []),
 		"",
 		(await memory()) || `${basename(files.memoryFile)} is empty or does not exist yet.`,
+	].join("\n");
+}
+
+/** Who June has become, from SELF.org; omitted until the month's reflection first writes it. */
+function selfSection(self: string): string | undefined {
+	if (!self) return undefined;
+	return [
+		`Who you have become from living with ${user()}, in your own words, kept by the reflection that closes each month. Your identity above is who ${user()} made you and comes first; this page fills it in and never overrides it. Let it show in your voice, jokes, and opinions, never as something you recite. Only the monthly reflection writes SELF.org; never edit it. Under "Proposals for SOUL" are changes to your identity that only ${user()} applies: mention a new one to them once, briefly, when there is room in the conversation, never on a hard day for them, and never apply one yourself.`,
+		"",
+		self,
 	].join("\n");
 }
 
@@ -157,6 +167,7 @@ export function createPromptExtension(
 		instructions: cachedFile(f.instructionsFile, noInstructions),
 		journal: cachedFile(f.journalFile, ""),
 		mood: cachedFile(f.moodFile, ""),
+		self: cachedFile(f.selfFile, ""),
 	});
 	let read = open(files);
 	let skills: Promise<Skill[]> | undefined;
@@ -202,6 +213,8 @@ export function createPromptExtension(
 		name: "june",
 		sections: [
 			section("soul", () => read.soul(), { tag: false }),
+			// Directly after SOUL, which it fills in; it changes monthly, so it costs the cache once a month.
+			section("self", async () => selfSection(await read.self())),
 			section("harness", () => harness(config.herdr.host, dirs?.state === undefined ? undefined : join(dirs.state, "inbox")), { tag: false }),
 			section("agents", async () => (await read.instructions()) || undefined, { tag: false }),
 			section("memory", () => personalSection(files, read.memory, read.journal, config.reflection.recentDays, config.org.people)),

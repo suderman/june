@@ -37,6 +37,8 @@ export type Config = {
 	readonly heartbeatFile: string | undefined;
 	/** MOOD.org beside SOUL.org: how June woke up feeling, replaced whole by the nightly reflection. */
 	readonly moodFile: string | undefined;
+	/** SELF.org beside SOUL.org: June's own account of who she has become, revised by the month's reflection. */
+	readonly selfFile: string | undefined;
 	/** AGENTS.md from the config directory, when it exists. */
 	readonly instructionsFile: string | undefined;
 	/** The host that runs the daemon; elsewhere the client commands run there over SSH. */
@@ -307,7 +309,7 @@ function patterTiming(given: Config["patter"]): Config["patter"] {
 	return given;
 }
 
-export type PromptFiles = Pick<Config, "soulFile" | "memoryFile" | "journalFile" | "heartbeatFile" | "moodFile" | "instructionsFile">;
+export type PromptFiles = Pick<Config, "soulFile" | "memoryFile" | "journalFile" | "heartbeatFile" | "moodFile" | "selfFile" | "instructionsFile">;
 
 /** The prompt files as they are now; /reload calls this again so files made since startup are found. */
 export function promptFiles(p: Pick<Paths, "config" | "data">): PromptFiles {
@@ -320,6 +322,7 @@ export function promptFiles(p: Pick<Paths, "config" | "data">): PromptFiles {
 		journalFile: soul ? join(p.data, "JOURNAL.org") : undefined,
 		heartbeatFile: soul ? join(p.data, "HEARTBEAT.org") : undefined,
 		moodFile: soul ? join(p.data, "MOOD.org") : undefined,
+		selfFile: soul ? join(p.data, "SELF.org") : undefined,
 		instructionsFile: existsSync(instructionsFile) ? instructionsFile : undefined,
 	};
 }
