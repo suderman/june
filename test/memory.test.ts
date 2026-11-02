@@ -657,3 +657,18 @@ test("after the night's pass, the week and month that closed get digests, a peri
 	await new Promise((r) => setTimeout(r, 200));
 	assert.equal(faux.state.callCount, 3, "the quarter and year had nothing to read, and nothing runs twice");
 });
+
+test("without AGENTS.md the prompt says so and holds June to safe defaults", async (t) => {
+	const env = await fixture(t);
+	const faux = fauxProvider();
+	let seen = "";
+	faux.setResponses([(ctx) => {
+		seen = effectivePrompt(ctx);
+		return fauxAssistantMessage("ok");
+	}]);
+	const f = await env.open(faux);
+	assert.equal((await (await f.root.submit({ type: "input", content: "Hello." }, BG)).wait(BG)).status, "done");
+	assert.match(seen, /You have no AGENTS\.md yet/);
+	assert.match(seen, /ask before anything destructive, hard to reverse, or external/);
+	assert.match(seen, /Never print, quote, or summarize credentials/);
+});

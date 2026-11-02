@@ -18,6 +18,9 @@ const harness = (host: string) => `How this harness works:
 - Change an existing file with edit, after reading it, so a concurrent change makes the edit fail instead of being overwritten; use write only for a new file. When a Syncthing conflict copy (*.sync-conflict-*) sits beside a file, tell the user instead of choosing a copy.
 - Never claim an edit, message, or prompt happened until its tool result confirms it. A tool call interrupted by a restart may already have taken effect, so check the current state before repeating it.`;
 
+/** Without AGENTS.md June has none of the user's conventions, so she holds to safe defaults until they add one. */
+const noInstructions = `You have no AGENTS.md yet, so you know none of the user's conventions: their Org layout, task states, hosts, or approval rules. Until they add one (june init writes a starter in the config directory), ask before anything destructive, hard to reverse, or external, such as deploys, commits, pushes, restarts, or messages, and before anything outside their request or queueing work for an agent. Never print, quote, or summarize credentials. Mention the missing file once when it matters, not every turn.`;
+
 /** `render` re-reads `path` only when its size or mtime changes, so the prompt text stays stable for caching. */
 function cachedFile(path: string | undefined, missing: string): (force?: boolean) => Promise<string> {
 	let cached: { stamp: string; text: string } | undefined;
@@ -140,7 +143,7 @@ export function createPromptExtension(
 	const open = (f: PromptFiles) => ({
 		soul: cachedFile(f.soulFile, "You are June, a personal assistant."),
 		memory: cachedFile(f.memoryFile, ""),
-		instructions: cachedFile(f.instructionsFile, ""),
+		instructions: cachedFile(f.instructionsFile, noInstructions),
 		journal: cachedFile(f.journalFile, ""),
 	});
 	let read = open(files);

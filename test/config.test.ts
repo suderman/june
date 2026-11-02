@@ -138,7 +138,7 @@ test("June's prompts and tools name the configured user, and the code names nobo
 	assert.match(request, /Robin's/, "the name reaches her prompt");
 	assert.doesNotMatch(request, /\$\{\s*[uU]ser\(\)\s*\}/, "no placeholder left uninterpolated");
 	assert.doesNotMatch(request, /\bJon\b/, "nobody's real name in the code's own text");
-	for (const file of ["SOUL.org", "MEMORY.org", "HEARTBEAT.org", "config.json"])
+	for (const file of ["SOUL.org", "MEMORY.org", "HEARTBEAT.org", "config.json", "AGENTS.md"])
 		assert.doesNotMatch(readFileSync(join(import.meta.dirname, "..", "templates", file), "utf8"), /\bJon\b/, `templates/${file} names nobody`);
 });
 
@@ -151,12 +151,28 @@ test("june init creates missing personal files from the templates with the name 
 	const results = init(dirs, "Robin");
 	assert.deepEqual(
 		results.map((r) => [r.path.slice(tmp.dir.length + 1), r.created]),
-		[["data/SOUL.org", true], ["data/MEMORY.org", false], ["data/HEARTBEAT.org", true], ["config/config.json", true]],
+		[["data/SOUL.org", true], ["data/MEMORY.org", false], ["data/HEARTBEAT.org", true], ["config/config.json", true], ["config/AGENTS.md", true]],
 	);
+	const agents = readFileSync(join(dirs.config, "AGENTS.md"), "utf8");
+	assert.match(agents, /Ask Robin before destructive/);
+	assert.match(agents, /under `~\/org` are the authority/, "the Org root from config.json");
+	assert.doesNotMatch(agents, /\{\{\w+\}\}/, "every placeholder filled");
 	const soul = readFileSync(join(dirs.data, "SOUL.org"), "utf8");
 	assert.match(soul, /^You are June, Robin's personal assistant/m);
 	assert.doesNotMatch(soul, /\{\{name\}\}/, "every placeholder filled");
 	assert.equal(readFileSync(join(dirs.data, "MEMORY.org"), "utf8"), "mine\n", "an existing file is never touched");
 	assert.equal(JSON.parse(readFileSync(join(dirs.config, "config.json"), "utf8")).user.name, "Robin");
 	assert.throws(() => init(dirs, " "), /a name is needed/);
+});
+
+test("june init names the Org root an existing config.json sets in the starter AGENTS.md", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const dirs = { config: join(tmp.dir, "config"), data: join(tmp.dir, "data") };
+	await mkdir(dirs.config);
+	await writeFile(join(dirs.config, "config.json"), JSON.stringify({ user: { name: "Robin" }, org: { root: "~/notes/org/" } }));
+	init(dirs, "Robin");
+	const agents = readFileSync(join(dirs.config, "AGENTS.md"), "utf8");
+	assert.match(agents, /`~\/notes\/org\/work\/<domain>\/<project>\/<project>\.org`/);
+	assert.doesNotMatch(agents, /~\/org\b/);
 });

@@ -1,5 +1,5 @@
-// `june init`: a fresh June's personal files from the templates, with the user's name filled in. Existing files are
-// never touched. The name is written into the files rather than substituted on every read, because June edits
+// `june init`: a fresh June's personal files from the templates, with the user's name filled in, and her starter
+// AGENTS.md with the Org root from config.json. Existing files are never touched. The name is written into the files rather than substituted on every read, because June edits
 // MEMORY.org and HEARTBEAT.org by quoting their text, which must match what is on disk.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -17,6 +17,7 @@ export function init(p: Pick<Paths, "config" | "data">, name: string, templates 
 		[p.data, "MEMORY.org"],
 		[p.data, "HEARTBEAT.org"],
 		[p.config, "config.json"],
+		[p.config, "AGENTS.md"],
 	] as const) {
 		const path = join(dir, file);
 		if (existsSync(path)) {
@@ -26,8 +27,19 @@ export function init(p: Pick<Paths, "config" | "data">, name: string, templates 
 		mkdirSync(dir, { recursive: true });
 		// In JSON the name is escaped as a string's contents.
 		const filled = file === "config.json" ? JSON.stringify(name.trim()).slice(1, -1) : name.trim();
-		writeFileSync(path, readFileSync(join(templates, file), "utf8").replaceAll("{{name}}", filled));
+		const text = readFileSync(join(templates, file), "utf8").replaceAll("{{name}}", filled);
+		writeFileSync(path, file === "AGENTS.md" ? text.replaceAll("{{org}}", orgRoot(join(p.config, "config.json"))) : text);
 		results.push({ path, created: true });
 	}
 	return results;
+}
+
+/** org.root as config.json writes it, such as ~/org, which AGENTS.md names; config.json is placed first. */
+function orgRoot(configFile: string): string {
+	try {
+		const root = JSON.parse(readFileSync(configFile, "utf8")).org?.root;
+		return typeof root === "string" && root.trim() ? root.trim().replace(/\/+$/, "") : "~/org";
+	} catch {
+		return "~/org";
+	}
 }
