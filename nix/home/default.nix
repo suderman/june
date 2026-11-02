@@ -19,6 +19,7 @@ self: {
     runtimeInputs = [pkgs.coreutils pkgs.ripgrep pkgs.openssh pkgs.wl-clipboard];
     text = ''
       ${daemonHostLine}
+      export ICU_TIMEZONE_FILES_DIR=${june.timezoneData}
       source="''${JUNE_SOURCE:-${lib.optionalString (cfg.source != null) cfg.source}}"
       if [[ -n $source && -f $source/src/cli.ts && -d $source/node_modules ]]; then
         exec ${pkgs.nodejs_22}/bin/node --disable-warning=ExperimentalWarning "$source/src/cli.ts" "$@"

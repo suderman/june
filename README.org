@@ -182,6 +182,8 @@ JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june
 JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june
 #+end_src
 
+The package, Home Manager wrapper and development shell set =ICU_TIMEZONE_FILES_DIR= to pinned official ICU timezone resources. Node's ICU timezone data can lag behind system tzdata; =TZDIR= alone does not update Intl or local Date calculations. Keep the system zone, such as =America/Edmonton=, unchanged. Update the resource version, revision and hashes in =nix/icu-timezone-data.nix= when rules change. Run checkout commands through =nix develop= so they use the same data as the package.
+
 Tests use pi-ai's faux model, never a real provider. Unix socket paths are limited to 108 bytes, so keep =JUNE_RUNTIME_DIR= short. =nix build= typechecks and produces =result/bin/june=. After changing dependencies, update =npmDepsHash= in =nix/package.nix=.
 
 * Deployment

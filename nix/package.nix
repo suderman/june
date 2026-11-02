@@ -1,6 +1,7 @@
 {
   lib,
   buildNpmPackage,
+  callPackage,
   nodejs_22,
   makeWrapper,
   ripgrep,
@@ -13,6 +14,7 @@
 }: let
   # Node 22: Node 24 aborts when GC collects node:sqlite objects (nodejs/node#65446), and Pi Durable uses node:sqlite.
   nodejs = nodejs_22;
+  timezoneData = callPackage ./icu-timezone-data.nix {};
   src = lib.fileset.toSource {
     root = ../.;
     fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test];
@@ -43,11 +45,13 @@ in
       mkdir -p $out/lib/june $out/bin
       cp -r package.json src templates node_modules $out/lib/june/
       makeWrapper ${nodejs}/bin/node $out/bin/june \
+        --set ICU_TIMEZONE_FILES_DIR ${timezoneData} \
         --add-flags "--disable-warning=ExperimentalWarning $out/lib/june/src/cli.ts" \
         --suffix PATH : ${lib.makeBinPath [ripgrep openssh wl-clipboard]}
       runHook postInstall
     '';
 
+    passthru.timezoneData = timezoneData;
     passthru.tests = buildNpmPackage {
       pname = "june-tests";
       inherit (finalAttrs) version npmDepsHash nodejs;
@@ -57,10 +61,11 @@ in
       buildPhase = ''
         runHook preBuild
         export HOME=$TMPDIR TZDIR=${tzdata}/share/zoneinfo
+        export ICU_TIMEZONE_FILES_DIR=${timezoneData}
         patchShebangs org
         org/tests/test-org-dispatch
         org/tests/test-org-edit
-        node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/follow.test.ts test/heartbeat.test.ts test/history.test.ts test/mail.test.ts test/memory.test.ts test/patter.test.ts test/people.test.ts test/situation.test.ts test/watch.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts test/view.test.ts test/detail.test.ts test/telegram.test.ts
+        node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/follow.test.ts test/heartbeat.test.ts test/history.test.ts test/mail.test.ts test/memory.test.ts test/patter.test.ts test/people.test.ts test/situation.test.ts test/watch.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts test/view.test.ts test/detail.test.ts test/telegram.test.ts test/timezone.test.ts
         runHook postBuild
       '';
       installPhase = "touch $out";
