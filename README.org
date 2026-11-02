@@ -56,7 +56,9 @@ The repository holds code and templates only. June keeps her files in three XDG 
 |--------+----------------------------------------------+------------------------------------------------------|
 | Config | =$XDG_CONFIG_HOME/june/= (=JUNE_CONFIG_DIR=) | =config.json=, =AGENTS.md=                           |
 | Data   | =$XDG_DATA_HOME/june/= (=JUNE_DATA_DIR=)     | =SOUL.org=, =MEMORY.org=, =HEARTBEAT.org=, =JOURNAL.org= |
-| State  | =$XDG_STATE_HOME/june/= (=JUNE_STATE_DIR=)   | the database, attachments, receipts, reflection copies |
+| State  | =$XDG_STATE_HOME/june/= (=JUNE_STATE_DIR=)   | the database, =inbox/=, receipts, reflection copies |
+
+Files sent to June land in =inbox/YYYY-MM-DD/HHMM-<name>= in the state directory, private to the user, and are deleted after 30 days. The inbox is a landing place, not storage: June copies what is worth keeping into the right Org task directory.
 
 The socket is =$XDG_RUNTIME_DIR/june/june.sock= (=JUNE_RUNTIME_DIR=, =JUNE_SOCKET=). Keep the state directory out of any sync tool: copying a live SQLite database with its WAL corrupts it. The data directory may be a link to a synced folder.
 
@@ -165,7 +167,7 @@ She never writes =asana.org=, =inbox.org=, archives, or conflict copies. The dis
 
 * Telegram
 
-=june telegram= is the Telegram bridge: a separate client of the daemon's socket, run as the =june-telegram= user service when =programs.june.telegram.enable= is set (the default when =programs.june.telegram.allowedUsers= is not empty). It needs =TELEGRAM_BOT_TOKEN= in one of =programs.june.environmentFiles=, and allowed user ids from =telegram.allowedUsers= or =TELEGRAM_ALLOWED_USERS=. It takes text, photos, and images sent as files, answers with rich Markdown, shows June's reply as a draft while she writes it, keeps patter in one edited message per wait, and offers =/stop=, =/new=, =/status=, =/compact=, and =/help=. June's own notices reach it when the user last spoke there. Its state is =$XDG_STATE_HOME/june/telegram.json=; see "Telegram bridge" in [[file:docs/architecture.org][docs/architecture.org]].
+=june telegram= is the Telegram bridge: a separate client of the daemon's socket, run as the =june-telegram= user service when =programs.june.telegram.enable= is set (the default when =programs.june.telegram.allowedUsers= is not empty). It needs =TELEGRAM_BOT_TOKEN= in one of =programs.june.environmentFiles=, and allowed user ids from =telegram.allowedUsers= or =TELEGRAM_ALLOWED_USERS=. It takes text, photos, and other files up to 20 MB with their captions: an image sent as a file goes to June inline like a photo, and any other file lands in her inbox. Voice notes, audio, video, and stickers get a short refusal. It answers with rich Markdown, shows June's reply as a draft while she writes it, keeps patter in one edited message per wait, and offers =/stop=, =/new=, =/status=, =/compact=, and =/help=. June's own notices reach it when the user last spoke there. Its state is =$XDG_STATE_HOME/june/telegram.json=; see "Telegram bridge" in [[file:docs/architecture.org][docs/architecture.org]].
 
 * Development
 

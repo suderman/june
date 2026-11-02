@@ -23,7 +23,8 @@ export const sourceName = (source: string) => (source === "kitty" ? "tui" : sour
 
 export type ViewItem =
 	/** `private` marks June's own look, shown only in detail. */
-	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; private?: true }
+	/** `files` are those the message brought to June's inbox, with where they were saved. */
+	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; files?: { name: string; size: number; path: string }[]; private?: true }
 	/**
 	 * `text` is Markdown. `thinking` holds one flattened line per thinking block, or in detail the full text. `answers` is
 	 * the source of the input the reply follows, empty when that input is before the transcript. `alert` names the client
@@ -113,7 +114,7 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 				// A private look is answered in the markup of where the user last spoke, so it leaves the markup alone.
 				if (!hidden) markdown = source === "telegram";
 				const said = hidden ? textOf(message?.content) || (entry.data?.text ?? "") : (entry.data?.text ?? "");
-				if (!hidden || detail) items.push({ kind: "user", id, source, text: said, ...(entry.data?.imageCount ? { imageCount: entry.data.imageCount } : {}), ...mark(!hidden) });
+				if (!hidden || detail) items.push({ kind: "user", id, source, text: said, ...(entry.data?.imageCount ? { imageCount: entry.data.imageCount } : {}), ...(Array.isArray(entry.data?.files) && entry.data.files.length ? { files: entry.data.files } : {}), ...mark(!hidden) });
 				break;
 			}
 			case "june.patter":

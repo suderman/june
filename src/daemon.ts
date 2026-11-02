@@ -29,6 +29,7 @@ import { entryTimes } from "./history.ts";
 import { createSituation } from "./situation.ts";
 import { setUser } from "./user.ts";
 import { validateImages } from "./images.ts";
+import { describeFiles, saveFiles, startInboxExpiry, validateFiles } from "./inbox.ts";
 import { createMemoryExtension } from "./memory.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
 import { createReflection } from "./reflect.ts";
@@ -233,12 +234,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			};
 		};
 
+		const inbox = `${paths.state}/inbox`;
+		const stopInbox = startInboxExpiry(inbox, (error) => log.warn("inbox_expiry_failed", { error: error.message }));
+
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
 			socket.once("close", () => clients.delete(socket));
 			const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
-			serve(socket, { harness, root, models: options.models, status, reload: prompt.reload, relax, log });
+			serve(socket, { harness, root, models: options.models, status, reload: prompt.reload, relax, log, inbox });
 		});
 		log.info("june_started", { pid: process.pid, socket: paths.socket, conversation: root.id });
 
@@ -256,6 +260,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				stopSituation();
 				stopHeartbeat?.();
 				stopWatch?.();
+				stopInbox();
 				await harness.close(BG);
 				rmSync(paths.socket, { force: true });
 				lock.release();
@@ -280,7 +285,7 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 	});
 }
 
-type Scope = CommandScope & { log: Logger };
+type Scope = CommandScope & { log: Logger; inbox: string };
 
 function serve(socket: Socket, scope: Scope): void {
 	const abort = new AbortController();
@@ -325,7 +330,9 @@ function serve(socket: Socket, scope: Scope): void {
 			case "submit": {
 				const images = request.images ?? [];
 				validateImages(images);
-				if (typeof request.text !== "string" || (!request.text.trim() && images.length === 0)) throw new Error("Empty message");
+				const files = request.files ?? [];
+				validateFiles(files, images.reduce((sum, image) => sum + image.data.length, 0));
+				if (typeof request.text !== "string" || (!request.text.trim() && images.length === 0 && files.length === 0)) throw new Error("Empty message");
 				if (images.length) {
 					const model = (await scope.root.agent(context)).model;
 					if (model === undefined || !scope.models.getModel(model.provider, model.modelId)?.input.includes("image"))
@@ -333,15 +340,27 @@ function serve(socket: Socket, scope: Scope): void {
 				}
 				const source = sourceName(String(request.source));
 				if (!(SOURCES as readonly string[]).includes(source)) throw new Error(`Unknown source ${String(request.source)}`);
+				const requestId = `${source}:${request.requestId}`;
+				// Saved before the submission, which names their paths; a retry finds what the first attempt saved.
+				const saved = await saveFiles(scope.inbox, requestId, files);
+				const said = [request.text, describeFiles(saved)].filter(Boolean).join("\n\n");
 				// Telegram stays untagged for the model, so June's prompt and her Markdown there hold.
-				const inputText = source === "telegram" ? request.text : `[${source}] ${request.text}`;
+				const inputText = source === "telegram" ? said : `[${source}] ${said}`;
 				const submission = await scope.root.submit(
 					{
 						type: "input",
-						requestId: `${source}:${request.requestId}`,
+						requestId,
 						content: images.length ? [{ type: "text", text: inputText }, ...images] : inputText,
 						whenBusy: request.whenBusy ?? "followUp",
-						entry: { kind: "june.input", data: { source, text: request.text, ...(images.length ? { imageCount: images.length } : {}) } },
+						entry: {
+							kind: "june.input",
+							data: {
+								source,
+								text: request.text,
+								...(images.length ? { imageCount: images.length } : {}),
+								...(saved.length ? { files: saved.map(({ name, size, path }) => ({ name, size, path })) } : {}),
+							},
+						},
 					},
 					context,
 				);

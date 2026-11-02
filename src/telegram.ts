@@ -13,6 +13,7 @@ import { Api, Bot, GrammyError, HttpError } from "grammy";
 import type { Message, Update } from "grammy/types";
 import { loadConfig, paths, readEnvFiles } from "./config.ts";
 import { prepare } from "./images.ts";
+import type { FileAttachment } from "./inbox.ts";
 import { Client, COMMANDS, type Reply, type Request } from "./protocol.ts";
 import { createLogger, type Logger } from "./runtime.ts";
 import { escapeHtml, splitForTelegram, tail } from "./telegram-format.ts";
@@ -31,7 +32,7 @@ const DRAFT_CHARS = 3500;
 const PATTER_CHARS = 3500;
 /** Without saved state, messages older than this when the bridge starts are left unanswered. */
 const STALE_MS = 5 * 60_000;
-const REFUSED = "I can only take text and images here for now: send a message, a photo, or an image file.";
+const REFUSED = "I can only take text, images, and files here: send a message, a photo, or a file.";
 
 /** A Bot API refusal: nothing was sent. */
 export class TelegramApiError extends Error {
@@ -185,9 +186,24 @@ export class Bridge {
 			return this.#command(command.name, command.args);
 		}
 		const attachment = imageOf(message);
-		if (message.text === undefined && attachment === undefined) {
+		// An animation also comes as a document; it is video, which June cannot take.
+		const document = attachment === undefined && message.animation === undefined ? message.document : undefined;
+		if (message.text === undefined && attachment === undefined && document === undefined) {
 			this.#mark(id);
 			return this.#reply(REFUSED);
+		}
+		const files: FileAttachment[] = [];
+		if (document !== undefined) {
+			const name = document.file_name ?? "file";
+			try {
+				if ((document.file_size ?? 0) > MAX_DOWNLOAD) throw new Error("bots can download files up to 20 MB");
+				const bytes = await this.#o.port.download(document.file_id, MAX_DOWNLOAD);
+				files.push({ name, mimeType: document.mime_type ?? "application/octet-stream", data: Buffer.from(bytes).toString("base64") });
+			} catch (error) {
+				this.#o.log.warn("telegram_file_failed", { update_id: id, error: (error as Error).message });
+				this.#mark(id);
+				return this.#reply(`I couldn't take ${name}: ${(error as Error).message}`);
+			}
 		}
 		const images: ImageContent[] = [];
 		if (attachment !== undefined) {
@@ -202,10 +218,10 @@ export class Bridge {
 		}
 		const text = message.text ?? message.caption ?? "";
 		// The update id is the request id, so a message Telegram delivers again is the same submission.
-		const reply = await this.#o.link.request({ op: "submit", requestId: `update:${id}`, text, ...(images.length ? { images } : {}), source: "telegram", whenBusy: "followUp" }, { retry: true });
+		const reply = await this.#o.link.request({ op: "submit", requestId: `update:${id}`, text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), source: "telegram", whenBusy: "followUp" }, { retry: true });
 		this.#mark(id);
 		if (reply.type === "error") return this.#reply(`⚠ ${reply.message}`);
-		this.#o.log.info("telegram_message_submitted", { update_id: id, images: images.length });
+		this.#o.log.info("telegram_message_submitted", { update_id: id, images: images.length, files: files.length });
 	}
 
 	#ignore(id: number, reason: string, message?: Message): void {
@@ -425,7 +441,7 @@ function replyText(item: Extract<ViewItem, { kind: "assistant" }>): string | und
 
 function help(): string {
 	const commands = TELEGRAM_COMMANDS.map((c) => `/${c.name} - ${c.description}`).join("\n");
-	return `June on Telegram. Send a message, a photo, or an image file with a caption.\n\n${commands}`;
+	return `June on Telegram. Send a message, a photo, or a file (up to 20 MB) with a caption. Files land in June's inbox for 30 days.\n\n${commands}`;
 }
 
 /** `/name args` for Telegram's commands and /start; other slash words go to June as text. */

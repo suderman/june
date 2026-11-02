@@ -133,7 +133,8 @@ function component(item: Item): Component[] {
 		case "user": {
 			const tag = item.source === "tui" ? "" : c.muted(`${item.source} `);
 			const images = item.imageCount ? `[${item.imageCount} image${item.imageCount === 1 ? "" : "s"}]` : "";
-			return [new Line(), new Wrapped(c.user([item.text, images].filter(Boolean).join("\n")), `${tag}${c.user("› ")}`)];
+			const files = (item.files ?? []).map((f) => `[file ${f.name}]`).join(" ");
+			return [new Line(), new Wrapped(c.user([item.text, images, files].filter(Boolean).join("\n")), `${tag}${c.user("› ")}`)];
 		}
 		case "assistant": {
 			const parts: Component[] = [new Line()];

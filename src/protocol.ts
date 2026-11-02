@@ -3,6 +3,7 @@
 import { connect, type Socket } from "node:net";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { EntryRecord } from "@earendil-works/pi-durable";
+import type { FileAttachment } from "./inbox.ts";
 import type { Change, ViewItem, ViewState } from "./transcript.ts";
 
 /**
@@ -37,7 +38,8 @@ export type Request =
 	| { op: "detail"; requestId: string; on: boolean }
 	/** Entries without a view: those since `since` (epoch ms), the newest `limit` of them. */
 	| { op: "history"; requestId: string; since?: number; limit?: number }
-	| { op: "submit"; requestId: string; text: string; images?: ImageContent[]; source: Source; whenBusy?: "steer" | "followUp"; wait?: boolean }
+	/** `files` land in June's inbox on the daemon's host (see "Inbox" in docs/architecture.org); `data` is base64. */
+	| { op: "submit"; requestId: string; text: string; images?: ImageContent[]; files?: FileAttachment[]; source: Source; whenBusy?: "steer" | "followUp"; wait?: boolean }
 	| { op: "command"; requestId: string; name: string; args?: string };
 
 export type Status = {

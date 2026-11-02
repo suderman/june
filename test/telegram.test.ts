@@ -209,17 +209,50 @@ test("commands go to the daemon once and answer as plain messages; help is the b
 	assert.equal(telegramCommand("/todo buy milk"), undefined);
 });
 
-test("voice notes and other files are refused with a reply, and strangers are ignored", async (t) => {
+test("a PDF goes to June's inbox with its caption, and one over the download limit gets a reply instead", async (t) => {
+	let told = "";
+	const { tmp, telegram, bridge, inputs } = await onDaemon(t, [
+		(ctx) => {
+			const last = ctx.messages.at(-1)!;
+			told = typeof last.content === "string" ? last.content : "";
+			return fauxAssistantMessage("Read it.");
+		},
+	]);
+	const pdf = Buffer.from("%PDF-1.4 fake report");
+	telegram.port.download = async () => new Uint8Array(pdf);
+	await bridge.handle(message({ document: { file_id: "p", file_unique_id: "p", mime_type: "application/pdf", file_name: "report.pdf", file_size: pdf.length }, caption: "what does this say?" }));
+	await until(() => telegram.sends().length >= 1);
+	const [input] = (await inputs()) as { text: string; files?: { name: string; size: number; path: string }[] }[];
+	assert.equal(input!.text, "what does this say?");
+	assert.equal(input!.files?.length, 1);
+	const { path } = input!.files![0]!;
+	assert.ok(path.startsWith(join(tmp.paths.state, "inbox") + "/"), path);
+	assert.deepEqual(readFileSync(path), pdf);
+	assert.match(told, /^what does this say\?\n\n\[file report\.pdf, application\/pdf, 20 B, saved at .+-report\.pdf\]$/);
+	assert.deepEqual(telegram.sends().map((c) => c.text), ["Read it."]);
+
+	let downloads = 0;
+	telegram.port.download = async () => (downloads++, new Uint8Array(pdf));
+	await bridge.handle(message({ document: { file_id: "big", file_unique_id: "b", mime_type: "application/pdf", file_name: "huge.pdf", file_size: 21 * 1024 * 1024 } }));
+	await until(() => telegram.sends().length >= 2);
+	assert.equal(telegram.sends()[1]!.text, "I couldn't take huge.pdf: bots can download files up to 20 MB");
+	assert.equal(downloads, 0, "nothing was downloaded");
+	assert.equal((await inputs()).length, 1, "nothing was submitted for it");
+});
+
+test("voice notes, audio, video, and stickers are refused with a reply, and strangers are ignored", async (t) => {
 	const { telegram, bridge, inputs } = await onDaemon(t, []);
 	await bridge.handle(message({ voice: { file_id: "v", file_unique_id: "v", duration: 3 } }));
-	await bridge.handle(message({ document: { file_id: "p", file_unique_id: "p", mime_type: "application/pdf" } }));
+	await bridge.handle(message({ audio: { file_id: "a", file_unique_id: "a", duration: 3 } }));
+	await bridge.handle(message({ video: { file_id: "m", file_unique_id: "m", width: 1, height: 1, duration: 3 } }));
+	await bridge.handle(message({ animation: { file_id: "g", file_unique_id: "g", width: 1, height: 1, duration: 1 }, document: { file_id: "g", file_unique_id: "g", mime_type: "video/mp4" } }));
+	await bridge.handle(message({ sticker: { file_id: "s", file_unique_id: "s", type: "regular", width: 1, height: 1, is_animated: false, is_video: false } }));
 	await bridge.handle(message({ text: "hi June" }, { from: 999, chat: 999 }));
 	await bridge.handle(message({ text: "hi all" }, { chat: -100, type: "group" }));
 	await bridge.handle(message({ text: "old news" }, { date: Math.floor(Date.now() / 1000) - 3600 }));
 	await sleep(300);
 	assert.deepEqual(telegram.sends().map((c) => c.text), [
-		"I can only take text and images here for now: send a message, a photo, or an image file.",
-		"I can only take text and images here for now: send a message, a photo, or an image file.",
+		...Array(5).fill("I can only take text, images, and files here: send a message, a photo, or a file."),
 	]);
 	assert.equal((await inputs()).length, 0, "a stranger, a group, and a message from before a first start reach no one");
 });
