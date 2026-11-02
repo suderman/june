@@ -106,7 +106,7 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 	const work = defineTool({
 		name: "work",
 		description:
-			`Hand a self-contained brief to your own separate working context, with your tools. It runs in the background: this call returns at once, you stay free to talk with ${user()}, and its report comes back to you later as a [work] message. Use it for anything beyond a quick check, so shell output and dead ends stay out of this conversation.`,
+			`Hand a self-contained brief to your own separate working context, with your tools. It runs in the background: this call returns at once, you stay free to talk with ${user()}, and its report comes back to you later as a [work] message. Use it for anything beyond a quick check, so shell output and dead ends stay out of this conversation. Tell ${user()} in a few words that you are on it and keep talking with them meanwhile; when the report arrives, tell them what it found as your own work, because it is.`,
 		parameters: Type.Object({
 			brief: Type.String({ description: "The goal, what you already know, constraints, and what the report must contain" }),
 			...(focus ? { focus: Type.Optional(Type.Boolean({ description: "Run it in focus mode, for work that needs care" })) } : {}),

@@ -2,7 +2,8 @@
 // do; resuming existing headings goes through org-edit. The dispatcher, not June, launches the work.
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdir, readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
@@ -145,6 +146,31 @@ export type ProjectRequest = {
 	dir?: string;
 };
 
+export type PlanTask = {
+	/** Short name other tasks in the plan use in `depends`. */
+	key: string;
+	file: string;
+	title: string;
+	body: string;
+	/** Keys of earlier or later tasks in this plan, or `id:UUID` of tasks already in Org. */
+	depends?: readonly string[];
+	host?: string;
+	agent?: string;
+	dir?: string;
+	review?: boolean;
+};
+
+export type PlanRequest = {
+	/** Stable across a replay; `org-dispatch plan` derives every ID from it. */
+	key: string;
+	title: string;
+	/** Where the plan's table of tasks goes. */
+	file: string;
+	tasks: readonly PlanTask[];
+};
+
+export type PlannedTask = { key: string; id: string; file: string; title: string; host: string; depends: string[] };
+
 export type ResumeRequest = {
 	file: string;
 	heading: string;
@@ -245,6 +271,75 @@ export class Dispatch {
 		throw new Error(`${this.#org.rel(path)} kept changing; try again shortly`);
 	}
 
+	/**
+	 * Write a plan of connected tasks through `org-dispatch plan`, which assigns stable IDs, writes `:DEPENDS:` edges,
+	 * checks the graph, and starts nothing. A replay with the same key and tasks finds what the first run wrote.
+	 */
+	async plan(request: PlanRequest): Promise<PlannedTask[]> {
+		if (!/^[\w-]+$/.test(request.key)) throw new Error("plan key is a plain name");
+		if (request.tasks.length === 0) throw new Error("A plan needs at least one task");
+		const keys = new Set<string>();
+		for (const task of request.tasks) {
+			if (!/^[a-z0-9][a-z0-9_-]*$/i.test(task.key) || keys.has(task.key)) throw new Error(`Task key ${task.key} must be a unique plain name`);
+			keys.add(task.key);
+		}
+		const defaultHost = this.#config.dispatch.host ?? this.#config.dispatch.hosts[0]!;
+		const defaultAgent = this.#config.dispatch.agent ?? "pi";
+		const tasks = [];
+		for (const task of request.tasks) {
+			const host = task.host ?? defaultHost;
+			checkRequest({ file: task.file, title: task.title, body: task.body, host, agent: task.agent, dir: task.dir, review: task.review ?? true, key: request.key }, this.#config.dispatch);
+			if (task.dir !== undefined && !(await stat(expandHome(task.dir)).catch(() => undefined))?.isDirectory())
+				throw new Error(`dir ${task.dir} is not a directory`);
+			for (const ref of task.depends ?? []) {
+				if (ref === task.key) throw new Error(`${task.key} cannot depend on itself`);
+				if (!keys.has(ref) && !/^id:[0-9A-Za-z-]{8,64}$/.test(ref)) throw new Error(`${task.key} depends on ${ref}, which is neither a task key in this plan nor id:UUID`);
+			}
+			tasks.push({
+				key: task.key,
+				file: this.#org.rel(await this.#target(task.file)),
+				title: task.title,
+				body: task.body.trim(),
+				host,
+				agent: task.agent ?? defaultAgent,
+				...(task.depends?.length ? { depends: [...task.depends] } : {}),
+				...(task.dir ? { dir: task.dir } : {}),
+				...(task.review === false ? { review: false } : {}),
+			});
+		}
+		if (/[\n\r]/.test(request.title) || !request.title.trim()) throw new Error("The plan title is one non-empty line");
+		const spec = { key: request.key, title: request.title.trim(), file: this.#org.rel(await this.#target(request.file)), tasks };
+		// The spec is runtime input, kept out of synced Org and removed once the dispatcher has read it.
+		const dir = await mkdtemp(join(tmpdir(), "june-plan-"));
+		let out: string;
+		try {
+			const path = join(dir, `${request.key}.json`);
+			await writeFile(path, JSON.stringify(spec), { mode: 0o600 });
+			out = await this.#run(["org-dispatch", "plan", path], 120_000);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+		let written: { id: string; file: string }[];
+		try {
+			// The dispatcher logs to stdout too, such as a fallback to its cached agenda; the result is the last line.
+			written = JSON.parse(out.trim().split("\n").at(-1)!);
+		} catch (cause) {
+			throw new Error("org-dispatch plan did not return its tasks; check that the installed dispatcher supports plans", { cause });
+		}
+		if (!Array.isArray(written) || written.length !== tasks.length) throw new Error("org-dispatch plan returned a different number of tasks");
+		const ids = new Map(tasks.map((task, i) => [task.key, written[i]!.id]));
+		// Emacs reports true file names.
+		const root = await realpath(this.#config.org.root);
+		return tasks.map((task, i) => ({
+			key: task.key,
+			id: written[i]!.id,
+			file: relative(root, written[i]!.file),
+			title: task.title,
+			host: task.host,
+			depends: (task.depends ?? []).map((ref) => ids.get(ref) ?? ref.slice(3)),
+		}));
+	}
+
 	/** Resume the same heading, with Org applying the state, tags, and Dialog entry in one save. */
 	async resume(request: ResumeRequest, herdr: Herdr) {
 		if (!this.#config.dispatch.hosts.includes(request.host)) throw new Error(`No allowed dispatcher on ${request.host}`);
@@ -280,7 +375,8 @@ export class Dispatch {
 		const task = await this.#org.read(file, heading);
 		const own = task.text.split(/\n\*+ /, 1)[0]!;
 		const id = /^:ID: (.+)$/m.exec(own)?.[1];
-		if (!id || !/^:JUNE_REQUEST: .+$/m.test(own) || !/^Queued by June: .+$/m.test(own))
+		// org_queue_task marks its heading JUNE_REQUEST; org-dispatch plan marks hers PLAN_REQUEST with June's prefix.
+		if (!id || !/^:(JUNE_REQUEST: .+|PLAN_REQUEST: june-.+)$/m.test(own) || !/^Queued by June: .+$/m.test(own))
 			throw new Error("June may close only tasks she created, not tasks she merely resumed");
 		const state = parseHeading(task.text.split("\n")[0]!, task.line)?.state;
 		if (state !== "EVAL" && state !== "DONE") throw new Error(`Expected EVAL, found ${state ?? "no state"}; read the task again`);
@@ -355,7 +451,7 @@ export function createDispatchExtension(
 		tools: [
 			defineTool({
 				name: "org_create_project",
-				description: "Create ~/org/work/<domain>/<project>/<project>.org with a title, category, and optional repository links, then confirm dispatcher agenda discovery. First use org_projects and search for an existing project. Honor a destination the user names. Otherwise GitHub owner/repo guides domain/project for a new repo project; unmatched work and clear one-offs go under domain june with a short descriptive project name. Never overwrite an existing record. This tool queues no work; use org_queue_task afterward.",
+				description: "Create ~/org/work/<domain>/<project>/<project>.org with a title, category, and optional repository links, then confirm dispatcher agenda discovery. First use org_projects and search for an existing project. Honor a destination the user names. Otherwise GitHub owner/repo guides domain/project for a new repo project; unmatched work and clear one-offs go under domain june with a short descriptive project name. Never overwrite an existing record. This tool queues no work; use org_queue_task afterward. If it cannot confirm agenda discovery, tell the user why and ask how to proceed rather than filing the task elsewhere.",
 				parameters: Type.Object({
 					domain: Type.String({ description: "Existing logical domain, GitHub owner for a new repo project, or june for unmatched work and one-offs" }),
 					project: Type.String({ description: "Short directory name; GitHub repository name when it fits" }),
@@ -368,7 +464,7 @@ export function createDispatchExtension(
 			}),
 			defineTool({
 				name: "org_queue_task",
-				description: `Queue new work for an unattended agent: write a new AUTO heading, its host (${hosts.join(", ")}) and agent in its property drawer, into an Org agenda file. The dispatcher on that host launches it, and this tool starts the one on this host right away, and the agent ends at EVAL for review by you or the user unless review is explicitly waived. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task and use org_projects to find its project first. If no project fits, use org_create_project before queueing. The tool writes the body from reason, scope, and checklist.`,
+				description: `Queue new work for an unattended agent: write a new AUTO heading, its host (${hosts.join(", ")}) and agent in its property drawer, into an Org agenda file. The dispatcher on that host launches it, and this tool starts the one on this host right away, and the agent ends at EVAL for review by you or the user unless review is explicitly waived. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task and use org_projects to find its project first. If no project fits, use org_create_project before queueing. The tool writes the body from reason, scope, and checklist. If it refuses the file, tell ${user()} why and ask how to proceed; never get around a refusal by queueing in another file.`,
 				parameters: Type.Object({
 					file: Type.String({ description: "Org file under ~/org, usually the project's <project>.org" }),
 					title: Type.String({ description: "Concise verb-led heading title, without keyword or tags" }),
@@ -387,6 +483,51 @@ export function createDispatchExtension(
 					const request = { ...rest, body: taskBody({ reason, scope, checklist }), review: args.review ?? true, key: `${instance}:${api.taskId}` };
 					const text = await queueAndFollow(request, (input) => api.commit((tx) => follow(tx, followTask, input, Number(api.conversationId)), context));
 					return { output: [{ type: "text", text }] };
+				},
+			}),
+			defineTool({
+				name: "org_queue_plan",
+				description: `Queue a plan of connected tasks for unattended agents when ${user()} asks for a series of tasks on a bigger project, some in parallel and some waiting on others. Each task is a new AUTO heading in its project file, with a :DEPENDS: edge to each task it waits on; the dispatcher launches a task only once every prerequisite is DONE, never at EVAL, and waiting costs nothing. A table of the plan's tasks goes in file. You follow every task: [follow] messages report a failed launch, a blocked agent, HOLD, and each finish. Each task ends at EVAL unless review is waived; review it as for org_queue_task, and close it with org_complete_task when satisfied, which is what lets its dependents start: you are what moves the plan along. A task left at EVAL for ${user()}'s review or decision holds everything after it, so tell ${user()} which tasks are waiting behind it. Report each task as it finishes, and tell ${user()} when the whole plan is done. Use this rather than queueing connected tasks one at a time; for a single task use org_queue_task. Search for existing tasks first, and use org_projects and org_create_project as for org_queue_task. Never use it to resume existing tasks.`,
+				parameters: Type.Object({
+					title: Type.String({ description: "One-line name of the plan, used for its table heading" }),
+					file: Type.String({ description: "Org agenda file for the plan's table, usually the main project's file" }),
+					reason: Type.String({ description: 'One line, written after "Queued by June: " in every task, naming the user, such as `${User()} asked for the launch plan for Boom Boom Baby.`' }),
+					tasks: Type.Array(Type.Object({
+						key: Type.String({ description: "Short plain name for this task within the plan, such as landing or api; letters, digits, - and _" }),
+						file: Type.String({ description: "Org file under ~/org for this task, usually its project's <project>.org" }),
+						title: Type.String({ description: "Concise verb-led heading title, without keyword or tags" }),
+						scope: Type.String({ description: "Outcome, constraints, and success criteria in Org, including what this task hands to the tasks after it; one physical line per paragraph" }),
+						checklist: Type.Array(Type.String(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
+						depends: Type.Optional(Type.Array(Type.String(), { description: "Keys of tasks in this plan that must be DONE first, or id:UUID of existing Org tasks" })),
+						host: Type.Optional(Type.String({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` })),
+						agent: agentParameter(`Coding agent: ${agents.join(" or ")}; default ${defaultAgent}`),
+						dir: Type.Optional(Type.String({ description: "Existing working directory, usually one of the project's local repository links; omit to use the project directory" })),
+						review: Type.Optional(Type.Boolean({ description: `Default true: the worker stops at EVAL for review. Set false only when ${user()} explicitly waives review for this task` })),
+					}), { minItems: 1 }),
+				}),
+				// org-dispatch plan derives every ID from the key, so a replay finds the tasks the first run wrote.
+				replay: "safe",
+				execute: async (args, api, context) => {
+					const key = `june-${instance}-${api.taskId}`.replace(/[^\w-]/g, "-");
+					const planned = await dispatch.plan({
+						key,
+						title: args.title,
+						file: args.file,
+						tasks: args.tasks.map(({ scope, checklist, ...task }) => ({ ...task, body: taskBody({ reason: args.reason, scope, checklist }) })),
+					});
+					const now = Date.now();
+					await api.commit(async (tx) => {
+						for (const task of planned)
+							await follow(tx, followTask, { id: task.id, title: task.title, host: task.host, queuedAt: now, request: `${key}:${task.key}`, ...(task.depends.length ? { depends: task.depends } : {}) }, Number(api.conversationId));
+					}, context);
+					let started = "";
+					if (planned.some((task) => task.host === config.herdr.host))
+						started = await dispatch.kick().then(
+							() => " The dispatcher was started; tasks without prerequisites launch now.",
+							(error: Error) => ` Starting the dispatcher failed (${error.message}); its timer runs within a minute.`,
+						);
+					const note = `You are following every task in this plan. Review each one at EVAL and close it with org_complete_task when satisfied, so the tasks waiting on it can start.${started} Tell ${user()} what you queued and that you will report back.`;
+					return { output: [{ type: "text", text: `${JSON.stringify(planned, null, 1)}\n${note}` }] };
 				},
 			}),
 			...(improve === undefined ? [] : [defineTool({
@@ -463,8 +604,10 @@ export function createDispatchExtension(
 					const own = task.text.split(/\n(?=\*+ )/)[0]!;
 					const id = /^\s*:ID:\s+(\S+)\s*$/m.exec(own)?.[1];
 					const host = /^\s*:HOST:\s+(\S+)\s*$/m.exec(own)?.[1] ?? task.herdrSessions.filter((s) => s.pane).at(-1)?.host ?? config.herdr.host;
+					const depends = [...(/^\s*:DEPENDS:\s+(.+)$/m.exec(own)?.[1] ?? "").matchAll(/id:([0-9A-Za-z-]+)/g)].map((m) => m[1]!);
 					const now = Date.now();
 					const input = {
+						...(depends.length ? { depends } : {}),
 						// Without an ID, the outline path finds the heading again, as org_read_task does.
 						...(id ? { id, title: parseHeading(own.split("\n")[0]!, task.line)!.title } : { id: `${task.file}::${task.outline}`, title: task.outline, file: task.file }),
 						host,

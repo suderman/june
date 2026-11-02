@@ -128,7 +128,7 @@ export function createHerdrExtension(config: Config, herdr = new Herdr(config.he
 		defineTool({
 			name: "herdr_list_agents",
 			description:
-				"List the coding agents (Pi, Claude, Codex) running in Herdr panes on a machine, with status (working, blocked, done, idle, unknown), workspace, directory, and session link. blocked means the agent waits for a person.",
+				"List the coding agents (Pi, Claude, Codex) running in Herdr panes on a machine, with status (working, blocked, done, idle, unknown), workspace, directory, and session link. blocked means the agent waits for a person; idle or done means its terminal settled, not that its task succeeded, so read its output and the task's Org state before reporting success. Inspect agents here to say what they are doing, but leave launching, watching, and nudging them to the dispatcher.",
 			parameters: Type.Object({ host, status: Type.Optional(Type.String({ description: "Only agents with this status" })) }),
 			replay: "safe",
 			execute: async (args) => {

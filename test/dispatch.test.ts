@@ -305,3 +305,69 @@ test("org-dispatch itself sees the task June wrote", { skip: !hasDispatcher && "
 	const scan = execFileSync("org-dispatch", ["scan"], options);
 	assert.match(scan, new RegExp(`^Check free disk space\\t${join(f.root, "work/june/new-oneoff")}\\tnew$`, "m"), "a one-off uses its own project directory, without a DIR override");
 });
+
+const planTask = (key: string, extra: object = {}) => ({ key, file: request.file, title: `Task ${key}`, body: taskBody({ reason: "Alex asked for a plan.", scope: `Do ${key}.`, checklist: ["Do it"] }), ...extra });
+
+test("a plan is checked before org-dispatch plan sees it, and its tasks are June's to close", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	const plan = { key: "june-inst-3", title: "Portal launch", file: request.file };
+	await assert.rejects(f.dispatch.plan({ ...plan, tasks: [planTask("a"), planTask("a")] }), /unique plain name/);
+	await assert.rejects(f.dispatch.plan({ ...plan, tasks: [planTask("a", { depends: ["nope"] })] }), /neither a task key in this plan nor id:UUID/);
+	await assert.rejects(f.dispatch.plan({ ...plan, tasks: [planTask("a", { host: "lux" })] }), /only for kit, cog/);
+	await assert.rejects(f.dispatch.plan({ ...plan, tasks: [planTask("a", { file: "asana.org" })] }), /does not write asana.org/);
+	assert.equal(f.runs.length, 0, "nothing reached the dispatcher");
+
+	const ids = ["11111111-0000-5000-a000-000000000001", "11111111-0000-5000-a000-000000000002"];
+	let spec: { tasks: { key: string; depends?: string[]; host: string; agent: string }[] } | undefined;
+	const dispatch = new Dispatch(new Org(f.root), f.config, async (argv) => {
+		if (argv[0] === "org-edit") return "";
+		spec = JSON.parse(await readFile(argv[2]!, "utf8"));
+		const text = await readFile(f.project, "utf8");
+		// What org-dispatch plan writes, here with the first task already reviewed down to EVAL.
+		await writeFile(f.project, `${text}\n* EVAL Task a\n:PROPERTIES:\n:ID: ${ids[0]}\n:PLAN_REQUEST: june-inst-3\n:END:\n${planTask("a").body}\n`);
+		return `could not read org-agenda-files; using the cache\n${JSON.stringify(ids.map((id) => ({ id, file: f.project })))}\n`;
+	});
+	const planned = await dispatch.plan({ ...plan, tasks: [planTask("a"), planTask("b", { depends: ["a", "id:22222222-0000-5000-a000-000000000009"] })] });
+	assert.deepEqual(spec!.tasks.map((task) => [task.key, task.depends, task.host, task.agent]), [["a", undefined, "kit", "pi"], ["b", ["a", "id:22222222-0000-5000-a000-000000000009"], "kit", "pi"]]);
+	assert.deepEqual(planned.map((task) => [task.key, task.id, task.file, task.depends]), [
+		["a", ids[0], request.file, []],
+		["b", ids[1], request.file, [ids[0], "22222222-0000-5000-a000-000000000009"]],
+	]);
+	await dispatch.complete(request.file, `id:${ids[0]}`);
+
+	// A plan someone else queued is not June's, even with her body line.
+	await writeFile(f.project, (await readFile(f.project, "utf8")).replace(":PLAN_REQUEST: june-inst-3", ":PLAN_REQUEST: launch"));
+	await assert.rejects(dispatch.complete(request.file, `id:${ids[0]}`), /only tasks she created/);
+});
+
+test("org-dispatch writes June's plan and holds the later task until the first is DONE", { skip: !hasDispatcher && "org-dispatch is not installed" }, async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	const init = join(f.dir, "init.el");
+	await writeFile(init, `(require 'org)\n(setq org-agenda-files (directory-files-recursively ${JSON.stringify(join(f.root, "work"))} "\\\\.org\\\\'"))\n`);
+	const options = {
+		encoding: "utf8" as const,
+		env: {
+			...process.env,
+			ORG_DISPATCH_HOST: "kit",
+			ORG_DISPATCH_ROOT: f.root,
+			ORG_DISPATCH_EMACS_INIT: init,
+			XDG_STATE_HOME: join(f.dir, "state"),
+			XDG_CONFIG_HOME: join(f.dir, "config"),
+			JUNE_CONFIG_DIR: join(f.dir, "config", "june"),
+		},
+	};
+	const actual = new Dispatch(new Org(f.root), { ...f.config, org: { ...f.config.org, agendaFiles: join(f.dir, "agenda") } },
+		async (argv) => execFileSync(argv[0]!, argv.slice(1), options));
+	const plan = { key: "june-inst-4", title: "Portal launch", file: request.file, tasks: [planTask("a"), planTask("b", { depends: ["a"] })] };
+	const planned = await actual.plan(plan);
+	const written = await readFile(f.project, "utf8");
+	assert.match(written, new RegExp(`^:DEPENDS: id:${planned[0]!.id}$`, "m"));
+	assert.match(written, /^:PLAN_REQUEST: june-inst-4$/m);
+	assert.deepEqual(await actual.plan(plan), planned, "a replay finds the same tasks");
+	assert.equal(await readFile(f.project, "utf8"), written, "and writes nothing");
+	const scan = execFileSync("org-dispatch", ["scan"], options);
+	assert.match(scan, /^Task a\t.*\tnew$/m);
+	assert.match(scan, /^Task b\t.*\twaiting on Task a \(AUTO\)$/m);
+});

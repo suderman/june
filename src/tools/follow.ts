@@ -21,9 +21,11 @@ export type FollowInput = {
 	/** Ask June for a progress update this often while the task is in PROG, until `updatesUntil`. */
 	everyMs?: number;
 	updatesUntil?: number;
+	/** Org IDs of the prerequisites from `:DEPENDS:`; the dispatcher holds the task in AUTO until each is DONE. */
+	depends?: string[];
 };
-/** `reported` is when June was last asked for a progress update. */
-type FollowState = { phase: "watch"; due: number; checks: number; last: string; reported?: number; missing?: boolean };
+/** `reported` is when June was last asked for a progress update; `waited` is when the task was last seen waiting on a prerequisite. */
+type FollowState = { phase: "watch"; due: number; checks: number; last: string; reported?: number; missing?: boolean; waited?: number };
 
 /** Org ID → follow task, so a task is followed once however often it is queued or replayed. */
 export const Follows = defineDoc<{ ids: Record<string, number> }>({
@@ -39,6 +41,8 @@ export type Observation = {
 	/** The agent's Herdr status, when the heading links a session on its host. */
 	agent?: string;
 	file?: string;
+	/** Still AUTO behind a prerequisite that is not DONE. */
+	waiting?: boolean;
 };
 
 export type FollowOptions = {
@@ -57,12 +61,18 @@ export const FOLLOW_DEFAULTS: FollowOptions = { intervalMs: 60_000, launchMs: 7 
  * What to say for `seen`, given the last signal: undefined while nothing worth reporting changed. `signal` is
  * remembered, so each transition is reported once; a return to work resets it, so a later HOLD is reported again.
  */
-export function decide(input: FollowInput, seen: Observation, last: string, now: number, options: FollowOptions) {
+export function decide(input: FollowInput, seen: Observation, last: string, now: number, options: FollowOptions, waited = 0) {
 	const where = seen.file ? ` (${seen.file})` : "";
 	const name = `the task «${input.title}»${where} you ${input.adopted ? "are following" : "queued"}`;
 	const Name = name[0]!.toUpperCase() + name.slice(1);
 	if (seen.missing) return { signal: "missing", done: true, say: `${Name} is no longer in Org; it was moved, archived, or deleted. You are no longer following it.` };
-	if (now - input.queuedAt > options.maxMs) return { signal: "expired", done: true, say: undefined };
+	if (now - input.queuedAt > options.maxMs) {
+		// A plan's later tasks can outlast a follow; say so rather than go quiet on them.
+		const say = input.depends?.length
+			? `You stopped following ${name} after ${Math.round(options.maxMs / 86_400_000)} days; it is still ${seen.state ?? "without a state"}${seen.waiting ? ", waiting on a prerequisite" : ""}. Tell ${user()} in a line, and follow it again with org_follow_task if they want.`
+			: undefined;
+		return { signal: "expired", done: true, say };
+	}
 	switch (seen.state) {
 		case "EVAL":
 		case "DONE":
@@ -76,10 +86,14 @@ export function decide(input: FollowInput, seen: Observation, last: string, now:
 		case "TODO":
 			// The user took it back; nothing to report.
 			return { signal: "TODO", done: true, say: undefined };
-		case "AUTO":
-			if (now - input.queuedAt > options.launchMs && last !== "stalled")
-				return { signal: "stalled", done: false, say: `${Name} has not launched ${Math.round((now - input.queuedAt) / 60_000)} minutes after queueing. Check org_dispatch_scan and tell the user what is holding it.` };
+		case "AUTO": {
+			// Waiting on a prerequisite is the plan working; the launch clock starts once the last one is DONE.
+			if (seen.waiting) return { signal: "waiting", done: false, say: undefined };
+			const since = Math.max(input.queuedAt, waited);
+			if (now - since > options.launchMs && last !== "stalled")
+				return { signal: "stalled", done: false, say: `${Name} has not launched ${Math.round((now - since) / 60_000)} minutes after ${waited > input.queuedAt ? "its prerequisites finished" : "queueing"}. Check org_dispatch_scan and tell the user what is holding it.` };
 			return { signal: last === "stalled" ? "stalled" : "AUTO", done: false, say: undefined };
+		}
 		case "PROG":
 			if (seen.agent === "blocked")
 				return { signal: "blocked", done: false, say: `The agent working on ${name} is blocked, waiting for a person. Read its output with herdr_read_agent and tell the user what it is asking.` };
@@ -111,7 +125,15 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 			const got = await herdr.json(input.host, ["agent", "get", session.pane]).catch(() => undefined);
 			agent = got?.result?.agent?.agent_status;
 		}
-		return { state: task.state, missing: false, file: task.file, ...(agent ? { agent } : {}) };
+		let waiting = false;
+		if (task.state === "AUTO" && input.depends?.length) {
+			// A prerequisite no longer in live Org was archived, which happens only after DONE.
+			for (const id of input.depends) {
+				const prerequisite = await org.byId(id);
+				if (prerequisite !== undefined && prerequisite.state !== "DONE") waiting = true;
+			}
+		}
+		return { state: task.state, missing: false, file: task.file, ...(agent ? { agent } : {}), ...(waiting ? { waiting } : {}) };
 	};
 
 	return defineTask<FollowInput, FollowState, null>({
@@ -139,7 +161,8 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 				const now = runtime.now();
 				const missing = seen?.missing ?? false;
 				// A save can briefly hide the heading. Confirm on the next poll before ending the follow.
-				const next = seen === undefined || (missing && !task.state.checkpoint.missing) ? undefined : decide(task.input, seen, last, now, options);
+				const waited = seen?.waiting ? now : task.state.checkpoint.waited;
+				const next = seen === undefined || (missing && !task.state.checkpoint.missing) ? undefined : decide(task.input, seen, last, now, options, waited);
 				const reported = task.state.checkpoint.reported ?? task.input.queuedAt;
 				const changed = next?.say !== undefined && next.signal !== last;
 				const update = !changed && next !== undefined && progressDue(task.input, next.signal, reported, now);
@@ -163,7 +186,7 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 					if (notice !== undefined && surface === "telegram") await deliverIn(tx, runtime.registry, runtime.conversationId, notice);
 					return next?.done
 						? { status: "terminal", outcome: { status: "completed", result: null } }
-						: { status: "running", checkpoint: { phase: "watch", due: nextDue, checks: checks + 1, last: next?.signal ?? last, reported: update ? now : reported, missing } };
+						: { status: "running", checkpoint: { phase: "watch", due: nextDue, checks: checks + 1, last: next?.signal ?? last, reported: update ? now : reported, missing, ...(waited !== undefined ? { waited } : {}) } };
 				}, context);
 			},
 		},

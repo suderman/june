@@ -37,6 +37,124 @@ test("follow reports each transition once and stays quiet otherwise", () => {
 	assert.equal(decide(input, { state: "PROG", missing: false }, "PROG", 8 * 24 * 60 * min, FOLLOW_DEFAULTS).done, true, "follows expire");
 });
 
+test("a task waiting on a prerequisite is silent, and its launch clock starts once it is ready", () => {
+	const planned = { ...input, depends: ["pre12345"] };
+	const seen = (waiting: boolean) => ({ state: "AUTO", missing: false, ...(waiting ? { waiting } : {}) });
+	assert.deepEqual(decide(planned, seen(true), "AUTO", 60 * min, FOLLOW_DEFAULTS), { signal: "waiting", done: false, say: undefined });
+	assert.equal(decide(planned, seen(false), "waiting", 62 * min, FOLLOW_DEFAULTS, 60 * min).say, undefined, "just ready is not stalled");
+	assert.match(decide(planned, seen(false), "waiting", 68 * min, FOLLOW_DEFAULTS, 60 * min).say ?? "", /has not launched 8 minutes after its prerequisites finished/);
+	const expired = decide(planned, seen(true), "waiting", 8 * 24 * 60 * min, FOLLOW_DEFAULTS);
+	assert.equal(expired.done, true);
+	assert.match(expired.say ?? "", /stopped following .* after 7 days; it is still AUTO, waiting on a prerequisite/);
+	assert.equal(decide(input, seen(false), "AUTO", 8 * 24 * 60 * min, FOLLOW_DEFAULTS).say, undefined, "a lone task still expires quietly");
+});
+
+test("June queues a plan, follows every task, and closing the first after review lets the next start", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "org");
+	const file = join(root, "work/studio/portal/portal.org");
+	await mkdir(join(root, "work/studio/portal"), { recursive: true });
+	await writeFile(file, "#+TITLE: Portal\n");
+	await writeFile(join(tmp.dir, "agenda"), `${file}\n`);
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") }, dispatch: { hosts: ["kit"] } };
+	const runs: string[][] = [];
+	let spec: { key: string; title: string; file: string; tasks: { key: string; title: string; body: string; host: string; agent: string; depends?: string[] }[] } | undefined;
+	const ids: Record<string, string> = { api: "aaaaaaaa-0000-5000-a000-000000000001", site: "aaaaaaaa-0000-5000-a000-000000000002" };
+	// Stands in for org-dispatch plan and org-edit, writing what they write.
+	const extension = createDispatchExtension(config, new Org(root), new Herdr(config.herdr, async () => "{}"), "inst", async (args) => {
+		runs.push([...args]);
+		if (args[0] === "org-dispatch" && args[1] === "plan") {
+			spec = JSON.parse(await readFile(args[2]!, "utf8"));
+			const text = spec!.tasks.map((task) => [
+				`* AUTO ${task.title}`, ":PROPERTIES:", `:ID: ${ids[task.key]}`, `:HOST: ${task.host}`, `:AGENT: ${task.agent}`, `:PLAN_REQUEST: ${spec!.key}`,
+				...(task.depends ? [`:DEPENDS: ${task.depends.map((key) => `id:${ids[key]}`).join(" ")}`] : []), ":END:", task.body, "",
+			].join("\n")).join("\n");
+			await replaceFile(file, `#+TITLE: Portal\n\n* ${spec!.title}\n\n${text}`);
+			return JSON.stringify(spec!.tasks.map((task) => ({ id: ids[task.key], file })));
+		}
+		if (args[0] === "org-edit") {
+			const id = args[3]!.replace(/^id:/, "");
+			const name = Object.keys(ids).find((key) => ids[key] === id)!;
+			const title = spec!.tasks.find((task) => task.key === name)!.title;
+			await replaceFile(file, (await readFile(file, "utf8")).replace(`* EVAL ${title}`, `* DONE ${title}`));
+		}
+		return "";
+	}, { intervalMs: 40, launchMs: 300, maxMs: 3_600_000 });
+	const faux = fauxProvider();
+	const plan = {
+		title: "Portal launch", file: "work/studio/portal/portal.org", reason: "Alex asked for the portal launch plan.",
+		tasks: [
+			{ key: "api", file: "work/studio/portal/portal.org", title: "Build the scores API", scope: "Serve scores.", checklist: ["Add the endpoint"], depends: [] as string[] },
+			{ key: "site", file: "work/studio/portal/portal.org", title: "Show scores on the site", scope: "Use the API.", checklist: ["Call the endpoint"], depends: ["api"] },
+		],
+	};
+	faux.setResponses(Array.from({ length: 20 }, () => (context: { messages: { role: string; content: unknown }[] }) => {
+		const last = context.messages.at(-1)!;
+		const text = JSON.stringify(last.content);
+		if (last.role === "toolResult") return fauxAssistantMessage("Done.");
+		if (text.includes("launch plan")) return fauxAssistantMessage([fauxToolCall("org_queue_plan", plan)], { stopReason: "toolUse" });
+		const finished = /«(Build the scores API|Show scores on the site)».* is now EVAL/.exec(text);
+		if (finished) return fauxAssistantMessage([fauxToolCall("org_complete_task", { file: "work/studio/portal/portal.org", heading: finished[1] })], { stopReason: "toolUse" });
+		return fauxAssistantMessage("Noted.");
+	}));
+	const daemon = await openTestDaemon({ ...tmp, faux, config, extensions: [extension, createOrgExtension(config)] });
+	t.after(() => daemon.close());
+	const reports = async () => (await daemon.root.context(BG)).entries.filter((e) => (e.data as { source?: string })?.source === "follow").map((e) => JSON.stringify(e.data));
+	const setState = async (title: string, from: string, to: string) => replaceFile(file, (await readFile(file, "utf8")).replace(`* ${from} ${title}`, `* ${to} ${title}`));
+
+	await ask(tmp.paths.socket, "queue the portal launch plan");
+	assert.ok(spec, "the plan went through org-dispatch plan");
+	assert.match(spec!.key, /^june-inst-\d+$/);
+	assert.deepEqual(spec!.tasks.map((task) => [task.key, task.depends]), [["api", undefined], ["site", ["api"]]]);
+	assert.match(spec!.tasks[1]!.body, /^Queued by June: Alex asked for the portal launch plan\.\n\n\*\* Scope\nUse the API\.\n\n\*\* Checklist\n- \[ \] Call the endpoint$/);
+	assert.ok(runs.some((args) => args[0] === "systemctl"), "this host's dispatcher is started");
+	assert.equal((await daemon.harness.inspect(BG)).tasks.filter((task) => task.record.kind === "june.follow").length, 2, "every task is followed");
+
+	// The first task runs and reaches EVAL while the second waits, well past the launch clock, without a stall report.
+	await setState("Build the scores API", "AUTO", "PROG");
+	await new Promise((r) => setTimeout(r, 500));
+	assert.equal((await reports()).length, 0, "waiting on a prerequisite is silent");
+	await setState("Build the scores API", "PROG", "EVAL");
+	await until(async () => /^\* DONE Build the scores API/m.test(await readFile(file, "utf8")));
+	assert.ok(runs.some((args) => args[0] === "org-edit" && args.includes(`id:${ids.api}`)), "June closed her reviewed plan task");
+
+	// Now ready; the second task launches and finishes, and June closes it too.
+	await setState("Show scores on the site", "AUTO", "PROG");
+	await setState("Show scores on the site", "PROG", "EVAL");
+	await until(async () => /^\* DONE Show scores on the site/m.test(await readFile(file, "utf8")));
+	await until(async () => (await daemon.harness.inspect(BG)).tasks.filter((task) => task.record.kind === "june.follow").length === 0);
+	const said = await reports();
+	assert.equal(said.length, 2, "one report per finish");
+	assert.ok(said.every((report) => !report.includes("has not launched")));
+});
+
+test("following a waiting task by hand reads its prerequisites", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "org");
+	const file = join(root, "work.org");
+	await mkdir(root, { recursive: true });
+	await writeFile(file, "#+TITLE: Work\n\n* PROG Build the API\n:PROPERTIES:\n:ID: bbbbbbbb-0000-5000-a000-000000000001\n:END:\n\n* AUTO Show scores\n:PROPERTIES:\n:ID: bbbbbbbb-0000-5000-a000-000000000002\n:DEPENDS: id:bbbbbbbb-0000-5000-a000-000000000001\n:END:\n");
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") }, dispatch: { hosts: ["kit"] } };
+	const extension = createDispatchExtension(config, new Org(root), new Herdr(config.herdr, async () => "{}"), "inst", async () => "", { intervalMs: 40, launchMs: 200, maxMs: 3_600_000 });
+	const faux = fauxProvider();
+	faux.setResponses([
+		fauxAssistantMessage([fauxToolCall("org_follow_task", { file: "work.org", heading: "Show scores", everyMinutes: 0 })], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Following."),
+		fauxAssistantMessage("It has not launched."),
+	]);
+	const daemon = await openTestDaemon({ ...tmp, faux, config, extensions: [extension, createOrgExtension(config)] });
+	t.after(() => daemon.close());
+	const reports = async () => (await daemon.root.context(BG)).entries.filter((e) => (e.data as { source?: string })?.source === "follow").map((e) => JSON.stringify(e.data));
+	await ask(tmp.paths.socket, "follow the scores task");
+	await new Promise((r) => setTimeout(r, 400));
+	assert.equal((await reports()).length, 0, "waiting is not a stall");
+	await replaceFile(file, (await readFile(file, "utf8")).replace("* PROG Build the API", "* DONE Build the API"));
+	await until(async () => (await reports()).length === 1);
+	assert.match((await reports())[0]!, /has not launched \d+ minutes after its prerequisites finished/);
+});
+
 test("timed updates come only while a task is in PROG, on time, and until their end", () => {
 	const timed = { ...input, everyMs: 5 * min, updatesUntil: 60 * min };
 	assert.equal(progressDue(input, "PROG", 0, 30 * min), false, "no updates unless asked for");
