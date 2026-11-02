@@ -66,7 +66,13 @@ in {
     telegram.allowedUsers = lib.mkOption {
       type = lib.types.listOf lib.types.int;
       default = [];
-      description = "Telegram user ids allowed to talk to June; empty leaves Telegram off unless an environment file sets TELEGRAM_ALLOWED_USERS.";
+      description = "Telegram user ids allowed to talk to June; the first one's private chat is the one the bridge serves. Empty leaves it to TELEGRAM_ALLOWED_USERS in an environment file.";
+    };
+    telegram.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = cfg.telegram.allowedUsers != [];
+      defaultText = lib.literalExpression "config.programs.june.telegram.allowedUsers != []";
+      description = "Run june telegram, the Telegram bridge, as a user service beside the daemon. It needs TELEGRAM_BOT_TOKEN in an environment file, and allowed users from telegram.allowedUsers or TELEGRAM_ALLOWED_USERS; set this when those come only from an environment file.";
     };
     herdrPackage = lib.mkOption {
       type = lib.types.nullOr lib.types.package;

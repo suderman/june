@@ -14,7 +14,8 @@ const MAX_IMAGES = 10;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 let processor: ReturnType<typeof createNodePhotonImages> | undefined;
 
-async function prepare(bytes: Uint8Array, mimeType: string): Promise<ImageContent> {
+/** Image bytes as model content, scaled and re-encoded within the model's limits. */
+export async function prepare(bytes: Uint8Array, mimeType: string): Promise<ImageContent> {
 	if (bytes.length > MAX_FILE_BYTES) throw new Error("Image exceeds 20 MiB; use a smaller file");
 	// Photon transfers a sliced Uint8Array to its worker; Buffer.slice() would keep Node's non-transferable pool.
 	const image = await (await (processor ??= createNodePhotonImages())).prepare(new Uint8Array(bytes), mimeType, DEFAULT_IMAGE_LIMITS);

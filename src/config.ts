@@ -179,7 +179,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 	const raw = readConfigFile(p);
 	const file = join(p.config, "config.json");
 	if (!raw.model?.chat?.provider || !raw.model?.chat?.modelId) throw new Error(`No model.chat configured in ${file}`);
-	// A telegram block is the bridge's, which runs on its own; the daemon ignores it.
+	// Telegram's settings come from the environment, for the bridge (`june telegram`); a telegram block here is ignored.
 	for (const key of ["daemonHost"]) if (key in raw) throw new Error(`${file}: ${key} now comes from the Home Manager module, not config.json`);
 	const allowed = (env.TELEGRAM_ALLOWED_USERS ?? "").split(/[\s,]+/).filter(Boolean);
 	if (allowed.some((id) => !/^\d+$/.test(id))) throw new Error("TELEGRAM_ALLOWED_USERS must be numeric user ids, separated by commas");

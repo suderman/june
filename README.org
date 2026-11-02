@@ -60,7 +60,7 @@ The repository holds code and templates only. June keeps her files in three XDG 
 
 The socket is =$XDG_RUNTIME_DIR/june/june.sock= (=JUNE_RUNTIME_DIR=, =JUNE_SOCKET=). Keep the state directory out of any sync tool: copying a live SQLite database with its WAL corrupts it. The data directory may be a link to a synced folder.
 
-Machine settings come from the environment: =JUNE_DAEMON_HOST= (the machine that runs June). A =config.json= that sets =daemonHost= is refused; a =telegram= block is left for the Telegram bridge and ignored by the daemon.
+Machine settings come from the environment: =JUNE_DAEMON_HOST= (the machine that runs June). A =config.json= that sets =daemonHost= is refused. Telegram's settings are environment too: =TELEGRAM_BOT_TOKEN= and =TELEGRAM_ALLOWED_USERS=; a =telegram= block in =config.json= is ignored.
 
 =templates/= holds starting points that name nobody: =SOUL.org= (her role, judgment, and voice, with a character section to write), =MEMORY.org= and =HEARTBEAT.org= (their shape, with placeholders), an example =config.json=, and a starter =AGENTS.md= of the conventions June works by: Org as the authority, task states and AUTO, what needs approval, keeping credentials out of answers, and where tasks go. ={{name}}= stands for the user and ={{org}}= for =org.root= in =config.json=, which =june init= places first. Without an =AGENTS.md=, June is told she has none of the user's conventions and to ask before anything destructive, external, or outside the request. =avatar/= is the base avatar set of labelled placeholders, used in place; =june init= does not copy it. =june init [NAME]= copies whichever are missing into the data and config directories with the name filled in, taking =user.name= from =config.json= when no name is given, and never overwrites a file. June has no identity until =SOUL.org= exists; she creates =MEMORY.org= and =JOURNAL.org= when she first writes to them.
 
@@ -165,7 +165,7 @@ She never writes =asana.org=, =inbox.org=, archives, or conflict copies. The dis
 
 * Telegram
 
-Telegram is off for now. It ran inside the daemon through pi-durable-telegram, which held Pi Durable back at 1.2.0, and returns as =june telegram=, a separate client of the daemon's socket; see "Telegram bridge" in [[file:docs/architecture.org][docs/architecture.org]]. Until then, what June says on her own initiative, such as a =[work]= report, a =[follow]= or =[watch]= update, or a heartbeat message, appears in the terminal.
+=june telegram= is the Telegram bridge: a separate client of the daemon's socket, run as the =june-telegram= user service when =programs.june.telegram.enable= is set (the default when =programs.june.telegram.allowedUsers= is not empty). It needs =TELEGRAM_BOT_TOKEN= in one of =programs.june.environmentFiles=, and allowed user ids from =telegram.allowedUsers= or =TELEGRAM_ALLOWED_USERS=. It takes text, photos, and images sent as files, answers with rich Markdown, shows June's reply as a draft while she writes it, keeps patter in one edited message per wait, and offers =/stop=, =/new=, =/status=, =/compact=, and =/help=. June's own notices reach it when the user last spoke there. Its state is =$XDG_STATE_HOME/june/telegram.json=; see "Telegram bridge" in [[file:docs/architecture.org][docs/architecture.org]].
 
 * Development
 

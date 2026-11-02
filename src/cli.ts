@@ -20,7 +20,8 @@ const USAGE = `usage:
                           WHEN (30m, 2h, 1d, 16:20, or a date); --detail adds thinking, tool output, and private looks
   june doctor             check configuration and dependencies
   june init [NAME]        create missing personal files from the templates, for NAME or user.name
-  june serve              run the daemon`;
+  june serve              run the daemon
+  june telegram           run the Telegram bridge, a client of the daemon`;
 
 // Exit codes: 0 ok, 1 failed or unanswered, 2 usage, 3 daemon unavailable.
 async function main(argv: string[]): Promise<number> {
@@ -40,6 +41,10 @@ async function main(argv: string[]): Promise<number> {
 		}
 		case "serve":
 			return serve();
+		case "telegram": {
+			const { runTelegram } = await import("./telegram.ts");
+			return runTelegram();
+		}
 		case "ask":
 			return ask(p.socket, args, json);
 		case "status":
