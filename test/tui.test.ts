@@ -12,7 +12,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { orgToMarkdown } from "../src/org.ts";
 import { plain } from "../src/plain.ts";
 import { fold } from "../src/transcript.ts";
-import { compactingStatus } from "../src/tui.ts";
+import { compactingStatus, Transcript } from "../src/tui.ts";
 
 // A valid 2x2 PNG, with red, green, blue and white pixels.
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGP4z8DAAMIM/4EAAB/uBfsL2WiLAAAAAElFTkSuQmCC";
@@ -182,4 +182,14 @@ test("a watch, work, follow, or heartbeat notice shows only June's words, whethe
 test("June's text reaches Jon as a keyboard types it: straight quotes, no em dashes, ranges kept", () => {
 	assert.equal(plain("“flaff” is what i’d say — and ‘faff’ too"), "\"flaff\" is what i'd say, and 'faff' too");
 	assert.equal(plain("— first\nnine–five stays"), "first\nnine–five stays");
+});
+
+test("a command reply stays where it was given, after the streaming reply it interrupted is replaced", () => {
+	const t = new Transcript();
+	const state = { running: true, background: 0, queued: 0, model: "", compacting: false };
+	t.apply({ type: "view", reset: true, earlier: false, state, items: [{ kind: "user", id: "1", source: "kitty", text: "go" }, { kind: "assistant", id: "live", text: "on it", streaming: true }] });
+	t.reply("stop", "Stopped.");
+	t.apply({ type: "view", changes: [{ op: "drop", id: "live" }, { op: "put", item: { kind: "assistant", id: "2", text: "on it", streaming: false, error: "aborted" }, after: "1" }, { op: "put", item: { kind: "note", id: "3", text: "stopped" }, after: "2" }] });
+	t.apply({ type: "view", changes: [{ op: "put", item: { kind: "user", id: "4", source: "kitty", text: "you there?" }, after: "3" }] });
+	assert.deepEqual(t.shown().map((i) => i.id), ["1", "reply:0", "2", "3", "4"]);
 });

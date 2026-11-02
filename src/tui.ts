@@ -161,7 +161,7 @@ function component(item: Item): Component[] {
 }
 
 /** What the daemon sent, and the command replies shown after the item that was last when each arrived. */
-class Transcript {
+export class Transcript {
 	items: ViewItem[] = [];
 	state: ViewState = { running: false, background: 0, queued: 0, model: "", compacting: false };
 	earlier = false;
@@ -180,7 +180,9 @@ class Transcript {
 	}
 
 	reply(command: string, text: string): void {
-		this.#replies.push({ after: this.items.at(-1)?.id ?? null, reply: { kind: "reply", id: `reply:${this.#replies.length}`, command, text } });
+		// After the last item that stays: the streaming reply and a failure note are replaced when the run settles.
+		const anchor = this.items.findLast((item) => item.id !== "live" && !item.id.startsWith("failure:"));
+		this.#replies.push({ after: anchor?.id ?? null, reply: { kind: "reply", id: `reply:${this.#replies.length}`, command, text } });
 	}
 
 	/** Items and replies in display order; a reply whose item is gone stays at the end. */
