@@ -64,6 +64,7 @@ test("the first month writes SELF.org from nothing, told what the page holds and
 	assert.match(system, /It is about you, not Alex/);
 	assert.match(system, /Facts and lessons about Alex stay in MEMORY\.org/);
 	assert.match(system, /Revise the page, do not rewrite it/);
+	assert.match(system, /When you have none yet, never answer null: write a first page/);
 	assert.match(system, /never contradicts or revises it/);
 	assert.match(system, /Never drift toward flattering Alex/);
 	assert.match(system, /\* Proposals for SOUL/);
