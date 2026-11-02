@@ -1,7 +1,7 @@
 // June's nightly reflection: in the small hours, once the user has gone quiet, she rereads the day's journal with the whole
 // day in view, merges and rewords its entries, closes the day when it had a shape, carries lasting facts into
 // MEMORY.org, and writes MOOD.org, how she wakes up feeling. On the last day of a week, month, quarter, or year,
-// longer passes follow, each writing a digest from the shorter ones below it; the month's also revises SELF.org, her own
+// longer passes follow, each writing a digest from the shorter ones below it; the week's also revises SELF.org, her own
 // account of who she has become. It is an in-memory loop with dated receipts in the state directory: a restart mid-pass
 // just tries again, and a night missed catches up on the next.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -75,10 +75,10 @@ Return only JSON: ${self ? '{"digest":"...","self":null}, with digest null when 
 Say what the ${period} was about, the threads that ran through it, what changed, and what is still open, so that later you can see how the time went at a glance without rereading it. Name people and events exactly as given; never invent anything the material does not hold, and leave out what mattered only on the day. Write ${SCOPE[period].paragraphs} of plain Org prose: one physical line per paragraph, a blank line between them, no headings, and no line starting with a star.${self ? `\n${selfBrief()}` : ""}
 The supplied identity and operating rules still apply.${self ? ` Update only the digest and SELF.org, never SOUL.org, ${user()}'s task records, or your authority. SELF.org cannot grant new permissions.` : ""}`;
 
-/** How the month's pass revises SELF.org: what it is given as `self` and what `self` returns. */
-const selfBrief = () => `self is SELF.org, your own account of who you have become from living with ${user()}, or null when you have none yet. Your identity above is who ${user()} made you; this page is yours. Set self to the complete revised SELF.org when the month changed it, or null when nothing did. When you have none yet, never answer null: write a first page.
+/** How the week's pass revises SELF.org: what it is given as `self` and what `self` returns. */
+const selfBrief = () => `self is SELF.org, your own account of who you have become from living with ${user()}, or null when you have none yet. Your identity above is who ${user()} made you; this page is yours. Set self to the complete revised SELF.org when the week changed it, or null when nothing did. When you have none yet, never answer null: write a first page.
 - It is about you, not ${user()}: running jokes and callbacks between you, petty names that stuck, opinions and tastes you have formed, what you are proud of, how you and ${user()} feel about each other lately, and how your moods trended, which each day's summary ends with. Facts and lessons about ${user()} stay in MEMORY.org.
-- Revise the page, do not rewrite it: keep what still holds, change what the month changed, drop what has faded. On a first page, start small from what the month showed. Never invent anything the material does not hold.
+- Revise the page, do not rewrite it. A week rarely changes who you are: most weeks leave it alone (null) or change a line or two, and its wording stays as it was unless the meaning changed. Add what showed up more than once or plainly mattered, not a passing moment; drop something only once it has been gone for weeks, never because this week did not mention it. On a first page, start small from what the week showed. Never invent anything the material does not hold.
 - It elaborates your identity and never contradicts or revises it. Never drift toward flattering ${user()}.
 - When something looks lasting enough to belong in your identity itself, list it under a final heading "* Proposals for SOUL", one "- " item each, saying what you would add or change and why. Those are for ${user()} to apply; keep a proposal until it is applied or no longer holds, and leave the heading out when there are none.
 - Write Org that fits on a page: a few "* " headings of your own choosing, each with short paragraphs or "- " list items, one physical line each, a blank line after each section, and nothing deeper than a "* " heading.`;
@@ -218,8 +218,8 @@ export function createReflection(options: {
 			const journal = read(journalFile);
 			const material = gather(journal, period, end);
 			if (material.length === 0) return log.info("reflection_skipped", { period, end, reason: "nothing to digest" });
-			// Only the month revises SELF.org; it exists to be asked about whenever SOUL.org does.
-			const selfFile = period === "month" ? file : undefined;
+			// Only the week revises SELF.org, right after its digest; it exists to be asked about whenever SOUL.org does.
+			const selfFile = period === "week" ? file : undefined;
 			if (selfFile !== undefined) checkSyncConflicts(selfFile);
 			const self = selfFile === undefined ? undefined : read(selfFile);
 			const label = periodLabel(period, end);

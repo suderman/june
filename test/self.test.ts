@@ -19,8 +19,8 @@ Alex said the boys' team won the final.
 **** Day's end
 The boys won the final. I felt stoked all evening.
 `;
-const digest = "October was the hockey final and a lot of build work.";
-const page = "* Between us\n- Alex calls the build agent \"the intern\" and so do I.\n\n* Proposals for SOUL\n- Add that I keep score of worker blunders, since it has held all month.";
+const digest = "The week was the hockey final and a lot of build work.";
+const page = "* Between us\n- Alex calls the build agent \"the intern\" and so do I.\n\n* Proposals for SOUL\n- Add that I keep score of worker blunders, since it has held all week.";
 
 async function files(t: TestContext) {
 	const tmp = await tempDir();
@@ -30,15 +30,15 @@ async function files(t: TestContext) {
 	const self = join(tmp.dir, "SELF.org");
 	await writeFile(soul, "* June\nBe observant.\n");
 	await writeFile(journal, journalText);
-	// The night of 2026-10-31 and its week are done, so the next pass is October's.
+	// The night of Sunday 2026-11-01 is done, so the next pass is its week's.
 	await mkdir(tmp.paths.state, { recursive: true });
-	await writeFile(join(tmp.paths.state, "reflection.json"), JSON.stringify({ day: "2026-10-31", week: "2026-10-25" }));
+	await writeFile(join(tmp.paths.state, "reflection.json"), JSON.stringify({ day: "2026-11-01", week: "2026-10-25", month: "2026-10-31" }));
 	const config = { soulFile: soul, memoryFile: join(tmp.dir, "MEMORY.org"), journalFile: journal, moodFile: join(tmp.dir, "MOOD.org"), selfFile: self, reflection, rhythm: night };
 	return { tmp, journal, self, config, kept: join(tmp.paths.state, "reflection"), receipt: join(tmp.paths.state, "reflection.json") };
 }
 
-/** One month pass at 03:30 on 2026-11-01, answering with `answer` and recording what it was asked. */
-async function monthly(t: TestContext, f: Awaited<ReturnType<typeof files>>, answer: object, at = new Date(2026, 10, 1, 3, 30)) {
+/** One week pass at 03:30 on 2026-11-02, answering with `answer` and recording what it was asked. */
+async function weekly(t: TestContext, f: Awaited<ReturnType<typeof files>>, answer: object, at = new Date(2026, 10, 2, 3, 30)) {
 	let asked: TranscriptContext | undefined;
 	const faux = fauxProvider();
 	faux.setResponses([(ctx) => {
@@ -54,92 +54,94 @@ async function monthly(t: TestContext, f: Awaited<ReturnType<typeof files>>, ans
 
 const receipts = (f: Awaited<ReturnType<typeof files>>) => JSON.parse(readFileSync(f.receipt, "utf8"));
 
-test("the first month writes SELF.org from nothing, told what the page holds and that SOUL changes are proposals", async (t) => {
+test("the first week writes SELF.org from nothing, told what the page holds and that SOUL changes are proposals", async (t) => {
 	const f = await files(t);
-	const { system, input } = await monthly(t, f, { digest, self: `${page}\n\n` });
-	assert.equal(input.period, "October 2026");
+	const { system, input } = await weekly(t, f, { digest, self: `${page}\n\n` });
+	assert.equal(input.period, "The week of 2026-10-26 to 2026-11-01");
 	assert.equal(input.self, null, "no page yet starts fresh");
-	assert.match(input.material, /I felt stoked all evening/, "the month sees the mood sentences in each Day's end");
+	assert.match(input.material, /I felt stoked all evening/, "the week sees its days in full, with the mood sentence in each Day's end");
 	assert.match(system, /\\"self\\":null/);
 	assert.match(system, /It is about you, not Alex/);
 	assert.match(system, /Facts and lessons about Alex stay in MEMORY\.org/);
 	assert.match(system, /Revise the page, do not rewrite it/);
+	assert.match(system, /A week rarely changes who you are/);
+	assert.match(system, /never because this week did not mention it/);
 	assert.match(system, /When you have none yet, never answer null: write a first page/);
 	assert.match(system, /never contradicts or revises it/);
 	assert.match(system, /Never drift toward flattering Alex/);
 	assert.match(system, /\* Proposals for SOUL/);
 	assert.match(system, /Update only the digest and SELF\.org, never SOUL\.org/);
 	assert.equal(readFileSync(f.self, "utf8"), `${page}\n`);
-	assert.match(readFileSync(f.journal, "utf8"), /\*\*\* Month's end\nOctober was the hockey final/);
-	assert.ok(!existsSync(join(f.kept, "2026-10-31.SELF.org")), "nothing to keep from an empty start");
-	assert.equal(receipts(f).month, "2026-10-31");
+	assert.match(readFileSync(f.journal, "utf8"), /\*\*\*\* Week's end\nThe week was the hockey final/);
+	assert.ok(!existsSync(join(f.kept, "2026-11-01.SELF.org")), "nothing to keep from an empty start");
+	assert.equal(receipts(f).week, "2026-11-01");
 });
 
-test("a later month reads the page, keeps the old one, and replaces it whole", async (t) => {
+test("a later week reads the page, keeps the old one, and replaces it whole", async (t) => {
 	const f = await files(t);
 	const before = "* Between us\n- Alex brought up chess twice.\n";
 	await writeFile(f.self, before);
-	const { input } = await monthly(t, f, { digest, self: page });
+	const { input } = await weekly(t, f, { digest, self: page });
 	assert.equal(input.self, before.trim());
-	assert.equal(readFileSync(join(f.kept, "2026-10-31.SELF.org"), "utf8"), before);
+	assert.equal(readFileSync(join(f.kept, "2026-11-01.SELF.org"), "utf8"), before);
 	assert.equal(readFileSync(f.self, "utf8"), `${page}\n`);
 });
 
-test("a month that changed nothing leaves the page alone and keeps no copy", async (t) => {
+test("a week that changed nothing leaves the page alone and keeps no copy", async (t) => {
 	const f = await files(t);
 	await writeFile(f.self, "* Between us\n- Steady.\n");
-	await monthly(t, f, { digest, self: null });
+	await weekly(t, f, { digest, self: null });
 	assert.equal(readFileSync(f.self, "utf8"), "* Between us\n- Steady.\n");
-	assert.ok(!existsSync(join(f.kept, "2026-10-31.SELF.org")));
-	assert.match(readFileSync(f.journal, "utf8"), /Month's end/);
-	assert.equal(receipts(f).month, "2026-10-31");
+	assert.ok(!existsSync(join(f.kept, "2026-11-01.SELF.org")));
+	assert.match(readFileSync(f.journal, "utf8"), /Week's end/);
+	assert.equal(receipts(f).week, "2026-11-01");
 });
 
-test("a month with no digest can still revise the page", async (t) => {
+test("a week with no digest can still revise the page", async (t) => {
 	const f = await files(t);
-	await monthly(t, f, { digest: null, self: page });
+	await weekly(t, f, { digest: null, self: page });
 	assert.equal(readFileSync(f.self, "utf8"), `${page}\n`);
 	assert.equal(readFileSync(f.journal, "utf8"), journalText);
-	assert.equal(receipts(f).month, "2026-10-31");
+	assert.equal(receipts(f).week, "2026-11-01");
 });
 
-test("a rerun of the same month keeps the page it first replaced", async (t) => {
+test("a rerun of the same week keeps the page it first replaced", async (t) => {
 	const f = await files(t);
 	await writeFile(f.self, "* Between us\n- Rerun.\n");
 	await mkdir(f.kept, { recursive: true });
-	await writeFile(join(f.kept, "2026-10-31.SELF.org"), "The first copy.\n");
-	await monthly(t, f, { digest, self: page });
-	assert.equal(readFileSync(join(f.kept, "2026-10-31.SELF.org"), "utf8"), "The first copy.\n");
+	await writeFile(join(f.kept, "2026-11-01.SELF.org"), "The first copy.\n");
+	await weekly(t, f, { digest, self: page });
+	assert.equal(readFileSync(join(f.kept, "2026-11-01.SELF.org"), "utf8"), "The first copy.\n");
 	assert.equal(readFileSync(f.self, "utf8"), `${page}\n`);
 });
 
 for (const [name, self] of [["missing", undefined], ["blank", "  \n"], ["not text", 3]] as const)
-	test(`a month answer with a ${name} self writes nothing and leaves the month undone`, async (t) => {
+	test(`a week answer with a ${name} self writes nothing and leaves the week undone`, async (t) => {
 		const f = await files(t);
 		await writeFile(f.self, "* Between us\n- Steady.\n");
-		await monthly(t, f, { digest, ...(self === undefined ? {} : { self }) });
+		await weekly(t, f, { digest, ...(self === undefined ? {} : { self }) });
 		assert.equal(readFileSync(f.journal, "utf8"), journalText);
 		assert.equal(readFileSync(f.self, "utf8"), "* Between us\n- Steady.\n");
-		assert.equal(receipts(f).month, undefined);
+		assert.equal(receipts(f).week, "2026-10-25");
 	});
 
-test("a week's pass is not asked about the page", async (t) => {
+test("a month's pass is not asked about the page", async (t) => {
 	const f = await files(t);
-	await writeFile(f.receipt, JSON.stringify({ day: "2026-11-01", week: "2026-10-25", month: "2026-10-31" }));
-	const { system, input } = await monthly(t, f, { digest: "A week." }, new Date(2026, 10, 2, 3, 30));
-	assert.equal(input.period, "The week of 2026-10-26 to 2026-11-01");
+	await writeFile(f.receipt, JSON.stringify({ day: "2026-10-31", week: "2026-10-25" }));
+	const { system, input } = await weekly(t, f, { digest: "A month." }, new Date(2026, 10, 1, 3, 30));
+	assert.equal(input.period, "October 2026");
 	assert.ok(!("self" in input));
 	assert.doesNotMatch(system, /SELF\.org/);
 	assert.ok(!existsSync(f.self));
-	assert.equal(receipts(f).week, "2026-11-01");
+	assert.equal(receipts(f).month, "2026-10-31");
 });
 
-test("a Syncthing conflict copy of SELF.org stops the month before it asks", async (t) => {
+test("a Syncthing conflict copy of SELF.org stops the week before it asks", async (t) => {
 	const f = await files(t);
 	await writeFile(join(f.tmp.dir, "SELF.sync-conflict-20261031-000000-ABCDEFG.org"), "other");
 	const faux = fauxProvider();
 	faux.setResponses([fauxAssistantMessage(JSON.stringify({ digest, self: page }))]);
-	const daemon = await openTestDaemon({ ...f.tmp, faux, config: f.config, reflectionClock: { now: () => new Date(2026, 10, 1, 3, 30), tickMs: 50 } });
+	const daemon = await openTestDaemon({ ...f.tmp, faux, config: f.config, reflectionClock: { now: () => new Date(2026, 10, 2, 3, 30), tickMs: 50 } });
 	t.after(() => daemon.close());
 	await new Promise((r) => setTimeout(r, 300));
 	assert.equal(faux.state.callCount, 0);
@@ -171,6 +173,7 @@ test("the page sits directly after SOUL, below it in authority, with the rule on
 	assert.ok(order.indexOf("self") < order.indexOf("mood"), "solid to fleeting: SOUL, SELF, then MOOD");
 	const text = JSON.stringify(seen.self);
 	assert.match(text, /the intern/);
+	assert.match(text, /kept by the reflection that closes each week/);
 	assert.match(text, /never overrides it/);
 	assert.match(text, /never edit it/);
 	assert.match(text, /mention a new one to them once/);

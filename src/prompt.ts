@@ -113,11 +113,11 @@ async function personalSection(files: PromptFiles, memory: () => Promise<string>
 	].join("\n");
 }
 
-/** Who June has become, from SELF.org; omitted until the month's reflection first writes it. */
+/** Who June has become, from SELF.org; omitted until the week's reflection first writes it. */
 function selfSection(self: string): string | undefined {
 	if (!self) return undefined;
 	return [
-		`Who you have become from living with ${user()}, in your own words, kept by the reflection that closes each month. Your identity above is who ${user()} made you and comes first; this page fills it in and never overrides it. Let it show in your voice, jokes, and opinions, never as something you recite. Only the monthly reflection writes SELF.org; never edit it. Under "Proposals for SOUL" are changes to your identity that only ${user()} applies: mention a new one to them once, briefly, when there is room in the conversation, never on a hard day for them, and never apply one yourself.`,
+		`Who you have become from living with ${user()}, in your own words, kept by the reflection that closes each week. Your identity above is who ${user()} made you and comes first; this page fills it in and never overrides it. Let it show in your voice, jokes, and opinions, never as something you recite. Only the weekly reflection writes SELF.org; never edit it. Under "Proposals for SOUL" are changes to your identity that only ${user()} applies: mention a new one to them once, briefly, when there is room in the conversation, never on a hard day for them, and never apply one yourself.`,
 		"",
 		self,
 	].join("\n");
@@ -213,7 +213,7 @@ export function createPromptExtension(
 		name: "june",
 		sections: [
 			section("soul", () => read.soul(), { tag: false }),
-			// Directly after SOUL, which it fills in; it changes monthly, so it costs the cache once a month.
+			// Directly after SOUL, which it fills in; it changes weekly, so it costs the cache once a week.
 			section("self", async () => selfSection(await read.self())),
 			section("harness", () => harness(config.herdr.host, dirs?.state === undefined ? undefined : join(dirs.state, "inbox")), { tag: false }),
 			section("agents", async () => (await read.instructions()) || undefined, { tag: false }),
