@@ -27,12 +27,12 @@ Pi Durable is experimental; recheck these notes when upgrading it.
 Pi Durable has no cross-process locking, so only =june serve= opens =june.sqlite=. It takes pi-durable-telegram's data-directory lock before opening storage; a second daemon on the same state exits with the owner's pid. Clients never open the database.
 
 ** Pi Durable 1.2.0, pinned to match pi-durable-telegram
-pi-durable-telegram 0.1.5 depends on =@earendil-works/*= 1.2.0 exactly. Running a newer Pi Durable beside it would load two copies into one process, with task and document definitions split between them. npm =overrides= pin the whole family to 1.2.0, and =npm ls= shows a single copy. Upgrade together.
+pi-durable-telegram 0.1.5 depends on =@earendil-works/*= 1.2.0 exactly. Running a newer Pi Durable beside it would load two copies into one process, with task and document definitions split between them. npm =overrides= pin the whole family to 1.2.0, and =npm ls= shows a single copy. Upgrade together. Being replaced: see "Telegram bridge" under the client protocol; the upgrade to 1.5 drops the library and the pin.
 
 ** Telegram as a library, routed into the primary conversation
 =createTelegramChannel()= is used as published, without its workspace tools, shell, prompt, or plugins; its only tool is =telegram_send_file=. The channel keeps a chat-to-conversation map in the session document =tg.chats=; before =channel.start()=, June points each allowed user at the root conversation, so Telegram and the terminal share one conversation. This depends on two document kinds the library does not export (=tg.chats=, =tg.chat=); June redefines them with the same kind and version, and =test/daemon.test.ts= fails if that stops working.
 
-Delivery is per admitted Telegram message: a =tg.deliver= task submits it and sends the answer back, so answers to terminal input stay in the terminal.
+Delivery is per admitted Telegram message: a =tg.deliver= task submits it and sends the answer back, so answers to terminal input stay in the terminal. Being replaced by the bridge described under "Telegram bridge".
 
 ** Source tags instead of separate conversations
 Terminal input is a =june.input= entry with ={source, text}=, which the model sees prefixed =[tui]= or =[cli]= (=[kitty]= before the rename). Telegram input is a plain =pi.user= entry, and the prompt says untagged messages come from Telegram. June's own inputs use the same entry with sources =work=, =follow=, =reminder=, and =heartbeat=; anything that asks "where is the user, and when did they last speak" skips those.
@@ -127,10 +127,10 @@ Set aside: binding the tailnet address (it would make Tailscale a requirement on
 - Clients keep their token out of the Nix store: the overlay reads a 0600 file named by its Home Manager option, the Android app keeps it in its private storage. Pairing on the phone is pasting the URL and token; a QR code can come later.
 
 ** Attaching to the folded view
-=attach= takes an optional =view=. ="events"=, the default, is today's behaviour: a snapshot, then Pi Durable's events unchanged; the terminal client stays on it. ="items"= sends display items computed in the daemon by the same =Transcript= class, one per connection:
+Revised on 2026-11-02 for Pi Durable 1.5, which removes =watchEvents()=. =attach= sends display items computed in the daemon by =Transcript=, one per connection, to every client, the terminal included; there is no events view. Until the upgrade lands, the terminal stays on today's events.
 
 #+begin_src typescript
-{ op: "attach"; requestId: string; view?: "events" | "items"; detail?: boolean }
+{ op: "attach"; requestId: string; detail?: boolean }
 { op: "detail"; requestId: string; on: boolean }
 
 // replies on view "items"
@@ -139,7 +139,7 @@ Set aside: binding the tailnet address (it would make Tailscale a requirement on
 
 type ViewItem =
 	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; voice?: true; private?: true }
-	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: "gui" | "apk"; error?: string; heard?: number; thinking?: string; private?: true }
+	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: "gui" | "apk" | "telegram"; error?: string; heard?: number; thinking?: string; private?: true }
 	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; error?: string; output?: string; private?: true }
 	| { kind: "note"; id: string; text: string }
 	| { kind: "patter"; id: string; text: string };
@@ -147,17 +147,19 @@ type ViewItem =
 type ViewState = { running: boolean; background: number; queued: number; model: string; notice?: string; compacting: boolean; expression: string; activity?: string };
 #+end_src
 
-- A reset replaces everything the client holds. It is sent at attach, and again whenever Pi Durable's stream overflows and sends a fresh snapshot.
-- After each event batch the daemon diffs the item list against what it last sent that connection: a new or changed item is a =put= of the whole item, placed after the item whose id is =after= (=null= for first); a removed item is a =drop=. =state= is sent whole when any field changed. Changes are flushed at most ten times a second per connection, so a streaming reply resends its text at most ten times a second; that is fine on the home network and keeps clients to a single "replace this item" operation.
+- The daemon folds from state, not events. Each connection holds a =Conversation.watch()= of the root with a window of =min: 200= (=max= 400), and a =ConversationTranscript= merges each value so entries that leave the window stay folded. =Transcript= is rebuilt to fold a view: committed entries from the transcript, and the run, the streaming reply, running tools, the inbox, and compactions from =docs["pi.live"]=, =docs["pi.inbox"]=, and =docs["pi.agent"]=. An idle conversation is =run === undefined=; =pi.live= may keep =runFailure= after a run that ended without an answer, which the fold shows as the run's error.
+- A reset replaces everything the client holds. It is sent at attach, and again whenever the watch delivers a root replacement (=[["r", view]]=, past 10,000 pending operations).
+- After each watch callback the daemon diffs the item list against what it last sent that connection: a new or changed item is a =put= of the whole item, placed after the item whose id is =after= (=null= for first); a removed item is a =drop=. =state= is sent whole when any field changed. Changes are flushed at most ten times a second per connection, so a streaming reply resends its text at most ten times a second; that is fine on the home network and keeps clients to a single "replace this item" operation.
 - The streaming reply is the item with id =live=. When the message ends it is dropped and the stored reply is put with its entry id, as =Transcript= already does.
 - Assistant =text= is always Markdown. The daemon applies =orgToMarkdown= where the terminal does today (a reply to anything but a Telegram message), so both clients need only a Markdown renderer.
 - =answers= is the source of the input the reply follows: a client source, =telegram=, or one of June's own (=work=, =follow=, =watch=, =heartbeat=, =reminder=). =alert= is described under "Which messages alert".
 - By default the view is simple and matches what the terminal shows. Each thinking block is one line in =thinking=, flattened and with Markdown emphasis removed, so a reasoning summary reads "Finding project heading". Every tool call appears as a line with its name, a one-line summary of its arguments, and its status, so a journal entry or a =work= brief is visible as it happens; a failed call adds the first line of its output as =error=. Left out: full thinking text, full tool output, and June's private looks, with heartbeat and watch looks, quiet answers, and her own inputs hidden exactly as in the terminal, because it is the same code.
 - Detail is the complete view, for checking what is going on, like showing hidden files in a file browser. A client turns it on or off with =detail= (or =detail: true= on =attach=, so it survives a reconnect), and the daemon answers with a reset. With detail on, =thinking= carries the full thinking text, tool items carry =output= (the same retained window the terminal shows), and June's private looks appear as items marked =private: true=, including heartbeat looks that ended quiet. Detail belongs to the connection, so turning it on in the overlay leaves the phone simple. The overlay binds it to a key; the Android app puts it in a menu. =Transcript= gains an option to keep private looks instead of dropping them.
 - Command replies are not view items: =command= still answers with a =reply=, which the client shows locally, as the terminal does.
-- History is the last 200 entries, as for the terminal; =omitted= says how many were left out. Older history is not paged in this view: a separate log browsed by day or week is planned instead, so the conversation never becomes one endless list. The socket's =history= request already returns entries without a stream, since a time and up to 2,000 at once, for =june transcript=.
+- History is the last 200 entries, as for the terminal; =omitted= says how many were left out. Older history is not paged in this view: a separate log browsed by day or week is planned instead, so the conversation never becomes one endless list. 1.5's =ConversationTranscript.loadEarlier()= is what that log would page with. The socket's =history= request returns entries without a stream, since a time and up to 2,000 at once, for =june transcript=; under 1.5 it pages with =Conversation.entries()=.
+- The terminal renders items: it keeps its look (Org converted to Markdown, thinking lines, tool lines, patter, notes) but no longer folds. Assistant =text= arrives as Markdown, so its own =orgToMarkdown= call goes.
 
-Built by the task "Serve a folded transcript view to clients" in the Org plan. The terminal may move to the items view later; nothing requires it.
+Built in two steps in the Org plan: "Upgrade June to Pi Durable 1.5" moves =Transcript= into the daemon, folds from views, and moves the terminal onto items with the simple view, so the terminal works the day the upgrade lands; "Serve a folded transcript view to clients" adds what graphical clients and the Telegram bridge need beyond that: =detail=, =answers=, =alert=, the =gui=, =apk=, and =telegram= sources, and Markdown =text=.
 
 ** Sources, submitting, and reconnecting
 - Sources name June's clients, never the program around them, in three letters to match =cli=:
@@ -165,24 +167,38 @@ Built by the task "Serve a folded transcript view to clients" in the Org plan. T
   - =cli=: =june ask= and other one-shot commands;
   - =gui=: the Hyprland overlay, on any machine;
   - =apk=: the Android app, including its assistant session.
-- Telegram stays untagged. The terminal's source is renamed from =kitty= to =tui=: stored entries keep =kitty=, so every reader (=src/notify.ts=, =src/patter.ts=, =src/heartbeat.ts=, the TUI) treats =kitty= as =tui=, and June's prompt says older messages may carry =[kitty]=.
+- Telegram stays untagged for the model: the bridge submits with source =telegram=, which the daemon records in =june.input= like any client but sends to the model without a tag, so June's prompt ("untagged messages come from Telegram") and her habit of answering Telegram in Markdown hold. Readers that asked "was the latest message from Telegram" by the absence of a tag read the =june.input= source instead, and still read untagged =pi.user= entries from before the bridge as Telegram. The terminal's source is renamed from =kitty= to =tui=: stored entries keep =kitty=, so every reader (=src/notify.ts=, =src/patter.ts=, =src/heartbeat.ts=, the TUI) treats =kitty= as =tui=, and June's prompt says older messages may carry =[kitty]=.
 - June answers =[gui]= and =[apk]= in Org like the terminal, since the daemon converts. The host an overlay runs on is not part of the source; the desktop-context task adds it as a separate field with the context it sends.
 - Notice routing: =gui= counts as the terminal surface. =apk= becomes its own surface in the task "Route June's own notices to the new surfaces".
 - A submit is retried with the same =requestId= until it is =accepted=. Clients keep the id with the draft, generated once when the user presses send, so a retry after a dropped connection returns the same submission instead of a second message. The daemon already namespaces ids by source.
 - Graphical clients send =submit= with =whenBusy= as the terminal does (follow-up by default, steer on request), never =wait=. Stop is =command= =stop=. They never offer =/new=.
-- On a dropped connection the client reconnects with backoff from 1 to 30 seconds, sends =hello=, attaches again, and takes the reset as the truth. There is no event cursor: Pi Durable's =watchEvents= has none, and a 200-entry snapshot is small enough. Revisit only if attach proves slow on the phone.
+- On a dropped connection the client reconnects with backoff from 1 to 30 seconds, sends =hello=, attaches again, and takes the reset as the truth. There is no resume: a 200-entry reset is small enough. 1.5's watch window can start =from= an entry id, so a resume is possible later; revisit only if attach proves slow on the phone.
 
 ** Which messages alert
 Every client shows the whole conversation; what differs is which messages interrupt the user. Telegram keeps its narrower behaviour as a fallback client: it shows only answers to messages sent there, plus notices routed there.
 
 - The daemon sets =alert= on a finished assistant reply, never on a streaming one, naming the client kind that should interrupt the user:
   - a reply to an =apk= message alerts =apk=, and a reply to a =gui= message alerts =gui=;
-  - a reply to one of June's own notices alerts the surface the notice was routed to, which the notice records in its =june.input= data as =surface= when it is committed: =apk= for the phone, =gui= when the terminal surface was chosen;
-  - replies to =tui=, =cli=, or Telegram messages alert nothing here; the user is looking at that client already.
+  - a reply to one of June's own notices (=work=, =follow=, =watch=, =reminder=, or a heartbeat that did not end quiet) alerts the surface the notice was routed to, which the notice records in its =june.input= data as =surface= when it is committed: =apk= for the phone, =gui= when the terminal surface was chosen, =telegram= when the user last spoke from Telegram;
+  - replies to =tui= or =cli= messages alert nothing here; the user is looking at that client already. Telegram is the exception, below.
 - Everything else arrives quietly: when the user chats from the desktop, the phone app shows those messages when opened, without a buzz.
 - The phone: the Android app connects only while it is on screen, so the daemon treats a connected =apk= device as on screen. A reply with =alert: "apk"= while no =apk= device is connected goes to the phone through ntfy, and tapping it opens the app; while the app is on screen it only appears. A push is sent at most once; losing one in a crash is acceptable, sending it twice is not.
 - The overlay is resident and stays connected while hidden. It shows a desktop notification for =alert: "gui"= while it is hidden.
 - The mechanics (ntfy, the =surface= field, the at-most-once record) belong to the tasks "Route June's own notices to the new surfaces" and the ntfy notification task; the protocol only carries =answers= and =alert=.
+
+** Telegram bridge
+Decided with Jon on 2026-11-02. Telegram is a backup client, so it must never hold the core back. pi-durable-telegram ran inside the harness and pinned the whole =@earendil-works/*= family; it is replaced by a bridge that is only a protocol client.
+
+- =june telegram= is a separate process in the same package, run on kit as its own systemd user service beside =june serve=, on the Unix socket. A Telegram outage, a grammY crash, or a bridge restart never touches the daemon, and no Pi Durable type crosses into it.
+- It uses grammY with long polling, the bot token from June's secrets, and =telegram.allowedUserIds= from config.json. Messages from anyone else are ignored. It serves the first allowed user's private chat, as today.
+- In: a text message is a =submit= with source =telegram= and request id from the Telegram update id, so a redelivered update is one submission. A photo, or an image sent as a file (how Telegram delivers an uncompressed screenshot, an =image/*= document), with its caption as text, is a =submit= with the image inline, as the terminal sends images. Other media (voice notes, other files) get a short reply that the bridge does not take them yet. =/stop=, =/new=, =/status=, =/compact=, and =/help= go as =command=, and the reply is sent back as a message.
+- Out: the bridge attaches to the simple items view. It sends a finished assistant item (=streaming: false=) when =answers= is =telegram= or =alert= is =telegram=, once. Text is Markdown, converted to Telegram HTML and split under Telegram's 4,096-character limit, as =splitForTelegram= did.
+- Patter: while the latest user item is from Telegram, patter items grow one message per wait by editing it, as =src/patter.ts= does now, and the next assistant item ends the wait. =src/patter.ts= no longer talks to Telegram.
+- Typing: while =state.running= or =state.background= is set and the latest user item is from Telegram, it sends "typing…" every four seconds.
+- Exactly once across restarts: a reset sends nothing by itself. The bridge keeps the id of the newest assistant item it has sent, and the open patter message, in =$XDG_STATE_HOME/june/telegram.json= (0600, replaced atomically), and after a reset it sends only qualifying items after that id. Losing a send in a crash is acceptable; sending twice is not.
+- Removed from the daemon: =createTelegramChannel=, =tg.deliver=, the =tg.chats= and =tg.chat= documents, Telegram code in =src/notify.ts=, =src/patter.ts=, and =src/heartbeat.ts=, and the npm =overrides=. Logger, settings, and data-directory lock, which June took from the library, become June's own.
+- Not kept: voice notes and files other than images, by Jon's choice (he may want files one day; that is a later task), and the =telegram_send_file= tool, which June has never called (none in =june.sqlite= on 2026-11-02).
+- A heartbeat's non-quiet message reaches Telegram the same way as any notice: its =june.input= records =surface= =telegram= when the user last spoke there, so its answer carries =alert: "telegram"=. =src/heartbeat.ts= no longer sends it itself.
 
 ** Voice flag
 =submit= takes an optional =voice: true= for speech transcribed from that client. The model sees the tag as =[apk voice]= or =[gui voice]=, the =june.input= entry records =voice: true=, and the user item carries it. June's prompt says a voice-tagged message was spoken and her answer will be heard. The flag says nothing about playback; the client that sent the voice turn owns playback of its answer. Built by the task "Make June's replies speakable"; audio framing belongs to the push-to-talk tasks.
