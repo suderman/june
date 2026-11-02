@@ -66,6 +66,7 @@ export async function openTestDaemon(options: {
 	/** More providers, such as a separate one for patter so its requests never take June's scripted answers. */
 	providers?: Faux[];
 	patterTiming?: Partial<PatterTiming>;
+	focusHoldMs?: number;
 	reflectionClock?: { now: () => Date; tickMs: number };
 	heartbeatClock?: { now: () => Date; tickMs: number };
 	mailRun?: (argv: readonly string[]) => Promise<string>;
@@ -83,6 +84,7 @@ export async function openTestDaemon(options: {
 		...(options.telegramPort ? { telegramPort: options.telegramPort } : {}),
 		...(options.secrets ? { secrets: options.secrets } : {}),
 		...(options.patterTiming ? { patterTiming: options.patterTiming } : {}),
+		...(options.focusHoldMs !== undefined ? { focusHoldMs: options.focusHoldMs } : {}),
 		...(options.reflectionClock ? { reflectionClock: options.reflectionClock } : {}),
 		...(options.heartbeatClock ? { heartbeatClock: options.heartbeatClock } : {}),
 		...(options.mailRun ? { mailRun: options.mailRun } : {}),

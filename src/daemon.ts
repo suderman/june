@@ -8,6 +8,7 @@ import type { Models } from "@earendil-works/pi-ai";
 import {
 	type AgentEvent,
 	type Conversation,
+	configure,
 	createRegistry,
 	type Extension,
 	Harness,
@@ -45,7 +46,7 @@ import { readLines, type Reply, type Request, type Status, writeLine } from "./p
 import { createCodingExtension } from "./tools/coding.ts";
 import { createHerdrExtension, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
-import { createWorkExtension, WorkDoc } from "./tools/work.ts";
+import { createWorkExtension, FocusDoc, WorkDoc } from "./tools/work.ts";
 import { createOrgExtension, Org } from "./tools/org.ts";
 import { createOrgWriteExtension } from "./tools/write.ts";
 import { createMail } from "./mail.ts";
@@ -65,6 +66,8 @@ export type DaemonOptions = {
 	readonly telegramPort?: TelegramPort;
 	/** Tests replace the infrastructure tools. */
 	readonly extensions?: readonly Extension[];
+	/** Tests shorten how long a held focus outlasts the user's last message. */
+	readonly focusHoldMs?: number;
 	/** Tests shorten patter's waits. */
 	readonly patterTiming?: Partial<PatterTiming>;
 	/** Tests set the clock and loop speed of the nightly reflection. */
@@ -179,20 +182,32 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				});
 		} else harness.resume();
 		const stopPatter = patter?.start(harness, root);
-		// Focus lasts for the turn June tied her hair up in: once the main thread goes quiet, she lets it down again.
+		// Focus lasts for the turn June tied her hair up in: once the main thread goes quiet, she lets it down again. A held
+		// focus lasts across turns until the user has been quiet for focusHoldMs; a hold left from before a restart or /new,
+		// which start relaxed, is dropped.
 		const focus = config.model.focus;
+		const holdMs = options.focusHoldMs ?? 20 * 60_000;
 		const unfocus =
 			focus &&
 			setInterval(
 				() =>
 					void (async () => {
 						const current = (await root.agent(BG)).model;
-						if (current?.modelId !== focus.modelId || current?.provider !== focus.provider) return;
-						if ((await harness.snapshot(LiveDoc, root.id, BG))?.run !== undefined) return;
-						await root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
+						const focused = current?.modelId === focus.modelId && current?.provider === focus.provider;
+						const held = (await harness.snapshot(FocusDoc, root.id, BG))?.held;
+						if (!focused && held === undefined) return;
+						if (focused && (await harness.snapshot(LiveDoc, root.id, BG))?.run !== undefined) return;
+						if (focused && held !== undefined && Date.now() - Math.max(held, await lastSpoke()) < holdMs) return;
+						await harness.commit(async (tx) => {
+							if (focused) await configure(tx, root.id, { model, thinkingLevel: agent.thinkingLevel });
+							delete (await tx.doc(FocusDoc, root.id)).held;
+						}, BG);
 					})().catch((error) => log.warn("unfocus_failed", { error: (error as Error).message })),
 				1000,
 			);
+		/** When the user last sent a message of their own, rather than a report, reminder, or heartbeat. */
+		const lastSpoke = async () =>
+			(await root.context(BG)).messages.findLast((m) => m.role === "user" && !/^\[(\/stop|work|follow|reminder|heartbeat|watch)\b/.test(typeof m.content === "string" ? m.content : m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ")))?.timestamp ?? 0;
 		const stopSituation = situation.start();
 		const stopReflection = config.reflection.enabled
 			? createReflection({ models: options.models, model: config.model.chat, config: config.reflection, window: { start: config.rhythm.sleep, end: config.rhythm.wake }, files: prompt.files, people: config.org.people, state: paths.state, log, ...options.reflectionClock }).start(harness, root)

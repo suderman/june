@@ -17,7 +17,17 @@ export const WorkDoc = defineDoc<{
 	byCall: Record<string, number>;
 }>({ kind: "june.work", version: 1, scope: "session", initial: () => ({ active: {}, byCall: {} }) });
 
-type WorkInput = { brief: string; model: ModelChoice; call: string };
+/** When June held her focus across turns; the daemon lets it down once the user has been quiet long enough. */
+export const FocusDoc = defineDoc<{ held?: number }>({
+	kind: "june.focus",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: () => ({}),
+});
+
+type WorkInput ={ brief: string; model: ModelChoice; call: string };
 
 const WORKER = `You are June's working context, running one brief from your main conversation. The user does not see this conversation and cannot answer here.
 Do the work with your tools, then end with one report for your main thread: the answer or outcome first, then the evidence that matters (commands, paths, findings), what you changed, and anything unresolved or needing the user's decision. Keep it concise and leave out dead ends unless they matter.
@@ -132,27 +142,41 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 
 	const focusTool = defineTool({
 		name: "focus",
-		description: `Tie your hair up and get focused for careful heads-down work, or let it down and relax back to your everyday self. Yours to manage; it applies from your next model request and lasts until this turn ends.`,
+		description: `Tie your hair up and get focused for careful heads-down work, or let it down and relax back to your everyday self. Yours to manage; it applies from your next model request and lasts until this turn ends, unless you hold it.`,
 		parameters: Type.Object({
 			on: Type.Boolean(),
+			hold: Type.Optional(Type.Boolean({ description: `With on true: stay focused across turns, for a back-and-forth with ${user()} that needs care throughout` })),
 			reason: Type.String({ description: "Why, in a few words" }),
 		}),
 		replay: "safe",
 		execute: async (args, api, context) => {
 			const model = args.on ? focus! : normal;
-			await api.commit((tx) => configure(tx, api.conversationId, agentOf(model)), context);
-			const text = args.on ? "Hair tied up: focus mode from your next request." : "Hair let down: chat mode from your next request.";
+			const hold = args.on && args.hold === true;
+			await api.commit(async (tx) => {
+				await configure(tx, api.conversationId, agentOf(model));
+				const doc = await tx.doc(FocusDoc, api.conversationId);
+				if (hold) doc.held = Date.now();
+				else delete doc.held;
+			}, context);
+			const text = !args.on
+				? "Hair let down: chat mode from your next request."
+				: hold
+					? "Hair tied up and held: focus mode from your next request, across turns until you let it down."
+					: "Hair tied up: focus mode from your next request, until this turn ends.";
 			return { output: [{ type: "text", text: `${text} (${label(model)})` }] };
 		},
 	});
 
-	const mode = section("mode", ({ agent }) => {
+	const mode = section("mode", async ({ agent, read, conversationId }, context) => {
 		if (focus === undefined) return undefined;
 		const focused =
 			agent.model?.provider === focus.provider && agent.model?.modelId === focus.modelId && agent.thinkingLevel === focus.thinkingLevel;
+		const held = focused && (await read.snapshot(FocusDoc, conversationId, context))?.held !== undefined;
+		if (held)
+			return `Your hair is tied up and held: you stay focused across turns for a back-and-forth with ${user()} that needs care. ${User()} often mixes topics, so a quick aside, a joke, or news from their day does not end the discussion: answer it and stay held, ready for them to come back. Call focus with on false before anything else only when ${user()} asks you to relax, says the matter is settled, or several exchanges have gone by without returning to it. If ${user()} goes quiet for a while, it comes down by itself. Do not mention modes or models unless asked.`;
 		return focused
-			? `Your hair is tied up: you are focused for the rest of this turn, and it comes down by itself when the turn ends. Write the careful work out yourself while focused; relaxing first would hand the writing to your everyday self. If the user asks you to relax, call focus with on false. Do not mention modes or models unless asked.`
-			: `Your hair is down: your everyday self. When the user asks you to focus, or a step in this turn needs careful heads-down work such as writing a complete Org task, call focus with on true; it lasts until the turn ends. A brief that needs care can instead run in work with focus true, which keeps you relaxed here. This is yours to manage; do not mention modes or models unless asked.`;
+			? `Your hair is tied up: you are focused for the rest of this turn, and it comes down by itself when the turn ends. Write the careful work out yourself while focused; relaxing first would hand the writing to your everyday self. If ${user()} wants to work something through with you over several turns, call focus with on true and hold true. If ${user()} asks you to relax, call focus with on false. Do not mention modes or models unless asked.`
+			: `Your hair is down: your everyday self. When ${user()} asks you to focus, or a step in this turn needs careful heads-down work such as writing a complete Org task, call focus with on true; it lasts until the turn ends. When ${user()} asks you to stay focused, or wants to work something hard through with you over several turns, add hold true. A brief that needs care can instead run in work with focus true, which keeps you relaxed here. This is yours to manage; do not mention modes or models unless asked.`;
 	});
 
 	const extension: Extension = defineExtension({

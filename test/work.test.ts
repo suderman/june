@@ -145,6 +145,35 @@ test("her hair comes down when the turn ends", async (t) => {
 	assert.deepEqual(used, ["faux-1", "faux-2", "faux-1"], "the next turn starts relaxed");
 });
 
+test("a held focus lasts across turns until the user goes quiet", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const faux = twoModels();
+	const used: string[] = [];
+	const step = (fn: (ctx: TranscriptContext) => ReturnType<typeof fauxAssistantMessage>) => (ctx: TranscriptContext, _o: unknown, _s: unknown, model: { id: string }) => {
+		used.push(model.id);
+		return fn(ctx);
+	};
+	faux.setResponses([
+		step(() => call("focus", { on: true, hold: true, reason: "working it through together" })),
+		step((ctx) => {
+			assert.match(last(ctx), /held/);
+			return fauxAssistantMessage("Okay, first point.");
+		}),
+		step((ctx) => {
+			assert.match(sections(ctx), /tied up and held/);
+			return fauxAssistantMessage("Second point.");
+		}),
+	]);
+	const daemon = await openTestDaemon({ ...tmp, faux, config: focusConfig, focusHoldMs: 3000 });
+	t.after(() => daemon.close());
+	await ask(tmp.paths.socket, "let's work this through");
+	await new Promise((r) => setTimeout(r, 1500));
+	await ask(tmp.paths.socket, "next point");
+	assert.deepEqual(used, ["faux-1", "faux-2", "faux-2"], "the held focus outlasts the turn");
+	await until(async () => (await daemon.root.agent(BG)).model?.modelId === "faux-1", 8000);
+});
+
 test("a restart and /new each let her hair down", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
