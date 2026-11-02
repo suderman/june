@@ -1,6 +1,6 @@
 // Herdr tools: structured reads and user-requested follow-ups through the herdr CLI's JSON API.
 import { execFile } from "node:child_process";
-import { Type } from "@earendil-works/pi-ai";
+import { int, obj, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import type { Config } from "../config.ts";
 
@@ -121,15 +121,15 @@ function json(value: unknown) {
 }
 
 export function createHerdrExtension(config: Config, herdr = new Herdr(config.herdr)): Extension {
-	const host = Type.Optional(
-		Type.String({ description: `Machine to inspect; default ${config.herdr.host}. Known: ${herdr.hosts().join(", ")}` }),
+	const host = opt(
+		str({ description: `Machine to inspect; default ${config.herdr.host}. Known: ${herdr.hosts().join(", ")}` }),
 	);
 	const tools = [
 		defineTool({
 			name: "herdr_list_agents",
 			description:
 				"List the coding agents (Pi, Claude, Codex) running in Herdr panes on a machine, with status (working, blocked, done, idle, unknown), workspace, directory, and session link. blocked means the agent waits for a person; idle or done means its terminal settled, not that its task succeeded, so read its output and the task's Org state before reporting success. Inspect agents here to say what they are doing, but leave launching, watching, and nudging them to the dispatcher.",
-			parameters: Type.Object({ host, status: Type.Optional(Type.String({ description: "Only agents with this status" })) }),
+			parameters: obj({ host, status: opt(str({ description: "Only agents with this status" })) }),
 			replay: "safe",
 			execute: async (args) => {
 				const agents = await herdr.agents(args.host ?? config.herdr.host);
@@ -139,7 +139,7 @@ export function createHerdrExtension(config: Config, herdr = new Herdr(config.he
 		defineTool({
 			name: "herdr_get_agent",
 			description: "Show one Herdr agent pane in full, by pane id (such as w4Z:p1) or agent name.",
-			parameters: Type.Object({ target: Type.String(), host }),
+			parameters: obj({ target: str(), host }),
 			replay: "safe",
 			execute: async (args) =>
 				json((await herdr.json(args.host ?? config.herdr.host, ["agent", "get", checkTarget(args.target)])).result),
@@ -147,10 +147,10 @@ export function createHerdrExtension(config: Config, herdr = new Herdr(config.he
 		defineTool({
 			name: "herdr_read_agent",
 			description: "Read the recent terminal output of a Herdr agent pane, to see what it is doing or asking.",
-			parameters: Type.Object({
-				target: Type.String(),
+			parameters: obj({
+				target: str(),
 				host,
-				lines: Type.Optional(Type.Integer({ minimum: 10, maximum: 400, description: "Default 80" })),
+				lines: opt(int({ minimum: 10, maximum: 400, description: "Default 80" })),
 			}),
 			replay: "safe",
 			execute: async (args) => {
@@ -164,7 +164,7 @@ export function createHerdrExtension(config: Config, herdr = new Herdr(config.he
 			defineTool({
 				name: "herdr_prompt_agent",
 				description: `Send a follow-up prompt to an existing agent on ${config.herdr.host}, only when the user explicitly asks. First inspect the agent and its recent output to confirm the target and that it is ready for normal input. Never answer an approval or question dialog with this tool; blocked agents need the user. Herdr rejects recognized blocked dialogs without typing. Success means submitted, not started or finished; read the agent again before reporting its response. An error or restart may follow delivery, so inspect before any retry. The call is not repeated after a restart.`,
-				parameters: Type.Object({ target: Type.String(), text: Type.String({ minLength: 1, maxLength: 4000 }) }),
+				parameters: obj({ target: str(), text: str({ minLength: 1, maxLength: 4000 }) }),
 				execute: async (args) => json((await herdr.prompt(args.target, args.text)).result ?? { sent: true }),
 			}) as never,
 		);

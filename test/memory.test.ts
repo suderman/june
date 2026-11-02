@@ -12,7 +12,8 @@ import { createMemoryExtension, MemoryReview } from "../src/memory.ts";
 import { createPromptExtension } from "../src/prompt.ts";
 import { entryUnder, insertEntry, latestEntry, putDigest } from "../src/journal.ts";
 import { dayFor, gather, lastClosed, periodLabel } from "../src/reflect.ts";
-import { ask, fakeTelegram, openTestDaemon, tempDir, testConfig, until, type Faux } from "./helpers.ts";
+import { Client } from "../src/protocol.ts";
+import { ask, openTestDaemon, tempDir, testConfig, until, type Faux } from "./helpers.ts";
 
 const lesson = "#+TITLE: Memory\n\n* 2026-10-26 Trust and judgment\nAlex said: judge when to act directly, rather than force delegation by missing tools.\n\nI had mistaken delegation for a universal rule. Use available tools for bounded checks, delegate sustained work, and keep approval rules. Source: conversation 1.\n";
 const response = (memory: string | null = lesson, summary = "Old conversation summarized.") => fauxAssistantMessage(JSON.stringify({ summary, memory }));
@@ -334,7 +335,7 @@ test("background compaction reviews memory while a normal request can finish", a
 	assert.equal(faux.state.callCount, 2);
 });
 
-test("Telegram's manual compact uses the same memory hook without a separate review path", async (t) => {
+test("a client's /compact uses the same memory hook without a separate review path", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const soul = join(tmp.dir, "SOUL.org");
@@ -342,29 +343,27 @@ test("Telegram's manual compact uses the same memory hook without a separate rev
 	await writeFile(soul, "* June\nBe observant.\n");
 	const faux = fauxProvider();
 	faux.setResponses([response(), fauxAssistantMessage("invalid")]);
-	const tg = fakeTelegram();
-	const daemon = await openTestDaemon({ ...tmp, faux, telegramPort: tg.port,
-		config: { soulFile: soul, memoryFile: memory, contextCap: 1000, telegram: { tokenEnv: "TG", allowedUserIds: [42] } },
-		secrets: { TG: `123456:${"a".repeat(35)}` },
-	});
+	const daemon = await openTestDaemon({ ...tmp, faux, config: { soulFile: soul, memoryFile: memory, contextCap: 1000 } });
 	t.after(() => daemon.close());
 	const append = async (content: string) => (await daemon.root.submit({ type: "write", entry: {
 		kind: UserEntry.kind, model: [{ role: "user", content, timestamp: Date.now() }],
 	} }, BG)).wait(BG);
-	const compact = async (id: number) => daemon.telegram!.handleUpdate({ update_id: id, message: {
-		message_id: id, date: Math.floor(Date.now() / 1000),
-		chat: { id: 42, type: "private", first_name: "Alex" }, from: { id: 42, is_bot: false, first_name: "Alex" }, text: "/compact",
-	} });
+	const compact = async (id: number) => {
+		const client = await Client.open(tmp.paths.socket);
+		try {
+			const reply = await client.request({ op: "command", requestId: `compact-${id}`, name: "compact" });
+			return reply.type === "reply" ? reply.text : JSON.stringify(reply);
+		} finally {
+			client.close();
+		}
+	};
 	await append("Old formative interaction. ".repeat(300));
 	await append("Recent working context. ".repeat(300));
-	await compact(1);
-	await until(() => tg.sent.some((m) => m.text === "Compacted."));
+	assert.equal(await compact(1), "Compacted. Memory reviewed and updated.");
 	assert.equal(await readFile(memory, "utf8"), lesson);
 	await append("More recent working context. ".repeat(300));
 	const entries = (await daemon.root.context(BG)).entries;
-	await compact(2);
-	// The library has only a generic decline reply; June gets the actual cause in her next model prompt.
-	await until(() => tg.sent.some((m) => m.text === "Nothing to compact."));
+	assert.match(await compact(2), /^Compaction skipped: .*invalid JSON.*Old context kept\.$/);
 	assert.match((await daemon.harness.snapshot(MemoryReview, daemon.root.id, BG))?.failure?.message ?? "", /invalid JSON/);
 	assert.deepEqual((await daemon.root.context(BG)).entries, entries);
 	assert.equal(await readFile(memory, "utf8"), lesson);

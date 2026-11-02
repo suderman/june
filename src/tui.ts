@@ -1,4 +1,4 @@
-// The terminal client. It attaches to the daemon's primary conversation, renders the shared transcript, and sends
+// The terminal client. It attaches to the daemon's primary conversation, renders the items the daemon folds, and sends
 // input. Closing it never touches running work; it reconnects on its own when the daemon restarts.
 import { randomUUID } from "node:crypto";
 import type { ImageContent } from "@earendil-works/pi-ai";
@@ -20,10 +20,12 @@ import {
 	VStack,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { orgToMarkdown } from "./org.ts";
-import { plain } from "./plain.ts";
 import { Client, COMMANDS, parseCommand, type Reply } from "./protocol.ts";
-import { type Item, Transcript } from "./transcript.ts";
+import { applyChanges, type ViewItem, type ViewState } from "./transcript.ts";
+
+/** A command's reply. Like a Telegram command reply, it is not part of the conversation; a reconnect drops it. */
+type CommandReply = { kind: "reply"; id: string; command: string; text: string };
+type Item = ViewItem | CommandReply;
 
 const esc = (code: string, off: string) => (s: string) => `\x1b[${code}m${s}\x1b[${off}m`;
 const c = {
@@ -126,8 +128,7 @@ class Wrapped implements Component {
 	invalidate() {}
 }
 
-/** `org`: the reply answers a terminal message, so June wrote Org; one bound for Telegram is Markdown already. */
-function component(item: Item, org: boolean): Component[] {
+function component(item: Item): Component[] {
 	switch (item.kind) {
 		case "user": {
 			const tag = item.source === "kitty" ? "" : c.muted(`${item.source} `);
@@ -136,11 +137,9 @@ function component(item: Item, org: boolean): Component[] {
 		}
 		case "assistant": {
 			const parts: Component[] = [new Line()];
-			for (const block of item.blocks) {
-				if (block.type === "text" && block.text) parts.push(new Markdown(org ? orgToMarkdown(plain(block.text)) : plain(block.text), 0, 0, markdownTheme));
-				else if (block.type === "thinking" && block.thinking)
-					parts.push(new Line(c.italic(c.muted(`∴ ${block.thinking.replace(/\s+/g, " ")}`))));
-			}
+			for (const line of item.thinking?.split("\n") ?? []) parts.push(new Line(c.italic(c.muted(`∴ ${line}`))));
+			// The daemon sends Markdown, converted from the Org June writes for the terminal.
+			if (item.text) parts.push(new Markdown(item.text, 0, 0, markdownTheme));
 			if (item.streaming && parts.length === 1) parts.push(new Line(c.muted("…")));
 			if (item.error) parts.push(new Line(c.err(`! ${item.error}`)));
 			return parts;
@@ -148,7 +147,7 @@ function component(item: Item, org: boolean): Component[] {
 		case "tool": {
 			const icon = item.status === "running" ? c.accent("•") : item.status === "done" ? c.ok("✓") : c.err("✗");
 			const rows: Component[] = [new Line(`${icon} ${c.bold(item.name)} ${c.muted(item.summary)}`)];
-			if (item.status === "error" && item.output) rows.push(new Line(c.err(`  ${item.output.split("\n")[0]}`)));
+			if (item.status === "error" && item.error) rows.push(new Line(c.err(`  ${item.error}`)));
 			return rows;
 		}
 		case "note":
@@ -161,15 +160,42 @@ function component(item: Item, org: boolean): Component[] {
 	}
 }
 
+/** What the daemon sent, and the command replies shown after the item that was last when each arrived. */
+class Transcript {
+	items: ViewItem[] = [];
+	state: ViewState = { running: false, background: 0, queued: 0, model: "", compacting: false };
+	earlier = false;
+	/** When the running compaction started, as this client first saw it; undefined when none runs. */
+	compacting: number | undefined;
+	#replies: { after: string | null; reply: CommandReply }[] = [];
+
+	apply(reply: Extract<Reply, { type: "view" }>): void {
+		if ("reset" in reply) {
+			this.items = reply.items;
+			this.earlier = reply.earlier;
+			this.#replies = [];
+		} else this.items = applyChanges(this.items, reply.changes);
+		if (reply.state !== undefined) this.state = reply.state;
+		this.compacting = this.state.compacting ? (this.compacting ?? Date.now()) : undefined;
+	}
+
+	reply(command: string, text: string): void {
+		this.#replies.push({ after: this.items.at(-1)?.id ?? null, reply: { kind: "reply", id: `reply:${this.#replies.length}`, command, text } });
+	}
+
+	/** Items and replies in display order; a reply whose item is gone stays at the end. */
+	shown(): Item[] {
+		const ids = new Set(this.items.map((item) => item.id));
+		const after = (id: string | null) => this.#replies.filter((r) => r.after === id).map((r) => r.reply);
+		return [...after(null), ...this.items.flatMap((item) => [item, ...after(item.id)]), ...this.#replies.filter((r) => r.after !== null && !ids.has(r.after)).map((r) => r.reply)];
+	}
+}
+
 class TranscriptView extends Container {
 	update(transcript: Transcript) {
 		this.clear();
-		if (transcript.omitted) this.addChild(new Line(c.muted(`── ${transcript.omitted} earlier entries not shown`)));
-		let org = true;
-		for (const item of transcript.items) {
-			if (item.kind === "user") org = item.telegram !== true;
-			for (const part of component(item, org)) this.addChild(part);
-		}
+		if (transcript.earlier) this.addChild(new Line(c.muted("── earlier entries not shown")));
+		for (const item of transcript.shown()) for (const part of component(item)) this.addChild(part);
 	}
 }
 
@@ -207,13 +233,13 @@ export async function runTui(socketPath: string): Promise<void> {
 
 	const redraw = () => {
 		const state = connection === "online" ? c.ok("●") : c.err("●");
-		header.text = `${state} 🦘 ${c.bold("June")} ${c.muted(transcript.model)}`;
+		header.text = `${state} 🦘 ${c.bold("June")} ${c.muted(transcript.state.model)}`;
 		const parts = [];
 		if (connection !== "online") parts.push(c.err(connection === "connecting" ? "connecting…" : "daemon unreachable, retrying"));
-		if (transcript.running) parts.push(c.accent("working"));
-		else if (transcript.background.size > 0) parts.push(c.accent("working in the background"));
-		if (transcript.queued) parts.push(c.muted(`${transcript.queued} queued`));
-		if (transcript.notice) parts.push(c.err(transcript.notice));
+		if (transcript.state.running) parts.push(c.accent("working"));
+		else if (transcript.state.background > 0) parts.push(c.accent("working in the background"));
+		if (transcript.state.queued) parts.push(c.muted(`${transcript.state.queued} queued`));
+		if (transcript.state.notice) parts.push(c.err(transcript.state.notice));
 		if (flash) parts.push(c.err(flash));
 		if (inputBusy) parts.push(c.muted("preparing input…"));
 		const since = transcript.compacting ?? compactStarted;
@@ -313,7 +339,7 @@ export async function runTui(socketPath: string): Promise<void> {
 	};
 
 	editor.onSubmit = (text) => {
-		void send(text, transcript.running ? "steer" : "followUp");
+		void send(text, transcript.state.running ? "steer" : "followUp");
 	};
 	tui.addInputListener((data) => {
 		if (inputBusy) return { consume: true };
@@ -334,7 +360,7 @@ export async function runTui(socketPath: string): Promise<void> {
 			return { consume: true };
 		}
 		if (matchesKey(data, "escape") && !editor.isShowingAutocomplete()) {
-			if (transcript.running || transcript.background.size > 0) void run("stop");
+			if (transcript.state.running || transcript.state.background > 0) void run("stop");
 			return { consume: true };
 		}
 		if (matchesKey(data, "shift+enter")) {
@@ -348,8 +374,8 @@ export async function runTui(socketPath: string): Promise<void> {
 	tui.start();
 	redraw();
 
-	// Attach, and on any disconnect try again with a capped backoff. Each attach starts from a fresh snapshot.
-	// The first snapshot seeds the history with what Jon typed before this client opened.
+	// Attach, and on any disconnect try again with a capped backoff. Each attach starts from a reset of the whole view.
+	// The first reset seeds the history with what the user typed before this client opened.
 	let seeded = false;
 	void (async () => {
 		let delay = 250;
@@ -360,13 +386,12 @@ export async function runTui(socketPath: string): Promise<void> {
 				const next = await Client.open(socketPath);
 				client = next;
 				next.on((reply: Reply) => {
-					if (reply.type === "snapshot") {
-						transcript.load(reply.snapshot, reply.omitted);
-						if (!seeded) for (const item of transcript.items) if (item.kind === "user" && item.source === "kitty") editor.addToHistory(item.text);
+					if (reply.type !== "view") return;
+					transcript.apply(reply);
+					if (!seeded && "reset" in reply) {
+						for (const item of transcript.items) if (item.kind === "user" && item.source === "kitty") editor.addToHistory(item.text);
 						seeded = true;
 					}
-					else if (reply.type === "events") transcript.apply(reply.events);
-					else return;
 					redraw();
 				});
 				const attached = await next.request({ op: "attach", requestId: randomUUID() });

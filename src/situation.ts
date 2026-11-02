@@ -5,7 +5,7 @@
 // delays a reply; when it is down or unconfigured, those lines are simply left out.
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
-import type { Logger } from "pi-durable-telegram";
+import type { Logger } from "./runtime.ts";
 import type { Config } from "./config.ts";
 import { parseHeading } from "./tools/org.ts";
 import { User, user } from "./user.ts";

@@ -1,7 +1,7 @@
 // June's system prompt: SOUL.org, harness rules, AGENTS.md, MEMORY.org, and the skills, all read in place.
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
+import { obj, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, type Extension, section } from "@earendil-works/pi-durable";
 import { type Config, type Paths, type PromptFiles, promptFiles } from "./config.ts";
 import { latestEntry, recentDayEnds } from "./journal.ts";
@@ -153,9 +153,9 @@ export function createPromptExtension(
 	const skillRead = defineTool({
 		name: "skill_read",
 		description: "Read one of the user's skills: its SKILL.md, or another file inside that skill's directory.",
-		parameters: Type.Object({
-			name: Type.String({ description: "Skill name from the skills list" }),
-			file: Type.Optional(Type.String({ description: "Path relative to the skill directory; default SKILL.md" })),
+		parameters: obj({
+			name: str({ description: "Skill name from the skills list" }),
+			file: opt(str({ description: "Path relative to the skill directory; default SKILL.md" })),
 		}),
 		replay: "safe",
 		execute: async (args) => {
@@ -174,7 +174,7 @@ export function createPromptExtension(
 	const clock = defineTool({
 		name: "clock",
 		description: "The current local date and time.",
-		parameters: Type.Object({}),
+		parameters: obj({}),
 		replay: "safe",
 		execute: async () => ({
 			output: [

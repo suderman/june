@@ -4,11 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createModels, fauxProvider } from "@earendil-works/pi-ai";
 import type { Extension } from "@earendil-works/pi-durable";
-import { createLogger, type TelegramPort } from "pi-durable-telegram";
 import type { PatterTiming } from "../src/patter.ts";
 import type { Config, Paths } from "../src/config.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Client, type Reply } from "../src/protocol.ts";
+import { createLogger } from "../src/runtime.ts";
+import { applyChanges, type ViewItem, type ViewState } from "../src/transcript.ts";
 
 export type Faux = ReturnType<typeof fauxProvider>;
 
@@ -60,7 +61,6 @@ export async function openTestDaemon(options: {
 	paths: Paths;
 	faux: Faux;
 	config?: Partial<Config>;
-	telegramPort?: TelegramPort;
 	secrets?: Record<string, string>;
 	extensions?: Extension[];
 	/** More providers, such as a separate one for patter so its requests never take June's scripted answers. */
@@ -81,7 +81,6 @@ export async function openTestDaemon(options: {
 		models,
 		log: createLogger({ sink: () => {} }),
 		extensions: options.extensions ?? [],
-		...(options.telegramPort ? { telegramPort: options.telegramPort } : {}),
 		...(options.secrets ? { secrets: options.secrets } : {}),
 		...(options.patterTiming ? { patterTiming: options.patterTiming } : {}),
 		...(options.focusHoldMs !== undefined ? { focusHoldMs: options.focusHoldMs } : {}),
@@ -107,32 +106,32 @@ export async function ask(socket: string, text: string, requestId: string = rand
 	}
 }
 
-/** A Telegram port that records what June sends. */
-export function fakeTelegram() {
-	const sent: { chatId: number; text: string; id: number }[] = [];
-	const edited: { chatId: number; messageId: number; text: string }[] = [];
-	const actions: { chatId: number; action: string }[] = [];
-	let next = 1000;
-	const port: TelegramPort = {
-		sendMessage: async (chatId, text) => {
-			sent.push({ chatId, text, id: next });
-			return next++;
-		},
-		editMessageText: async (chatId, messageId, text) => {
-			edited.push({ chatId, messageId, text });
-		},
-		sendDraft: async () => {},
-		answerCallbackQuery: async () => {},
-		sendChatAction: async (chatId, action) => {
-			actions.push({ chatId, action });
-		},
-		sendPhoto: async () => next++,
-		sendDocument: async () => next++,
-		getFile: async () => ({ path: "x" }),
-		downloadFile: async () => new Response(""),
-		setMyCommands: async () => {},
-	};
-	return { port, sent, edited, actions };
+/** A client attached to the folded view, as the terminal is: it holds the items and state the daemon sends. */
+export async function attachView(socket: string): Promise<{ items(): ViewItem[]; state(): ViewState; earlier(): boolean; replies: Extract<Reply, { type: "view" }>[]; close(): void }> {
+	const client = await Client.open(socket);
+	let items: ViewItem[] = [];
+	let state: ViewState | undefined;
+	let earlier = false;
+	const replies: Extract<Reply, { type: "view" }>[] = [];
+	client.on((reply) => {
+		if (reply.type !== "view") return;
+		replies.push(reply);
+		if ("reset" in reply) {
+			items = reply.items;
+			earlier = reply.earlier;
+		} else items = applyChanges(items, reply.changes);
+		if (reply.state !== undefined) state = reply.state;
+	});
+	const attached = await client.request({ op: "attach", requestId: randomUUID() });
+	if (attached.type !== "view") throw new Error(JSON.stringify(attached));
+	return { items: () => items, state: () => state!, earlier: () => earlier, replies, close: () => client.close() };
+}
+
+/** Items as short lines: "alex: hi", "june: hello", "tool: name", "note: text", "patter: text". */
+export function lines(items: readonly ViewItem[], user = "alex"): string[] {
+	return items.map((i) =>
+		i.kind === "user" ? `${user}: ${i.text}` : i.kind === "assistant" ? `june: ${i.text}${i.error ? ` ! ${i.error}` : ""}` : i.kind === "tool" ? `tool: ${i.name} ${i.status}` : `${i.kind}: ${i.text}`,
+	);
 }
 
 export async function until(check: () => boolean | Promise<boolean>, ms = 5000): Promise<void> {

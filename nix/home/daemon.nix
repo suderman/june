@@ -26,7 +26,7 @@ in {
           ++ lib.optional (cfg.telegram.allowedUsers != []) "TELEGRAM_ALLOWED_USERS=${lib.concatMapStringsSep "," toString cfg.telegram.allowedUsers}";
         Restart = "on-failure";
         RestartSec = 5;
-        # SIGTERM closes Telegram and the harness; unfinished work resumes on the next start.
+        # SIGTERM closes the harness; unfinished work resumes on the next start.
         TimeoutStopSec = 30;
         UMask = "0077";
         NoNewPrivileges = true;

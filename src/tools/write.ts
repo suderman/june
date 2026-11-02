@@ -2,7 +2,7 @@
 // agents do, replacing the file only if nobody changed it meanwhile; Org sets states and dates through org-edit, so
 // CLOSED, repeaters, logbook entries, and weekdays come out as Emacs makes them. Each write is safe to replay.
 import { readFile } from "node:fs/promises";
-import { Type } from "@earendil-works/pi-ai";
+import { lit, obj, opt, str, union } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import type { Config } from "../config.ts";
 import { replaceIfUnchanged } from "../journal.ts";
@@ -154,21 +154,21 @@ const WHEN = "As org-edit takes it: a date (2026-10-30, +3d, fri, today), an opt
 export function createOrgWriteExtension(config: Config, org: Org, run: Run = runProcess): Extension {
 	const writes = new OrgWrites(org, config, run);
 	const json = (value: unknown) => ({ output: [{ type: "text" as const, text: JSON.stringify(value, null, 1) }] });
-	const file = Type.String({ description: "Agenda Org file under ~/org, as org_search returns it" });
-	const heading = Type.String({ description: 'Exact title, outline path such as "Parent / Title", or id:UUID' });
+	const file = str({ description: "Agenda Org file under ~/org, as org_search returns it" });
+	const heading = str({ description: 'Exact title, outline path such as "Parent / Title", or id:UUID' });
 	return defineExtension({
 		name: "org-write",
 		tools: [
 			defineTool({
 				name: "org_add_task",
 				description: `Add a TODO for ${user()} to an agenda file, where their agenda and phone see it, optionally with a SCHEDULED or DEADLINE time; a deadline is how to remind them at a set time. File it where it belongs: under the heading it concerns in a life file, or in the project file, after searching. Writes once: an open TODO with the same title in the same place is reused. Never for agent work, which org_queue_task queues.`,
-				parameters: Type.Object({
+				parameters: obj({
 					file,
-					title: Type.String({ description: "Concise verb-led title, without keyword or tags" }),
-					under: Type.Optional(Type.String({ description: "Heading to file it under, as heading; omit for a first-level heading after the preamble" })),
-					body: Type.Optional(Type.String({ description: "Optional Org text: one physical line per paragraph or list item" })),
-					scheduled: Type.Optional(Type.String({ description: `When to start; ${WHEN}` })),
-					deadline: Type.Optional(Type.String({ description: `When it is due; ${WHEN}` })),
+					title: str({ description: "Concise verb-led title, without keyword or tags" }),
+					under: opt(str({ description: "Heading to file it under, as heading; omit for a first-level heading after the preamble" })),
+					body: opt(str({ description: "Optional Org text: one physical line per paragraph or list item" })),
+					scheduled: opt(str({ description: `When to start; ${WHEN}` })),
+					deadline: opt(str({ description: `When it is due; ${WHEN}` })),
 				}),
 				replay: "safe",
 				execute: async (args) => json(await writes.addTask(args)),
@@ -176,11 +176,11 @@ export function createOrgWriteExtension(config: Config, org: Org, run: Run = run
 			defineTool({
 				name: "org_add_heading",
 				description: `Add a plain heading, with no TODO state, for a record that is not something to do: a meeting, reference material, a topic its notes collect under. In a project file, a task directory's heading links its files with file: links relative to the project file. Writes once: a heading with the same title in the same place is reused. Use org_add_task instead when ${user()} has something to do.`,
-				parameters: Type.Object({
+				parameters: obj({
 					file,
-					title: Type.String({ description: "Concise title, without keyword or tags" }),
-					under: Type.Optional(Type.String({ description: "Heading to file it under, as heading; omit for a first-level heading after the preamble" })),
-					body: Type.Optional(Type.String({ description: "Optional Org text: one physical line per paragraph or list item" })),
+					title: str({ description: "Concise title, without keyword or tags" }),
+					under: opt(str({ description: "Heading to file it under, as heading; omit for a first-level heading after the preamble" })),
+					body: opt(str({ description: "Optional Org text: one physical line per paragraph or list item" })),
 				}),
 				replay: "safe",
 				execute: async (args) => json(await writes.addTask({ ...args, todo: false })),
@@ -188,18 +188,18 @@ export function createOrgWriteExtension(config: Config, org: Org, run: Run = run
 			defineTool({
 				name: "org_add_note",
 				description: "Add a paragraph or list to the end of an Org heading's own text, before its subheadings. Use it for a fact that belongs with a task or topic, such as a changed time or a reply received; not for Dialog entries on agent tasks. Writes once: text already there is not added again.",
-				parameters: Type.Object({ file, heading, text: Type.String({ description: "Org text, one physical line per paragraph or list item; no headings, dates, or drawers" }) }),
+				parameters: obj({ file, heading, text: str({ description: "Org text, one physical line per paragraph or list item; no headings, dates, or drawers" }) }),
 				replay: "safe",
 				execute: async (args) => json(await writes.addNote(args.file, args.heading, args.text)),
 			}),
 			defineTool({
 				name: "org_set_state",
 				description: `Change a heading's TODO state through Org, which writes CLOSED and logging. Only when ${user()} asks, or for a TODO you added for them that is plainly done. Never AUTO; agent tasks close through org_complete_task. Refused if the state is no longer expected.`,
-				parameters: Type.Object({
+				parameters: obj({
 					file,
 					heading,
-					state: Type.Union(SETTABLE.map((s) => Type.Literal(s))),
-					expected: Type.String({ description: "The state you just read, or empty for none" }),
+					state: union(SETTABLE.map((s) => lit(s))),
+					expected: str({ description: "The state you just read, or empty for none" }),
 				}),
 				replay: "safe",
 				execute: async (args) => json(await writes.setState(args.file, args.heading, args.state, args.expected)),
@@ -207,11 +207,11 @@ export function createOrgWriteExtension(config: Config, org: Org, run: Run = run
 			defineTool({
 				name: "org_set_date",
 				description: "Set or remove a heading's SCHEDULED or DEADLINE through Org, which writes the weekday and handles repeaters.",
-				parameters: Type.Object({
+				parameters: obj({
 					file,
 					heading,
-					kind: Type.Union([Type.Literal("scheduled"), Type.Literal("deadline")]),
-					when: Type.String({ description: `${WHEN}; or none to remove it` }),
+					kind: union([lit("scheduled"), lit("deadline")]),
+					when: str({ description: `${WHEN}; or none to remove it` }),
 				}),
 				replay: "safe",
 				execute: async (args) => json(await writes.setDate(args.file, args.heading, args.kind, args.when)),

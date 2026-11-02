@@ -1,15 +1,15 @@
 // June's heartbeat: every so often between the user's wake and quiet hours, she takes a private look at the moment in the
 // main conversation, with her standing instructions from HEARTBEAT.org and what changed since her last look, and
-// either says something to the user or stays quiet. The user never sees the heartbeat itself: the terminal hides it and its
-// quiet answers, and on Telegram only a real message is sent. Like patter and the reflection, it is an in-memory loop
+// either says something to the user or stays quiet. The user never sees the heartbeat itself: the folded view hides it
+// and its quiet answers, showing only a real message. Like patter and the reflection, it is an in-memory loop
 // with a receipt in the state directory, so a restart neither skips a beat for long nor repeats one.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import type { Message } from "@earendil-works/pi-ai";
 import { type Conversation, type Harness, LiveDoc } from "@earendil-works/pi-durable";
-import { type Logger, splitForTelegram, type TelegramPort } from "pi-durable-telegram";
 import type { Config, PromptFiles } from "./config.ts";
+import type { Logger } from "./runtime.ts";
 import { isQuiet, QUIET } from "./transcript.ts";
 import { User, user } from "./user.ts";
 
@@ -28,7 +28,6 @@ export function createHeartbeat(options: {
 	files: () => PromptFiles;
 	state: string;
 	log: Logger;
-	telegram?: { port: TelegramPort; chatId: number };
 	/** Tests run the clock and the loop faster. */
 	now?: () => Date;
 	tickMs?: number;
@@ -80,11 +79,6 @@ export function createHeartbeat(options: {
 				const answer = reply((await root.commit((tx) => tx.entry(settled.answer!), BG))?.model?.[0]);
 				if (isQuiet(answer) || answer.trim() === "") return log.info("heartbeat_quiet", {});
 				log.info("heartbeat_spoke", { chars: answer.length });
-				// The terminal shows her message in the transcript; Telegram needs it sent when that is where the user is.
-				if (options.telegram !== undefined && said !== undefined && !/^\[(kitty|cli)\]/.test(text(said))) {
-					const { port, chatId } = options.telegram;
-					for (const chunk of splitForTelegram(answer)) await port.sendMessage(chatId, chunk.html, { html: true });
-				}
 			} finally {
 				busy = false;
 			}

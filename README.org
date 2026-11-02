@@ -1,11 +1,10 @@
 #+TITLE: June
 
-June is a personal assistant: one persistent daemon on Pi Durable that the user talks to from a terminal and Telegram. She reads Org for tasks and knowledge and Herdr for live agent sessions, does quick checks and small edits herself with a shell and file tools, and hands larger work to coding agents through an Org dispatcher. Design notes are in [[file:docs/architecture.org][docs/architecture.org]].
+June is a personal assistant: one persistent daemon on Pi Durable that the user talks to from a terminal client, on the desktop or over SSH from a phone. She reads Org for tasks and knowledge and Herdr for live agent sessions, does quick checks and small edits herself with a shell and file tools, and hands larger work to coding agents through an Org dispatcher. Design notes are in [[file:docs/architecture.org][docs/architecture.org]].
 
 * Built on
 
 - [[https://github.com/earendil-works/pi/tree/main/packages/durable][Pi Durable]]: the harness June runs in. Her conversation, tasks, tools, and compaction are durable, so a restart resumes work rather than losing or repeating it. [[https://github.com/earendil-works/pi/tree/main/packages/ai][pi-ai]] talks to the models and [[https://github.com/earendil-works/pi/tree/main/packages/tui][pi-tui]] draws the terminal client.
-- [[https://github.com/smixs/pi-durable-telegram][pi-durable-telegram]]: the Telegram channel for Pi Durable.
 - [[https://github.com/earendil-works/pi/tree/main/packages/coding-agent][Pi Coding Agent]] and Claude Code: the agents the dispatcher starts for AUTO tasks, selected by =AGENT=. June reads her providers from Pi's =models.json=.
 - [[https://herdr.dev][Herdr]]: the runtime those agents run in, one pane each. June reads their status through its CLI.
 - [[https://orgmode.org][Org]] in [[https://www.gnu.org/software/emacs/][Emacs]]: where tasks, projects, calendars, and June's own files live. Task states and dates are set by Org itself, through Emacs in batch.
@@ -35,7 +34,7 @@ With Herdr, Ctrl+V can upload a clipboard image from the connecting machine and 
 
 =june transcript= prints the recent conversation as text for a reader outside the terminal, such as a worker looking into something June could not do. It shows the last 200 entries by default, or the last =--last N=, or those since =--since= =30m=, =2h=, =1d=, =16:20=, or a date. The plain view is what the terminal shows, with one line per thinking block and each tool call; =--detail= adds her full thinking, tool arguments and output (clipped at 2,000 characters), and her private heartbeat, watch, work, and follow looks, marked private. =--json= prints the raw entries. It reads through the daemon socket, so the conversation stays on the daemon's host; elsewhere it runs there over SSH, as =june ask= does.
 
-The terminal client, =june ask=, and Telegram share these slash commands:
+The terminal client and =june ask= share these slash commands:
 
 | Command                   | Effect                                                                                 |
 |---------------------------+----------------------------------------------------------------------------------------|
@@ -61,7 +60,7 @@ The repository holds code and templates only. June keeps her files in three XDG 
 
 The socket is =$XDG_RUNTIME_DIR/june/june.sock= (=JUNE_RUNTIME_DIR=, =JUNE_SOCKET=). Keep the state directory out of any sync tool: copying a live SQLite database with its WAL corrupts it. The data directory may be a link to a synced folder.
 
-Machine settings come from the environment: =JUNE_DAEMON_HOST= (the machine that runs June) and =TELEGRAM_ALLOWED_USERS= (comma-separated ids; Telegram is off without it). A =config.json= that sets =daemonHost= or =telegram= is refused.
+Machine settings come from the environment: =JUNE_DAEMON_HOST= (the machine that runs June). A =config.json= that sets =daemonHost= is refused; a =telegram= block is left for the Telegram bridge and ignored by the daemon.
 
 =templates/= holds starting points that name nobody: =SOUL.org= (her role, judgment, and voice, with a character section to write), =MEMORY.org= and =HEARTBEAT.org= (their shape, with placeholders), an example =config.json=, and a starter =AGENTS.md= of the conventions June works by: Org as the authority, task states and AUTO, what needs approval, keeping credentials out of answers, and where tasks go. ={{name}}= stands for the user and ={{org}}= for =org.root= in =config.json=, which =june init= places first. Without an =AGENTS.md=, June is told she has none of the user's conventions and to ask before anything destructive, external, or outside the request. =avatar/= is the base avatar set of labelled placeholders, used in place; =june init= does not copy it. =june init [NAME]= copies whichever are missing into the data and config directories with the name filled in, taking =user.name= from =config.json= when no name is given, and never overwrites a file. June has no identity until =SOUL.org= exists; she creates =MEMORY.org= and =JOURNAL.org= when she first writes to them.
 
@@ -118,7 +117,7 @@ June's prompt ends with a =now= section: the weekday, the rough hour, when the s
 
 ** Heartbeat
 
-Every =heartbeat.everyMinutes= between =wake= and =quiet=, June takes a private look at the moment in the main conversation, with her standing instructions from =HEARTBEAT.org=, what changed in her =now= section since the last look, and whether the user is chatting. She answers =QUIET= or a message. The user never sees the look itself: the terminal hides its input, tools, and quiet answers, and Telegram gets only a real message. A heartbeat waits while June is busy, and a receipt in the state directory keeps a restart from repeating one. June updates =HEARTBEAT.org= when told what to watch for.
+Every =heartbeat.everyMinutes= between =wake= and =quiet=, June takes a private look at the moment in the main conversation, with her standing instructions from =HEARTBEAT.org=, what changed in her =now= section since the last look, and whether the user is chatting. She answers =QUIET= or a message. The user never sees the look itself: the daemon's view hides its input, tools, and quiet answers, showing only a real message. A heartbeat waits while June is busy, and a receipt in the state directory keeps a restart from repeating one. June updates =HEARTBEAT.org= when told what to watch for.
 
 With =mail= on, each look also lists the mail that arrived since the last one, sorted before June sees it. Messages from people come first, marked when the user has written to them before; automated senders (no-reply and alert addresses, mail domains such as =updates.=, auto-replies) follow in one line each; newsletters and list mail (=List-Unsubscribe=, =List-Id=, bulk =Precedence=) are only counted; the user's own messages are left out. She sees senders and subjects only, framed as outside text, and reads a message with notmuch when it may matter.
 
@@ -138,7 +137,7 @@ June has Pi Durable's =bash=, =read=, =edit=, and =write= tools, running on the 
 
 - Chat (=model.chat=) is everyday talk. Focus (=model.focus=) is careful work; the =focus= tool switches to it and back, and a restart or =/new= starts relaxed.
 - =work= hands a self-contained brief to a background child conversation with her tools and identity. The call returns at once, so the user can keep talking; only the final report comes back, as a =[work]= follow-up. A restart resumes the same brief without running it twice.
-- Patter (=model.patter=) keeps the user company during a long wait with short playful lines that never claim results or promise anything. Lines are display-only: no model context, compaction, or memory review contains them. On Telegram one message grows by edits, so the phone buzzes once per wait.
+- Patter (=model.patter=) keeps the user company during a long wait with short playful lines that never claim results or promise anything. Lines are display-only: no model context, compaction, or memory review contains them.
 
 ** Memory and journal
 
@@ -164,14 +163,9 @@ June reads Org with ripgrep and writes only through =org-edit= and the dispatche
 
 She never writes =asana.org=, =inbox.org=, archives, or conflict copies. The dispatcher, =org-edit=, =herdr-link=, their prompts, and the =project-org-tasks= and =org-triage= skills live in =org/= and =skills/=; see [[file:org/README.org][org/README.org]].
 
-* Telegram setup
+* Telegram
 
-1. Create a bot with @BotFather. Two processes polling one token fail with 409 Conflict.
-2. Put =TELEGRAM_BOT_TOKEN=<token>= in the service environment, or an env file for development.
-3. Set =TELEGRAM_ALLOWED_USERS= to the user's numeric id.
-4. Restart June. =june status= shows =telegram polling=.
-
-Only allowed users reach the model, and private chats share the primary conversation. What June says on her own initiative, such as a =[work]= report, a =[follow]= or =[watch]= update, or a heartbeat message, goes where the user last spoke to her. She answers the terminal in Org markup and Telegram in Markdown.
+Telegram is off for now. It ran inside the daemon through pi-durable-telegram, which held Pi Durable back at 1.2.0, and returns as =june telegram=, a separate client of the daemon's socket; see "Telegram bridge" in [[file:docs/architecture.org][docs/architecture.org]]. Until then, what June says on her own initiative, such as a =[work]= report, a =[follow]= or =[watch]= update, or a heartbeat message, appears in the terminal.
 
 * Development
 
@@ -186,7 +180,7 @@ JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june
 JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june
 #+end_src
 
-Tests use pi-ai's faux model and a fake Telegram port, never a real provider. Unix socket paths are limited to 108 bytes, so keep =JUNE_RUNTIME_DIR= short. =nix build= typechecks and produces =result/bin/june=. After changing dependencies, update =npmDepsHash= in =nix/package.nix=.
+Tests use pi-ai's faux model, never a real provider. Unix socket paths are limited to 108 bytes, so keep =JUNE_RUNTIME_DIR= short. =nix build= typechecks and produces =result/bin/june=. After changing dependencies, update =npmDepsHash= in =nix/package.nix=.
 
 * Deployment
 

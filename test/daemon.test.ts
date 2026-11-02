@@ -8,8 +8,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContex
 import { promptFiles } from "../src/config.ts";
 import { Client, parseCommand, type Reply } from "../src/protocol.ts";
 import { createCodingExtension } from "../src/tools/coding.ts";
-import { Transcript } from "../src/transcript.ts";
-import { ask, fakeTelegram, openTestDaemon, routed, tempDir, until } from "./helpers.ts";
+import { ask, attachView, lines, openTestDaemon, routed, tempDir, until } from "./helpers.ts";
 
 const call = (name: string, args: Parameters<typeof fauxToolCall>[1]) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
 
@@ -58,9 +57,13 @@ test("a restart keeps the conversation and finishes a run the last process left"
 	assert.equal(resumed.text, "resumed answer");
 	const kinds = (await daemon.root.context(BG)).entries.map((e) => e.kind);
 	assert.equal(kinds.filter((k) => k === "june.input").length, 2, "both inputs survive, neither duplicated");
+	const view = await attachView(tmp.paths.socket);
+	t.after(() => view.close());
+	assert.deepEqual(lines(view.items()).filter((l) => !l.startsWith("june: word")), ["alex: one", "june: first answer", "alex: two", "june: resumed answer"], "the view after a restart shows the resumed run's answer");
+	assert.equal(view.state().running, false);
 });
 
-test("an attached client sees a snapshot, then other clients' messages as events", async (t) => {
+test("an attached client sees a reset of items, then other clients' messages as changes", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const faux = fauxProvider();
@@ -69,121 +72,41 @@ test("an attached client sees a snapshot, then other clients' messages as events
 	t.after(() => daemon.close());
 	await ask(tmp.paths.socket, "before attach");
 
-	const watcher = await Client.open(tmp.paths.socket);
-	t.after(() => watcher.close());
-	const events: Reply[] = [];
-	watcher.on((r) => events.push(r));
-	const snapshot = await watcher.request({ op: "attach", requestId: randomUUID() });
-	assert.equal(snapshot.type, "snapshot");
-	if (snapshot.type === "snapshot") assert.ok(snapshot.snapshot.entries.some((e) => e.kind === "pi.assistant"));
+	const view = await attachView(tmp.paths.socket);
+	t.after(() => view.close());
+	assert.deepEqual(lines(view.items()), ["alex: before attach", "june: earlier"]);
+	assert.equal(view.replies[0]!.type, "view");
+	assert.ok("reset" in view.replies[0]!);
 
 	await ask(tmp.paths.socket, "after attach");
-	await until(() =>
-		events.some((r) => r.type === "events" && r.events.some((e) => e.type === "message_end")),
-	);
-	const appended = events.flatMap((r) => (r.type === "events" ? r.events : []));
-	assert.ok(appended.some((e) => e.type === "message_end" && e.entry.kind === "june.input"));
+	await until(() => lines(view.items()).includes("june: live"));
+	assert.deepEqual(lines(view.items()), ["alex: before attach", "june: earlier", "alex: after attach", "june: live"]);
+	assert.ok(view.replies.slice(1).every((r) => !("reset" in r)), "later replies are changes, not resets");
+	assert.equal(view.state().running, false);
 });
 
-test("Telegram messages land in the primary conversation and are answered to the chat", async (t) => {
-	const tmp = await tempDir();
-	t.after(tmp.cleanup);
-	const faux = fauxProvider();
-	faux.setResponses([fauxAssistantMessage("from kitty"), fauxAssistantMessage("from telegram — it’s “plain”")]);
-	const tg = fakeTelegram();
-	const daemon = await openTestDaemon({
-		...tmp,
-		faux,
-		telegramPort: tg.port,
-		config: { telegram: { tokenEnv: "TG", allowedUserIds: [42] } },
-		secrets: { TG: `123456:${"a".repeat(35)}` },
-	});
-	t.after(() => daemon.close());
-	assert.equal((await daemon.status()).telegram, "polling");
-
-	await ask(tmp.paths.socket, "hello from the terminal");
-	assert.equal(tg.sent.length, 0, "terminal answers stay in the terminal");
-
-	const update = {
-		update_id: 1,
-		message: {
-			message_id: 7,
-			date: Math.floor(Date.now() / 1000),
-			chat: { id: 42, type: "private" as const, first_name: "Alex" },
-			from: { id: 42, is_bot: false, first_name: "Alex" },
-			text: "hello from my phone",
-		},
-	};
-	await daemon.telegram!.handleUpdate(update);
-	await daemon.telegram!.handleUpdate(update); // redelivered by Telegram
-	await until(() => tg.sent.some((m) => m.text.includes("from telegram")));
-	assert.ok(tg.sent.some((m) => m.text.includes(`from telegram, it's "plain"`)), "Telegram gets straight quotes and no em dash");
-
-	const entries = (await daemon.root.context(BG)).entries;
-	assert.equal(entries.filter((e) => e.kind === "pi.user").length, 1, "one shared conversation, no duplicate");
-	assert.equal(entries.filter((e) => e.kind === "june.input").length, 1);
-	assert.equal(faux.state.callCount, 2);
-
-	// A stranger is refused before reaching the model.
-	await daemon.telegram!.handleUpdate({
-		update_id: 2,
-		message: { ...update.message, message_id: 8, chat: { id: 9, type: "private" as const, first_name: "X" }, from: { id: 9, is_bot: false, first_name: "X" } },
-	});
-	await new Promise((r) => setTimeout(r, 100));
-	assert.equal(faux.state.callCount, 2);
-});
-
-test("a brief asked for from Telegram reports back to the chat; one asked for in the terminal stays there", async (t) => {
+test("a brief's report reaches the terminal as June's words, not the report", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const faux = fauxProvider();
 	faux.setResponses(routed(
 		[
-			call("work", { brief: "Count the phone wombats." }),
-			fauxAssistantMessage("on it"),
-			(ctx) => {
-				assert.match(JSON.stringify(ctx.messages.at(-1)), /\[work\] Report: seven wombats\./);
-				return fauxAssistantMessage("seven wombats, from the phone brief");
-			},
 			call("work", { brief: "Count the desk wombats." }),
 			fauxAssistantMessage("on it at the desk"),
-			fauxAssistantMessage("three wombats, from the desk brief"),
+			(ctx) => {
+				assert.match(JSON.stringify(ctx.messages.at(-1)), /\[work\] Report: three wombats\./);
+				return fauxAssistantMessage("three wombats, from the desk brief");
+			},
 		],
-		[fauxAssistantMessage("Report: seven wombats."), fauxAssistantMessage("Report: three wombats.")],
+		[fauxAssistantMessage("Report: three wombats.")],
 	));
-	const tg = fakeTelegram();
-	const daemon = await openTestDaemon({
-		...tmp,
-		faux,
-		telegramPort: tg.port,
-		extensions: [createCodingExtension()],
-		config: { telegram: { tokenEnv: "TG", allowedUserIds: [42] } },
-		secrets: { TG: `123456:${"a".repeat(35)}` },
-	});
+	const daemon = await openTestDaemon({ ...tmp, faux, extensions: [createCodingExtension()] });
 	t.after(() => daemon.close());
-	await daemon.telegram!.handleUpdate({
-		update_id: 1,
-		message: {
-			message_id: 7,
-			date: Math.floor(Date.now() / 1000),
-			chat: { id: 42, type: "private" as const, first_name: "Alex" },
-			from: { id: 42, is_bot: false, first_name: "Alex" },
-			text: "count the wombats",
-		},
-	});
-	await until(() => tg.sent.some((m) => m.text.includes("seven wombats, from the phone brief")), 10_000);
-	assert.ok(tg.sent.some((m) => m.text.includes("on it")), "the hand-off reached the chat too");
-	const transcript = new Transcript();
-	const client = await Client.open(tmp.paths.socket);
-	t.after(() => client.close());
-	transcript.load(((await client.request({ op: "attach", requestId: "a" })) as Extract<Reply, { type: "snapshot" }>).snapshot);
-	assert.ok(!transcript.items.some((i) => i.kind === "user" && i.source === "work"), "the terminal shows June's words about the report, not the report");
-
-	const before = tg.sent.length;
-	assert.equal((await ask(tmp.paths.socket, "now count the desk ones")).text, "on it at the desk");
-	await until(async () => JSON.stringify((await daemon.root.context(BG)).messages).includes("three wombats, from the desk brief"), 10_000);
-	await new Promise((r) => setTimeout(r, 100));
-	assert.equal(tg.sent.length, before, "a terminal brief's report stays in the terminal");
+	assert.equal((await ask(tmp.paths.socket, "count the desk ones")).text, "on it at the desk");
+	const view = await attachView(tmp.paths.socket);
+	t.after(() => view.close());
+	await until(() => lines(view.items()).includes("june: three wombats, from the desk brief"), 10_000);
+	assert.ok(!view.items().some((i) => i.kind === "user" && i.source === "work"), "the view shows June's words about the report, not the report");
 });
 
 test("a second daemon refuses to open the same state", async (t) => {

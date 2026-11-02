@@ -2,7 +2,7 @@
 // Herdr on a timer, without a model call, and tells June only when something changed that the user would want to hear,
 // or when a progress update the user asked for is due.
 import { defineDoc, defineTask, type Tx } from "@earendil-works/pi-durable";
-import { deliverIn, type Notice, noticeSurface, submitNotice, type Surface } from "../notify.ts";
+import { type Notice, submitNotice } from "../notify.ts";
 import type { Herdr } from "./herdr.ts";
 import type { Org } from "./org.ts";
 import { User, user } from "../user.ts";
@@ -31,6 +31,7 @@ type FollowState = { phase: "watch"; due: number; checks: number; last: string; 
 export const Follows = defineDoc<{ ids: Record<string, number> }>({
 	kind: "june.follows",
 	version: 1,
+	checkpointWhen: () => false,
 	scope: "session",
 	initial: () => ({ ids: {} }),
 });
@@ -144,13 +145,11 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 			watch: async (task, runtime, context) => {
 				const { due, checks, last } = task.state.checkpoint;
 				// The due time is in the checkpoint, so a restart keeps the schedule instead of starting it over.
-				if (runtime.now() < due) await runtime.sleep(due, context);
+				if (runtime.now() < due) return runtime.sleepUntil(due, task.state.checkpoint, context);
 				let superseded = false;
-				let surface: Surface = "terminal";
 				await runtime.commit(async (tx) => {
 					const doc = await tx.doc(Follows);
 					superseded = doc.ids[task.input.id] !== Number(task.id);
-					if (!superseded) surface = await noticeSurface(tx, runtime.registry, runtime.conversationId);
 					return superseded ? { status: "terminal", outcome: { status: "completed", result: null } } : undefined;
 				}, context);
 				if (superseded) return;
@@ -179,11 +178,9 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 				// Wake for the next update on time rather than up to a check late.
 				const nextUpdate = (update ? now : reported) + (task.input.everyMs ?? Number.POSITIVE_INFINITY);
 				const nextDue = nextUpdate > now ? Math.min(now + options.intervalMs, nextUpdate) : now + options.intervalMs;
-				// To Telegram, the delivery is created with the checkpoint that records it; to the terminal, a rerun after a
-				// crash submits the same request id, which finds the first submission.
-				if (notice !== undefined && surface === "terminal") await submitNotice(await runtime.conversation(runtime.conversationId, context), notice, context);
-				await runtime.commit(async (tx) => {
-					if (notice !== undefined && surface === "telegram") await deliverIn(tx, runtime.registry, runtime.conversationId, notice);
+				// A rerun after a crash submits the same request id, which finds the first submission.
+				if (notice !== undefined) await submitNotice(await runtime.conversation(runtime.conversationId, context), notice, context);
+				await runtime.commit(() => {
 					return next?.done
 						? { status: "terminal", outcome: { status: "completed", result: null } }
 						: { status: "running", checkpoint: { phase: "watch", due: nextDue, checks: checks + 1, last: next?.signal ?? last, reported: update ? now : reported, missing, ...(waited !== undefined ? { waited } : {}) } };

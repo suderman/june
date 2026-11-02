@@ -29,8 +29,8 @@ const entries = [
 ];
 
 test("the plain view shows what the terminal shows, and detail adds thinking, tool output, and private looks", () => {
-	const plain = renderHistory(entries, { user: "Robin", omitted: 4 });
-	assert.match(plain, /^\(4 earlier entries not shown\)\n== 2026-10-30\n/);
+	const plain = renderHistory(entries, { user: "Robin", earlier: true });
+	assert.match(plain, /^\(earlier entries not shown\)\n== 2026-10-30\n/);
 	assert.match(plain, /\d\d:\d\d Robin \(kitty\): can you check the worker\?/);
 	assert.match(plain, /June thinking: Finding the worker then reading it\n/, "thinking is one line");
 	assert.match(plain, / {2}-> herdr_read_agent: target=w5A:p1/);
@@ -61,7 +61,7 @@ test("--since reads ages, clock times, and dates", () => {
 	assert.equal(parseSince("soon", now), undefined);
 });
 
-test("the daemon serves history without a stream: the newest entries, or those since a time", async (t) => {
+test("the daemon serves history without a view: the newest entries, or those since a time", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const faux = fauxProvider();
@@ -83,12 +83,16 @@ test("the daemon serves history without a stream: the newest entries, or those s
 		return reply as Extract<typeof reply, { type: "history" }>;
 	};
 	const all = await history({});
+	assert.equal(all.earlier, false, "everything fits");
 	const text = renderHistory(all.entries);
 	assert.match(text, /user \(cli\): first message\n.*June thinking: Looking it up\n.*-> no_such_tool: query=x\n.*<- no_such_tool failed: .+\n.*June: Could not look it up\.\n.*user \(cli\): second message\n.*June: Second answer\.$/s);
 	const last = await history({ limit: 2 });
 	assert.equal(last.entries.length, 2);
-	assert.equal(last.omitted, all.entries.length + all.omitted - 2);
+	assert.equal(last.earlier, true);
+	assert.deepEqual(last.entries, all.entries.slice(-2));
 	assert.match(renderHistory(last.entries), /second message[\s\S]*Second answer/);
 	const future = await history({ since: Date.now() + 60_000 });
-	assert.deepEqual([future.entries.length, future.omitted], [0, all.entries.length + all.omitted]);
+	assert.deepEqual([future.entries.length, future.earlier], [0, true]);
+	const recent = await history({ since: Number((all.entries.find((e) => e.kind === "june.input" && JSON.stringify(e.data).includes("second")) as { model?: { timestamp: number }[] }).model?.[0]?.timestamp ?? 0) });
+	assert.match(renderHistory(recent.entries), /^== .*\n.*user \(cli\): second message\n.*June: Second answer\.$/s, "since a time starts at the first entry at or after it");
 });

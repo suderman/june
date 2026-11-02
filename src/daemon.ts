@@ -1,36 +1,28 @@
-// The June daemon: the one process that owns the Durable database. It runs the harness, the Telegram channel, and a
-// Unix socket that terminal clients attach to.
+// The June daemon: the one process that owns the Durable database. It runs the harness and a Unix socket that clients
+// attach to, folding the conversation into display items for each of them.
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname } from "node:path";
+import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT as BG, withAbortSignal } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import {
-	type AgentEvent,
 	type Conversation,
+	ConversationTranscript,
 	configure,
 	createRegistry,
+	type Cursor,
+	type EntryRecord,
 	type Extension,
 	Harness,
 	LiveDoc,
-	type SnapshotEvent,
-	watchEvents,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import {
-	acquireDataDirLock,
-	createGrammyPort,
-	createLogger,
-	createSettings,
-	createTelegramChannel,
-	type Logger,
-	type TelegramChannel,
-	type TelegramPort,
-} from "pi-durable-telegram";
 import { type CommandScope, runCommand } from "./commands.ts";
 import { type Config, expandHome, type Paths } from "./config.ts";
-import { plainPort } from "./plain.ts";
+import { acquireDataDirLock, createLogger, createSettings, type Logger } from "./runtime.ts";
+import { diff, type Folded, foldView } from "./transcript.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { createHeartbeat } from "./heartbeat.ts";
 import { entryTimes } from "./history.ts";
@@ -38,7 +30,6 @@ import { createSituation } from "./situation.ts";
 import { setUser } from "./user.ts";
 import { validateImages } from "./images.ts";
 import { createMemoryExtension } from "./memory.ts";
-import { ChatInfo, ChatMap } from "./notify.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
 import { createReflection } from "./reflect.ts";
 import { createWatch } from "./watch.ts";
@@ -52,6 +43,10 @@ import { createOrgWriteExtension } from "./tools/write.ts";
 import { createMail } from "./mail.ts";
 
 export const VERSION = "0.1.0";
+/** The entries a view holds: a client starts with the newest 200, and the window drops back to 200 past 400. */
+const WINDOW = { min: 200, max: 400 };
+/** Changes go to a client at most this often, so a streaming reply resends its text ten times a second at most. */
+const FLUSH_MS = 100;
 const SNAPSHOT_ENTRIES = 200;
 /** The most entries one history request returns. */
 const HISTORY_ENTRIES = 2000;
@@ -62,8 +57,6 @@ export type DaemonOptions = {
 	readonly models: Models;
 	readonly secrets?: Readonly<Record<string, string>>;
 	readonly log?: Logger;
-	/** Tests replace the Telegram transport; polling is then off. */
-	readonly telegramPort?: TelegramPort;
 	/** Tests replace the infrastructure tools. */
 	readonly extensions?: readonly Extension[];
 	/** Tests shorten how long a held focus outlasts the user's last message. */
@@ -83,7 +76,6 @@ export type DaemonOptions = {
 export type Daemon = {
 	readonly harness: Harness;
 	readonly root: Conversation;
-	readonly telegram: TelegramChannel | undefined;
 	status(): Promise<Status>;
 	close(): Promise<void>;
 };
@@ -113,12 +105,6 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const situation = createSituation({ config: config.situation, env: { ...process.env, ...options.secrets }, log });
 		const prompt = createPromptExtension(config, paths, situation);
 		const memory = createMemoryExtension(prompt.files, () => harness);
-		const telegram = createTelegram(options, model, log);
-		// Patter reaches the phone too, through its own Bot API client: the channel keeps its client to itself.
-		const patterTelegram = telegram && {
-			port: options.telegramPort ?? createGrammyPort({ token: telegramToken(options)!, apiRoot: "https://api.telegram.org" }),
-			chatId: config.telegram!.allowedUserIds[0]!,
-		};
 		const patter = config.model.patter
 			? createPatter({
 					models: options.models,
@@ -127,14 +113,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 					files: prompt.files,
 					log,
 					timing: { openAfterMs: config.patter.openAfterSeconds * 1000, gapsMs: config.patter.gapsSeconds.map((s) => s * 1000), ...options.patterTiming },
-					...(patterTelegram ? { telegram: patterTelegram } : {}),
 				})
 			: undefined;
 		// June's working context does the work only: no memory review, task queueing, patter, or messages to the user.
-		const childless = [memory, ...extensions.filter((e) => e.name === "dispatch"), ...(telegram ? [telegram.extension] : []), ...(patter ? [patter.extension] : [])];
+		const childless = [memory, ...extensions.filter((e) => e.name === "dispatch"), ...(patter ? [patter.extension] : [])];
 		const work = createWorkExtension(config, () => childless);
 		for (const extension of [prompt.extension, memory, work, ...(patter ? [patter.extension] : []), ...extensions]) registry.install(extension);
-		if (telegram !== undefined) registry.install(telegram.extension);
 
 		const workdir = `${paths.state}/files`;
 		mkdirSync(workdir, { recursive: true, mode: 0o700 });
@@ -145,13 +129,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				registry,
 				settings: createSettings({ contextCap: config.contextCap, contextWindow: resolved.contextWindow }),
 				env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? workdir }),
-				onReport: (error) => log.warn("durable_report", { error: String((error as Error)?.message ?? error) }),
+				onReport: (report) => log.warn("durable_report", { kind: report.kind, error: String((report.error as Error)?.message ?? report.error) }),
 			},
 			BG,
 		);
 
-		// Commands and relative paths start in the home directory; Telegram downloads stay in the workdir. A restart also
-		// lets June's hair down: she always starts in default mode.
+		// Commands and relative paths start in the home directory; files June keeps for herself stay in the workdir. A
+		// restart also lets June's hair down: she always starts in default mode.
 		const agent = { model, thinkingLevel: config.model.chat.thinkingLevel as never, cwd: expandHome("~") };
 		const root = await harness.root(BG, { agent });
 		const current = await root.agent(BG);
@@ -163,24 +147,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		)
 			await root.configure(agent, BG);
 
-		let telegramState: Status["telegram"] = "off";
-		if (telegram !== undefined) {
-			await harness.commit(async (tx) => {
-				const map = await tx.doc(ChatMap);
-				// Private chats have the user's id as chat id.
-				for (const id of config.telegram!.allowedUserIds) map.chats[String(id)] = root.id as unknown as number;
-				(await tx.doc(ChatInfo, root.id)).chatId = config.telegram!.allowedUserIds[0]!;
-			}, BG);
-			// start() runs harness.resume() once the channel listens, then long-polls.
-			await telegram
-				.start(harness, BG, { polling: options.telegramPort === undefined })
-				.then(() => (telegramState = "polling"))
-				.catch((error: Error) => {
-					telegramState = "failed";
-					log.error("telegram_failed", { error: error.message });
-					harness.resume();
-				});
-		} else harness.resume();
+		harness.resume();
 		const stopPatter = patter?.start(harness, root);
 		// Focus lasts for the turn June tied her hair up in: once the main thread goes quiet, she lets it down again. A held
 		// focus lasts across turns until the user has been quiet for focusHoldMs; a hold left from before a restart or /new,
@@ -221,7 +188,6 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 					files: prompt.files,
 					state: paths.state,
 					log,
-					...(patterTelegram ? { telegram: patterTelegram } : {}),
 					...options.heartbeatClock,
 				}).start(harness, root)
 			: undefined;
@@ -262,7 +228,6 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				background: Object.keys((await harness.snapshot(WorkDoc, BG))?.active ?? {}).length,
 				queued: mine.filter((s) => s.status === "queued").length,
 				entries: view.entries.length,
-				telegram: telegramState,
 				tools: resolvedAgent.tools.map((tool) => tool.name),
 				source: dirname(import.meta.dirname),
 			};
@@ -275,7 +240,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
 			serve(socket, { harness, root, models: options.models, status, reload: prompt.reload, relax, log });
 		});
-		log.info("june_started", { pid: process.pid, socket: paths.socket, conversation: root.id, telegram: telegramState });
+		log.info("june_started", { pid: process.pid, socket: paths.socket, conversation: root.id });
 
 		let closing: Promise<void> | undefined;
 		const close = () =>
@@ -291,45 +256,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				stopSituation();
 				stopHeartbeat?.();
 				stopWatch?.();
-				await telegram?.stop();
 				await harness.close(BG);
 				rmSync(paths.socket, { force: true });
 				lock.release();
 			})());
-		return { harness, root, telegram, status, close };
+		return { harness, root, status, close };
 	} catch (error) {
 		lock.release();
 		throw error;
 	}
-}
-
-function telegramToken(options: DaemonOptions): string | undefined {
-	const tg = options.config.telegram;
-	return tg && (options.secrets?.[tg.tokenEnv] ?? process.env[tg.tokenEnv]);
-}
-
-function createTelegram(options: DaemonOptions, model: { provider: string; modelId: string }, log: Logger) {
-	const tg = options.config.telegram;
-	if (tg === undefined) return undefined;
-	const token = telegramToken(options);
-	if (!token) {
-		log.warn("telegram_disabled", { reason: `${tg.tokenEnv} is not set` });
-		return undefined;
-	}
-	return createTelegramChannel({
-		botToken: token,
-		allowedUserIds: tg.allowedUserIds,
-		workdir: `${options.paths.state}/files`,
-		model,
-		thinkingLevel: options.config.model.chat.thinkingLevel as never,
-		models: options.models,
-		// Native drafts while she works, and the answer as a new message at the end, so patter's lines stay above it.
-		rich: true,
-		log,
-		port: plainPort(options.telegramPort ?? createGrammyPort({ token, apiRoot: "https://api.telegram.org" })),
-		...(options.telegramPort ? { previewIntervalMs: 20 } : {}),
-		onFatal: (reason) => log.error("telegram_fatal", { reason }),
-	});
 }
 
 /** Listen on `path`; a leftover socket file from a dead daemon is replaced (the data-dir lock proved it dead). */
@@ -350,11 +285,11 @@ type Scope = CommandScope & { log: Logger };
 function serve(socket: Socket, scope: Scope): void {
 	const abort = new AbortController();
 	const context = withAbortSignal(abort.signal, BG);
-	let stopWatch: (() => Promise<unknown>) | undefined;
+	let stopView: (() => Promise<unknown>) | undefined;
 	socket.on("error", () => {});
 	socket.on("close", () => {
 		abort.abort();
-		void stopWatch?.();
+		void stopView?.();
 	});
 	const send = (reply: Reply) => writeLine(socket, reply);
 
@@ -374,25 +309,15 @@ function serve(socket: Socket, scope: Scope): void {
 			case "status":
 				return send({ type: "status", requestId: request.requestId, status: await scope.status() });
 			case "attach": {
-				const stream = await watchEvents(scope.harness, scope.root.id, context);
-				stopWatch = () => stream.stop();
-				const { snapshot, omitted } = trim(stream.snapshot);
-				send({ type: "snapshot", requestId: request.requestId, snapshot, omitted });
-				stream.start(async (events) => {
-					send({ type: "events", events: events.map((e) => (e.type === "snapshot" ? trim(e).snapshot : e)) as AgentEvent[] });
-				});
+				// A second attach on one connection starts the view over.
+				await stopView?.();
+				stopView = await attachView(scope.root, context, send, request.requestId);
 				return;
 			}
 			case "history": {
-				// The entries attach would show, without a stream: since a time, newest last.
-				const stream = await watchEvents(scope.harness, scope.root.id, context);
-				await stream.stop();
-				const all = stream.snapshot.entries;
-				const times = entryTimes(all);
-				const from = request.since === undefined ? 0 : times.findIndex((time) => time >= request.since!);
 				const limit = Math.min(Math.max(1, request.limit ?? (request.since === undefined ? SNAPSHOT_ENTRIES : HISTORY_ENTRIES)), HISTORY_ENTRIES);
-				const entries = (from < 0 ? [] : all.slice(from)).slice(-limit);
-				return send({ type: "history", requestId: request.requestId, entries, omitted: all.length - entries.length });
+				const { entries, earlier } = await history(scope.root, request.since, limit, context);
+				return send({ type: "history", requestId: request.requestId, entries, earlier });
 			}
 			case "submit": {
 				const images = request.images ?? [];
@@ -448,7 +373,77 @@ export function assistantText(message: unknown): string {
 		.join("");
 }
 
-function trim(snapshot: SnapshotEvent): { snapshot: SnapshotEvent; omitted: number } {
-	const omitted = Math.max(0, snapshot.entries.length - SNAPSHOT_ENTRIES);
-	return { snapshot: omitted ? { ...snapshot, entries: snapshot.entries.slice(omitted) } : snapshot, omitted };
+/**
+ * Attach a connection to the folded view: a watch of the root conversation, a `ConversationTranscript` that keeps entries
+ * the window drops, and the items last sent, so each flush sends only what changed. A root replacement (the watch fell
+ * 10,000 operations behind) starts the transcript over and sends a reset. Returns what stops it.
+ */
+export async function attachView(root: Pick<Conversation, "watch" | "entries">, context: Context, send: (reply: Reply) => void, requestId: string): Promise<() => Promise<unknown>> {
+	const load = (query: Parameters<Conversation["entries"]>[0], limit: number, ctx: Context) => root.entries(query, limit, undefined, ctx);
+	let transcript = new ConversationTranscript(load);
+	const watch = await root.watch(context, WINDOW);
+	let latest = transcript.merge(watch.value);
+	let shown: Folded | undefined;
+	let state = "";
+	const sent = new Map<string, string>();
+	const reset = (id?: string) => {
+		shown = foldView(latest);
+		sent.clear();
+		for (const item of shown.items) sent.set(item.id, JSON.stringify(item));
+		state = JSON.stringify(shown.state);
+		send({ type: "view", ...(id ? { requestId: id } : {}), reset: true, items: shown.items, state: shown.state, earlier: shown.earlier });
+	};
+	reset(requestId);
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	let flushed = 0;
+	let replaced = false;
+	const flush = () => {
+		timer = undefined;
+		flushed = Date.now();
+		if (replaced) {
+			replaced = false;
+			return reset();
+		}
+		const next = foldView(latest);
+		const changes = diff(shown!.items, next.items, sent);
+		const nextState = JSON.stringify(next.state);
+		if (changes.length > 0 || nextState !== state) send({ type: "view", changes, ...(nextState !== state ? { state: next.state } : {}) });
+		shown = next;
+		state = nextState;
+	};
+	watch.start(async (call) => {
+		if (call.kind !== "value") return;
+		if (call.ops[0]?.[0] === "r") {
+			transcript = new ConversationTranscript(load);
+			replaced = true;
+		}
+		latest = transcript.merge(call.value);
+		timer ??= setTimeout(flush, Math.max(0, flushed + FLUSH_MS - Date.now()));
+	});
+	return async () => {
+		clearTimeout(timer);
+		await watch.stop();
+	};
+}
+
+/**
+ * The newest `limit` entries since `since` (epoch ms), oldest first, paged back from the newest with `Conversation.entries()`
+ * until enough are found. An entry without its own time, such as patter, takes the time of the entry before it.
+ */
+async function history(root: Conversation, since: number | undefined, limit: number, context: Context): Promise<{ entries: EntryRecord[]; earlier: boolean }> {
+	const newest: EntryRecord[] = [];
+	let cursor: Cursor | undefined;
+	do {
+		const page = await root.entries({ order: "descending" }, 200, cursor, context);
+		newest.push(...page.items);
+		cursor = page.next;
+		const oldest = (newest.at(-1)?.model?.[0] as { timestamp?: unknown } | undefined)?.timestamp;
+		// Enough once the oldest held has its own time and is before `since`, or more than `limit` are held.
+		if (typeof oldest === "number" && (newest.length > limit || (since !== undefined && oldest < since))) break;
+	} while (cursor !== undefined);
+	const all = newest.reverse();
+	const times = entryTimes(all);
+	const from = since === undefined ? 0 : times.findIndex((time) => time >= since);
+	const entries = (from < 0 ? [] : all.slice(from)).slice(-limit);
+	return { entries, earlier: entries.length < all.length || cursor !== undefined };
 }

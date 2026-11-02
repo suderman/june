@@ -7,11 +7,11 @@ import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { DEFAULT_IMAGE_LIMITS } from "@earendil-works/pi-durable/tools";
 import { clipboardInput, imageInput, validateImages } from "../src/images.ts";
 import { Client, type Reply } from "../src/protocol.ts";
-import { ask, openTestDaemon, tempDir } from "./helpers.ts";
+import { ask, attachView, openTestDaemon, tempDir } from "./helpers.ts";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { orgToMarkdown } from "../src/org.ts";
 import { plain } from "../src/plain.ts";
-import { Transcript } from "../src/transcript.ts";
+import { fold } from "../src/transcript.ts";
 import { compactingStatus } from "../src/tui.ts";
 
 // A valid 2x2 PNG, with red, green, blue and white pixels.
@@ -91,14 +91,9 @@ test("terminal images reach the model, persist through restart, and reconnect wi
 	daemon = await openTestDaemon({ ...tmp, faux: resumed });
 	assert.equal((await ask(tmp.paths.socket, "remember?", "text", "kitty")).text, "still four pixels");
 	const snapshot = await daemon.root.context(BG);
-	const transcript = new Transcript();
-	const watcher = await Client.open(tmp.paths.socket);
-	try {
-		const attached = await watcher.request({ op: "attach", requestId: "reconnect" });
-		assert.equal(attached.type, "snapshot");
-		if (attached.type === "snapshot") transcript.load(attached.snapshot);
-	} finally { watcher.close(); }
-	const user = transcript.items.find((i) => i.kind === "user" && i.imageCount);
+	const view = await attachView(tmp.paths.socket);
+	view.close();
+	const user = view.items().find((i) => i.kind === "user" && i.imageCount);
 	assert.deepEqual(user, { kind: "user", id: String(snapshot.entries.find((e) => e.kind === "june.input")!.id), source: "kitty", text: "what is this?", imageCount: 1 });
 	assert.equal(JSON.stringify(snapshot.entries.find((e) => e.kind === "june.input")?.data).includes(PNG), false, "metadata does not duplicate base64");
 });
@@ -139,19 +134,11 @@ test("the compaction line hops, changes chores, counts time, and keeps its width
 	assert.match(compactingStatus(65_000), /nearly there|don't rush me|big swag/, "past a minute she gets defensive");
 });
 
-test("the transcript knows while a compaction runs, from events or a reconnect snapshot", () => {
-	const transcript = new Transcript();
-	assert.equal(transcript.compacting, undefined);
-	transcript.apply([{ type: "compaction_start", taskId: 1, reason: "manual", blocking: false } as never]);
-	const since = transcript.compacting;
-	assert.ok(since !== undefined && since <= Date.now());
-	transcript.apply([{ type: "compaction_start", taskId: 2, reason: "threshold", blocking: true } as never]);
-	assert.equal(transcript.compacting, since, "a second start keeps the first time");
-	transcript.apply([{ type: "compaction_end", taskId: 1, reason: "manual" } as never]);
-	assert.equal(transcript.compacting, undefined);
-	const snapshot = { entries: [], inbox: [], tools: [], compactions: [{ taskId: 3 }], agent: {} } as never;
-	transcript.load(snapshot);
-	assert.ok(transcript.compacting !== undefined, "a client that attaches mid-compaction shows it too");
+test("the view says while a compaction runs, so a client that attaches mid-compaction shows it too", () => {
+	assert.equal(fold([], {}).state.compacting, false);
+	const live = { compactions: [{ taskId: 3, trigger: "manual", blocking: false, attempt: 1 }] };
+	assert.equal(fold([], { "pi.live": live }).state.compacting, true);
+	assert.equal(fold([], { "pi.live": { compactionFailure: { taskId: 3, trigger: "manual", error: "boom" } } }).state.notice, "compaction failed: boom");
 });
 
 test("June's Org replies render as Markdown in the terminal, leaving paths and Markdown alone", () => {
@@ -188,9 +175,7 @@ test("a watch, work, follow, or heartbeat notice shows only June's words, whethe
 		user(14, "[work] Home Assistant runs on hub."),
 		said(15, "yes, it runs on hub."),
 	];
-	const transcript = new Transcript();
-	transcript.load({ entries, inbox: [], tools: [], compactions: [], agent: {} } as never);
-	const shown = transcript.items.map((i) => (i.kind === "user" ? `${i.source} › ${i.text}` : i.kind === "assistant" ? `june: ${i.blocks.map((b) => b.text ?? "").join("")}` : i.kind));
+	const shown = fold(entries, {}).items.map((i) => (i.kind === "user" ? `${i.source} › ${i.text}` : i.kind === "assistant" ? `june: ${i.text}` : i.kind));
 	assert.deepEqual(shown, ["telegram › hi", "june: hello", "june: Snape's uptime report is at EVAL.", "june: The pirate report is done.", "june: Ship is ready.", "june: yes, it runs on hub."]);
 });
 

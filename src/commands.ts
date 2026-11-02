@@ -1,5 +1,4 @@
-// Terminal slash commands. Shared commands match pi-durable-telegram; /reload is terminal-only.
-// That package exports neither its command handlers nor a custom-command hook.
+// Slash commands, answered by the daemon for any client. /reload is terminal-only.
 import type { Context } from "@earendil-works/chord";
 import type { Message, Models, Usage } from "@earendil-works/pi-ai";
 import { estimateContextTokens } from "@earendil-works/pi-ai/utils/estimate";
@@ -121,7 +120,6 @@ async function runStatus({ harness, root, models, status }: CommandScope, contex
 		`State: ${s.busy ? `working${tool ? ` (${tool})` : ""}` : "idle"}, queued: ${s.queued}`,
 		`Context: ${formatTokens(tokens)}${window ? ` / ${formatTokens(window)}` : ""}${percent}`,
 		`Spend: ${usage(await harness.snapshot(UsageDoc, root.id, context))}`,
-		`Telegram: ${s.telegram}`,
 		`Code: ${s.source}`,
 	].join("\n");
 }

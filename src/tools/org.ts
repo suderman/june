@@ -2,7 +2,7 @@
 // Org structure themselves: changes go through org-edit and org-dispatch, which run Org in Emacs.
 import { readdir, readFile, realpath } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
+import { arr, int, lit, obj, opt, str, union } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import type { Config } from "../config.ts";
 import { type Run, runProcess } from "./herdr.ts";
@@ -295,8 +295,8 @@ function json(value: unknown) {
 }
 
 export function createOrgExtension(config: Config, org = new Org(config.org.root), run: Run = runProcess): Extension {
-	const scope = Type.Optional(
-		Type.String({ description: 'Directory or file under ~/org, such as "work", "life", or "work/acme/site"; default "all"' }),
+	const scope = opt(
+		str({ description: 'Directory or file under ~/org, such as "work", "life", or "work/acme/site"; default "all"' }),
 	);
 	return defineExtension({
 		name: "org",
@@ -304,9 +304,9 @@ export function createOrgExtension(config: Config, org = new Org(config.org.root
 			defineTool({
 				name: "org_projects",
 				description: "Find existing projects under ~/org/work before choosing where to file a task. Returns project paths and preambles, including local and GitHub repository links, best match first. Each word of query is matched against project names, repository links, and task headings, archived ones included, so a topic finds the project that worked on it before; matching headings are listed. Omit query to list projects. Does not scan task bodies or material.",
-				parameters: Type.Object({
-					query: Type.Optional(Type.String()),
-					limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 300, description: "Default 100; total reports whether more match" })),
+				parameters: obj({
+					query: opt(str()),
+					limit: opt(int({ minimum: 1, maximum: 300, description: "Default 100; total reports whether more match" })),
 				}),
 				replay: "safe",
 				execute: async (args) => json(await org.projects(args.query, args.limit)),
@@ -315,10 +315,10 @@ export function createOrgExtension(config: Config, org = new Org(config.org.root
 				name: "org_search",
 				description:
 					"Search the user's Org files (not archives) for text. Returns each matching heading with its outline path, TODO state, tags, and matching lines.",
-				parameters: Type.Object({
-					query: Type.String({ minLength: 2 }),
+				parameters: obj({
+					query: str({ minLength: 2 }),
 					scope,
-					limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Default 15" })),
+					limit: opt(int({ minimum: 1, maximum: 50, description: "Default 15" })),
 				}),
 				replay: "safe",
 				execute: async (args) => json(await org.search(args.query, args.scope ?? "all", args.limit ?? 15)),
@@ -326,10 +326,10 @@ export function createOrgExtension(config: Config, org = new Org(config.org.root
 			defineTool({
 				name: "org_tasks",
 				description: "List Org headings in the given TODO states, such as active work (PROG, EVAL, HOLD) or queued AUTO tasks.",
-				parameters: Type.Object({
-					states: Type.Array(Type.Union(STATES.map((s) => Type.Literal(s))), { minItems: 1 }),
+				parameters: obj({
+					states: arr(union(STATES.map((s) => lit(s))), { minItems: 1 }),
 					scope,
-					limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 300, description: "Default 100" })),
+					limit: opt(int({ minimum: 1, maximum: 300, description: "Default 100" })),
 				}),
 				replay: "safe",
 				execute: async (args) => json(await org.tasks(args.states, args.scope ?? "all", args.limit ?? 100)),
@@ -338,9 +338,9 @@ export function createOrgExtension(config: Config, org = new Org(config.org.root
 				name: "org_read_task",
 				description:
 					"Read one Org heading with its whole subtree: scope, checklist, dialog, and linked Herdr sessions. Name it by line number, exact title, or id:UUID.",
-				parameters: Type.Object({
-					file: Type.String({ description: "Path under ~/org, as org_search returns it" }),
-					heading: Type.Union([Type.Integer({ minimum: 1 }), Type.String()]),
+				parameters: obj({
+					file: str({ description: "Path under ~/org, as org_search returns it" }),
+					heading: union([int({ minimum: 1 }), str()]),
 				}),
 				replay: "safe",
 				execute: async (args) => json(await org.read(args.file, args.heading)),
@@ -348,14 +348,14 @@ export function createOrgExtension(config: Config, org = new Org(config.org.root
 			defineTool({
 				name: "org_session_task",
 				description: "Find the Org task that links a Herdr agent session, by its session id.",
-				parameters: Type.Object({ session: Type.String() }),
+				parameters: obj({ session: str() }),
 				replay: "safe",
 				execute: async (args) => json(await org.sessionTasks(args.session)),
 			}),
 			defineTool({
 				name: "org_dispatch_scan",
 				description: "Show which AUTO tasks the dispatcher on this machine would launch now (new, resume, or settling). Read-only.",
-				parameters: Type.Object({}),
+				parameters: obj({}),
 				replay: "safe",
 				execute: async () => {
 					const out = await run(["org-dispatch", "scan"], 60_000);

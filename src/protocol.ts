@@ -1,12 +1,13 @@
-// Client/daemon protocol: one JSON object per line over a Unix socket. Conversation updates are Pi Durable's own
-// agent events (`watchEvents`), passed through unchanged after a trimmed snapshot.
+// Client/daemon protocol: one JSON object per line over a Unix socket. After `attach` the daemon sends the folded view:
+// a reset with every item, then the changes to it (see "Attaching to the folded view" in docs/architecture.org).
 import { connect, type Socket } from "node:net";
 import type { ImageContent } from "@earendil-works/pi-ai";
-import type { AgentEvent, SnapshotEvent } from "@earendil-works/pi-durable";
+import type { EntryRecord } from "@earendil-works/pi-durable";
+import type { Change, ViewItem, ViewState } from "./transcript.ts";
 
 export type Source = "kitty" | "cli" | "follow";
 
-/** Terminal commands. All except /reload match pi-durable-telegram's bot menu. */
+/** Terminal commands. All except /reload are also Telegram's. */
 export const COMMANDS = [
 	{ name: "new", description: "Start a fresh context (history is kept)" },
 	{ name: "stop", description: "Stop the current run; queued messages continue" },
@@ -26,7 +27,7 @@ export function parseCommand(text: string): { name: string; args: string } | und
 export type Request =
 	| { op: "status"; requestId: string }
 	| { op: "attach"; requestId: string }
-	/** Entries without a stream: those since `since` (epoch ms), the newest `limit` of them. */
+	/** Entries without a view: those since `since` (epoch ms), the newest `limit` of them. */
 	| { op: "history"; requestId: string; since?: number; limit?: number }
 	| { op: "submit"; requestId: string; text: string; images?: ImageContent[]; source: Source; whenBusy?: "steer" | "followUp"; wait?: boolean }
 	| { op: "command"; requestId: string; name: string; args?: string };
@@ -44,7 +45,6 @@ export type Status = {
 	background: number;
 	queued: number;
 	entries: number;
-	telegram: "off" | "polling" | "failed";
 	tools: string[];
 	/** The directory the daemon's code runs from: a checkout or the Nix store. */
 	source: string;
@@ -52,9 +52,11 @@ export type Status = {
 
 export type Reply =
 	| { type: "status"; requestId: string; status: Status }
-	| { type: "snapshot"; requestId: string; snapshot: SnapshotEvent; omitted: number }
-	| { type: "history"; requestId: string; entries: SnapshotEvent["entries"]; omitted: number }
-	| { type: "events"; events: readonly AgentEvent[] }
+	/** The whole view, at attach and whenever the daemon starts it over; `earlier` says older entries are not in it. */
+	| { type: "view"; requestId?: string; reset: true; items: ViewItem[]; state: ViewState; earlier: boolean }
+	| { type: "view"; changes: Change[]; state?: ViewState }
+	/** `earlier` says older entries were left out. */
+	| { type: "history"; requestId: string; entries: EntryRecord[]; earlier: boolean }
 	| { type: "accepted"; requestId: string; submissionId: number }
 	| { type: "settled"; requestId: string; status: "done" | "unanswered"; text?: string; reason?: string }
 	| { type: "reply"; requestId: string; text: string }

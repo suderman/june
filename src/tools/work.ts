@@ -2,10 +2,10 @@
 // conversation, so shell output, file contents, and dead ends stay out of the main thread, and June stays free to talk
 // while it runs; the report comes back as a [work] follow-up. `focus` switches the calling conversation between the
 // default and focus models from its next request.
-import { Type } from "@earendil-works/pi-ai";
+import { bool, obj, opt, str } from "@earendil-works/pi-schema";
 import { type ConversationId, configure, defineDoc, LiveDoc, defineExtension, defineTask, defineTool, type Extension, section, type Tx } from "@earendil-works/pi-durable";
 import type { Config, ModelChoice } from "../config.ts";
-import { deliverIn, type Notice, noticeSurface, submitNotice, type Surface } from "../notify.ts";
+import { type Notice, submitNotice } from "../notify.ts";
 import { User, user } from "../user.ts";
 
 export const WORK = "june.work";
@@ -15,12 +15,13 @@ export const WorkDoc = defineDoc<{
 	/** `run` is the first input of the run that handed it off, so stopping that run stops the brief too. */
 	active: Record<string, { brief: string; started: number; run?: number; child?: number }>;
 	byCall: Record<string, number>;
-}>({ kind: "june.work", version: 1, scope: "session", initial: () => ({ active: {}, byCall: {} }) });
+}>({ kind: "june.work", version: 1, checkpointWhen: () => false, scope: "session", initial: () => ({ active: {}, byCall: {} }) });
 
 /** When June held her focus across turns; the daemon lets it down once the user has been quiet long enough. */
 export const FocusDoc = defineDoc<{ held?: number }>({
 	kind: "june.focus",
 	version: 1,
+	checkpointWhen: () => false,
 	scope: "conversation",
 	history: "latest",
 	fork: "initial",
@@ -51,7 +52,7 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 		delete doc.byCall[task.input.call];
 	};
 
-	const task = defineTask<WorkInput, { phase: "run" } | { phase: "report"; report: string; surface: Surface }, null>({
+	const task = defineTask<WorkInput, { phase: "run" } | { phase: "report"; report: string }, null>({
 		name: "june.work",
 		version: 1,
 		initial: () => ({ phase: "run" }),
@@ -77,15 +78,13 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 				if (context.abortSignal?.aborted) return;
 				await runtime.commit(async (tx) => {
 					if ((await tx.doc(WorkDoc)).active[id] === undefined) return undefined;
-					// Decided once and kept, so a restart cannot send the report both ways. Reads come before the writes below.
-					const surface = await noticeSurface(tx, runtime.registry, runtime.conversationId);
 					const report =
 						settled.status === "done"
 							? textOf((await tx.entry(settled.answer!))?.model?.[0]) || "The working context finished without a report."
 							: `The working context ended ${settled.status}${"reason" in settled && settled.reason ? `: ${settled.reason}` : ""}. Tell ${user()} what happened.`;
 					await done(tx, task);
 					await mark(tx, runtime.conversationId, id, "finished", task.input.brief);
-					return { status: "running", checkpoint: { phase: "report", report, surface } };
+					return { status: "running", checkpoint: { phase: "report", report } };
 				}, context);
 			},
 			// The report is its own phase, so a restart sends it once and never marks the work finished twice.
@@ -98,11 +97,9 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 					source: "work",
 					label: `report: ${clip(task.input.brief, 80)}`,
 				};
-				if (checkpoint.surface === "terminal") await submitNotice(await runtime.conversation(runtime.conversationId, context), notice, context);
-				await runtime.commit(async (tx) => {
-					if (checkpoint.surface === "telegram") await deliverIn(tx, runtime.registry, runtime.conversationId, notice);
-					return { status: "terminal", outcome: { status: "completed", result: null } };
-				}, context);
+				// A rerun after a crash submits the same request id, which finds the first submission.
+				await submitNotice(await runtime.conversation(runtime.conversationId, context), notice, context);
+				await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
 			},
 		},
 		abort: (task, runtime, context) =>
@@ -117,9 +114,9 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 		name: "work",
 		description:
 			`Hand a self-contained brief to your own separate working context, with your tools. It runs in the background: this call returns at once, you stay free to talk with ${user()}, and its report comes back to you later as a [work] message. Use it for anything beyond a quick check, so shell output and dead ends stay out of this conversation. Tell ${user()} in a few words that you are on it and keep talking with them meanwhile; when the report arrives, tell them what it found as your own work, because it is.`,
-		parameters: Type.Object({
-			brief: Type.String({ description: "The goal, what you already know, constraints, and what the report must contain" }),
-			...(focus ? { focus: Type.Optional(Type.Boolean({ description: "Run it in focus mode, for work that needs care" })) } : {}),
+		parameters: obj({
+			brief: str({ description: "The goal, what you already know, constraints, and what the report must contain" }),
+			...(focus ? { focus: opt(bool({ description: "Run it in focus mode, for work that needs care" })) } : {}),
 		}),
 		// A rerun after a restart finds the task the first run started.
 		replay: "safe",
@@ -143,10 +140,10 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 	const focusTool = defineTool({
 		name: "focus",
 		description: `Tie your hair up and get focused for careful heads-down work, or let it down and relax back to your everyday self. Yours to manage; it applies from your next model request and lasts until this turn ends, unless you hold it.`,
-		parameters: Type.Object({
-			on: Type.Boolean(),
-			hold: Type.Optional(Type.Boolean({ description: `With on true: stay focused across turns, for a back-and-forth with ${user()} that needs care throughout` })),
-			reason: Type.String({ description: "Why, in a few words" }),
+		parameters: obj({
+			on: bool(),
+			hold: opt(bool({ description: `With on true: stay focused across turns, for a back-and-forth with ${user()} that needs care throughout` })),
+			reason: str({ description: "Why, in a few words" }),
 		}),
 		replay: "safe",
 		execute: async (args, api, context) => {

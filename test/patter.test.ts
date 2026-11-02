@@ -2,10 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
-import { Client, type Reply } from "../src/protocol.ts";
 import { createCodingExtension } from "../src/tools/coding.ts";
-import { Transcript } from "../src/transcript.ts";
-import { ask, fakeTelegram, openTestDaemon, routed, tempDir, until } from "./helpers.ts";
+import { ask, attachView, openTestDaemon, routed, tempDir, until } from "./helpers.ts";
 
 const call = (name: string, args: Parameters<typeof fauxToolCall>[1]) => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
 const sections = (ctx: TranscriptContext) =>
@@ -71,13 +69,12 @@ test("a slow command gets patter in the transcript, never in a model context, an
 	assert.equal((await ask(tmp.paths.socket, "anything else?")).text, "Nothing new.");
 	assert.equal(patter.faux.state.callCount, count, "a quick answer gets no patter");
 
-	// The terminal client shows patter from a fresh snapshot, as after a reconnect.
-	const client = await Client.open(tmp.paths.socket);
-	t.after(() => client.close());
-	const snapshot = (await client.request({ op: "attach", requestId: "a" })) as Extract<Reply, { type: "snapshot" }>;
-	const transcript = new Transcript();
-	transcript.load(snapshot.snapshot);
-	assert.deepEqual(transcript.items.filter((i) => i.kind === "patter").map((i) => (i as { text: string }).text), lines);
+	// The view shows patter after a reconnect, between the command and June's answer.
+	const view = await attachView(tmp.paths.socket);
+	t.after(() => view.close());
+	assert.deepEqual(view.items().filter((i) => i.kind === "patter").map((i) => (i as { text: string }).text), lines);
+	const kinds = view.items().map((i) => i.kind);
+	assert.ok(kinds.indexOf("patter") > kinds.indexOf("tool") && kinds.lastIndexOf("patter") < kinds.lastIndexOf("assistant"), kinds.join(", "));
 });
 
 test("a work brief starts patter at once with the brief, and patter failures change nothing", async (t) => {
@@ -211,98 +208,4 @@ test("June relaying a report gets no patter, however long she takes", async (t) 
 	const kinds = (await daemon.root.context(BG)).entries.map((e) => (e.kind === "june.input" ? `input:${(e.data as { source: string }).source}` : e.kind));
 	assert.ok(kinds.includes("input:work"), "the report arrived");
 	assert.ok(!kinds.slice(kinds.indexOf("input:work")).includes("june.patter"), `no patter while June relays it: ${kinds.join(", ")}`);
-});
-
-test("while Alex is on Telegram, patter grows one message in his chat; at the terminal it stays there", async (t) => {
-	const tmp = await tempDir();
-	t.after(tmp.cleanup);
-	const patter = patterModel();
-	const faux = fauxProvider();
-	faux.setResponses(routed(
-		[
-			call("work", { brief: "Count the phone wombats." }),
-			fauxAssistantMessage("on it"),
-			fauxAssistantMessage("seven wombats"),
-			call("work", { brief: "Count the desk wombats." }),
-			fauxAssistantMessage("on it at the desk"),
-			fauxAssistantMessage("three wombats"),
-		],
-		[
-			call("bash", { command: "sleep 1.5" }),
-			fauxAssistantMessage("Report: seven wombats."),
-			call("bash", { command: "sleep 1.5" }),
-			fauxAssistantMessage("Report: three wombats."),
-		],
-	));
-	const tg = fakeTelegram();
-	const daemon = await openTestDaemon({
-		...tmp,
-		faux,
-		providers: [patter.faux],
-		telegramPort: tg.port,
-		extensions: [createCodingExtension()],
-		patterTiming: fast,
-		config: { ...config, telegram: { tokenEnv: "TG", allowedUserIds: [42] } },
-		secrets: { TG: `123456:${"a".repeat(35)}` },
-	});
-	t.after(() => daemon.close());
-	await daemon.telegram!.handleUpdate({
-		update_id: 1,
-		message: {
-			message_id: 7,
-			date: Math.floor(Date.now() / 1000),
-			chat: { id: 42, type: "private" as const, first_name: "Alex" },
-			from: { id: 42, is_bot: false, first_name: "Alex" },
-			text: "count the wombats",
-		},
-	});
-	// Between June's "on it" and her report only the brief runs, so any typing then is patter's.
-	await until(() => tg.sent.some((m) => m.text.includes("on it")));
-	const typed = tg.actions.length;
-	await until(() => tg.actions.length > typed || tg.sent.some((m) => m.text.includes("seven wombats")));
-	assert.ok(!tg.sent.some((m) => m.text.includes("seven wombats")), "the chat shows June typing while the brief runs");
-	await until(() => tg.sent.some((m) => m.text.includes("seven wombats")), 10_000);
-	const opened = tg.sent.filter((m) => m.text.includes("🦘"));
-	assert.equal(opened.length, 1, `one patter message per wait: ${JSON.stringify(tg.sent)}`);
-	assert.match(opened[0]!.text, /^🦘 <i>patter line 1<\/i>$/);
-	assert.ok(tg.edited.length >= 1, "later lines edit it");
-	assert.ok(tg.edited.every((e) => e.messageId === opened[0]!.id && e.text.startsWith(opened[0]!.text)), "each edit extends the same message");
-
-	const [sends, edits] = [tg.sent.length, tg.edited.length];
-	assert.equal((await ask(tmp.paths.socket, "now count the desk ones")).text, "on it at the desk");
-	await until(async () => JSON.stringify((await daemon.root.context(BG)).messages).includes("three wombats"), 10_000);
-	assert.deepEqual([tg.sent.length, tg.edited.length], [sends, edits], "patter for a terminal brief stays in the terminal");
-});
-
-test("on Telegram, patter's line sits above June's answer, which arrives as a new message", async (t) => {
-	const tmp = await tempDir();
-	t.after(tmp.cleanup);
-	const patter = patterModel();
-	const faux = fauxProvider();
-	faux.setResponses([call("bash", { command: "sleep 1.5; echo built" }), fauxAssistantMessage("Built.")]);
-	const tg = fakeTelegram();
-	const daemon = await openTestDaemon({
-		...tmp,
-		faux,
-		providers: [patter.faux],
-		telegramPort: tg.port,
-		extensions: [createCodingExtension()],
-		patterTiming: fast,
-		config: { ...config, telegram: { tokenEnv: "TG", allowedUserIds: [42] } },
-		secrets: { TG: `123456:${"a".repeat(35)}` },
-	});
-	t.after(() => daemon.close());
-	await daemon.telegram!.handleUpdate({
-		update_id: 1,
-		message: {
-			message_id: 7,
-			date: Math.floor(Date.now() / 1000),
-			chat: { id: 42, type: "private" as const, first_name: "Alex" },
-			from: { id: 42, is_bot: false, first_name: "Alex" },
-			text: "build it",
-		},
-	});
-	await until(() => tg.sent.some((m) => m.text.includes("Built.")), 10_000);
-	const order = tg.sent.map((m) => (m.text.includes("🦘") ? "patter" : m.text));
-	assert.deepEqual(order, ["patter", "Built."], "no preview message is opened before patter speaks");
 });

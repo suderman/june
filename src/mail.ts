@@ -2,7 +2,7 @@
 // counted. Only senders and subjects reach her, marked as outside text; she reads a message herself if it matters.
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
-import type { Logger } from "pi-durable-telegram";
+import type { Logger } from "./runtime.ts";
 import type { Config } from "./config.ts";
 import { contacts, rolodex } from "./people.ts";
 import { type Run, runProcess } from "./tools/herdr.ts";

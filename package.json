@@ -8,23 +8,17 @@
   "engines": { "node": ">=22.19" },
   "scripts": {
     "typecheck": "tsc --noEmit -p .",
-    "test": "node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/follow.test.ts test/heartbeat.test.ts test/history.test.ts test/mail.test.ts test/memory.test.ts test/patter.test.ts test/people.test.ts test/situation.test.ts test/watch.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts test/avatar.test.ts"
+    "test": "node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/follow.test.ts test/heartbeat.test.ts test/history.test.ts test/mail.test.ts test/memory.test.ts test/patter.test.ts test/people.test.ts test/situation.test.ts test/watch.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts test/avatar.test.ts test/view.test.ts"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.2.0",
-    "@earendil-works/pi-ai": "1.2.0",
-    "@earendil-works/pi-durable": "1.2.0",
-    "@earendil-works/pi-tui": "1.2.0",
-    "pi-durable-telegram": "0.1.5"
+    "@earendil-works/chord": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-durable": "1.5.0",
+    "@earendil-works/pi-schema": "1.5.0",
+    "@earendil-works/pi-tui": "1.5.0"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
     "typescript": "5.9.3"
-  },
-  "overrides": {
-    "@earendil-works/chord": "1.2.0",
-    "@earendil-works/pi-ai": "1.2.0",
-    "@earendil-works/pi-codemode": "1.2.0",
-    "@earendil-works/pi-durable": "1.2.0"
   }
 }

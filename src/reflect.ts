@@ -8,7 +8,7 @@ import { basename, dirname, join } from "node:path";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import type { Message, Models } from "@earendil-works/pi-ai";
 import { type Conversation, type Harness, LiveDoc } from "@earendil-works/pi-durable";
-import type { Logger } from "pi-durable-telegram";
+import type { Logger } from "./runtime.ts";
 import type { Config, ModelChoice, PromptFiles } from "./config.ts";
 import { checkJournalConflicts, DIGEST, daySection, entryUnder, localStamp, type Period, putDigest, read, replaceDay, replaceIfUnchanged } from "./journal.ts";
 import { checkConflicts, memoryBrief, transcript } from "./memory.ts";

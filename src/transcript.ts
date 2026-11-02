@@ -1,241 +1,222 @@
-// Folds a Pi Durable snapshot and its agent events into display items for the terminal client.
-import type { AgentEvent, SnapshotEvent } from "@earendil-works/pi-durable";
+// Folds a Pi Durable conversation view into the display items every client renders. The daemon runs it, one fold per
+// connection, over `Conversation.watch()` and a `ConversationTranscript`; clients only render. It is a pure function of
+// the view, so a reconnect, a reset, and a live update all show the same thing.
+import type { ConversationView, LiveState } from "@earendil-works/pi-durable";
+import { orgToMarkdown } from "./org.ts";
+import { plain } from "./plain.ts";
 
-/** A heartbeat's whole answer when nothing is worth raising; the heartbeat sends nothing and the terminal shows nothing. */
+/** A heartbeat's whole answer when nothing is worth raising; the view shows nothing for it. */
 export const QUIET = "QUIET";
 export const isQuiet = (text: string) => /^\s*QUIET\.?\s*$/i.test(text);
 
 /** June's own looks, by their june.input source or [tag]: only a real message to the user shows, never the prompt or her tools. */
 export const PRIVATE = new Set(["heartbeat", "watch", "work", "follow"]);
 
+export type ViewItem =
+	| { kind: "user"; id: string; source: string; text: string; imageCount?: number }
+	/** `text` is Markdown. `thinking` holds one flattened line per thinking block. */
+	| { kind: "assistant"; id: string; text: string; streaming: boolean; error?: string; thinking?: string }
+	/** `error` is the first line of a failed call's output. */
+	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; error?: string }
+	| { kind: "note"; id: string; text: string }
+	| { kind: "patter"; id: string; text: string };
+
+export type ViewState = {
+	running: boolean;
+	/** Briefs running in June's working context in the background. */
+	background: number;
+	queued: number;
+	model: string;
+	notice?: string;
+	compacting: boolean;
+};
+
+export type Change = { op: "put"; item: ViewItem; after: string | null } | { op: "drop"; id: string };
+
+/** One value of the view as a client sees it: the transcript the client holds, then the conversation's documents. */
+export type Folded = { items: ViewItem[]; state: ViewState; earlier: boolean };
+
+type Entry = { readonly id: unknown; readonly kind: string; readonly data?: any; readonly model?: readonly any[] };
 type Block = { type: string; text?: string; thinking?: string; name?: string; arguments?: unknown; id?: string };
 
-export type Item =
-	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; telegram?: true }
-	| { kind: "assistant"; id: string; blocks: Block[]; streaming: boolean; error?: string }
-	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; output: string }
-	| { kind: "note"; id: string; text: string }
-	| { kind: "patter"; id: string; text: string }
-	| { kind: "reply"; id: string; command: string; text: string };
+/**
+ * Fold the entries a client holds and the view's documents into items. Inside one of June's private looks (a heartbeat,
+ * a watch or work report, a followed task) only her final words show, and only when they are a message rather than the
+ * quiet answer; her tools, thinking, and streaming reply stay out.
+ */
+export function fold(entries: readonly Entry[], docs: Readonly<Record<string, unknown>>, earlier = false): Folded {
+	const items: ViewItem[] = [];
+	const tools = new Map<string, Extract<ViewItem, { kind: "tool" }>>();
+	const background = new Set<string>();
+	let hidden = false;
+	/** The reply follows a Telegram message, already Markdown; anything else June answers in Org. */
+	let markdown = false;
+	const text = (raw: string) => (markdown ? plain(raw) : orgToMarkdown(plain(raw)));
+	const assistant = (id: string, content: readonly Block[], streaming: boolean, error?: string) => {
+		const words = content.filter((b) => b.type === "text" && b.text).map((b) => b.text!).join("\n\n");
+		const thinking = content.filter((b) => b.type === "thinking" && b.thinking?.trim()).map((b) => flatten(b.thinking!));
+		if (words === "" && thinking.length === 0 && !error && !streaming) return;
+		items.push({ kind: "assistant", id, text: text(words), streaming, ...(thinking.length ? { thinking: thinking.join("\n") } : {}), ...(error ? { error } : {}) });
+	};
 
-export class Transcript {
-	items: Item[] = [];
-	running = false;
-	/** Briefs running in June's working context in the background, by task ID. */
-	background = new Set<string>();
-	queued = 0;
-	omitted = 0;
-	model = "";
-	notice: string | undefined;
-	/** When the running compaction started, as this client first saw it; undefined when none runs. */
-	compacting: number | undefined;
-	#entries = new Set<string>();
-	/** Inside a heartbeat or watch notice, June's private look: only a real message to the user shows, never the look itself. */
-	#private = false;
-	#live: Extract<Item, { kind: "assistant" }> | undefined;
-	#tools = new Map<string, Extract<Item, { kind: "tool" }>>();
-	#calls = new Map<string, string>();
-
-	load(snapshot: SnapshotEvent, omitted = 0): void {
-		this.items = [];
-		this.#entries.clear();
-		this.#tools.clear();
-		this.background.clear();
-		this.#live = undefined;
-		this.#private = false;
-		this.omitted = omitted;
-		for (const entry of snapshot.entries) this.#entry(entry);
-		this.running = snapshot.run !== undefined;
-		this.queued = snapshot.inbox.length;
-		this.compacting = snapshot.compactions.length > 0 ? (this.compacting ?? Date.now()) : undefined;
-		this.#model(snapshot.agent);
-		if (snapshot.generation?.message && !this.#private) this.#startLive(snapshot.generation.message);
-		for (const slot of this.#private ? [] : (snapshot.tools as readonly any[])) {
-			if (slot?.toolCallId && !this.#tools.has(slot.toolCallId))
-				this.#tool(slot.toolCallId, slot.toolName ?? slot.name ?? "tool", slot.args);
-		}
-	}
-
-	/** A command's reply. Like a Telegram command reply, it is not part of the conversation; a reconnect drops it. */
-	reply(command: string, text: string): void {
-		this.items.push({ kind: "reply", id: `reply:${this.items.length}`, command, text });
-	}
-
-	apply(events: readonly AgentEvent[]): void {
-		for (const event of events) this.#event(event);
-	}
-
-	#event(event: AgentEvent): void {
-		switch (event.type) {
-			case "snapshot":
-				return this.load(event);
-			case "run_start":
-				this.running = true;
-				this.notice = undefined;
-				return;
-			case "run_end":
-				this.running = false;
-				return;
-			case "inbox_update":
-				this.queued = event.items.length;
-				return;
-			case "message_start":
-				// Inputs are placed as messages too; only an assistant message streams.
-				if (event.message.role === "assistant" && !this.#private) this.#startLive(event.message);
-				return;
-			case "message_update": {
-				const live = this.#live;
-				if (live === undefined) return;
-				for (const change of event.changes as readonly any[]) {
-					if (change.type === "message") live.blocks = [...change.message.content];
-					else if (change.type === "text_delta") (live.blocks[change.contentIndex] ??= { type: "text", text: "" }).text += change.delta;
-					else if (change.type === "thinking_delta")
-						(live.blocks[change.contentIndex] ??= { type: "thinking", thinking: "" }).thinking += change.delta;
-					else if (change.block) live.blocks[change.contentIndex] = { ...change.block };
-				}
-				return;
-			}
-			case "message_end":
-				if (event.entry.kind === "pi.assistant") this.#dropLive();
-				return this.#entry(event.entry);
-			case "entry_appended":
-				return this.#entry(event.entry);
-			case "tool_execution_start":
-				if (event.parentToolCallId === undefined && !this.#private) this.#tool(event.toolCallId, event.toolName, event.args);
-				return;
-			case "tool_execution_update": {
-				const tool = this.#tools.get(event.toolCallId);
-				const output = event.output as any;
-				if (tool === undefined || output === undefined) return;
-				if ("set" in output) tool.output = output.set;
-				else tool.output = tool.output.slice(output.trimStart ?? 0) + (output.append ?? "");
-				return;
-			}
-			case "tool_execution_end": {
-				const tool = this.#tools.get(event.toolCallId);
-				if (tool !== undefined && tool.status === "running") tool.status = "done";
-				if (event.entry) this.#entry(event.entry);
-				return;
-			}
-			case "auto_retry_start":
-				this.notice = `retrying (attempt ${event.attempt}): ${event.errorMessage}`;
-				return;
-			case "auto_retry_end":
-				this.notice = undefined;
-				return;
-			case "task_failed":
-				this.notice = `${event.kind} failed: ${event.message}`;
-				return;
-			case "agent_changed":
-				return this.#model(event.agent);
-			case "compaction_start":
-				this.compacting ??= Date.now();
-				return;
-			case "compaction_end":
-				this.compacting = undefined;
-				return;
-		}
-	}
-
-	#model(agent: any): void {
-		if (agent?.model) this.model = `${agent.model.modelId}${agent.thinkingLevel ? `:${agent.thinkingLevel}` : ""}`;
-	}
-
-	#startLive(message: any): void {
-		this.#dropLive();
-		this.#live = { kind: "assistant", id: "live", blocks: [...(message?.content ?? [])], streaming: true };
-		this.items.push(this.#live);
-	}
-
-	#dropLive(): void {
-		if (this.#live === undefined) return;
-		this.items = this.items.filter((item) => item !== this.#live);
-		this.#live = undefined;
-	}
-
-	#tool(id: string, name: string, args: unknown): void {
-		const item = { kind: "tool" as const, id, name, summary: summarize(args), status: "running" as const, output: "" };
-		this.#tools.set(id, item);
-		this.items.push(item);
-	}
-
-	#entry(entry: any): void {
+	for (const entry of entries) {
 		const id = String(entry.id);
-		if (this.#entries.has(id)) return;
-		this.#entries.add(id);
 		const message = entry.model?.[0];
 		switch (entry.kind) {
-			case "june.input":
-				this.#private = PRIVATE.has(entry.data?.source);
-				if (!this.#private) this.items.push({ kind: "user", id, source: entry.data?.source ?? "?", text: entry.data?.text ?? "", ...(entry.data?.imageCount ? { imageCount: entry.data.imageCount } : {}) });
-				return;
+			case "june.input": {
+				const source = String(entry.data?.source ?? "?");
+				hidden = PRIVATE.has(source);
+				// A private look is answered in the markup of where the user last spoke, so it leaves the markup alone.
+				if (!hidden) markdown = false;
+				if (!hidden) items.push({ kind: "user", id, source, text: entry.data?.text ?? "", ...(entry.data?.imageCount ? { imageCount: entry.data.imageCount } : {}) });
+				break;
+			}
 			case "june.patter":
-				this.items.push({ kind: "patter", id, text: entry.data?.text ?? "" });
-				return;
+				items.push({ kind: "patter", id, text: entry.data?.text ?? "" });
+				break;
 			case "june.work":
-				if (entry.data?.state === "started") this.background.add(String(entry.data.id));
-				else this.background.delete(String(entry.data?.id));
-				return;
+				if (entry.data?.state === "started") background.add(String(entry.data.id));
+				else background.delete(String(entry.data?.id));
+				break;
 			case "pi.user": {
-				const text = textOf(message?.content);
-				this.#private = PRIVATE.has(/^\[(\w+)\]/.exec(text)?.[1] ?? "");
+				const words = textOf(message?.content);
+				hidden = PRIVATE.has(/^\[(\w+)\]/.exec(words)?.[1] ?? "");
+				if (hidden) break;
+				// Untagged user entries came from Telegram, and so did notices relayed there before the bridge.
+				const own = /^\[(work|follow|reminder)[\] ]\s*/.exec(words);
 				// /stop, from either surface, writes this boundary so queued messages can be placed.
-				const own = /^\[(work|follow|reminder)[\] ]\s*/.exec(text);
-				if (this.#private) return;
-				if (text.startsWith("[/stop]")) this.items.push({ kind: "note", id, text: "stopped" });
-				// A notice delivered through Telegram, which June relays there: one short line here, not the whole report.
-				else if (own) this.items.push({ kind: "user", id, source: own[1]!, text: clip(text.slice(own[0].length), 80), telegram: true });
-				else this.items.push({ kind: "user", id, source: "telegram", text, telegram: true });
-				return;
+				if (words.startsWith("[/stop]")) items.push({ kind: "note", id, text: "stopped" });
+				else if (own) items.push({ kind: "user", id, source: own[1]!, text: clip(words.slice(own[0].length), 80) });
+				else items.push({ kind: "user", id, source: "telegram", text: words });
+				if (!words.startsWith("[/stop]")) markdown = true;
+				break;
 			}
 			case "pi.assistant": {
-				const content: Block[] = message?.content ?? [];
-				if (this.#private) {
-					// Only her final words, and only when they are a message rather than the quiet answer.
+				const content: readonly Block[] = message?.content ?? [];
+				if (hidden) {
 					const words = textOf(content.filter((b) => b.type === "text"));
-					if (words.trim() !== "" && !isQuiet(words)) this.items.push({ kind: "assistant", id, blocks: [{ type: "text", text: words }], streaming: false });
-					return;
+					if (words.trim() !== "" && !isQuiet(words)) items.push({ kind: "assistant", id, text: text(words), streaming: false });
+					break;
 				}
-				for (const b of content) if (b.type === "toolCall" && b.id) this.#calls.set(b.id, summarize(b.arguments));
-				const blocks = content.filter((b) => b.type !== "toolCall");
-				const error = message?.stopReason === "error" || message?.stopReason === "aborted" ? (message.errorMessage ?? message.stopReason) : undefined;
-				if (blocks.length > 0 || error) this.items.push({ kind: "assistant", id, blocks, streaming: false, ...(error ? { error } : {}) });
-				return;
+				const error = message?.stopReason === "error" || message?.stopReason === "aborted" ? String(message.errorMessage ?? message.stopReason) : undefined;
+				assistant(id, content, false, error);
+				for (const b of content) {
+					if (b.type !== "toolCall" || !b.id) continue;
+					// Prefixed, so a provider's call id never collides with an entry's; a repeated one also takes the entry's.
+					const item = { kind: "tool" as const, id: tools.has(b.id) ? `call:${id}:${b.id}` : `call:${b.id}`, name: b.name ?? "tool", summary: summarize(b.arguments), status: "running" as const };
+					tools.set(b.id, item);
+					items.push(item);
+				}
+				break;
 			}
 			case "pi.tool-result": {
-				if (this.#private) return;
-				const callId = message?.toolCallId as string | undefined;
-				const tool = callId ? this.#tools.get(callId) : undefined;
-				if (tool !== undefined) {
-					tool.status = message.isError ? "error" : "done";
-					return;
-				}
-				this.items.push({
-					kind: "tool",
-					id,
-					name: message?.toolName ?? "tool",
-					summary: (callId && this.#calls.get(callId)) ?? "",
-					status: message?.isError ? "error" : "done",
-					output: message?.isError ? textOf(message.content) : "",
-				});
-				return;
+				if (hidden) break;
+				const callId = String(message?.toolCallId ?? id);
+				const status = message?.isError ? ("error" as const) : ("done" as const);
+				const error = message?.isError ? textOf(message.content).split("\n")[0] : undefined;
+				const done = { status, ...(error ? { error } : {}) };
+				const known = tools.get(callId);
+				if (known !== undefined) Object.assign(known, done);
+				// The call itself is before the transcript the client holds.
+				else items.push({ kind: "tool", id: `call:${callId}`, name: message?.toolName ?? "tool", summary: "", ...done });
+				break;
 			}
 			case "pi.reset":
-				this.items.push({ kind: "note", id, text: "new context" });
-				return;
+				items.push({ kind: "note", id, text: "new context" });
+				break;
 			case "pi.compaction":
-				this.items.push({ kind: "note", id, text: "earlier conversation compacted" });
-				return;
+				items.push({ kind: "note", id, text: "earlier conversation compacted" });
+				break;
 		}
 	}
+
+	const live = (docs["pi.live"] ?? {}) as LiveState;
+	const running = live.run !== undefined;
+	if (!hidden) {
+		const message = live.generation?.message as { content?: Block[] } | undefined;
+		if (message !== undefined) assistant("live", message.content ?? [], true);
+		for (const slot of live.tools ?? []) {
+			if (slot.status === "done") continue;
+			const known = tools.get(slot.callId);
+			if (known === undefined) items.push({ kind: "tool", id: `call:${slot.callId}`, name: slot.name, summary: "", status: "running" });
+		}
+		// A run that ended without an answer says why, unless the user stopped it or started afresh.
+		const failure = live.runFailure;
+		if (!running && failure !== undefined && !["aborted", "reset", "nothing_to_answer"].includes(failure.reason)) {
+			const last = items.at(-1);
+			if (!(last?.kind === "assistant" && last.error))
+				items.push({ kind: "assistant", id: `failure:${String(failure.taskId)}`, text: "", streaming: false, error: [failure.reason.replace(/_/g, " "), failure.detail].filter(Boolean).join(": ") });
+		}
+	}
+	// A call without a result once its run has ended was cut off.
+	if (!running)
+		for (const tool of tools.values())
+			if (tool.status === "running") Object.assign(tool, { status: "error", error: "interrupted" });
+
+	const agent = docs["pi.agent"] as { model?: { modelId?: string }; thinkingLevel?: string } | undefined;
+	const retry = live.generation?.retry;
+	const state: ViewState = {
+		running,
+		background: background.size,
+		queued: ((docs["pi.inbox"] as { items?: unknown[] } | undefined)?.items ?? []).length,
+		model: agent?.model?.modelId ? `${agent.model.modelId}${agent.thinkingLevel ? `:${agent.thinkingLevel}` : ""}` : "",
+		compacting: (live.compactions?.length ?? 0) > 0,
+		...(retry ? { notice: `retrying: ${retry.error}` } : live.compactionFailure ? { notice: `compaction failed: ${live.compactionFailure.error}` } : {}),
+	};
+	return { items, state, earlier };
+}
+
+/** The items of a view the daemon holds through a `ConversationTranscript`: its entries, in order, and whether more precede them. */
+export function foldView(view: Omit<ConversationView, "entries" | "before"> & { readonly items: readonly { kind: string; entry?: unknown }[] }): Folded {
+	const entries = view.items.flatMap((item) => (item.kind === "entry" ? [item.entry as Entry] : []));
+	return fold(entries, view.docs, view.items[0]?.kind === "earlier");
+}
+
+/**
+ * The changes that turn `before` into `after`: a drop for each item gone, then a put for each item that is new, changed,
+ * or now follows a different item, in order. Applied in order with `applyChanges`, they give `after` exactly.
+ */
+export function diff(before: readonly ViewItem[], after: readonly ViewItem[], sent: Map<string, string>): Change[] {
+	const changes: Change[] = [];
+	const ids = new Set(after.map((item) => item.id));
+	const previous = new Map<string, string | null>();
+	before.forEach((item, i) => previous.set(item.id, i === 0 ? null : before[i - 1]!.id));
+	for (const item of before) if (!ids.has(item.id)) {
+		changes.push({ op: "drop", id: item.id });
+		sent.delete(item.id);
+	}
+	after.forEach((item, i) => {
+		const placed = i === 0 ? null : after[i - 1]!.id;
+		const json = JSON.stringify(item);
+		if (sent.get(item.id) === json && previous.get(item.id) === placed) return;
+		sent.set(item.id, json);
+		changes.push({ op: "put", item, after: placed });
+	});
+	return changes;
+}
+
+/** A client's side of `diff`: apply drops and puts to the items it holds. */
+export function applyChanges(items: ViewItem[], changes: readonly Change[]): ViewItem[] {
+	let next = items;
+	for (const change of changes) {
+		next = next.filter((item) => item.id !== (change.op === "drop" ? change.id : change.item.id));
+		if (change.op === "put") {
+			const at = change.after === null ? 0 : next.findIndex((item) => item.id === change.after) + 1;
+			next.splice(at === 0 && change.after !== null ? next.length : at, 0, change.item);
+		}
+	}
+	return next;
+}
+
+/** One line per thinking block, with Markdown emphasis removed, so a reasoning summary reads "Finding project heading". */
+function flatten(thinking: string): string {
+	return thinking.replace(/\*\*|__/g, "").replace(/\s+/g, " ").trim();
 }
 
 export function textOf(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
-	return content
-		.map((block) => (block.type === "text" ? block.text : block.type === "image" ? "[image]" : ""))
-		.join("");
+	return content.map((block) => (block.type === "text" ? block.text : block.type === "image" ? "[image]" : "")).join("");
 }
 
 export function summarize(args: unknown): string {

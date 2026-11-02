@@ -1,7 +1,8 @@
 // Preserve personal learning at the same boundary that summarizes old conversation context.
 import { closeSync, fsyncSync, lstatSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { type AssistantMessage, type Message, Type } from "@earendil-works/pi-ai";
+import { type AssistantMessage, type Message } from "@earendil-works/pi-ai";
+import { obj, str } from "@earendil-works/pi-schema";
 import {
 	AgentDoc, CompactionTask, defineDoc, defineExtension, defineTool, type Harness, hook, section, UsageDoc,
 } from "@earendil-works/pi-durable";
@@ -13,11 +14,11 @@ export const MemoryReview = defineDoc<{
 	failure?: { task: number; message: string };
 	last?: { task: number; file: string; changed: boolean };
 }>({
-	kind: "june.memory-review", version: 1, scope: "conversation", history: "latest", fork: "initial", initial: () => ({}),
+	kind: "june.memory-review", version: 1, checkpointWhen: () => false, scope: "conversation", history: "latest", fork: "initial", initial: () => ({}),
 });
 
 const MemorySpend = defineDoc<{ recorded: boolean }>({
-	kind: "june.memory-spend", version: 1, scope: "task", initial: () => ({ recorded: false }),
+	kind: "june.memory-spend", version: 1, checkpointWhen: () => false, scope: "task", initial: () => ({ recorded: false }),
 });
 
 type Review = { file: string; base: string | null; next: string | null; summary: string; journal?: JournalEntry[] };
@@ -91,9 +92,9 @@ export function createMemoryExtension(files: () => PromptFiles, getHarness: () =
 	const journal = defineTool({
 		name: "journal",
 		description: `Write an entry in your own journal, filed under today's date with the current time: something ${user()} shared, a moment, a mood, or what you did together, in your own words and perspective.`,
-		parameters: Type.Object({
-			title: Type.String({ description: "A few words naming the entry" }),
-			text: Type.String({ description: "The entry in Org prose, one paragraph per line" }),
+		parameters: obj({
+			title: str({ description: "A few words naming the entry" }),
+			text: str({ description: "The entry in Org prose, one paragraph per line" }),
 		}),
 		// A rerun finds its text already written and skips it.
 		replay: "safe",

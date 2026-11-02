@@ -5,7 +5,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
+import { arr, bool, lit, num, obj, opt, str, union } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import { type Config, expandHome } from "../config.ts";
 import { type Run, runProcess } from "./herdr.ts";
@@ -427,7 +427,7 @@ export function createDispatchExtension(
 	const defaultHost = config.dispatch.host ?? hosts[0];
 	const defaultAgent = config.dispatch.agent ?? "pi";
 	const agents = dispatchAgents(config.dispatch);
-	const agentParameter = (description: string) => Type.Optional(Type.Union(agents.map((agent) => Type.Literal(agent)), { description }));
+	const agentParameter = (description: string) => opt(union(agents.map((agent) => lit(agent)), { description }));
 	/** Write the task, follow it once whether this call wrote it or a replay found it, and start this host's dispatcher. */
 	const queueAndFollow = async (request: QueueRequest, followIt: (input: FollowInput) => Promise<unknown>): Promise<string> => {
 		const result = await dispatch.queue(request);
@@ -452,12 +452,12 @@ export function createDispatchExtension(
 			defineTool({
 				name: "org_create_project",
 				description: "Create ~/org/work/<domain>/<project>/<project>.org with a title, category, and optional repository links, then confirm dispatcher agenda discovery. First use org_projects and search for an existing project. Honor a destination the user names. Otherwise GitHub owner/repo guides domain/project for a new repo project; unmatched work and clear one-offs go under domain june with a short descriptive project name. Never overwrite an existing record. This tool queues no work; use org_queue_task afterward. If it cannot confirm agenda discovery, tell the user why and ask how to proceed rather than filing the task elsewhere.",
-				parameters: Type.Object({
-					domain: Type.String({ description: "Existing logical domain, GitHub owner for a new repo project, or june for unmatched work and one-offs" }),
-					project: Type.String({ description: "Short directory name; GitHub repository name when it fits" }),
-					title: Type.String({ description: "Human-readable project title, one line" }),
-					github: Type.Optional(Type.String({ description: "Repository this project actually concerns, as https://github.com/owner/repo without .git; omit or leave empty for unrelated one-offs" })),
-					dir: Type.Optional(Type.String({ description: "Existing checkout this project actually concerns, absolute or ~/ path; omit or leave empty for work without one" })),
+				parameters: obj({
+					domain: str({ description: "Existing logical domain, GitHub owner for a new repo project, or june for unmatched work and one-offs" }),
+					project: str({ description: "Short directory name; GitHub repository name when it fits" }),
+					title: str({ description: "Human-readable project title, one line" }),
+					github: opt(str({ description: "Repository this project actually concerns, as https://github.com/owner/repo without .git; omit or leave empty for unrelated one-offs" })),
+					dir: opt(str({ description: "Existing checkout this project actually concerns, absolute or ~/ path; omit or leave empty for work without one" })),
 				}),
 				replay: "safe",
 				execute: async (args) => ({ output: [{ type: "text", text: JSON.stringify(await dispatch.createProject(args), null, 1) }] }),
@@ -465,16 +465,16 @@ export function createDispatchExtension(
 			defineTool({
 				name: "org_queue_task",
 				description: `Queue new work for an unattended agent: write a new AUTO heading, its host (${hosts.join(", ")}) and agent in its property drawer, into an Org agenda file. The dispatcher on that host launches it, and this tool starts the one on this host right away, and the agent ends at EVAL for review by you or the user unless review is explicitly waived. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task and use org_projects to find its project first. If no project fits, use org_create_project before queueing. The tool writes the body from reason, scope, and checklist. If it refuses the file, tell ${user()} why and ask how to proceed; never get around a refusal by queueing in another file.`,
-				parameters: Type.Object({
-					file: Type.String({ description: "Org file under ~/org, usually the project's <project>.org" }),
-					title: Type.String({ description: "Concise verb-led heading title, without keyword or tags" }),
-					reason: Type.String({ description: 'One line, written after "Queued by June: ": the reason itself, naming the user rather than writing "you", such as `${User()} asked for a read-only docs check.`' }),
-					scope: Type.String({ description: "Outcome, constraints, and success criteria in Org; one physical line per paragraph" }),
-					checklist: Type.Array(Type.String(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
-					host: Type.String({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` }),
+				parameters: obj({
+					file: str({ description: "Org file under ~/org, usually the project's <project>.org" }),
+					title: str({ description: "Concise verb-led heading title, without keyword or tags" }),
+					reason: str({ description: 'One line, written after "Queued by June: ": the reason itself, naming the user rather than writing "you", such as `${User()} asked for a read-only docs check.`' }),
+					scope: str({ description: "Outcome, constraints, and success criteria in Org; one physical line per paragraph" }),
+					checklist: arr(str(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
+					host: str({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` }),
 					agent: agentParameter(`Coding agent the dispatcher starts: ${agents.join(" or ")}; default ${defaultAgent}. Choose one when ${user()} names it`),
-					dir: Type.Optional(Type.String({ description: "Existing working directory override, usually one of the project's local repository links. Omit for one-offs without a checkout: the dispatcher uses the project directory" })),
-					review: Type.Optional(Type.Boolean({ description: `Default true: the worker stops at EVAL for human or agent review, including read-only lookups you will review yourself. Set false only when ${user()} explicitly waives review` })),
+					dir: opt(str({ description: "Existing working directory override, usually one of the project's local repository links. Omit for one-offs without a checkout: the dispatcher uses the project directory" })),
+					review: opt(bool({ description: `Default true: the worker stops at EVAL for human or agent review, including read-only lookups you will review yourself. Set false only when ${user()} explicitly waives review` })),
 				}),
 				// Idempotent by key: a rerun after a restart finds the heading it wrote.
 				replay: "safe",
@@ -488,21 +488,21 @@ export function createDispatchExtension(
 			defineTool({
 				name: "org_queue_plan",
 				description: `Queue a plan of connected tasks for unattended agents when ${user()} asks for a series of tasks on a bigger project, some in parallel and some waiting on others. Each task is a new AUTO heading in its project file, with a :DEPENDS: edge to each task it waits on; the dispatcher launches a task only once every prerequisite is DONE, never at EVAL, and waiting costs nothing. A table of the plan's tasks goes in file. You follow every task: [follow] messages report a failed launch, a blocked agent, HOLD, and each finish. Each task ends at EVAL unless review is waived; review it as for org_queue_task, and close it with org_complete_task when satisfied, which is what lets its dependents start: you are what moves the plan along. A task left at EVAL for ${user()}'s review or decision holds everything after it, so tell ${user()} which tasks are waiting behind it. Report each task as it finishes, and tell ${user()} when the whole plan is done. Use this rather than queueing connected tasks one at a time; for a single task use org_queue_task. Search for existing tasks first, and use org_projects and org_create_project as for org_queue_task. Never use it to resume existing tasks.`,
-				parameters: Type.Object({
-					title: Type.String({ description: "One-line name of the plan, used for its table heading" }),
-					file: Type.String({ description: "Org agenda file for the plan's table, usually the main project's file" }),
-					reason: Type.String({ description: 'One line, written after "Queued by June: " in every task, naming the user, such as `${User()} asked for the launch plan for Boom Boom Baby.`' }),
-					tasks: Type.Array(Type.Object({
-						key: Type.String({ description: "Short plain name for this task within the plan, such as landing or api; letters, digits, - and _" }),
-						file: Type.String({ description: "Org file under ~/org for this task, usually its project's <project>.org" }),
-						title: Type.String({ description: "Concise verb-led heading title, without keyword or tags" }),
-						scope: Type.String({ description: "Outcome, constraints, and success criteria in Org, including what this task hands to the tasks after it; one physical line per paragraph" }),
-						checklist: Type.Array(Type.String(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
-						depends: Type.Optional(Type.Array(Type.String(), { description: "Keys of tasks in this plan that must be DONE first, or id:UUID of existing Org tasks" })),
-						host: Type.Optional(Type.String({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` })),
+				parameters: obj({
+					title: str({ description: "One-line name of the plan, used for its table heading" }),
+					file: str({ description: "Org agenda file for the plan's table, usually the main project's file" }),
+					reason: str({ description: 'One line, written after "Queued by June: " in every task, naming the user, such as `${User()} asked for the launch plan for Boom Boom Baby.`' }),
+					tasks: arr(obj({
+						key: str({ description: "Short plain name for this task within the plan, such as landing or api; letters, digits, - and _" }),
+						file: str({ description: "Org file under ~/org for this task, usually its project's <project>.org" }),
+						title: str({ description: "Concise verb-led heading title, without keyword or tags" }),
+						scope: str({ description: "Outcome, constraints, and success criteria in Org, including what this task hands to the tasks after it; one physical line per paragraph" }),
+						checklist: arr(str(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
+						depends: opt(arr(str(), { description: "Keys of tasks in this plan that must be DONE first, or id:UUID of existing Org tasks" })),
+						host: opt(str({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` })),
 						agent: agentParameter(`Coding agent: ${agents.join(" or ")}; default ${defaultAgent}`),
-						dir: Type.Optional(Type.String({ description: "Existing working directory, usually one of the project's local repository links; omit to use the project directory" })),
-						review: Type.Optional(Type.Boolean({ description: `Default true: the worker stops at EVAL for review. Set false only when ${user()} explicitly waives review for this task` })),
+						dir: opt(str({ description: "Existing working directory, usually one of the project's local repository links; omit to use the project directory" })),
+						review: opt(bool({ description: `Default true: the worker stops at EVAL for review. Set false only when ${user()} explicitly waives review for this task` })),
 					}), { minItems: 1 }),
 				}),
 				// org-dispatch plan derives every ID from the key, so a replay finds the tasks the first run wrote.
@@ -533,11 +533,11 @@ export function createDispatchExtension(
 			...(improve === undefined ? [] : [defineTool({
 				name: "june_improve",
 				description: `When ${user()} says you could not do something they expected, or did it badly, and wants it fixed, or agrees when you offer: queue a task for a coding agent to change your own code, prompt, skills, or tools. It goes in ${improve.file} for ${improveAgent} on ${improveHost}, with ${user()}'s words, your reading of the gap, and the june transcript command for that stretch of conversation, which the agent reads itself. It ends at EVAL for ${user()}'s review, and you follow it as for org_queue_task. Never use it on your own initiative, and not for work on ${user()}'s projects.`,
-				parameters: Type.Object({
-					title: Type.String({ description: "Concise verb-led title for the fix, without keyword or tags, such as \"Let June give timed updates on a task\"" }),
-					complaint: Type.String({ description: `${User()}'s own words about the gap, copied exactly from their messages` }),
-					gap: Type.String({ description: "One line: what you could not do or did badly, and why, as far as you can tell" }),
-					minutes: Type.Optional(Type.Number({ description: "How many minutes ago the relevant exchange began, so the agent reads from there; default 30, at most 1440" })),
+				parameters: obj({
+					title: str({ description: "Concise verb-led title for the fix, without keyword or tags, such as \"Let June give timed updates on a task\"" }),
+					complaint: str({ description: `${User()}'s own words about the gap, copied exactly from their messages` }),
+					gap: str({ description: "One line: what you could not do or did badly, and why, as far as you can tell" }),
+					minutes: opt(num({ description: "How many minutes ago the relevant exchange began, so the agent reads from there; default 30, at most 1440" })),
 				}),
 				replay: "safe",
 				execute: async (args, api, context) => {
@@ -560,13 +560,13 @@ export function createDispatchExtension(
 			defineTool({
 				name: "org_resume_task",
 				description: "When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and deploy off, and select one host. Refuse an active agent. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work.",
-				parameters: Type.Object({
-					file: Type.String({ description: "Org agenda file under ~/org" }),
-					heading: Type.String({ description: "Exact title or id:UUID, as org_read_task accepts" }),
-					expected: Type.Union([Type.Literal("TODO"), Type.Literal("EVAL"), Type.Literal("HOLD")], { description: "Current state just read; a stale request is refused" }),
-					host: Type.String({ description: `Keep the existing host unless the user changes it; otherwise default ${defaultHost}. Allowed: ${hosts.join(", ")}` }),
+				parameters: obj({
+					file: str({ description: "Org agenda file under ~/org" }),
+					heading: str({ description: "Exact title or id:UUID, as org_read_task accepts" }),
+					expected: union([lit("TODO"), lit("EVAL"), lit("HOLD")], { description: "Current state just read; a stale request is refused" }),
+					host: str({ description: `Keep the existing host unless the user changes it; otherwise default ${defaultHost}. Allowed: ${hosts.join(", ")}` }),
 					agent: agentParameter(`Only when ${user()} asks for a different agent: ${agents.join(" or ")}. Omit to keep the task's agent`),
-					note: Type.String({ description: `One line recording ${user()}'s request and any answer or revised scope, naming ${user()} rather than writing you` }),
+					note: str({ description: `One line recording ${user()}'s request and any answer or revised scope, naming ${user()} rather than writing you` }),
 				}),
 				replay: "safe",
 				execute: async (args, api, context) => {
@@ -588,11 +588,11 @@ export function createDispatchExtension(
 			defineTool({
 				name: "org_follow_task",
 				description: `When ${user()} asks for regular updates on a task or the agent working on it, follow the task: every everyMinutes while it is PROG you get a [follow] message to read its agent and report, and you hear when it blocks, holds, or finishes, as for tasks you queue. Works for any Org task, including ones you did not queue. Never sends the agent anything. Following a task again replaces the earlier follow, so everyMinutes 0 stops the timed updates and keeps the rest.`,
-				parameters: Type.Object({
-					file: Type.String({ description: "Path under ~/org, as org_search returns it" }),
-					heading: Type.String({ description: "Exact title, outline path, or id:UUID, as org_read_task accepts" }),
-					everyMinutes: Type.Number({ description: "Minutes between updates, at least 2; 0 stops timed updates" }),
-					hours: Type.Optional(Type.Number({ description: "How long timed updates last, 1 to 24; default 4" })),
+				parameters: obj({
+					file: str({ description: "Path under ~/org, as org_search returns it" }),
+					heading: str({ description: "Exact title, outline path, or id:UUID, as org_read_task accepts" }),
+					everyMinutes: num({ description: "Minutes between updates, at least 2; 0 stops timed updates" }),
+					hours: opt(num({ description: "How long timed updates last, 1 to 24; default 4" })),
 				}),
 				// A replay finds the follow its first run started, by request key.
 				replay: "safe",
@@ -624,9 +624,9 @@ export function createDispatchExtension(
 			defineTool({
 				name: "org_complete_task",
 				description: `After reading the whole task, outcome, and verification evidence, mark your own EVAL task DONE through org-edit. Use only when the request is satisfied and no decision, approval, or review from ${user()} remains. You must have created the task; merely resuming ${user()}'s task does not make it yours. Leave incomplete or uncertain work, and work needing ${user()}'s review, at EVAL and report what remains. Report the reviewed result to ${user()} after closing. Refuses other states; an already DONE task is unchanged on replay.`,
-				parameters: Type.Object({
-					file: Type.String({ description: "Org agenda file under ~/org" }),
-					heading: Type.String({ description: "Exact title or id:UUID of the EVAL task you just reviewed" }),
+				parameters: obj({
+					file: str({ description: "Org agenda file under ~/org" }),
+					heading: str({ description: "Exact title or id:UUID of the EVAL task you just reviewed" }),
 				}),
 				replay: "safe",
 				execute: async (args) => ({ output: [{ type: "text", text: JSON.stringify(await dispatch.complete(args.file, args.heading), null, 1) }] }),
@@ -634,7 +634,7 @@ export function createDispatchExtension(
 			defineTool({
 				name: "org_dispatch_now",
 				description: `Run the dispatcher on ${config.herdr.host} now and show what it would launch. Queueing already starts it; use this to retry a task that did not launch.`,
-				parameters: Type.Object({}),
+				parameters: obj({}),
 				// Starting the dispatcher twice is harmless: it holds a lock and skips running tasks.
 				replay: "safe",
 				execute: async () => ({ output: [{ type: "text", text: await dispatch.nudge() }] }),

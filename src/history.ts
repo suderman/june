@@ -29,10 +29,10 @@ export function parseSince(text: string, now = new Date()): number | undefined {
 	return Number.isNaN(date) ? undefined : date;
 }
 
-export function renderHistory(entries: readonly any[], options: { detail?: boolean; user?: string; omitted?: number } = {}): string {
+export function renderHistory(entries: readonly any[], options: { detail?: boolean; user?: string; earlier?: boolean } = {}): string {
 	const { detail = false, user = "user" } = options;
 	const times = entryTimes(entries);
-	const lines: string[] = options.omitted ? [`(${options.omitted} earlier entries not shown)`] : [];
+	const lines: string[] = options.earlier ? ["(earlier entries not shown)"] : [];
 	let day = "";
 	/** Inside a private look, which the plain view shows only as her message to the user, if she sent one. */
 	let looking = false;

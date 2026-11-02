@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
-import { createLogger } from "pi-durable-telegram";
+import { createLogger } from "./runtime.ts";
 import { daemonHost, loadConfig, paths, readConfigFile, readEnvFiles, shortHostname } from "./config.ts";
 import { startDaemon } from "./daemon.ts";
 import { parseSince, renderHistory } from "./history.ts";
@@ -177,8 +177,8 @@ async function transcript(p: ReturnType<typeof paths>, args: string[], json: boo
 		console.error(reply.type === "error" ? reply.message : "unexpected reply");
 		return 1;
 	}
-	if (json) console.log(JSON.stringify({ omitted: reply.omitted, entries: reply.entries }));
-	else console.log(renderHistory(reply.entries, { detail, user: String(readConfigFile(p).user?.name ?? "") || "user", omitted: reply.omitted }));
+	if (json) console.log(JSON.stringify({ earlier: reply.earlier, entries: reply.entries }));
+	else console.log(renderHistory(reply.entries, { detail, user: String(readConfigFile(p).user?.name ?? "") || "user", earlier: reply.earlier }));
 	return 0;
 }
 
@@ -206,7 +206,6 @@ function formatStatus(s: Status): string {
 		`code ${s.source}`,
 		`model ${s.model} (${s.thinkingLevel})`,
 		`conversation ${s.conversation}: ${s.entries} entries, ${s.busy ? "working" : "idle"}${s.background ? `, ${s.background} in the background` : ""}${s.queued ? `, ${s.queued} queued` : ""}`,
-		`telegram ${s.telegram}`,
 		`tools ${s.tools.join(", ")}`,
 	].join("\n");
 }
@@ -250,14 +249,7 @@ async function doctor(): Promise<number> {
 		const reply = await client.request({ op: "status", requestId: randomUUID() });
 		client.close();
 		if (reply.type !== "status") throw new Error("bad status reply");
-		return `pid ${reply.status.pid}, telegram ${reply.status.telegram}`;
-	});
-	check("telegram", () => {
-		const tg = config!.telegram;
-		if (tg === undefined) return "not configured (no TELEGRAM_ALLOWED_USERS in this shell; the service may have it)";
-		const has = readEnvFiles(config!.envFiles)[tg.tokenEnv] ?? process.env[tg.tokenEnv];
-		if (!has) throw new Error(`${tg.tokenEnv} is not set for this shell (the service may still have it)`);
-		return `${tg.allowedUserIds.length} allowed user(s), token in ${tg.tokenEnv}`;
+		return `pid ${reply.status.pid}`;
 	});
 	check("herdr", async () => {
 		const out = await runProcess(["herdr", "--session", config!.herdr.session, "status", "server"], 5000);

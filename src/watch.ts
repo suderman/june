@@ -8,10 +8,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import type { Conversation, Harness, RegistrySnapshot, TaskId } from "@earendil-works/pi-durable";
-import type { Logger } from "pi-durable-telegram";
+import type { Logger } from "./runtime.ts";
 import type { Config } from "./config.ts";
 import { within } from "./heartbeat.ts";
-import { deliverIn, type Notice, noticeSurface, submitNotice } from "./notify.ts";
+import { type Notice, submitNotice } from "./notify.ts";
 import { Follows } from "./tools/follow.ts";
 import type { Herdr, Run } from "./tools/herdr.ts";
 import type { Org } from "./tools/org.ts";
@@ -113,7 +113,7 @@ export function createWatch(options: {
 					const mine = new Set<string>();
 					for (const [id, task] of Object.entries(ids)) {
 						const record = await tx.task(task as unknown as TaskId);
-						if (record !== undefined && ["pending", "running", "waiting"].includes(record.state.status)) mine.add(id);
+						if (record !== undefined && record.state.status !== "terminal") mine.add(id);
 					}
 					return mine;
 				}, BG);
@@ -157,14 +157,8 @@ export function createWatch(options: {
 				const notice: Notice = { requestId: `watch:${at.getTime()}`, content: `[watch] ${message(pending)}`, source: "watch", label: `${pending.length} dispatched task${pending.length === 1 ? "" : "s"} changed` };
 				// The ledger first: a crash after it loses one notice; one before it would repeat it.
 				save({ ...ledger, pending: {}, notified: at.getTime() });
-				const surface = await harness.commit(async (tx) => {
-					const registry = options.registry.snapshot();
-					const where = await noticeSurface(tx, registry, root.id);
-					if (where === "telegram") await deliverIn(tx, registry, root.id, notice);
-					return where;
-				}, BG);
-				if (surface === "terminal") await submitNotice(root as never, notice, BG);
-				log.info("watch_notified", { count: pending.length, surface });
+				await submitNotice(root as never, notice, BG);
+				log.info("watch_notified", { count: pending.length });
 			} finally {
 				busy = false;
 			}
