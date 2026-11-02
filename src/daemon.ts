@@ -11,6 +11,7 @@ import {
 	createRegistry,
 	type Extension,
 	Harness,
+	LiveDoc,
 	type SnapshotEvent,
 	watchEvents,
 } from "@earendil-works/pi-durable";
@@ -178,6 +179,20 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				});
 		} else harness.resume();
 		const stopPatter = patter?.start(harness, root);
+		// Focus lasts for the turn June tied her hair up in: once the main thread goes quiet, she lets it down again.
+		const focus = config.model.focus;
+		const unfocus =
+			focus &&
+			setInterval(
+				() =>
+					void (async () => {
+						const current = (await root.agent(BG)).model;
+						if (current?.modelId !== focus.modelId || current?.provider !== focus.provider) return;
+						if ((await harness.snapshot(LiveDoc, root.id, BG))?.run !== undefined) return;
+						await root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
+					})().catch((error) => log.warn("unfocus_failed", { error: (error as Error).message })),
+				1000,
+			);
 		const stopSituation = situation.start();
 		const stopReflection = config.reflection.enabled
 			? createReflection({ models: options.models, model: config.model.chat, config: config.reflection, window: { start: config.rhythm.sleep, end: config.rhythm.wake }, files: prompt.files, people: config.org.people, state: paths.state, log, ...options.reflectionClock }).start(harness, root)
@@ -256,6 +271,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				for (const socket of clients) socket.destroy();
 				await closed;
 				stopPatter?.();
+				if (unfocus) clearInterval(unfocus);
 				stopReflection?.();
 				stopSituation();
 				stopHeartbeat?.();

@@ -279,7 +279,7 @@ export function createPatter(options: {
 			if (handed !== undefined && !current.seen.has(handed)) out.push(handed);
 			out.push(fresh.length > 0 ? `${current.lines.length === 0 ? "Steps so far" : "New since your last line"}:\n${fresh.map((c) => `- ${c}`).join("\n")}` : current.lines.length === 0 ? "No steps yet." : `Nothing new since your last line, so leave the work and its progress alone this time: talk about the topic, ${user()}, or the wait.`);
 			if (running.length > 0) out.push(`Still running:\n${running.join("\n")}`);
-			out.push(current.lines.length === 0 ? "The work is just starting. Open with a quick line about getting stuck in." : `The wait so far: ${waited(Date.now() - current.start)}. Your next line.`);
+			out.push(current.lines.length === 0 ? "The work is just starting. Open with a quick line that picks up what they are after or what you two were just saying, rather than announcing that the work has begun." : `The wait so far: ${waited(Date.now() - current.start)}. Your next line.`);
 			return { update: out.join("\n\n"), steps: handed === undefined ? steps : [...steps, handed], resumed: current.resumed };
 		};
 

@@ -127,6 +127,24 @@ test("June ties her hair up to focus and lets it down to relax, and work can foc
 	assert.deepEqual(used.slice(3).sort(), ["main:faux-1", "main:faux-1", "main:faux-1", "worker:faux-2"], "a focused brief leaves the main thread relaxed");
 });
 
+test("her hair comes down when the turn ends", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const faux = twoModels();
+	const used: string[] = [];
+	const step = (fn: () => ReturnType<typeof fauxAssistantMessage>) => (_c: unknown, _o: unknown, _s: unknown, model: { id: string }) => {
+		used.push(model.id);
+		return fn();
+	};
+	faux.setResponses([step(() => call("focus", { on: true, reason: "heads down" })), step(() => fauxAssistantMessage("Focused.")), step(() => fauxAssistantMessage("Ha."))]);
+	const daemon = await openTestDaemon({ ...tmp, faux, config: focusConfig });
+	t.after(() => daemon.close());
+	await ask(tmp.paths.socket, "write it carefully");
+	await until(async () => (await daemon.root.agent(BG)).model?.modelId === "faux-1");
+	await ask(tmp.paths.socket, "ha, nice");
+	assert.deepEqual(used, ["faux-1", "faux-2", "faux-1"], "the next turn starts relaxed");
+});
+
 test("a restart and /new each let her hair down", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
@@ -134,7 +152,6 @@ test("a restart and /new each let her hair down", async (t) => {
 	faux.setResponses([call("focus", { on: true, reason: "heads down" }), fauxAssistantMessage("Focused.")]);
 	let daemon = await openTestDaemon({ ...tmp, faux, config: focusConfig });
 	await ask(tmp.paths.socket, "focus");
-	assert.equal((await daemon.root.agent(BG)).model?.modelId, "faux-2");
 	await daemon.close();
 	daemon = await openTestDaemon({ ...tmp, faux, config: focusConfig });
 	t.after(() => daemon.close());
@@ -142,7 +159,6 @@ test("a restart and /new each let her hair down", async (t) => {
 
 	faux.setResponses([call("focus", { on: true, reason: "heads down" }), fauxAssistantMessage("Focused.")]);
 	await ask(tmp.paths.socket, "focus again");
-	assert.equal((await daemon.root.agent(BG)).model?.modelId, "faux-2");
 	const client = await Client.open(tmp.paths.socket);
 	t.after(() => client.close());
 	await client.request({ op: "command", requestId: "n", name: "new" });

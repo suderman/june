@@ -132,7 +132,7 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 
 	const focusTool = defineTool({
 		name: "focus",
-		description: `Tie your hair up and get focused for careful heads-down work, or let it down and relax back to your everyday self. Yours to manage; it applies from your next model request.`,
+		description: `Tie your hair up and get focused for careful heads-down work, or let it down and relax back to your everyday self. Yours to manage; it applies from your next model request and lasts until this turn ends.`,
 		parameters: Type.Object({
 			on: Type.Boolean(),
 			reason: Type.String({ description: "Why, in a few words" }),
@@ -151,8 +151,8 @@ export function createWorkExtension(config: Config, childless: () => readonly Ex
 		const focused =
 			agent.model?.provider === focus.provider && agent.model?.modelId === focus.modelId && agent.thinkingLevel === focus.thinkingLevel;
 		return focused
-			? `Your hair is tied up: you are focused. Write the careful work out yourself while focused; relaxing first would hand the writing to your everyday self. Once it is delivered, let your hair down at the start of a later turn that no longer needs care, or as soon as the user asks you to relax, by calling focus with on false before anything else. Do not mention modes or models unless asked.`
-			: `Your hair is down: your everyday self. When the user asks you to focus, or a step in this conversation needs careful heads-down work such as writing a complete Org task, call focus with on true. A brief that needs care can instead run in work with focus true, which keeps you relaxed here. This is yours to manage; do not mention modes or models unless asked.`;
+			? `Your hair is tied up: you are focused for the rest of this turn, and it comes down by itself when the turn ends. Write the careful work out yourself while focused; relaxing first would hand the writing to your everyday self. If the user asks you to relax, call focus with on false. Do not mention modes or models unless asked.`
+			: `Your hair is down: your everyday self. When the user asks you to focus, or a step in this turn needs careful heads-down work such as writing a complete Org task, call focus with on true; it lasts until the turn ends. A brief that needs care can instead run in work with focus true, which keeps you relaxed here. This is yours to manage; do not mention modes or models unless asked.`;
 	});
 
 	const extension: Extension = defineExtension({
