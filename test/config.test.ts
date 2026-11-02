@@ -59,7 +59,10 @@ test("the rhythm, reflection, heartbeat, and patter timing have defaults, take o
 	};
 	const plain = loadConfig({ ...tmp.paths, config: await layer("plain", {}) });
 	assert.deepEqual(plain.rhythm, { wake: "05:00", quiet: "22:00", sleep: "01:00" });
-	assert.deepEqual(plain.reflection, { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"] });
+	assert.deepEqual(plain.reflection, { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"], bitcoin: false }, "bitcoin is off unless configured");
+	assert.equal(loadConfig({ ...tmp.paths, config: await layer("bitcoin", { reflection: { bitcoin: true } }) }).reflection.bitcoin, true);
+	const yes = await layer("yes", { reflection: { bitcoin: "yes" } });
+	assert.throws(() => loadConfig({ ...tmp.paths, config: yes }), /reflection\.bitcoin must be true or false/);
 	assert.deepEqual(plain.heartbeat, { enabled: false, everyMinutes: 60, chattingMinutes: 15 }, "off unless configured");
 	assert.equal(plain.patter.openAfterSeconds, 8);
 	const tuned = loadConfig({ ...tmp.paths, config: await layer("tuned", { herdr: { allowPrompt: false }, rhythm: { sleep: "00:30" }, heartbeat: { enabled: true, everyMinutes: 30 }, patter: { openAfterSeconds: 15 } }) });

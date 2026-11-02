@@ -84,6 +84,8 @@ export type Config = {
 		readonly recentDays: number;
 		/** The longer digests written after the nightly pass on each period's last day, such as ["week", "month"]. */
 		readonly periods: readonly Period[];
+		/** Fetch bitcoin's price and its day and week change for the nightly mood, since the user follows it; off by default. */
+		readonly bitcoin?: boolean;
 	};
 	/** June's periodic private look at the moment, which she may turn into a message to the user, or not. */
 	readonly heartbeat: {
@@ -156,7 +158,7 @@ const DEFAULTS = {
 	org: { root: "~/org", agendaFiles: "~/.local/state/org-dispatch/agenda-files", people: "~/org/people.org" },
 	herdr: { session: "default", hosts: {}, allowPrompt: true },
 	rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
-	reflection: { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"] },
+	reflection: { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"], bitcoin: false },
 	heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
 	mail: { enabled: false, query: "tag:inbox and tag:unread", accounts: {} as Record<string, string> },
 	watch: { enabled: false, gapMinutes: 10 },
@@ -238,6 +240,7 @@ function reflection(given: Config["reflection"] & { start?: unknown; end?: unkno
 	if ("start" in given || "end" in given) throw new Error("reflection.start and end are gone: the reflection runs from rhythm.sleep to rhythm.wake");
 	if (!Number.isInteger(given.recentDays) || given.recentDays < 0) throw new Error("reflection.recentDays must be a whole number, 0 or more");
 	if (!Array.isArray(given.periods) || given.periods.some((p) => !Object.hasOwn(DIGEST, p))) throw new Error(`reflection.periods may hold only ${Object.keys(DIGEST).join(", ")}`);
+	if (typeof given.bitcoin !== "boolean") throw new Error("reflection.bitcoin must be true or false");
 	return given;
 }
 
