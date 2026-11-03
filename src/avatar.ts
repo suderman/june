@@ -51,6 +51,12 @@ export type Asset = { file: string; play: Playback; frames?: number; fps?: numbe
  */
 export const FRAMINGS = ["close-up", "head", "bust", "waist", "full"] as const;
 export type Framing = (typeof FRAMINGS)[number];
+/**
+ * What a pose can show June doing, rather than how she feels: busy before her first words, at work with tools or
+ * briefs, or keeping an eye on dispatched tasks. Chosen from runtime state, never by a model.
+ */
+export const POSE_ACTIVITIES = ["thinking", "working", "watching"] as const;
+export type PoseActivity = (typeof POSE_ACTIVITIES)[number];
 /** Marks a client may draw beside a pose's face to reinforce it; never baked into the art. */
 export const MARKS = ["sparkle", "heart", "sweat", "vein", "steam", "emphasis"] as const;
 export type Mark = (typeof MARKS)[number];
@@ -61,12 +67,14 @@ export type Mark = (typeof MARKS)[number];
  * expression ties it to the vocabulary, so an unknown name or a missing pose falls back through the expression chain.
  * Geometry is in fractions of the image: `face` is the box no balloon may cover, `mouth` the point tails aim at.
  * `facing` is where she looks; a client mirrors a pose to face the text unless `mirror` is false (lettering or a prop that
- * must not flip). `framings` lists the crops the image can fill; `marks` are decorations that suit it.
+ * must not flip). `framings` lists the crops the image can fill; `marks` are decorations that suit it. `activity` marks a
+ * pose that shows what she is doing: a client shows it only while she is doing that, never as a reaction.
  */
 export type Pose = {
 	file: string;
 	size: [number, number];
 	expression: Expression;
+	activity?: PoseActivity;
 	description?: string;
 	face: [number, number, number, number];
 	mouth: [number, number];
@@ -123,6 +131,7 @@ function poseErrors(data: unknown, options: { base?: boolean }): string[] {
 			errors.push(`${at}: file must be a .png, .webp, or .svg path inside the set`);
 		if (!Array.isArray(p?.size) || p.size.length !== 2 || !p.size.every(positiveInt)) errors.push(`${at}: size must be [width, height] in pixels`);
 		if (typeof p?.expression !== "string" || !isExpression(p.expression)) errors.push(`${at}: expression must be in the vocabulary`);
+		if (p?.activity !== undefined && !(POSE_ACTIVITIES as readonly string[]).includes(p.activity)) errors.push(`${at}: activity must be one of ${POSE_ACTIVITIES.join(", ")}`);
 		const face = p?.face;
 		if (!Array.isArray(face) || face.length !== 4 || !face.every(fraction) || !(face[2]! > 0 && face[3]! > 0) || face[0]! + face[2]! > 1 || face[1]! + face[3]! > 1)
 			errors.push(`${at}: face must be [x, y, width, height] inside the image, as fractions`);
@@ -138,7 +147,7 @@ function poseErrors(data: unknown, options: { base?: boolean }): string[] {
 		if (p?.description !== undefined && typeof p.description !== "string") errors.push(`${at}: description must be text`);
 	}
 	const names = Object.values(poses);
-	if (options.base && names.length > 0 && !names.some((p) => p?.expression === "idle")) errors.push("a base set with poses must have an idle pose");
+	if (options.base && names.length > 0 && !names.some((p) => p?.expression === "idle" && p.activity === undefined)) errors.push("a base set with poses must have an idle pose");
 	return errors;
 }
 

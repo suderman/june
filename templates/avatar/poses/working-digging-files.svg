@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1300" width="1000" height="1300">
+<path d="M 270 1300 C 220 900 260 260 520 230 C 780 260 820 900 770 1300 Z" fill="#45291c"/>
+<rect x="470" y="585" width="100" height="110" fill="#f0c3a8" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 140 1300 C 150 790 290 680 520 680 C 750 680 890 790 900 1300 Z" fill="#ee7fa4" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 440 684 Q 520 745 600 684" fill="#f0c3a8" stroke="#2a1f22" stroke-width="6"/>
+<g transform="rotate(0 520 430)">
+<ellipse cx="508" cy="430" rx="150" ry="175" fill="#f9d9c4" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 330 470 C 320 230 460 200 540 215 C 670 225 730 300 710 470 C 670 360 610 320 536 300 C 510 360 430 380 370 360 C 350 400 345 440 330 470 Z" fill="#5b3a29" stroke="#2a1f22" stroke-width="6"/>
+<ellipse cx="411" cy="500" rx="30" ry="14" fill="#f39aa6" opacity="0.55"/><ellipse cx="581" cy="500" rx="30" ry="14" fill="#f39aa6" opacity="0.55"/>
+<ellipse cx="434" cy="445" rx="24" ry="26" fill="#6e8f4a" stroke="#2a1f22" stroke-width="5"/><circle cx="434" cy="455" r="11" fill="#2b2a1e"/><path d="M 406 437 Q 434 425 462 437" fill="#f9d9c4" stroke="#2a1f22" stroke-width="5"/><ellipse cx="558" cy="445" rx="24" ry="26" fill="#6e8f4a" stroke="#2a1f22" stroke-width="5"/><circle cx="558" cy="455" r="11" fill="#2b2a1e"/><path d="M 530 437 Q 558 425 586 437" fill="#f9d9c4" stroke="#2a1f22" stroke-width="5"/>
+<ellipse cx="496" cy="534" rx="13" ry="17" fill="#b23a48" stroke="#2a1f22" stroke-width="5"/>
+<path d="M 348 450 A 172 205 0 0 1 692 450" fill="none" stroke="#2b2d33" stroke-width="26"/><rect x="660" y="395" width="56" height="110" rx="24" fill="#2b2d33"/><rect x="324" y="395" width="56" height="110" rx="24" fill="#2b2d33"/><path d="M 688 495 Q 670 585 571 560" fill="none" stroke="#2b2d33" stroke-width="12" stroke-linecap="round"/><circle cx="566" cy="560" r="16" fill="#2b2d33"/>
+</g>
+
+<ellipse cx="320" cy="980" rx="52" ry="44" fill="#f9d9c4" stroke="#2a1f22" stroke-width="6"/><ellipse cx="720" cy="960" rx="52" ry="44" fill="#f9d9c4" stroke="#2a1f22" stroke-width="6"/><rect x="330" y="1010" width="360" height="60" rx="6" fill="#f2c76b" stroke="#2a1f22" stroke-width="5"/><rect x="336" y="976" width="360" height="60" rx="6" fill="#7fb0e0" stroke="#2a1f22" stroke-width="5"/><rect x="342" y="942" width="360" height="60" rx="6" fill="#e88f8f" stroke="#2a1f22" stroke-width="5"/><rect x="348" y="908" width="360" height="60" rx="6" fill="#9fd39a" stroke="#2a1f22" stroke-width="5"/><path d="M 350 880 L 530 820 L 710 880 L 530 910 Z" fill="#fffdf6" stroke="#2a1f22" stroke-width="5"/><path d="M 410 868 L 510 842 M 560 845 L 660 870" stroke="#7c8aa8" stroke-width="7" stroke-linecap="round"/>
+<text x="500" y="1260" font-family="sans-serif" font-size="40" font-weight="700" text-anchor="middle" fill="#3a1f2a" opacity="0.75">working-digging-files · placeholder</text>
+</svg>
