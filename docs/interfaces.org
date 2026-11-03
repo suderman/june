@@ -39,7 +39,50 @@ Quickshell: Qt/QML with native layer-shell and Hyprland integration, pre-1.0 (0.
 
 Set aside: AGS/Astal (GTK4, TypeScript and CSS), whose momentum has moved to Quickshell, and a web view in a GTK4 layer-shell host, which would be the most custom option. An ordinary Electron or Tauri window cannot take the overlay layer.
 
-A half-day Quickshell spike retires the remaining risks before the build: overlay above a fullscreen video, keyboard focus in and out, the window beneath staying active, multi-monitor, toggle by bind, memory at rest, an animated avatar frame, and a WebSocket or socket connection.
+A half-day Quickshell spike retired the remaining risks before the build; its findings follow.
+
+** Spike findings
+Run on 2026-11-03 with Quickshell 0.3.0 and Hyprland 0.57.1 on a laptop with an external monitor, beside the user's own Quickshell shell, attached to the daemon on another host. Every risk came out in Quickshell's favour.
+
+- Layer and focus: a =PanelWindow= with =WlrLayershell.layer: WlrLayer.Overlay= and =WlrKeyboardFocus.Exclusive= draws above a fullscreen mpv video, takes every key while shown, and returns focus to the previous window when hidden. =hyprctl activewindow= keeps naming the window beneath while the user types in the overlay, so desktop context can be read at any time.
+- Variants: the full variant is one panel anchored to all four edges with a translucent backdrop and the card centred; the corner variant is a second panel anchored bottom and right with a transparent background. Both share one QML component and one transcript model, so switching keeps scrollback and draft.
+- Monitor: picking the screen from =Hyprland.focusedMonitor= on each summon puts the overlay on the monitor in use.
+- Toggle: an =IpcHandler= target called from a Hyprland bind (=qs -p DIR ipc call june toggle=) toggles a resident process. Avoid naming IPC functions =show=, which =qs ipc call= does not dispatch; =open= and =close= work.
+- Bind: the user's keyd setup sends F13 for a lone tap of left Alt. Hyprland sees it as =code:191= (XKB names it XF86Tools) with keyd's guard modifier, so the bind needs =ignore_mods = true=. Rofi uses the same tap to cycle modes, so the bind is non-consuming and returns early while a =rofi= layer is mapped; the focused application also receives the key, which mpv logs as an unbound =TOOLS= key.
+- Animation: =AnimatedImage= plays a GIF; pausing it while hidden costs nothing.
+- Memory: about 125 MB resident while hidden and attached, as a separate process.
+- Connection: Quickshell's =Socket= with a =SplitParser= speaks the newline-delimited protocol directly; attach, the folded view's reset and changes, streaming, and =submit= with source =gui= all worked through a Unix socket forwarded from the daemon's host with =ssh -L=. QtWebSockets 6.11.2 from nixpkgs loads inside Quickshell when put on =QML2_IMPORT_PATH=, since it is built against the same qtbase; it is not in Quickshell's own closure.
+- Packaging: the QML directory copied to the store and a =writeShellApplication= wrapper that adds QtWebSockets to =QML2_IMPORT_PATH= and runs =qs -p= on the store path loads from the read-only store. The wrapper should take =hyprctl= from the running system rather than a pinned Hyprland, whose version may not match the compositor. A Home Manager user service on =graphical-session.target= can keep it resident.
+- For the build: the transcript has to follow its end when the last item grows, not only when one is added, or a streaming reply runs below the fold.
+
+** Look: a comic strip
+Chosen on 2026-11-03 after two rounds of sketches. The terminal client already covers the console look, so the overlay goes the other way: a full-colour comic strip with an expressive, reactive avatar and animated lettering. The art is generated, so colour costs nothing extra; it starts as pre-generated images chosen by name from the expression vocabulary.
+
+- Full variant: a vertical strip over the dimmed desktop. The newest exchange is the largest panel, with June's portrait and her balloon; earlier panels scroll up above it. The user types into a balloon at the bottom.
+- Subtle variant: a small chibi June in a corner panel with one balloon.
+
+Every folded-view item has one comic device:
+
+| Item                         | Device                                                                      |
+|------------------------------+-----------------------------------------------------------------------------|
+| assistant                    | speech balloon with its tail to her; grows as the reply streams              |
+| user                         | balloon from off-panel, tail out of the frame; a small tag names the source |
+| patter                       | thought bubble; drifts off when the real reply lands                        |
+| tool                         | caption box in the panel corner; a failure keeps its first line             |
+| state.background             | an inset "meanwhile" panel with speed lines                                 |
+| note, error                  | burst balloon, same plain words                                             |
+| speaking (voice, later)      | voice balloon; spoken words darken, stopping leaves the rest pale          |
+| offline (client state)       | the panel greys, an ellipsis balloon with a dashed edge                     |
+
+Expression symbols drawn over the portrait make a beat readable at a glance: an anger vein for =indignant=, a sweat drop for =exasperated=, sparkles for =smug= and =delighted=, blush hatching for =bashful=, gloom lines for =pout=, and "!?" for =surprised=.
+
+Motion rules:
+- Ink, not glow: balloon outlines draw, captions wipe in, faces cut between images rather than fade. No blur or glass.
+- Text arrives a word at a time at the streaming pace; words the reply stresses land in display lettering with a small bounce.
+- Big moves (a shake, a bounce) only on the rare expressions, so they still surprise.
+- Serious and gentle replies get no sound effects or symbols, as =SOUL.org= drops the teasing then. Reduced motion keeps only the cuts.
+
+Until the art exists, labelled placeholders stand in for the portrait; the strip, balloons, captions, and panels do not wait on it.
 
 ** Desktop context and taking over, later
 Read =hyprctl activewindow -j= (class, title, workspace); offer an explicit screenshot of the active window with =grim=; read the primary selection with =wl-paste --primary=. Each is sent only when the user asks, and framed as outside content as mail already is.
