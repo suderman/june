@@ -36,6 +36,7 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 		rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
 		reflection: { enabled: false, quietMinutes: 60, recentDays: 3, periods: [] },
 		heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
+		looseEnds: { enabled: false, at: "20:30" },
 		mail: { enabled: false, query: "tag:inbox and tag:unread", accounts: {} },
 		watch: { enabled: false, gapMinutes: 10 },
 		patter: { openAfterSeconds: 8, gapsSeconds: [25] },
@@ -71,6 +72,7 @@ export async function openTestDaemon(options: {
 	focusHoldMs?: number;
 	reflectionClock?: { now: () => Date; tickMs: number };
 	heartbeatClock?: { now: () => Date; tickMs: number };
+	looseEndsClock?: { now: () => Date; tickMs: number };
 	mailRun?: (argv: readonly string[]) => Promise<string>;
 	watchClock?: { now: () => Date; tickMs: number; home: string; run: (argv: readonly string[]) => Promise<string> };
 }): Promise<Daemon> {
@@ -88,6 +90,7 @@ export async function openTestDaemon(options: {
 		...(options.focusHoldMs !== undefined ? { focusHoldMs: options.focusHoldMs } : {}),
 		...(options.reflectionClock ? { reflectionClock: options.reflectionClock } : {}),
 		...(options.heartbeatClock ? { heartbeatClock: options.heartbeatClock } : {}),
+		...(options.looseEndsClock ? { looseEndsClock: options.looseEndsClock } : {}),
 		...(options.mailRun ? { mailRun: options.mailRun } : {}),
 		...(options.watchClock ? { watchClock: options.watchClock } : {}),
 	});

@@ -32,6 +32,7 @@ import { validateImages } from "./images.ts";
 import { describeFiles, saveFiles, startInboxExpiry, validateFiles } from "./inbox.ts";
 import { createMemoryExtension } from "./memory.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
+import { createLooseEnds } from "./loose.ts";
 import { createReflection } from "./reflect.ts";
 import { createWatch } from "./watch.ts";
 import { readLines, type Reply, type Request, SOURCES, type Status, writeLine } from "./protocol.ts";
@@ -68,6 +69,8 @@ export type DaemonOptions = {
 	readonly reflectionClock?: { now: () => Date; tickMs: number };
 	/** Tests set the clock and loop speed of the heartbeat. */
 	readonly heartbeatClock?: { now: () => Date; tickMs: number };
+	/** Tests set the clock and loop speed of the evening look for loose ends. */
+	readonly looseEndsClock?: { now: () => Date; tickMs: number };
 	/** Tests answer notmuch themselves. */
 	readonly mailRun?: Run;
 	/** Tests set the watch's clock, loop speed, home directory for local run records, and commands. */
@@ -192,6 +195,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 					...options.heartbeatClock,
 				}).start(harness, root)
 			: undefined;
+		const stopLooseEnds = config.looseEnds.enabled
+			? createLooseEnds({
+					config: config.looseEnds,
+					quiet: config.rhythm.quiet,
+					chattingMinutes: config.heartbeat.chattingMinutes,
+					files: prompt.files,
+					state: paths.state,
+					log,
+					...options.looseEndsClock,
+				}).start(harness, root)
+			: undefined;
 
 		const watchRun = options.watchClock?.run ?? runProcess;
 		const stopWatch =
@@ -259,6 +273,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				stopReflection?.();
 				stopSituation();
 				stopHeartbeat?.();
+				stopLooseEnds?.();
 				stopWatch?.();
 				stopInbox();
 				await harness.close(BG);

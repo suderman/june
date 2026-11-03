@@ -94,6 +94,11 @@ export type Config = {
 		/** The user wrote this recently: they are chatting, so raising something is just her next line. */
 		readonly chattingMinutes: number;
 	};
+	/**
+	 * June's evening look for loose ends: once a day from `at`, local "HH:MM", until `rhythm.quiet`, she asks about a few
+	 * things from the day whose outcome she never heard, so the nightly reflection can close the day; off by default.
+	 */
+	readonly looseEnds: { readonly enabled: boolean; readonly at: string };
 	/** New mail for the heartbeat, from a notmuch query; accounts name each maildir folder, such as {"work": "work"}. */
 	readonly mail: { readonly enabled: boolean; readonly query: string; readonly accounts: Readonly<Record<string, string>> };
 	/** Dispatched tasks June did not queue, on `dispatch.hosts`: news reaches her in waking hours, at most every `gapMinutes`. */
@@ -160,6 +165,7 @@ const DEFAULTS = {
 	rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
 	reflection: { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"], bitcoin: false },
 	heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
+	looseEnds: { enabled: false, at: "20:30" },
 	mail: { enabled: false, query: "tag:inbox and tag:unread", accounts: {} as Record<string, string> },
 	watch: { enabled: false, gapMinutes: 10 },
 	patter: { openAfterSeconds: 8, gapsSeconds: [25, 25, 25, 40, 60, 90, 120, 180] },
@@ -211,6 +217,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 		rhythm: rhythm({ ...DEFAULTS.rhythm, ...raw.rhythm }),
 		reflection: reflection({ ...DEFAULTS.reflection, ...raw.reflection }),
 		heartbeat: heartbeat({ ...DEFAULTS.heartbeat, ...raw.heartbeat }),
+		looseEnds: looseEnds({ ...DEFAULTS.looseEnds, ...raw.looseEnds }),
 		mail: mail({ ...DEFAULTS.mail, ...raw.mail }),
 		watch: watch({ ...DEFAULTS.watch, ...raw.watch }),
 		patter: patterTiming({ ...DEFAULTS.patter, ...raw.patter }),
@@ -248,6 +255,12 @@ function heartbeat(given: Config["heartbeat"]): Config["heartbeat"] {
 	if (!(typeof given.everyMinutes === "number" && given.everyMinutes >= 5)) throw new Error("heartbeat.everyMinutes must be 5 or more");
 	if (!(typeof given.chattingMinutes === "number" && given.chattingMinutes >= 0)) throw new Error("heartbeat.chattingMinutes must be 0 or more");
 	return given;
+}
+
+function looseEnds(given: Config["looseEnds"]): Config["looseEnds"] {
+	if (typeof given.enabled !== "boolean") throw new Error("looseEnds.enabled must be true or false");
+	if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(given.at))) throw new Error(`looseEnds.at must be HH:MM, not ${given.at}`);
+	return { enabled: given.enabled, at: given.at };
 }
 
 function dispatch(given: Partial<Config["dispatch"]> | undefined): Config["dispatch"] {
