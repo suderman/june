@@ -86,10 +86,11 @@ test("the daemon serves history without a view: the newest entries, or those sin
 	assert.equal(all.earlier, false, "everything fits");
 	const text = renderHistory(all.entries);
 	assert.match(text, /user \(cli\): first message\n.*June thinking: Looking it up\n.*-> no_such_tool: query=x\n.*<- no_such_tool failed: .+\n.*June: Could not look it up\.\n.*user \(cli\): second message\n.*June: Second answer\.$/s);
-	const last = await history({ limit: 2 });
-	assert.equal(last.entries.length, 2);
+	// Three: the second request also carries a system entry, when the day's greeting section goes away.
+	const last = await history({ limit: 3 });
+	assert.equal(last.entries.length, 3);
 	assert.equal(last.earlier, true);
-	assert.deepEqual(last.entries, all.entries.slice(-2));
+	assert.deepEqual(last.entries, all.entries.slice(-3));
 	assert.match(renderHistory(last.entries), /second message[\s\S]*Second answer/);
 	const future = await history({ since: Date.now() + 60_000 });
 	assert.deepEqual([future.entries.length, future.earlier], [0, true]);

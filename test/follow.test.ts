@@ -90,7 +90,7 @@ test("June queues a plan, follows every task, and closing the first after review
 		],
 	};
 	faux.setResponses(Array.from({ length: 20 }, () => (context: { messages: { role: string; content: unknown }[] }) => {
-		const last = context.messages.at(-1)!;
+		const last = context.messages.findLast((m) => m.role !== "system")!;
 		const text = JSON.stringify(last.content);
 		if (last.role === "toolResult") return fauxAssistantMessage("Done.");
 		if (text.includes("launch plan")) return fauxAssistantMessage([fauxToolCall("org_queue_plan", plan)], { stopReason: "toolUse" });
@@ -184,7 +184,7 @@ test("June follows a task she did not queue with timed updates until told to sto
 	const faux = fauxProvider();
 	const followIt = (everyMinutes: number) => fauxAssistantMessage([fauxToolCall("org_follow_task", { file: "work.org", heading: "Refresh content", everyMinutes })], { stopReason: "toolUse" });
 	faux.setResponses(Array.from({ length: 80 }, () => (context: { messages: { role: string; content: unknown }[] }) => {
-		const last = context.messages.at(-1)!;
+		const last = context.messages.findLast((m) => m.role !== "system")!;
 		if (last.role === "toolResult") return fauxAssistantMessage("Done.");
 		const text = JSON.stringify(last.content);
 		if (text.includes("stop the updates")) return followIt(0);

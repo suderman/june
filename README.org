@@ -119,6 +119,8 @@ Keys of =config.json=, with their defaults:
 
 June's prompt ends with a =now= section: the weekday, the rough hour, when the sun next sets or rises, today's and tomorrow's weather, today's and tomorrow's calendar entries, and which zone each configured person is in. She uses it to judge, not to narrate. Home Assistant is polled in the background, so a reply never waits on it, and lines it cannot fill are left out. The section changes about once an hour, so the prompt cache mostly holds; the =clock= tool gives the exact time.
 
+Until the user and June have spoken on a given day, a =greeting= section asks her to open her first words with a greeting for the time of day, whether she answers the user or reaches out first, and to answer in kind when the user greeted her. The day starts at =rhythm.wake=, so a chat past midnight still counts as the same day. Contact is a message the user wrote or a message June sent, not her own task inputs or a quiet heartbeat; the section is never a reason to break a quiet heartbeat. It lives in =src/greeting.ts=.
+
 ** Heartbeat
 
 Every =heartbeat.everyMinutes= between =wake= and =quiet=, June takes a private look at the moment in the main conversation, with her standing instructions from =HEARTBEAT.org=, what changed in her =now= section since the last look, and whether the user is chatting. She answers =QUIET= or a message. The user never sees the look itself: the daemon's view hides its input, tools, and quiet answers, showing only a real message. A heartbeat waits while June is busy, and a receipt in the state directory keeps a restart from repeating one. June updates =HEARTBEAT.org= when told what to watch for.

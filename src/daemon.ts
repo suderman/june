@@ -32,6 +32,7 @@ import { validateImages } from "./images.ts";
 import { describeFiles, saveFiles, startInboxExpiry, validateFiles } from "./inbox.ts";
 import { createMemoryExtension } from "./memory.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
+import { createGreeting } from "./greeting.ts";
 import { createLooseEnds } from "./loose.ts";
 import { createReflection } from "./reflect.ts";
 import { createWatch } from "./watch.ts";
@@ -109,6 +110,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const situation = createSituation({ config: config.situation, env: { ...process.env, ...options.secrets }, log });
 		const prompt = createPromptExtension(config, paths, situation);
 		const memory = createMemoryExtension(prompt.files, () => harness);
+		const greeting = createGreeting({ wake: config.rhythm.wake });
 		const patter = config.model.patter
 			? createPatter({
 					models: options.models,
@@ -122,7 +124,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		// June's working context does the work only: no memory review, task queueing, patter, or messages to the user.
 		const childless = [memory, ...extensions.filter((e) => e.name === "dispatch"), ...(patter ? [patter.extension] : [])];
 		const work = createWorkExtension(config, () => childless);
-		for (const extension of [prompt.extension, memory, work, ...(patter ? [patter.extension] : []), ...extensions]) registry.install(extension);
+		for (const extension of [prompt.extension, greeting.extension, memory, work, ...(patter ? [patter.extension] : []), ...extensions]) registry.install(extension);
 
 		const workdir = `${paths.state}/files`;
 		mkdirSync(workdir, { recursive: true, mode: 0o700 });
@@ -151,6 +153,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		)
 			await root.configure(agent, BG);
 
+		greeting.start(root);
 		harness.resume();
 		const stopPatter = patter?.start(harness, root);
 		// Focus lasts for the turn June tied her hair up in: once the main thread goes quiet, she lets it down again. A held

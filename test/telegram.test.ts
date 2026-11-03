@@ -154,12 +154,12 @@ test("a photo with its caption, and an image sent as a file, reach June inline",
 		t,
 		[
 			(ctx) => {
-				const last = ctx.messages.at(-1)!;
+				const last = ctx.messages.findLast((m) => m.role !== "system")!;
 				seen += Array.isArray(last.content) ? last.content.filter((b) => b.type === "image").length : 0;
 				return fauxAssistantMessage("Nice photo.");
 			},
 			(ctx) => {
-				const last = ctx.messages.at(-1)!;
+				const last = ctx.messages.findLast((m) => m.role !== "system")!;
 				seen += Array.isArray(last.content) ? last.content.filter((b) => b.type === "image").length : 0;
 				return fauxAssistantMessage("Nice screenshot.");
 			},

@@ -94,7 +94,7 @@ test("a brief's report reaches the terminal as June's words, not the report", as
 			call("work", { brief: "Count the desk wombats." }),
 			fauxAssistantMessage("on it at the desk"),
 			(ctx) => {
-				assert.match(JSON.stringify(ctx.messages.at(-1)), /\[work\] Report: three wombats\./);
+				assert.match(JSON.stringify(ctx.messages.findLast((m) => m.role !== "system")), /\[work\] Report: three wombats\./);
 				return fauxAssistantMessage("three wombats, from the desk brief");
 			},
 		],
