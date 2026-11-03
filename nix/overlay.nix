@@ -1,6 +1,6 @@
 # june-overlay: June's Hyprland overlay (overlay/), a Quickshell config run from the store. `june-overlay` runs it;
-# `june-overlay toggle`, `open`, and `close` summon or hide the running one's strip, and `mini` live June, its
-# minimised form, for compositor binds. It ships the base
+# `june-overlay cycle` steps the running one through live June, the full strip, and hidden, for a single compositor
+# bind; `toggle`, `open`, `close`, and `mini` reach each directly. It ships the base
 # avatar set from templates/avatar; JUNE_OVERLAY_ART can put a personal set in front of it.
 {
   lib,
@@ -35,9 +35,9 @@ in
       export JUNE_OVERLAY_ART="''${JUNE_OVERLAY_ART:+$JUNE_OVERLAY_ART:}${art}"
       case "''${1:-}" in
         "") exec qs -p ${config} ;;
-        toggle | open | close | mini) exec qs -p ${config} ipc call june "$1" ;;
+        cycle | toggle | open | close | mini) exec qs -p ${config} ipc call june "$1" ;;
         *)
-          echo "usage: june-overlay [toggle|open|close|mini]" >&2
+          echo "usage: june-overlay [cycle|toggle|open|close|mini]" >&2
           exit 2
           ;;
       esac

@@ -5,8 +5,8 @@
 // Environment, set by the june-overlay wrapper: JUNE_OVERLAY_URL (wss://june.kit/), JUNE_OVERLAY_TOKEN_FILE (a 0600
 // file holding this device's token), JUNE_OVERLAY_FONTS (a directory of the strip's fonts), and JUNE_OVERLAY_ART (avatar
 // set directories, colon-separated, a personal set before the base one; see "Poses" in docs/interfaces.org).
-// Summon the strip with `june-overlay toggle` (qs ipc call june toggle), and live June, the minimised form, with
-// `june-overlay mini`.
+// One key cycles the overlay (`june-overlay cycle`, for an Alt tap): hidden, live June in the corner, the full strip,
+// hidden again. Esc dismisses either. `toggle`, `open`, `close`, and `mini` reach each directly.
 import QtQuick
 import QtQml.Models
 import QtQuick.Controls
@@ -99,8 +99,8 @@ ShellRoot {
   }
   function hide() { shown = false; }
 
-  // Live June, the minimised form. Summoned with Shift and an Alt tap, she opens with the user's note ready; she also
-  // pops up by herself with a reply that finishes while the strip is hidden, and tucks herself away after a while.
+  // Live June, the minimised form. Summoned by the first Alt tap, she opens with the user's note ready; she also pops
+  // up by herself with a reply that finishes while the strip is hidden, and tucks herself away after a while.
   property bool miniShown: false
   property bool miniSummoned: false
   property bool miniInput: false
@@ -179,6 +179,12 @@ ShellRoot {
     function open(): void { root.show(); }
     function close(): void { root.hide(); }
     function mini(): void { root.miniShown ? root.hideMini() : root.showMini(); }
+    // Hidden, then live June, then the full strip, then hidden: one key for everything.
+    function cycle(): void {
+      if (root.shown) root.hide();
+      else if (root.miniShown) root.show();
+      else root.showMini();
+    }
   }
 
   LiveWindow {
