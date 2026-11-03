@@ -430,13 +430,17 @@ function qualifies(item: Extract<ViewItem, { kind: "assistant" }>): boolean {
 	return !item.streaming && (item.answers === "telegram" || item.alert === "telegram") && (item.text.trim() !== "" || item.error !== undefined);
 }
 
-/** The text to send for a reply; a run the user stopped with no words says nothing, since /stop already answered. */
+/**
+ * The text to send for a reply; a run the user stopped with no words says nothing, since /stop already answered. A failed
+ * attempt with no words says nothing either: the harness retries it, and if every retry fails the run's own failure item
+ * is sent instead.
+ */
 function replyText(item: Extract<ViewItem, { kind: "assistant" }>): string | undefined {
 	const stopped = item.error !== undefined && /abort/i.test(item.error);
 	const text = item.text.trim();
 	if (item.error === undefined) return text;
-	if (stopped) return text === "" ? undefined : `${text}\n\n⏹ stopped`;
-	return text === "" ? `⚠ ${item.error}` : `${text}\n\n⚠ ${item.error}`;
+	if (text === "") return undefined;
+	return stopped ? `${text}\n\n⏹ stopped` : `${text}\n\n⚠ ${item.error}`;
 }
 
 function help(): string {

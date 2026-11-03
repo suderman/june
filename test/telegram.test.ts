@@ -316,6 +316,14 @@ test("a notice reaches Telegram only when it is routed there", async (t) => {
 	assert.deepEqual(telegram.sends().map((c) => c.text), ["Your audit finished.", "⚠ model error: overloaded"]);
 });
 
+test("a failed attempt with no words stays off Telegram; the run's own failure is what reports it", async (t) => {
+	const { telegram, put } = await viewBridge(t, [user(1, "telegram")]);
+	await put(june(2, "", "telegram", { error: "Request timed out." }));
+	await put(june(3, "Done, the retry worked.", "telegram"));
+	await put(june(4, "Half an answer", "telegram", { error: "connection reset" }));
+	assert.deepEqual(telegram.sends().map((c) => c.text), ["Done, the retry worked.", "Half an answer\n\n⚠ connection reset"]);
+});
+
 test("patter grows one message per wait, and June's answer ends the wait", async (t) => {
 	const { telegram, put } = await viewBridge(t, [user(1, "telegram")], { running: true });
 	await put(user(10, "telegram", "build it"));
