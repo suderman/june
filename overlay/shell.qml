@@ -106,6 +106,8 @@ ShellRoot {
   property bool miniInput: false
   property bool miniMessage: false
   property string miniText: ""
+  // When her latest desktop reply arrived; a recent one shows again above the note when she is summoned.
+  property real miniTextAt: 0
   property var miniScreen: Quickshell.screens[0]
   // The newest desktop reply already shown, so each pops up once; null until the first view arrives.
   property var seenReply: null
@@ -120,7 +122,8 @@ ShellRoot {
   Timer { id: oneShotEnd; onTriggered: { root.oneShot = null; root.now = Date.now(); } }
   Timer {
     id: tuckAway
-    interval: 15000
+    // Set per reply: longer to read, longer to stay (see readingTime in live.mjs).
+    interval: 8000
     onTriggered: {
       if (live.hovered || root.miniInput) { restart(); return; }
       root.miniMessage = false;
@@ -141,6 +144,7 @@ ShellRoot {
     miniShown = true;
     miniSummoned = true;
     miniInput = true;
+    miniMessage = miniText !== "" && Live.recent(miniTextAt, Date.now());
   }
   // Open the note under whatever she is showing, and keep her until the user sends or dismisses it.
   function answerMini() {
@@ -156,7 +160,6 @@ ShellRoot {
     tuckAway.stop();
   }
   function popReply(item) {
-    miniText = Live.excerpt(item.text);
     miniMessage = true;
     if (!miniShown) {
       miniScreen = focusedScreen();
@@ -164,6 +167,7 @@ ShellRoot {
       miniSummoned = false;
       playOnce("pop-in", 1800);
     }
+    tuckAway.interval = Live.readingTime(miniText);
     tuckAway.restart();
   }
   // After each view change: note when a run ends, and pop up for a newly finished desktop reply while the strip is hidden.
@@ -176,6 +180,8 @@ ShellRoot {
     if (seenReply === null) { seenReply = latest ? latest.id : ""; return; }
     if (!latest) return;
     seenReply = latest.id;
+    miniText = Live.excerpt(latest.text);
+    miniTextAt = Date.now();
     if (!shown) popReply(latest);
   }
 
@@ -209,7 +215,7 @@ ShellRoot {
     onWantInput: root.answerMini()
     onDismissed: root.hideMini()
     onSubmitted: (text, followUp) => {
-      if (root.submit(text, followUp)) { root.miniInput = false; root.miniMessage = false; root.miniSummoned = false; tuckAway.restart(); }
+      if (root.submit(text, followUp)) { root.miniInput = false; root.miniMessage = false; root.miniSummoned = false; tuckAway.interval = 8000; tuckAway.restart(); }
     }
   }
 

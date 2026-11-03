@@ -105,3 +105,16 @@ export function readLive(manifest, base) {
 	return out;
 }
 
+/** How long a popped-up reply stays to be read, in ms: five seconds plus about 60 ms a character, 5 to 30 seconds. */
+export function readingTime(text) {
+	return Math.round(Math.min(30000, Math.max(5000, 5000 + (text ?? "").length * 60)));
+}
+
+// A reply this recent still shows above the note when she is summoned.
+export const RECENT_MS = 10 * 60 * 1000;
+
+/** Whether a reply that arrived at `at` (ms) is recent enough to show again when she is summoned at `now` (ms). */
+export function recent(at, now) {
+	return at > 0 && now - at <= RECENT_MS;
+}
+

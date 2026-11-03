@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { activity, applyView, beats, caption, emptyView, markup, panels, readInput } from "../overlay/strip.mjs";
 import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, jagged, liveActivity, metrics, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
-import { LIVE_STATES as LIVE, excerpt, idleState, liveState, newReply, readLive } from "../overlay/live.mjs";
+import { LIVE_STATES as LIVE, RECENT_MS, excerpt, idleState, liveState, newReply, readLive, readingTime, recent } from "../overlay/live.mjs";
 
 const user = (id, text = "hi", source = "gui") => ({ kind: "user", id, source, text });
 const june = (id, text = "hello", streaming = false) => ({ kind: "assistant", id, text, streaming, answers: "gui" });
@@ -457,5 +457,18 @@ test("live June's art is read by state, a sprite sheet keeping its frames, an un
 	assert.deepEqual(Object.keys(sheet), ["typing"]);
 	assert.deepEqual([sheet.typing.frames, sheet.typing.fps], [8, 8]);
 	assert.deepEqual(readLive({}, ""), {});
+});
+
+test("a popped-up reply stays as long as it takes to read, and a recent one shows again when she is summoned", () => {
+	assert.equal(readingTime("hi!"), 5180, "a word: about five seconds");
+	assert.equal(readingTime("x".repeat(200)), 17000, "a few sentences: longer");
+	assert.equal(readingTime("x".repeat(2000)), 30000, "never more than thirty seconds");
+	assert.equal(readingTime(""), 5000);
+	assert.ok(readingTime("a longer reply with more to read") > readingTime("ok"));
+	const now = 1_000_000_000;
+	assert.equal(recent(now - 60_000, now), true, "a minute ago");
+	assert.equal(recent(now - RECENT_MS, now), true, "ten minutes ago, just");
+	assert.equal(recent(now - RECENT_MS - 1, now), false, "older");
+	assert.equal(recent(0, now), false, "none yet");
 });
 
