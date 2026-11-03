@@ -252,7 +252,8 @@ the file fresh so concurrent edits by agents are not overwritten."
     (unwind-protect
         (with-current-buffer buffer
           (org-mode)
-          (let ((position (or (org-find-property "ID" id)
+          ;; With a nil ID, org-find-property matches any heading that has one.
+          (let ((position (or (and id (org-find-property "ID" id))
                               (and heading (org-find-exact-headline-in-buffer heading)))))
             (unless position (error "no heading %s in %s" (or heading id) file))
             (goto-char position)

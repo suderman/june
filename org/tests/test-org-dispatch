@@ -472,6 +472,27 @@ cat >"$fixture/launch-tests.el" <<'EOF'
         (should (string-search "claude is blocked during startup in Herdr pane p-new" (org-dispatch--subtree-text))))
       "Test launch"))))
 
+(ert-deftest launch-finds-a-heading-without-an-id-below-one-with-an-id ()
+  ;; Jon's typed AUTO has no ID yet; an earlier heading's ID must not stand in for it.
+  (test-with-herdr
+   (let* ((file (expand-file-name "noid.org" org-dispatch-root))
+          (test-agent "claude"))
+     (make-directory org-dispatch-root t)
+     (with-temp-file file
+       (insert "* Earlier thread\n:PROPERTIES:\n:ID: 00000000-0000-0000-0000-000000000077\n:END:\n"
+               "* AUTO Typed by Jon\n:PROPERTIES:\n:HOST: kit\n:AGENT: claude\n:END:\n"))
+     (unwind-protect
+         (let ((task (org-dispatch--edit file nil #'org-dispatch--task "Typed by Jon")))
+           (should (equal (plist-get task :todo) "AUTO"))
+           (should (org-dispatch--launch task))
+           (org-dispatch--edit file nil
+                               (lambda ()
+                                 (should (equal (org-get-todo-state) "PROG"))
+                                 (should (org-entry-get nil "ID")))
+                               "Typed by Jon"))
+       (delete-file file)
+       (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))))))
+
 (ert-deftest watch-uses-claude-in-blocked-and-missing-notices ()
   (test-with-herdr
    (let* ((task (test-task "claude"))
