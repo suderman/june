@@ -105,6 +105,39 @@ test("a work brief starts patter at once with the brief, and patter failures cha
 	assert.ok(patter.heard.length >= 2, "patter kept trying after a failure");
 });
 
+test("patter hears what June just told Alex and lets her words land before its next line", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const at: number[] = [];
+	const patter = patterModel((n) => {
+		at.push(Date.now());
+		return fauxAssistantMessage(`patter line ${n}`);
+	});
+	const faux = fauxProvider();
+	faux.setResponses(routed(
+		[call("work", { brief: "Trace the timeout." }), fauxAssistantMessage("i'm checking the timeline rather than guessing."), fauxAssistantMessage("Found it.")],
+		[() => call("bash", { command: "sleep 1.5" }), () => fauxAssistantMessage("Report: traced.")],
+	));
+	const gap = 600;
+	const daemon = await openTestDaemon({
+		...tmp,
+		faux,
+		config,
+		providers: [patter.faux],
+		extensions: [createCodingExtension()],
+		patterTiming: { ...fast, openAfterMs: 60_000, gapsMs: [gap] },
+	});
+	t.after(() => daemon.close());
+	assert.equal((await ask(tmp.paths.socket, "why the timeout?")).text, "i'm checking the timeline rather than guessing.");
+	await until(() => patter.heard.length >= 1);
+	const answered = (await daemon.root.context(BG)).messages.find((m) => m.role === "assistant" && JSON.stringify(m.content).includes("checking the timeline"))!.timestamp;
+	assert.ok(at[0]! - answered >= gap - 150, `the opener waited for June's words to land: ${at[0]! - answered} ms`);
+	assert.match(patter.heard[0]!.update, /June has just told them[^\n]*:\n- i'm checking the timeline rather than guessing\./);
+	await until(() => patter.heard.length >= 2);
+	assert.doesNotMatch(patter.heard[1]!.update, /June has just told them/, "her words are reported once");
+	await until(async () => JSON.stringify((await daemon.root.context(BG)).messages).includes("Found it."));
+});
+
 test("Alex breaks in during background work: patter pauses, June hears it, and patter picks the bit back up", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);

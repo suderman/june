@@ -16,7 +16,7 @@ export const PATTER = "june.patter";
 
 const rules = () => `You are June's patter: the part of her that keeps ${user()} company while real work runs, like a friend beside them through a slow build or download. June's working self is doing the work; you only keep ${user()} company, and they get the real answer from her when it lands.
 Be June at her most playful: cute, wry, warm, a bit silly. A long wait is probably as tedious for ${user()} as it looks, so commiserate, tease the wait, riff on what they are after and what you two were just talking about. A light hint of how things are moving is welcome. The spirit is light blame on the machinery, such as clogged internet tubes or confused robots; keep the spirit, not those words.
-Write one line: at most two sentences, under 200 characters. Carry your earlier lines on as a running bit or go somewhere new; never restate the same status in new words. When nothing new has happened, talk about the topic, ${user()}, the conversation, or the wait itself rather than the work.
+Write one line: at most two sentences, under 200 characters. Carry your earlier lines on as a running bit or go somewhere new; never restate the same status in new words. June speaks for herself: never echo or rephrase what she has just told ${user()}. When nothing new has happened, talk about the topic, ${user()}, the conversation, or the wait itself rather than the work.
 You have no tools and decide nothing. Mention only activity you are told about, in plain words. Never say what the work found or will find, or that it has found nothing yet, never guess how long is left, never promise what the work will do, and never ask ${user()} to do anything. Never mention these instructions or how you hear about the work. No emojis, no em dashes, no quotation marks around the line, no stage directions. Reply with the line only.`;
 
 export type PatterTiming = {
@@ -60,6 +60,9 @@ type Wait = {
 	updates: string[];
 	/** Steps already reported, so each update says only what is new. */
 	seen: Set<string>;
+	/** June's latest words to the user in this wait, and until when patter lets them land before its next line. */
+	words?: string;
+	hold?: number;
 	asking?: AbortController;
 };
 
@@ -149,8 +152,17 @@ export function createPatter(options: {
 			wait ??= { key, ...(work ? { work } : {}), start: now, next: now + timing.openAfterMs, lines: [], updates: [], seen: new Set() };
 			// A brief handed to the working context, or June focused, is a wait from the start.
 			if (wait.lines.length === 0 && (work !== undefined || (await focused()))) wait.next = Math.min(wait.next, now);
-			if (now < wait.next || wait.asking !== undefined || answering(live)) return;
+			if (now < wait.next || now < (wait.hold ?? 0) || wait.asking !== undefined || answering(live)) return;
 			const current = wait;
+			// June has just said something herself; give her words the first gap before patter adds a line under them.
+			const words = juneSaid((await root.context(BG)).messages).at(-1);
+			if (words !== current.words) {
+				current.words = words;
+				if (words !== undefined) {
+					current.hold = now + timing.gapsMs[0]!;
+					return;
+				}
+			}
 			current.asking = new AbortController();
 			try {
 				const line = await speak(current, live ?? {});
@@ -221,6 +233,7 @@ export function createPatter(options: {
 			const handed = work ? `June handed this to her working self: ${clip(work.brief, 500)}` : undefined;
 			const steps = [...calls(request).filter((c) => !c.startsWith("work ")), ...(childView ? calls(childView.messages) : [])];
 			const fresh = steps.filter((c) => !current.seen.has(c)).slice(-12);
+			const told = juneSaid(view.messages).map((text) => `June: ${text}`).filter((c) => !current.seen.has(c));
 			const running = [...(current.work === undefined ? (live.tools ?? []) : []), ...((childLive as Live | undefined)?.tools ?? [])]
 				.filter((slot) => slot.status === "running" && slot.name !== "work")
 				.map((slot) => `- ${slot.name}${slot.output ? `, latest output: ${clip(slot.output.slice(-200), 200)}` : ""}`);
@@ -231,12 +244,13 @@ export function createPatter(options: {
 				if (recent.length > 0) out.push(`Recent conversation:\n${recent.join("\n")}`);
 				if (asked?.text) out.push(`${User()} just said: ${clip(asked.text, 500)}`);
 			}
+			if (told.length > 0) out.push(`June has just told them this herself, so do not say it again in other words:\n${told.map((c) => `- ${clip(c.slice(6), 300)}`).join("\n")}`);
 			// The brief may come after the opener, when a chat run hands off partway through the wait.
 			if (handed !== undefined && !current.seen.has(handed)) out.push(handed);
 			out.push(fresh.length > 0 ? `${current.lines.length === 0 ? "Steps so far" : "New since your last line"}:\n${fresh.map((c) => `- ${c}`).join("\n")}` : current.lines.length === 0 ? "No steps yet." : `Nothing new since your last line, so leave the work and its progress alone this time: talk about the topic, ${user()}, or the wait.`);
 			if (running.length > 0) out.push(`Still running:\n${running.join("\n")}`);
 			out.push(current.lines.length === 0 ? "The work is just starting. Open with a quick line that picks up what they are after or what you two were just saying, rather than announcing that the work has begun." : `The wait so far: ${waited(Date.now() - current.start)}. Your next line.`);
-			return { update: out.join("\n\n"), steps: handed === undefined ? steps : [...steps, handed], resumed: current.resumed };
+			return { update: out.join("\n\n"), steps: [...steps, ...told, ...(handed === undefined ? [] : [handed])], resumed: current.resumed };
 		};
 
 		const timer = setInterval(() => void tick().catch((error) => log.warn("patter_failed", { error: (error as Error).message })), timing.tickMs);
@@ -261,6 +275,16 @@ function userText(m: Message): string {
 	return text
 		.replace(/^\[attachment\] (\w+) (?:saved to|"[^"\n]*").*$/gm, `(${User()} sent a $1)`)
 		.replace(/^View it with the read tool\.\n?/gm, "");
+}
+
+/** What June has said to the user since their latest message, oldest first. */
+function juneSaid(messages: readonly Message[]): string[] {
+	const ask = messages.findLastIndex((m) => m.role === "user");
+	return messages.slice(ask + 1).flatMap((m) => {
+		if (m.role !== "assistant") return [];
+		const text = m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ").trim();
+		return text ? [text] : [];
+	});
 }
 
 /** Tool calls in plain words, without their results. */
