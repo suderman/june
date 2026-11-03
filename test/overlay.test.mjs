@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { activity, applyView, beats, caption, emptyView, markup, panels, readInput } from "../overlay/strip.mjs";
-import { FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, jagged, metrics, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
-import { EXPRESSIONS, fallbacks } from "../src/avatar.ts";
+import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, jagged, liveActivity, metrics, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
+import { EXPRESSIONS, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 
 const user = (id, text = "hi", source = "gui") => ({ kind: "user", id, source, text });
 const june = (id, text = "hello", streaming = false) => ({ kind: "assistant", id, text, streaming, answers: "gui" });
@@ -110,6 +110,37 @@ test("input reads commands, refuses /new, and submits anything else; the badge s
 test("the overlay's expression chains match the daemon's vocabulary", () => {
 	assert.deepEqual(Object.keys(FALLBACK).sort(), Object.keys(EXPRESSIONS).filter((e) => e !== "idle").sort());
 	for (const name of [...Object.keys(EXPRESSIONS), "no-such-face"]) assert.deepEqual(chain(name), fallbacks(name), name);
+});
+
+test("June's activity in the live panel comes from runtime state: thinking, then working, then her own words", () => {
+	const busy = { running: true, background: 0, compacting: false };
+	const panel = (...kinds) => ({ id: "p", elements: kinds.map((k) => (typeof k === "string" ? { kind: k } : k)) });
+	const writing = { kind: "june", text: "two need a reply", streaming: true };
+	assert.equal(liveActivity(busy, panel("user")), "thinking", "before her first words");
+	assert.equal(liveActivity(busy, panel("user", "thought")), "thinking", "patter alone is still thinking");
+	assert.equal(liveActivity(busy, panel("user", { kind: "june", text: "i'll check.", streaming: false }, "tools", "thought")), "working", "tools since her last words, patter coming through");
+	assert.equal(liveActivity(busy, panel("user", "tools", writing)), null, "writing her reply: her expression shows");
+	assert.equal(liveActivity(busy, panel("user", { kind: "june", text: "", streaming: true })), "thinking", "a reply with no words yet");
+	assert.equal(liveActivity({ ...busy, running: false, compacting: true }, panel("user")), "working", "tidying up while compacting");
+	assert.equal(liveActivity({ ...busy, running: false }, panel("user", "tools")), null, "no run: the panel settles");
+	assert.deepEqual(ACTIVITIES, [...POSE_ACTIVITIES], "the overlay's activities match the daemon's");
+});
+
+test("activity poses show only while she is doing it, never as a reaction", () => {
+	const doing = POSES.filter((p) => p.activity);
+	assert.ok(doing.some((p) => p.activity === "working") && doing.some((p) => p.activity === "thinking"));
+	assert.equal(choosePose(POSES, { activity: "working" }).activity, "working");
+	assert.equal(choosePose(POSES, { activity: "thinking" }).id, "thinking-finger-tapping");
+	assert.equal(choosePose(POSES, { activity: "watching", expression: "curious" }).id, "curious-head-tilt", "no watching pose: her expression instead");
+	for (const expression of [...Object.keys(EXPRESSIONS), "no-such-face"])
+		for (const seed of ["a", "b", "c", "d"]) assert.equal(choosePose(POSES, { expression }, "", seed).activity, null, `${expression}: a reaction pose`);
+	const twoAtWork = POSES.filter((p) => p.activity === "working").map((p) => p.id);
+	assert.notEqual(choosePose(POSES, { activity: "working" }, twoAtWork[0], "x").id, twoAtWork[0], "variety among working poses too");
+	assert.equal(tallFor(POSES, pose("working-typing-laptop")), null, "no tall working pose, and none in determined's chain: the inset");
+	const thinkingSerious = { ...pose("thinking-finger-tapping"), expression: "serious" };
+	assert.equal(tallFor(POSES, thinkingSerious).id, "explaining-standing-clipboard", "otherwise she stands in her expression's tall pose, not a working one");
+	const tallWorker = { ...pose("content-standing-mug"), id: "working-standing-armful", activity: "working", expression: "serious" };
+	assert.equal(tallFor([...POSES, tallWorker], pose("working-typing-laptop")).id, "working-standing-armful", "a tall working pose keeps her at work");
 });
 
 test("poses are read leniently from a manifest, and chosen by name, expression chain, and variety", () => {

@@ -152,8 +152,10 @@ ShellRoot {
     let previousSide = undefined;
     let previousPose = "";
     const composed = list.map((p, i) => {
-      const live = i === list.length - 1 && view.state.running;
-      let pose = live ? Compose.choosePose(poses, Compose.standIn(p, true), previousPose, p.id) : (poses.find(x => x.id === poseIds[p.id]) ?? null);
+      const live = i === list.length - 1 && (view.state.running || view.state.compacting);
+      // While she works or thinks, a pose showing that; while she writes, her expression; settled, the kept reaction.
+      const doing = live ? Compose.liveActivity(view.state, p) : null;
+      let pose = live ? Compose.choosePose(poses, doing ? { activity: doing, expression: "curious" } : Compose.standIn(p, true), previousPose, p.id) : (poses.find(x => x.id === poseIds[p.id]) ?? null);
       if (!pose && !live) {
         pose = Compose.choosePose(poses, Compose.standIn(p, false), previousPose, p.id);
         if (pose) poseIds[p.id] = pose.id;

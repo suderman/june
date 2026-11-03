@@ -29,6 +29,8 @@ export const FRAMINGS = ["close-up", "head", "bust", "waist", "full"];
 // A pose that names no framings fills these; `full` (a three-quarter or full figure) only when it says so.
 const USUAL = ["close-up", "head", "bust", "waist"];
 const MARKS = ["sparkle", "heart", "sweat", "vein", "steam", "emphasis"];
+// What a pose can show her doing; a copy of POSE_ACTIVITIES in src/avatar.ts, kept in step by test/overlay.test.mjs.
+export const ACTIVITIES = ["thinking", "working", "watching"];
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -71,6 +73,7 @@ export function readPoses(manifest, base) {
 			width: p.size[0],
 			height: p.size[1],
 			expression: p.expression,
+			activity: ACTIVITIES.includes(p.activity) ? p.activity : null,
 			face: { x: p.face[0], y: p.face[1], w: p.face[2], h: p.face[3] },
 			mouth: { x: p.mouth[0], y: p.mouth[1] },
 			facing: ["left", "right"].includes(p.facing) ? p.facing : "front",
@@ -83,8 +86,10 @@ export function readPoses(manifest, base) {
 }
 
 /**
- * The pose for a request: the named pose, else one with the requested expression or the next in its chain. `avoid` is the
- * previous panel's pose, skipped when another fits, and `seed` picks among equals so a panel keeps its choice.
+ * The pose for a request: the named pose; for an `activity`, a pose showing her doing it; otherwise one with the
+ * requested expression or the next in its chain. A pose that shows an activity never answers an expression, so a
+ * settled panel never shows her still at work. `avoid` is the previous panel's pose, skipped when another fits, and
+ * `seed` picks among equals so a panel keeps its choice.
  */
 export function choosePose(poses, request = {}, avoid = "", seed = "") {
 	if (poses.length === 0) return null;
@@ -92,14 +97,38 @@ export function choosePose(poses, request = {}, avoid = "", seed = "") {
 		const named = poses.find((p) => p.id === request.pose);
 		if (named) return named;
 	}
-	for (const expression of chain(request.expression ?? "idle")) {
-		const fits = poses.filter((p) => p.expression === expression);
-		if (fits.length === 0) continue;
+	const pick = (fits) => {
 		const fresh = fits.filter((p) => p.id !== avoid);
 		const pool = fresh.length > 0 ? fresh : fits;
 		return pool[hash(seed) % pool.length];
+	};
+	if (request.activity) {
+		const doing = poses.filter((p) => p.activity === request.activity);
+		if (doing.length > 0) return pick(doing);
 	}
-	return poses[0];
+	const reactions = poses.filter((p) => !p.activity);
+	for (const expression of chain(request.expression ?? "idle")) {
+		const fits = reactions.filter((p) => p.expression === expression);
+		if (fits.length === 0) continue;
+		return pick(fits);
+	}
+	return reactions[0] ?? poses[0];
+}
+
+/**
+ * What the panel June is answering in should show her doing, from runtime state alone: thinking before her first words,
+ * working while tool calls run or patter comes through after them, or tidying while compacting. Null once she is
+ * writing her reply (her expression shows then) or when no run is busy, so the panel settles to her reaction.
+ */
+export function liveActivity(state, panel) {
+	if (!state || !(state.running || state.compacting)) return null;
+	if (state.compacting) return "working";
+	const elements = panel.elements;
+	const last = elements[elements.length - 1];
+	if (last && last.kind === "june" && last.streaming && last.text.trim() !== "") return null;
+	const since = elements.slice(elements.map((e) => e.kind).lastIndexOf("june") + 1);
+	if (since.some((e) => e.kind === "tools")) return "working";
+	return "thinking";
 }
 
 // Until the daemon sends June's expression (see "Send expression and activity to clients"), the overlay picks one from
@@ -121,9 +150,15 @@ export function standIn(panel, live) {
 export function tallFor(poses, pose) {
 	if (!pose) return null;
 	if (pose.framings.includes("full")) return pose;
+	const tall = poses.filter((p) => p.framings.includes("full"));
+	// A pose showing her at work keeps her at work if a tall one does; otherwise she stands in her expression's pose.
+	if (pose.activity) {
+		const doing = tall.find((p) => p.activity === pose.activity);
+		if (doing) return doing;
+	}
 	for (const expression of chain(pose.expression)) {
-		const tall = poses.find((p) => p.expression === expression && p.framings.includes("full"));
-		if (tall) return tall;
+		const found = tall.find((p) => p.expression === expression && !p.activity);
+		if (found) return found;
 	}
 	return null;
 }
