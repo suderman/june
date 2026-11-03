@@ -100,6 +100,13 @@ Motion rules:
 
 The words are real text: balloons and notes are read-only text fields, so a drag selects and the usual key copies. Until the art exists, the base avatar set's placeholder poses stand in; the composition does not wait on them.
 
+** Live June, the minimised form (planned)
+From the user on 2026-11-03. The strip is the historical record: her reactions, lively while she writes, settled once she has. Live June is the present tense: a small chibi June showing what she is doing right now, in short animated loops. It is the same app's minimised form, not a second client.
+
+- One element in both modes. In min mode it sits in a screen corner, alone or grown to show her current message or the user's input; in max mode the strip unfolds above it and it docks by the input. The two modes grow into each other; how is still to be sketched.
+- Its state comes from runtime state, never a model: typing while a reply streams, thinking before the first words, delegating while work or briefs run, watching while following tasks, tidying while compacting, listening and speaking with voice. Idle loops are picked by time of day and idle time: sipping, reading, music, doodling, snoozing late. A reply landing shows a brief chibi reaction, then a loop again.
+- It appears by itself when June replies while the overlay is hidden, as her own notification. Shift with an Alt tap toggles min mode; an Alt tap toggles max.
+
 ** Desktop context and taking over, later
 Read =hyprctl activewindow -j= (class, title, workspace); offer an explicit screenshot of the active window with =grim=; read the primary selection with =wl-paste --primary=. Each is sent only when the user asks, and framed as outside content as mail already is.
 
@@ -243,6 +250,7 @@ The overlay composes June into panels from poses, not one image per expression. 
 - =facing= is where she looks (=left=, =right=, =front=). A client mirrors a pose to face the words unless =mirror= is false, for lettering or a prop that must not flip.
 - =framings= lists the crops the image can fill, from =close-up= to =full=; leave out a framing the image cannot reach, such as =waist= for a head-only image, and name =full= only for art drawn tall. Several images may share an expression and differ in framing when a pose genuinely needs it.
 - =marks= are the decorations that suit the pose, from =sparkle=, =heart=, =sweat=, =vein=, =steam=, and =emphasis=. =props= and =description= are for choosing and for the art's own records.
+- Planned: an optional =activity= (=working=, =thinking=, =watching=) marks a pose that shows what she is doing rather than how she feels. While a panel is live and a run is busy, the overlay picks a pose for the current activity from runtime state; when she finishes, the panel settles to a reaction pose. Live June's loops get their own manifest section, keyed by state, with the sprite-sheet fields expressions already use.
 - Files are PNG, WebP, or SVG inside the set. =parseManifest= in =src/avatar.ts= checks all of this strictly, naming each problem; the overlay reads the same manifest leniently and skips a pose it cannot place.
 - Taller art for long panels, from the user on 2026-11-03: a pose drawn as a three-quarter or full figure lists =full= among its framings; a pose that lists no framings fills only the first four. When a panel's words run long enough to need an inset, the overlay looks for a pose with =full= and the same expression, or the next in its chain (=tallFor=), and frames her down the panel's height, her face near the top and her figure reaching the bottom. The inset is kept when no pose can fill the panel, or the panel is taller than the figure. Splitting crowded panels stays the first answer; tall art is the answer for genuinely long ones.
 - The model's side of the contract is small: a pose name, or an expression, and optionally a framing hint. Layout code does the rest. Generating a pose on demand can come later as one more way to fill the manifest.
