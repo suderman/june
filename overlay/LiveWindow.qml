@@ -127,14 +127,15 @@ PanelWindow {
     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: win.openStrip() }
   }
 
-  // Her latest reply, growing out of her card, its tail toward her. A click answers it.
+  // Her latest reply, growing out of her card, its tail toward her; above the user's note while they answer it. A click
+  // answers it.
   Balloon {
     id: balloon
-    visible: win.messageShown && win.message !== "" && !win.inputShown
+    visible: win.messageShown && win.message !== ""
     anchors.right: cardBox.left
     anchors.rightMargin: 18
-    anchors.bottom: cardBox.bottom
-    anchors.bottomMargin: 26
+    anchors.bottom: note.visible ? note.top : cardBox.bottom
+    anchors.bottomMargin: note.visible ? 14 : 26
     maxWidth: win.reach - 18
     pixelSize: 16
     rich: false
