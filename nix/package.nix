@@ -22,7 +22,7 @@
   # The tests also cover org-dispatch and org-edit, whose Emacs Lisp lives beside the daemon.
   testSrc = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test ../org];
+    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test ../org ../overlay];
   };
 in
   buildNpmPackage (finalAttrs: {
@@ -65,7 +65,7 @@ in
         patchShebangs org
         org/tests/test-org-dispatch
         org/tests/test-org-edit
-        node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/follow.test.ts test/heartbeat.test.ts test/history.test.ts test/mail.test.ts test/memory.test.ts test/patter.test.ts test/people.test.ts test/situation.test.ts test/watch.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts test/view.test.ts test/detail.test.ts test/telegram.test.ts test/timezone.test.ts test/remote.test.ts
+        node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/follow.test.ts test/heartbeat.test.ts test/history.test.ts test/mail.test.ts test/memory.test.ts test/patter.test.ts test/people.test.ts test/situation.test.ts test/watch.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts test/view.test.ts test/detail.test.ts test/telegram.test.ts test/timezone.test.ts test/remote.test.ts test/overlay.test.mjs
         runHook postBuild
       '';
       installPhase = "touch $out";
