@@ -13,6 +13,8 @@
     packages = forAll (pkgs:
       {
         default = pkgs.callPackage ./nix/package.nix {};
+        # The Hyprland overlay, a Quickshell config with its own Qt modules and fonts.
+        overlay = pkgs.callPackage ./nix/overlay.nix {};
       }
       # The Android assistant. The SDK's build tools are x86_64 binaries, and its licence is accepted only for this build.
       // nixpkgs.lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") {

@@ -1,5 +1,5 @@
 # June's Home Manager module, homeModules.default: the june client everywhere it is enabled, and on chosen hosts her
-# daemon (daemon.nix) and the Org dispatcher (org.nix). It needs only Home Manager and nixpkgs; secrets, persistence, and
+# daemon (daemon.nix), the Org dispatcher (org.nix), and the Hyprland overlay (overlay.nix). It needs only Home Manager and nixpkgs; secrets, persistence, and
 # the agents she drives are the host's configuration.
 self: {
   config,
@@ -28,7 +28,7 @@ self: {
     '';
   };
 in {
-  imports = [./daemon.nix (import ./org.nix self)];
+  imports = [./daemon.nix (import ./org.nix self) (import ./overlay.nix self)];
 
   options.programs.june = {
     enable = lib.mkEnableOption "the june client";
