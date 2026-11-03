@@ -84,7 +84,41 @@ export type Pose = {
 	marks?: Mark[];
 	props?: string[];
 };
-export type Manifest = { version: 1; size: [number, number]; expressions: Partial<Record<Expression, Asset>>; poses?: Record<string, Pose> };
+/**
+ * Live June's states: what the overlay's minimised form shows her doing right now, chosen from runtime state and the
+ * clock, never by a model. Busy states follow the run; `pop-in`, `handing-note`, and `waking` play once on arrival;
+ * idle states follow the time of day and how long she has been idle.
+ */
+export const LIVE_STATES = [
+	"typing",
+	"thinking",
+	"digging",
+	"delegating",
+	"watching",
+	"tidying",
+	"listening",
+	"speaking",
+	"pop-in",
+	"handing-note",
+	"waking",
+	"sipping",
+	"reading",
+	"music",
+	"doodling",
+	"stretching",
+	"snoozing",
+	"offline",
+] as const;
+export type LiveState = (typeof LIVE_STATES)[number];
+
+export type Manifest = {
+	version: 1;
+	size: [number, number];
+	expressions: Partial<Record<Expression, Asset>>;
+	poses?: Record<string, Pose>;
+	/** Live June's art by state: a still, an animated WebP, or a PNG sprite sheet, as for expressions, SVG allowed. */
+	live?: Partial<Record<LiveState, Asset>>;
+};
 
 const isExpression = (name: string): name is Expression => Object.hasOwn(EXPRESSIONS, name);
 const positiveInt = (n: unknown) => Number.isInteger(n) && (n as number) > 0;
@@ -111,6 +145,7 @@ export function parseManifest(data: unknown, options: { base?: boolean } = {}): 
 	}
 	if (options.base && expressions.idle === undefined) errors.push("a base set must have idle");
 	errors.push(...poseErrors(m.poses, options));
+	errors.push(...liveErrors(m.live));
 	if (errors.length > 0) throw new Error(`manifest: ${errors.join("; ")}`);
 	return m as Manifest;
 }
@@ -148,6 +183,23 @@ function poseErrors(data: unknown, options: { base?: boolean }): string[] {
 	}
 	const names = Object.values(poses);
 	if (options.base && names.length > 0 && !names.some((p) => p?.expression === "idle" && p.activity === undefined)) errors.push("a base set with poses must have an idle pose");
+	return errors;
+}
+
+/** Problems with a manifest's optional live June art. */
+function liveErrors(data: unknown): string[] {
+	if (data === undefined) return [];
+	if (typeof data !== "object" || data === null || Array.isArray(data)) return ["live must be an object"];
+	const errors: string[] = [];
+	for (const [state, a] of Object.entries(data as Record<string, Partial<Asset>>)) {
+		const at = `live ${state}`;
+		if (!(LIVE_STATES as readonly string[]).includes(state)) errors.push(`${at}: not a live state`);
+		if (typeof a?.file !== "string" || !/^[\w./-]+\.(png|webp|svg)$/i.test(a.file) || a.file.startsWith("/") || a.file.split("/").includes(".."))
+			errors.push(`${at}: file must be a .png, .webp, or .svg path inside the set`);
+		if (!["still", "loop", "once"].includes(a?.play as string)) errors.push(`${at}: play must be still, loop, or once`);
+		if ((a?.frames !== undefined || a?.fps !== undefined) && (!positiveInt(a.frames) || a.frames! < 2 || typeof a.fps !== "number" || !(a.fps > 0)))
+			errors.push(`${at}: a sprite sheet needs frames of 2 or more and fps above 0`);
+	}
 	return errors;
 }
 

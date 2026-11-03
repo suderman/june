@@ -35,5 +35,25 @@
     "working-digging-files": {"file": "poses/working-digging-files.svg", "size": [1000, 1300], "expression": "curious", "activity": "working", "description": "leafing through a stack of folders, one held open; shown while she works", "face": [0.358, 0.196, 0.3, 0.269], "mouth": [0.496, 0.412], "facing": "left", "framings": ["close-up", "head", "bust", "waist"], "props": ["folders"]},
     "thinking-finger-tapping": {"file": "poses/thinking-finger-tapping.svg", "size": [1000, 1300], "expression": "curious", "activity": "thinking", "description": "eyes up, a finger tapping her lip, before the first words come", "face": [0.35, 0.196, 0.3, 0.269], "mouth": [0.5, 0.412], "facing": "front", "framings": ["close-up", "head", "bust", "waist"]},
     "curious-head-tilt": {"file": "poses/curious-head-tilt.svg", "size": [1000, 1300], "expression": "curious", "description": "curious, head tilted, eyes wide", "face": [0.338, 0.196, 0.3, 0.269], "mouth": [0.476, 0.412], "facing": "left", "framings": ["close-up", "head", "bust", "waist"]}
+  },
+  "live": {
+    "typing": {"file": "live/typing.svg", "play": "loop"},
+    "thinking": {"file": "live/thinking.svg", "play": "loop"},
+    "digging": {"file": "live/digging.svg", "play": "loop"},
+    "delegating": {"file": "live/delegating.svg", "play": "loop"},
+    "watching": {"file": "live/watching.svg", "play": "loop"},
+    "tidying": {"file": "live/tidying.svg", "play": "loop"},
+    "listening": {"file": "live/listening.svg", "play": "loop"},
+    "speaking": {"file": "live/speaking.svg", "play": "loop"},
+    "pop-in": {"file": "live/pop-in.svg", "play": "once"},
+    "handing-note": {"file": "live/handing-note.svg", "play": "once"},
+    "waking": {"file": "live/waking.svg", "play": "once"},
+    "sipping": {"file": "live/sipping.svg", "play": "loop"},
+    "reading": {"file": "live/reading.svg", "play": "loop"},
+    "music": {"file": "live/music.svg", "play": "loop"},
+    "doodling": {"file": "live/doodling.svg", "play": "loop"},
+    "stretching": {"file": "live/stretching.svg", "play": "loop"},
+    "snoozing": {"file": "live/snoozing.svg", "play": "loop"},
+    "offline": {"file": "live/offline.svg", "play": "loop"}
   }
 }

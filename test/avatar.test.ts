@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { ACTIVITIES, EXPRESSIONS, FRAMINGS, MARKS, POSE_ACTIVITIES, fallbacks, parseManifest, resolveExpression } from "../src/avatar.ts";
+import { ACTIVITIES, EXPRESSIONS, FRAMINGS, LIVE_STATES, MARKS, POSE_ACTIVITIES, fallbacks, parseManifest, resolveExpression } from "../src/avatar.ts";
 import { TEMPLATES } from "../src/init.ts";
 
 const base = new URL("avatar/", `file://${TEMPLATES}`);
@@ -107,3 +107,16 @@ test("a bad pose names each problem, and a base set's poses need an idle one", (
 		"an idle working pose does not end the chains: a reaction never shows an activity",
 	);
 });
+
+test("live June's art validates by state, and the placeholder set covers every state", async () => {
+	const manifest = parseManifest(JSON.parse(await readFile(new URL("manifest.json", base), "utf8")), { base: true });
+	assert.deepEqual(Object.keys(manifest.live ?? {}).sort(), [...LIVE_STATES].sort());
+	for (const [state, asset] of Object.entries(manifest.live ?? {})) await readFile(new URL(asset.file, base)).catch(() => assert.fail(`${state}: ${asset.file} missing`));
+	const idle = { idle: { file: "idle.png", play: "still" as const } };
+	assert.doesNotThrow(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, live: { typing: { file: "live/typing.png", play: "loop", frames: 8, fps: 8 } } }));
+	assert.throws(
+		() => parseManifest({ version: 1, size: [64, 64], expressions: idle, live: { dancing: { file: "d.png", play: "loop" }, typing: { file: "../t.gif", play: "bounce", frames: 1, fps: 0 } } }),
+		(e: Error) => ["live dancing: not a live state", "live typing: file must be", "live typing: play must be", "live typing: a sprite sheet needs"].every((s) => e.message.includes(s)),
+	);
+});
+
