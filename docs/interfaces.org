@@ -56,33 +56,49 @@ Run on 2026-11-03 with Quickshell 0.3.0 and Hyprland 0.57.1 on a laptop with an 
 - For the build: the transcript has to follow its end when the last item grows, not only when one is added, or a streaming reply runs below the fold.
 
 ** Look: a comic strip
-Chosen on 2026-11-03 after two rounds of sketches. The terminal client already covers the console look, so the overlay goes the other way: a full-colour comic strip with an expressive, reactive avatar and animated lettering. The art is generated, so colour costs nothing extra; it starts as pre-generated images chosen by name from the expression vocabulary.
+Chosen on 2026-11-03 after two rounds of sketches, and refined the same day against a full-colour manga mockup (the brief and mockup are in the project's Org task material). The terminal client already covers the console look, so the overlay goes the other way: a living comic strip in which June is the recurring protagonist and the user's messages enter her world from outside the frame. Priorities, in order when they conflict: the words stay readable, her face stays visible, the panel reads as a natural comic, vertical space is not wasted, and new art and message kinds fit without code changes.
 
-- Full variant: a vertical strip over the dimmed desktop. The newest exchange is the largest panel, with June's portrait and her balloon; earlier panels scroll up above it. The user types into a balloon at the bottom.
-- Subtle variant: a small chibi June in a corner panel with one balloon.
+- Full variant: a vertical strip over the dimmed desktop, every panel the strip's full width, the newest at the bottom above the user's input. Subtle variant: a small chibi June in a corner panel with one balloon.
+- One canvas per panel, not a portrait column beside a text column. June's art and the words share it: balloons may overlap her body but never her face, and her art may run past the panel's edges and be cropped.
+- She alternates sides from panel to panel, as a default the composition may break: a pose that faces away from the words and may not be mirrored keeps the side where she faces in.
+- The words set the panel's height, within a minimum; the art adapts like a hero image, scaled and cropped by its face box, never stretching the panel. The framing follows the art area's height: a close-up in a compact panel, head and shoulders, bust, or waist-up in taller ones. When the words run long, a pose drawn tall shows the whole of her down the panel; without one, she moves to an inset at the top of her side instead of a portrait stretched down the panel.
+- Below 480 px she stands in a band across the top of the panel and the words run full width beneath her.
+- A panel holds one beat of conversation: a message and what June did in reply. A long reply splits into balloons at its paragraphs (a list stays with the line that introduces it, four balloons at most). When a panel's words outgrow its art, the strip cuts to a new panel rather than crowding one: past about 480 characters (the user's message included, a tool card or thought counting as a short line), the exchange continues in the next panel at one of June's balloons, taking the tools and thought that lead into it, and June appears again there. Flowing words around her inset at full width is the next step if splitting proves not enough.
 
-Every folded-view item has one comic device:
+Every folded-view item has one device:
 
-| Item                         | Device                                                                      |
-|------------------------------+-----------------------------------------------------------------------------|
-| assistant                    | speech balloon with its tail to her; grows as the reply streams              |
-| user                         | balloon from off-panel, tail out of the frame; a small tag names the source |
-| patter                       | thought bubble; drifts off when the real reply lands                        |
-| tool                         | caption box in the panel corner; a failure keeps its first line             |
-| state.background             | an inset "meanwhile" panel with speed lines                                 |
-| note, error                  | burst balloon, same plain words                                             |
-| speaking (voice, later)      | voice balloon; spoken words darken, stopping leaves the rest pale          |
-| offline (client state)       | the panel greys, an ellipsis balloon with a dashed edge                     |
+| Item                    | Device                                                                                                   |
+|-------------------------+----------------------------------------------------------------------------------------------------------|
+| user                    | a light-blue rounded note with a =›= marker and no tail, on the side away from June; the source names itself unless it is the overlay |
+| assistant               | a cream speech balloon whose tail aims at her mouth; it grows as the reply streams                       |
+| assistant, several beats | one balloon per beat; consecutive balloons share one tail unless each sits beside her face            |
+| patter                  | a thought cloud, shallow scallops rather than poofy ones, trailing toward her; a panel keeps only its latest |
+| tool, one in a row      | a small lavender chip, =∴ read · MEMORY.org=; a click shows the whole summary                            |
+| tools, several in a row | a terminal status card, one line each with ✓, ✗, or …, the latest five, beside the balloon after it when both fit; a click opens every call in full and the panel makes room |
+| state.background        | a dark "meanwhile, on kit" card in the masthead                                                          |
+| note, error             | a jagged burst balloon sized to its words, same plain words                                             |
+| speaking (voice, later) | a voice balloon; spoken words darken, stopping leaves the rest pale                                      |
+| offline (client state)  | the strip dims and the masthead says it is reconnecting                                                  |
 
-Expression symbols drawn over the portrait make a beat readable at a glance: an anger vein for =indignant=, a sweat drop for =exasperated=, sparkles for =smug= and =delighted=, blush hatching for =bashful=, gloom lines for =pout=, and "!?" for =surprised=.
+Stressed words in June's balloons are bold on a highlighter stroke. Marks drawn beside her face reinforce a pose and are never baked into the art: sparkle, heart, sweat drop, anger vein, steam, and emphasis lines. A pose lists the marks that suit it; serious and gentle poses list none.
+
+*** Composition engine
+=overlay/compose.mjs= holds every layout decision as plain JavaScript, so =test/overlay.test.mjs= checks the compositions under Node: QML measures each element's text at the column width the engine gives it, and the engine returns where everything goes. Its contract with the art is the pose metadata below; with the words, only their measured sizes.
+
+- =metrics(width)=: the words' column and the art's share of the width, padding, minimum panel height, and the height past which the art moves to an inset.
+- =plan()=: elements in reading order (the user's notes to the outer edge, June's balloons toward her with an alternating stagger, a status card beside the next balloon when both fit), the panel's height from their bottom, the framing, and the image rectangle from the pose's face box, with a lane between her face and the words for tails. It returns her face and mouth in panel coordinates, each balloon's tail, and her marks.
+- Tails: consecutive balloons are one speech, and tool chips, cards, and thoughts between them do not end it; the user's notes and bursts do. A balloon beside her face takes its tail from the side facing her; otherwise from its top or bottom edge, or the side if that path is clearer. A base only sits on a straight run of the outline, and a balloon is never drawn smaller than 120 by 58 px, so a reply that has just started still has a clean tail. A tail leans at most 50° from its edge, so a balloon far below her gets a tail that points her way rather than a bent spike, and the edge needing the least bending wins. The tip stops before her face box and before any other element, and a tail without 12 px of clear room is left off rather than drawn over something. A thought cloud's trail leaves its corner nearest her face and drifts toward it, trying the next corner when its circles would land on another element or cross the cloud, and going without when every corner is boxed in.
+- Pose choice: the named pose, else a pose whose expression is the requested one or the next in its fallback chain, avoiding the previous panel's pose when another fits. Until the daemon sends an expression, the overlay asks for a stand-in: exasperated for a failure, curious while she answers, serious for a run of tool calls, otherwise a common face chosen by the panel's id, so rare faces stay rare. A panel's side and pose are kept once chosen, so the strip does not rearrange itself as it grows.
+
+The invariants the tests hold at 820, 640, 460, and 340 px, both sides, and several element mixes: every element inside the panel and apart from the others, none over her face, her face inside her art area and image, a face of a useful size, marks inside the art area, tails toward her mouth and short of her face and other balloons, one tail per run of balloons away from her face, and no floating torso.
 
 Motion rules:
 - Ink, not glow: balloon outlines draw, captions wipe in, faces cut between images rather than fade. No blur or glass.
-- Text arrives a word at a time at the streaming pace; words the reply stresses land in display lettering with a small bounce.
+- Text arrives at the streaming pace; the newest balloons land with a small overshoot.
 - Big moves (a shake, a bounce) only on the rare expressions, so they still surprise.
-- Serious and gentle replies get no sound effects or symbols, as =SOUL.org= drops the teasing then. Reduced motion keeps only the cuts.
+- Serious and gentle replies get no marks, as =SOUL.org= drops the teasing then. Reduced motion keeps only the cuts.
 
-Until the art exists, labelled placeholders stand in for the portrait; the strip, balloons, captions, and panels do not wait on it.
+The words are real text: balloons and notes are read-only text fields, so a drag selects and the usual key copies. Until the art exists, the base avatar set's placeholder poses stand in; the composition does not wait on them.
 
 ** Desktop context and taking over, later
 Read =hyprctl activewindow -j= (class, title, workspace); offer an explicit screenshot of the active window with =grim=; read the primary selection with =wl-paste --primary=. Each is sent only when the user asks, and framed as outside content as mail already is.
@@ -201,7 +217,39 @@ An avatar set is a directory holding =manifest.json= and its images. =templates/
 - =play= is =still=, =loop=, or =once=; =once= plays and then shows =idle=. Animation is an animated WebP, or a horizontal PNG sprite sheet with =frames= (2 or more) and =fps=.
 - Fallbacks belong to the vocabulary, not the manifest. To show a name, each name in its chain is looked up in every set in order (the active theme, then the base) before the next name, so a theme can replace a few faces. Every chain ends at =idle=, and an unknown name is =idle=. =parseManifest= and =resolveExpression= in =src/avatar.ts= implement this; a base set must have =idle=.
 
-The art is generated anime, made in rounds with the user choosing at each step. Consistency across expressions and later seasonal sets is the hard part: keep a character reference sheet and the prompts, seeds, and settings beside the images, so a new set can be regenerated to match. Animated WebP and PNG sprite sheets play in both QML and Compose. Mouth movement synced to speech can come later from TTS timestamps or audio amplitude.
+*** Poses
+The overlay composes June into panels from poses, not one image per expression. A pose is one illustration, ideally on a transparent background at high resolution, that a client scales, crops, mirrors, and places like a hero image, so one image serves every panel size and side. Poses live in the same manifest as the expressions, under =poses=, keyed by a descriptive name a model can choose by (=smug-chin-on-hand=, =thoughtful-pen=):
+
+#+begin_src json
+"poses": {
+  "smug-chin-on-hand": {
+    "file": "poses/smug-chin-on-hand.webp",
+    "size": [2000, 2600],
+    "expression": "smug",
+    "description": "pleased with herself, chin resting on one hand",
+    "face": [0.37, 0.196, 0.3, 0.269],
+    "mouth": [0.544, 0.412],
+    "facing": "right",
+    "mirror": true,
+    "framings": ["close-up", "head", "bust", "waist"],
+    "marks": ["sparkle"],
+    "props": []
+  }
+}
+#+end_src
+
+- =face= is the box no balloon may cover and the one framing scales by, =[x, y, width, height]= as fractions of the image; =mouth= is the point tails aim at, inside the face.
+- =expression= ties the pose to the vocabulary, so a request for any name falls back through its chain to a pose that exists; a base set's poses include an idle one.
+- =facing= is where she looks (=left=, =right=, =front=). A client mirrors a pose to face the words unless =mirror= is false, for lettering or a prop that must not flip.
+- =framings= lists the crops the image can fill, from =close-up= to =full=; leave out a framing the image cannot reach, such as =waist= for a head-only image, and name =full= only for art drawn tall. Several images may share an expression and differ in framing when a pose genuinely needs it.
+- =marks= are the decorations that suit the pose, from =sparkle=, =heart=, =sweat=, =vein=, =steam=, and =emphasis=. =props= and =description= are for choosing and for the art's own records.
+- Files are PNG, WebP, or SVG inside the set. =parseManifest= in =src/avatar.ts= checks all of this strictly, naming each problem; the overlay reads the same manifest leniently and skips a pose it cannot place.
+- Taller art for long panels, from the user on 2026-11-03: a pose drawn as a three-quarter or full figure lists =full= among its framings; a pose that lists no framings fills only the first four. When a panel's words run long enough to need an inset, the overlay looks for a pose with =full= and the same expression, or the next in its chain (=tallFor=), and frames her down the panel's height, her face near the top and her figure reaching the bottom. The inset is kept when no pose can fill the panel, or the panel is taller than the figure. Splitting crowded panels stays the first answer; tall art is the answer for genuinely long ones.
+- The model's side of the contract is small: a pose name, or an expression, and optionally a framing hint. Layout code does the rest. Generating a pose on demand can come later as one more way to fill the manifest.
+
+=templates/avatar/poses/= holds ten labelled placeholder poses, two of them standing figures drawn to the knees, with June's identity cues (brunette hair, green-hazel eyes, a pink shirt, a headset) covering idle, warm, smug, laughing, serious, wry, exasperated, and curious, so composition can be judged before the art exists. The overlay reads avatar sets from =JUNE_OVERLAY_ART=, a personal set first and the base set last.
+
+The art is generated anime, made in rounds with the user choosing at each step. Direction set on 2026-11-03: full colour, polished and cel-shaded rather than photorealistic; one consistent identity (brunette hair, green-hazel eyes, a pink shirt, a headset, a warm and expressive face) and proportions; a wide emotional range, from smug, teasing, and amused to curious, annoyed, embarrassed, thoughtful, delighted, exasperated, and sleepy; varied gestures and body poses; and occasional props such as a mug, keyboard, laptop, or pen. She performs the conversation rather than accompanying it. Consistency across expressions and later seasonal sets is the hard part: keep a character reference sheet and the prompts, seeds, and settings beside the images, so a new set can be regenerated to match. Animated WebP and PNG sprite sheets play in both QML and Compose. Mouth movement synced to speech can come later from TTS timestamps or audio amplitude.
 
 * Themes
 The user wants to change the look seasonally, so presentation comes from a theme rather than from each client's code.
