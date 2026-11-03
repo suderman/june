@@ -5,7 +5,8 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { activity, applyView, beats, caption, emptyView, markup, panels, readInput } from "../overlay/strip.mjs";
 import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, jagged, liveActivity, metrics, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
-import { EXPRESSIONS, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
+import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
+import { LIVE_STATES as LIVE, excerpt, idleState, liveState, newReply, readLive } from "../overlay/live.mjs";
 
 const user = (id, text = "hi", source = "gui") => ({ kind: "user", id, source, text });
 const june = (id, text = "hello", streaming = false) => ({ kind: "assistant", id, text, streaming, answers: "gui" });
@@ -395,10 +396,66 @@ test("a balloon and its tail are one closed outline from any side, and a burst s
 
 test("the shared modules use only JavaScript that QML's engine runs", async () => {
 	// Each of these loaded under Node but failed in Quickshell, blanking the overlay.
-	for (const file of ["strip.mjs", "compose.mjs"]) {
+	for (const file of ["strip.mjs", "compose.mjs", "live.mjs"]) {
 		const source = (await readFile(new URL(`../overlay/${file}`, import.meta.url), "utf8")).replace(/^\s*(\/\/|\*).*$/gm, "");
 		assert.doesNotMatch(source, /\.at\(/, `${file}: Array.prototype.at`);
 		assert.doesNotMatch(source, /Object\.hasOwn\(/, `${file}: Object.hasOwn`);
 		assert.doesNotMatch(source, /\{\s*\.\.\./, `${file}: object spread`);
 	}
 });
+
+test("live June's state follows the run: thinking, digging or delegating, typing, tidying, offline", () => {
+	const now = new Date(2026, 10, 3, 14, 0);
+	const at = (items, state, extra = {}) => liveState({ view: { items, state }, linked: true, now, idleSince: now.getTime(), ...extra });
+	const busy = { running: true, background: 0, compacting: false };
+	const ask = user("u1", "any emails worth responding to?");
+	assert.equal(at([ask], busy), "thinking", "a run with no words or tools yet");
+	assert.equal(at([ask, tool("t1", "bash", "notmuch search")], busy), "digging", "her own tools");
+	assert.equal(at([ask, june("a1", "i'll check."), tool("t1", "work", "brief=Find replies")], busy), "delegating", "handing work to a brief");
+	assert.equal(at([ask, tool("t1"), june("a2", "two need a reply", true)], busy), "typing", "her reply streaming");
+	assert.equal(at([ask, june("a2", "", true)], busy), "thinking", "a reply with no words yet");
+	assert.equal(at([ask], { ...busy, running: false, compacting: true }), "tidying");
+	assert.equal(at([ask], { running: false, background: 2 }), "delegating", "briefs running in the background");
+	assert.equal(liveState({ view: { items: [], state: busy }, linked: false, now }), "offline");
+	assert.equal(at([ask], busy, { once: { state: "pop-in", until: now.getTime() + 1000 } }), "pop-in", "a one-shot plays first");
+	assert.equal(at([ask], busy, { once: { state: "pop-in", until: now.getTime() - 1 } }), "thinking", "then the run shows again");
+	assert.deepEqual(LIVE, [...LIVE_STATES], "the overlay's live states match the daemon's");
+});
+
+test("idle, she sips her mug, then reads, doodles, listens to music in the evening, and snoozes late", () => {
+	const at = (h) => new Date(2026, 10, 3, h, 30);
+	assert.equal(idleState(at(14), 2), "sipping", "just finished");
+	assert.equal(idleState(at(14), 20), "reading");
+	assert.equal(idleState(at(14), 90), "doodling");
+	assert.equal(idleState(at(20), 20), "music");
+	assert.equal(idleState(at(23), 20), "snoozing");
+	assert.equal(idleState(at(3), 20), "snoozing");
+	assert.equal(idleState(at(3), 2), "sipping", "even late, a moment of sipping first");
+	const now = at(20);
+	assert.equal(liveState({ view: { items: [], state: { running: false, background: 0 } }, linked: true, now, idleSince: now.getTime() - 30 * 60000 }), "music");
+});
+
+test("she pops up for a newly finished desktop reply, once, with its opening lines", () => {
+	const done = (id, text, alert = "gui") => ({ ...june(id, text), alert });
+	assert.equal(newReply([user("u1"), done("a1", "two need a reply.")], null).id, "a1");
+	assert.equal(newReply([user("u1"), done("a1", "two need a reply.")], "a1"), null, "already shown");
+	assert.equal(newReply([user("u1"), { ...june("a1", "writing", true), alert: "gui" }], null), null, "still streaming");
+	assert.equal(newReply([user("u1"), done("a1", "on telegram", "telegram")], null), null, "meant for another surface");
+	assert.equal(newReply([done("a0", "older"), user("u1"), done("a1", "  ")], null).id, "a0", "an empty reply is skipped");
+	assert.equal(excerpt("short reply.\n\nmore detail"), "short reply.");
+	const long = `${"word ".repeat(30)}ends here. ${"more ".repeat(40)}`;
+	assert.equal(excerpt(long, 200), `${"word ".repeat(30)}ends here.`, "cut at a sentence");
+	assert.ok(excerpt("a".repeat(50) + " " + "b".repeat(300), 200).endsWith("…"), "or at a word, with an ellipsis");
+});
+
+test("live June's art is read by state, a sprite sheet keeping its frames, an unknown state skipped", () => {
+	const art = readLive(manifest, "file:///set/");
+	assert.equal(Object.keys(art).length, LIVE.length, "the placeholder set covers every state");
+	assert.equal(art.typing.url, "file:///set/live/typing.svg");
+	assert.equal(art["pop-in"].play, "once");
+	const sheet = readLive({ live: { typing: { file: "t.png", play: "loop", frames: 8, fps: 8 }, dancing: { file: "d.png", play: "loop" }, sipping: { play: "loop" } } }, "");
+	assert.deepEqual(Object.keys(sheet), ["typing"]);
+	assert.deepEqual([sheet.typing.frames, sheet.typing.fps], [8, 8]);
+	assert.deepEqual(readLive({}, ""), {});
+});
+

@@ -5,7 +5,8 @@
 // Environment, set by the june-overlay wrapper: JUNE_OVERLAY_URL (wss://june.kit/), JUNE_OVERLAY_TOKEN_FILE (a 0600
 // file holding this device's token), JUNE_OVERLAY_FONTS (a directory of the strip's fonts), and JUNE_OVERLAY_ART (avatar
 // set directories, colon-separated, a personal set before the base one; see "Poses" in docs/interfaces.org).
-// Summon with `june-overlay toggle` (qs ipc call june toggle).
+// Summon the strip with `june-overlay toggle` (qs ipc call june toggle), and live June, the minimised form, with
+// `june-overlay mini`.
 import QtQuick
 import QtQml.Models
 import QtQuick.Controls
@@ -16,6 +17,7 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 import "strip.mjs" as Strip
 import "compose.mjs" as Compose
+import "live.mjs" as Live
 
 ShellRoot {
   id: root
@@ -39,7 +41,10 @@ ShellRoot {
   // chosen so the strip does not rearrange itself as it grows.
   readonly property var artDirs: (Quickshell.env("JUNE_OVERLAY_ART") || "").split(":").filter(d => d !== "")
   property var artSets: ({})
+  property var liveSets: ({})
   property var poses: []
+  // Live June's art by state, the first set winning.
+  property var liveArt: ({})
   property var sides: ({})
   property var poseIds: ({})
 
@@ -55,9 +60,18 @@ ShellRoot {
 
   function addArt(index, dir, text) {
     const sets = Object.assign({}, artSets);
-    try { sets[index] = Compose.readPoses(JSON.parse(text), "file://" + dir + "/"); }
-    catch (e) { console.warn("june overlay: no usable avatar set in", dir); sets[index] = []; }
+    const lives = Object.assign({}, liveSets);
+    try {
+      const manifest = JSON.parse(text);
+      sets[index] = Compose.readPoses(manifest, "file://" + dir + "/");
+      lives[index] = Live.readLive(manifest, "file://" + dir + "/");
+    }
+    catch (e) { console.warn("june overlay: no usable avatar set in", dir); sets[index] = []; lives[index] = {}; }
     artSets = sets;
+    liveSets = lives;
+    const art = {};
+    for (let i = artDirs.length - 1; i >= 0; i--) Object.assign(art, liveSets[i] ?? {});
+    liveArt = art;
     const seen = {};
     const all = [];
     for (let i = 0; i < artDirs.length; i++)
@@ -74,18 +88,115 @@ ShellRoot {
 
   ListModel { id: strip } // newest panel first, so the list grows upward from the input
 
-  function show() {
+  function focusedScreen() {
     const name = Hyprland.focusedMonitor?.name;
-    targetScreen = Quickshell.screens.find(s => s.name === name) || Quickshell.screens[0];
+    return Quickshell.screens.find(s => s.name === name) || Quickshell.screens[0];
+  }
+  function show() {
+    targetScreen = focusedScreen();
+    hideMini();
     shown = true;
   }
   function hide() { shown = false; }
+
+  // Live June, the minimised form. Summoned with Shift and an Alt tap, she opens with the user's note ready; she also
+  // pops up by herself with a reply that finishes while the strip is hidden, and tucks herself away after a while.
+  property bool miniShown: false
+  property bool miniSummoned: false
+  property bool miniInput: false
+  property bool miniMessage: false
+  property string miniText: ""
+  property var miniScreen: Quickshell.screens[0]
+  // The newest desktop reply already shown, so each pops up once; null until the first view arrives.
+  property var seenReply: null
+  property real idleSince: Date.now()
+  property bool wasRunning: false
+  property var oneShot: null
+  property real now: Date.now()
+  readonly property string liveState: Live.liveState({ view: view, linked: linked, now: new Date(now), idleSince: idleSince, once: oneShot })
+  readonly property var liveWords: ({ typing: "writing", thinking: "thinking", digging: "digging", delegating: "delegating", watching: "watching", tidying: "tidying up", listening: "listening", speaking: "speaking", offline: "offline" })
+
+  Timer { interval: 30000; running: true; repeat: true; onTriggered: root.now = Date.now() }
+  Timer { id: oneShotEnd; onTriggered: { root.oneShot = null; root.now = Date.now(); } }
+  Timer {
+    id: tuckAway
+    interval: 15000
+    onTriggered: {
+      if (live.hovered || root.miniInput) { restart(); return; }
+      root.miniMessage = false;
+      if (!root.miniSummoned) root.miniShown = false;
+    }
+  }
+
+  function playOnce(state, ms) {
+    oneShot = { state: state, until: Date.now() + ms };
+    now = Date.now();
+    oneShotEnd.interval = ms;
+    oneShotEnd.restart();
+  }
+  function showMini() {
+    if (shown) return;
+    miniScreen = focusedScreen();
+    if (liveState === "snoozing") playOnce("waking", 1500);
+    miniShown = true;
+    miniSummoned = true;
+    miniInput = true;
+  }
+  function hideMini() {
+    miniShown = false;
+    miniSummoned = false;
+    miniInput = false;
+    miniMessage = false;
+    tuckAway.stop();
+  }
+  function popReply(item) {
+    miniText = Live.excerpt(item.text);
+    miniMessage = true;
+    if (!miniShown) {
+      miniScreen = focusedScreen();
+      miniShown = true;
+      miniSummoned = false;
+      playOnce("pop-in", 1800);
+    }
+    tuckAway.restart();
+  }
+  // After each view change: note when a run ends, and pop up for a newly finished desktop reply while the strip is hidden.
+  function watchLive() {
+    const running = Boolean(view.state.running || view.state.compacting);
+    if (wasRunning && !running) idleSince = Date.now();
+    wasRunning = running;
+    now = Date.now();
+    const latest = Live.newReply(view.items, seenReply);
+    if (seenReply === null) { seenReply = latest ? latest.id : ""; return; }
+    if (!latest) return;
+    seenReply = latest.id;
+    if (!shown) popReply(latest);
+  }
 
   IpcHandler {
     target: "june"
     function toggle(): void { root.shown ? root.hide() : root.show(); }
     function open(): void { root.show(); }
     function close(): void { root.hide(); }
+    function mini(): void { root.miniShown ? root.hideMini() : root.showMini(); }
+  }
+
+  LiveWindow {
+    id: live
+    screen: root.miniScreen
+    shown: root.miniShown && !root.shown
+    liveState: root.liveState
+    art: root.liveArt[root.liveState] ?? root.liveArt["sipping"] ?? null
+    status: root.liveWords[root.liveState] ?? ""
+    message: root.miniText
+    messageShown: root.miniMessage
+    inputShown: root.miniInput
+    onOpenStrip: root.show()
+    onWantInput: { root.miniInput = true; tuckAway.restart(); }
+    onDismissed: root.hideMini()
+    onSubmitted: (text, followUp) => {
+      if (root.submit(text, followUp)) { root.miniInput = false; root.miniMessage = false; root.miniSummoned = false; tuckAway.restart(); }
+    }
   }
 
   FileView { id: tokenFile; path: Quickshell.env("JUNE_OVERLAY_TOKEN_FILE") || ""; blockLoading: true }
@@ -138,6 +249,7 @@ ShellRoot {
     if (reply.type === "view") {
       view = Strip.applyView(view, reply);
       sync();
+      watchLive();
       return;
     }
     if (reply.type === "reply") say(reply.text);
