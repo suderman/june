@@ -59,11 +59,15 @@ function formatValue(value: unknown): string {
 export const silentLogger: Logger = { debug() {}, info() {}, warn() {}, error() {} };
 
 /** Harness settings. `contextCap` limits the context: blocking compaction starts at the cap, background compaction at most a
- * quarter below it, and a compaction keeps at most a third of it, so a compacted context stays under both thresholds. */
+ * quarter below it, and a compaction keeps at most a third of it, so a compacted context stays under both thresholds.
+ * `stream.timeoutMs` bounds the wait for a model's response headers, not the answer: the OpenAI and Anthropic SDKs clear it
+ * once headers arrive, and cliproxyapi sends them in a few seconds even before thinking. Without it Node waits five minutes
+ * on a stalled request before the harness retries. */
 export function createSettings(options: { contextCap?: number; contextWindow?: number } = {}): HarnessSettings {
 	const { contextCap: cap, contextWindow: window } = options;
 	const capped = cap !== undefined && window !== undefined && cap < window;
 	return {
+		stream: { timeoutMs: 60_000 },
 		progress: { partialIntervalMs: 300, outputIntervalMs: 500 },
 		...(capped ? { compaction: { reserveTokens: window - cap, keepRecentTokens: Math.min(20_000, Math.floor(cap / 3)), backgroundTokens: Math.min(32_768, Math.floor(cap / 4)) } } : {}),
 	};

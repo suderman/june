@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadConfig, paths } from "../src/config.ts";
 import { init } from "../src/init.ts";
+import { createSettings } from "../src/runtime.ts";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { ask, openTestDaemon, tempDir } from "./helpers.ts";
 
@@ -64,6 +65,10 @@ test("the rhythm, reflection, heartbeat, and patter timing have defaults, take o
 	const yes = await layer("yes", { reflection: { bitcoin: "yes" } });
 	assert.throws(() => loadConfig({ ...tmp.paths, config: yes }), /reflection\.bitcoin must be true or false/);
 	assert.deepEqual(plain.heartbeat, { enabled: false, everyMinutes: 60, chattingMinutes: 15 }, "off unless configured");
+	assert.deepEqual(plain.looseEnds, { enabled: false, at: "20:30" }, "the evening look is off unless configured");
+	assert.deepEqual(loadConfig({ ...tmp.paths, config: await layer("evening", { looseEnds: { enabled: true, at: "19:45" } }) }).looseEnds, { enabled: true, at: "19:45" });
+	const pm = await layer("pm", { looseEnds: { enabled: true, at: "8:30pm" } });
+	assert.throws(() => loadConfig({ ...tmp.paths, config: pm }), /looseEnds\.at must be HH:MM/);
 	assert.equal(plain.patter.openAfterSeconds, 8);
 	const tuned = loadConfig({ ...tmp.paths, config: await layer("tuned", { herdr: { allowPrompt: false }, rhythm: { sleep: "00:30" }, heartbeat: { enabled: true, everyMinutes: 30 }, patter: { openAfterSeconds: 15 } }) });
 	assert.equal(tuned.herdr.allowPrompt, false, "an explicit opt-out is preserved");
@@ -118,6 +123,7 @@ test("the templates load: the example config is valid, and the identity files ar
 	const templates = join(import.meta.dirname, "..", "templates");
 	const config = loadConfig({ ...paths({}), config: templates, data: templates }, {});
 	assert.equal(config.heartbeat.enabled, true);
+	assert.deepEqual(config.looseEnds, { enabled: true, at: "20:30" });
 	assert.equal(config.soulFile, join(templates, "SOUL.org"));
 	assert.equal(config.heartbeatFile, join(templates, "HEARTBEAT.org"));
 	for (const file of ["SOUL.org", "MEMORY.org", "HEARTBEAT.org"]) assert.match(readFileSync(join(templates, file), "utf8"), /^#\+TITLE: /);
@@ -182,4 +188,9 @@ test("june init names the Org root an existing config.json sets in the starter A
 	const agents = readFileSync(join(dirs.config, "AGENTS.md"), "utf8");
 	assert.match(agents, /`~\/notes\/org\/work\/<domain>\/<project>\/<project>\.org`/);
 	assert.doesNotMatch(agents, /~\/org\b/);
+});
+
+test("a model that sends no response headers for a minute is given up on, so the harness retries it", () => {
+	assert.equal(createSettings().stream?.timeoutMs, 60_000);
+	assert.equal(createSettings({ contextCap: 1000, contextWindow: 4000 }).stream?.timeoutMs, 60_000);
 });
