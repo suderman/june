@@ -202,6 +202,7 @@ test("/reload refreshes prompt files and skill discovery without a model call or
 			assert.match(prompt(ctx), /Rules before\./);
 			assert.match(prompt(ctx), /old: Old skill/);
 			assert.match(prompt(ctx), /MEMORY.org is empty or does not exist yet/, "a missing memory file is not an error");
+			assert.match(prompt(ctx), /never a one-off or dated reminder.*through org_add_task/, "timed reminders go to Org, not HEARTBEAT.org");
 			return fauxAssistantMessage("Before reload.");
 		},
 	]);

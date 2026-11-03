@@ -98,7 +98,7 @@ async function personalSection(files: PromptFiles, memory: () => Promise<string>
 			: []),
 		...(files.heartbeatFile
 			? [
-					`${files.heartbeatFile} holds ${user()}'s standing instructions for your heartbeat: what is worth a nudge between conversations and what is not, in their words. When they tell you to watch for something, or to stop nudging them about something, update it with edit in the same turn.`,
+					`${files.heartbeatFile} holds ${user()}'s standing instructions for your heartbeat: what is worth a nudge between conversations and what is not, in their words. When they tell you to watch for something, or to stop nudging them about something, update it with edit in the same turn. It holds only standing guidance, never a one-off or dated reminder: a heartbeat is not a reliable clock, so a reminder for a set day or time goes in Org as a TODO with a deadline or scheduled time through org_add_task, filed where it belongs. When you find a dated or passed item in it, move it to Org if it still matters, otherwise remove it, and tell ${user()} in a line.`,
 				]
 			: []),
 		...(people
