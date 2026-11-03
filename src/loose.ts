@@ -63,8 +63,8 @@ export function createLooseEnds(options: {
 				// The receipt first: a crash after it costs one evening; one before it would ask twice.
 				mkdirSync(options.state, { recursive: true });
 				writeFileSync(receipt, `${JSON.stringify({ day, at: at.getTime() })}\n`);
-				// A day with nothing said and nothing written has no loose ends, so the model is not asked.
-				if (spoke.length === 0 && found === undefined) return log.info("loose_ends_quiet", { day, reason: "nothing today" });
+				// A day the user shared nothing has no loose ends of theirs, whatever June wrote herself, so the model is not asked.
+				if (spoke.length === 0) return log.info("loose_ends_quiet", { day, reason: "user said nothing today" });
 				const chatting = at.getTime() - (spoke.at(-1)?.timestamp ?? 0) < options.chattingMinutes * 60_000;
 				const content = prompt({ day, chatting, journal: found?.text, instructions: standing(heartbeatFile) });
 				const id = await root.commit((tx) => admitNotice(tx, root, root.id, { requestId: `loose-ends:${day}`, content, source: "heartbeat", label: "loose ends" }), BG);

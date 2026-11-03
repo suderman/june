@@ -111,7 +111,7 @@ test("at 20:30 June asks about a loose end, Alex's answer goes in the journal, a
 	await until(() => readFileSync(journal, "utf8").includes("Alex called Dana, and she signed the contract."));
 });
 
-test("a quiet evening shows nothing, a day with nothing in it asks nobody, and after quiet hours the look waits", async (t) => {
+test("a quiet evening shows nothing, a day Alex shared nothing asks nobody, and after quiet hours the look waits", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const today = localStamp().date;
@@ -138,7 +138,9 @@ test("a quiet evening shows nothing, a day with nothing in it asks nobody, and a
 	await settle();
 	assert.deepEqual(lines(view.items()), ["alex: hi", "june: hello"], "a quiet look shows nothing");
 
-	// Tomorrow nothing was said or written, so no model is asked, and the day still counts as looked at.
+	// Tomorrow Alex says nothing, so no model is asked even though June wrote in her journal, and the day still counts as looked at.
+	const tomorrow = localStamp(new Date(y, m - 1, d + 1)).date;
+	await writeFile(join(tmp.dir, "JOURNAL.org"), `#+TITLE: June's journal\n\n* ${tomorrow.slice(0, 4)}\n** ${tomorrow.slice(0, 7)} Month\n*** ${tomorrow} Day\n**** 09:00 Mail\nA newsletter from the school arrived.\n`);
 	clock = new Date(y, m - 1, d + 1, 20, 30);
 	await until(() => receipt(tmp.paths.state) > today);
 	await settle();
