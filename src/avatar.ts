@@ -44,7 +44,39 @@ export type Activity = keyof typeof ACTIVITIES;
 export type Playback = "still" | "loop" | "once";
 /** One image: a still, an animated WebP, or a horizontal PNG sprite sheet of `frames` frames at `fps`. `once` returns to idle. */
 export type Asset = { file: string; play: Playback; frames?: number; fps?: number };
-export type Manifest = { version: 1; size: [number, number]; expressions: Partial<Record<Expression, Asset>> };
+
+/**
+ * How much of June a comic panel shows, closest first: her face, head and shoulders, bust, down to the waist, or a
+ * three-quarter or full figure. A pose that lists no framings fills the first four; `full` is only for art drawn tall.
+ */
+export const FRAMINGS = ["close-up", "head", "bust", "waist", "full"] as const;
+export type Framing = (typeof FRAMINGS)[number];
+/** Marks a client may draw beside a pose's face to reinforce it; never baked into the art. */
+export const MARKS = ["sparkle", "heart", "sweat", "vein", "steam", "emphasis"] as const;
+export type Mark = (typeof MARKS)[number];
+
+/**
+ * A pose: one illustration of June, ideally on a transparent background, that a client scales, crops, mirrors, and places
+ * into panels of any size, like a hero image. Its name describes it (`smug-chin-on-hand`) so a model can choose it; its
+ * expression ties it to the vocabulary, so an unknown name or a missing pose falls back through the expression chain.
+ * Geometry is in fractions of the image: `face` is the box no balloon may cover, `mouth` the point tails aim at.
+ * `facing` is where she looks; a client mirrors a pose to face the text unless `mirror` is false (lettering or a prop that
+ * must not flip). `framings` lists the crops the image can fill; `marks` are decorations that suit it.
+ */
+export type Pose = {
+	file: string;
+	size: [number, number];
+	expression: Expression;
+	description?: string;
+	face: [number, number, number, number];
+	mouth: [number, number];
+	facing: "left" | "right" | "front";
+	mirror?: boolean;
+	framings?: Framing[];
+	marks?: Mark[];
+	props?: string[];
+};
+export type Manifest = { version: 1; size: [number, number]; expressions: Partial<Record<Expression, Asset>>; poses?: Record<string, Pose> };
 
 const isExpression = (name: string): name is Expression => Object.hasOwn(EXPRESSIONS, name);
 const positiveInt = (n: unknown) => Number.isInteger(n) && (n as number) > 0;
@@ -70,8 +102,44 @@ export function parseManifest(data: unknown, options: { base?: boolean } = {}): 
 		}
 	}
 	if (options.base && expressions.idle === undefined) errors.push("a base set must have idle");
+	errors.push(...poseErrors(m.poses, options));
 	if (errors.length > 0) throw new Error(`manifest: ${errors.join("; ")}`);
 	return m as Manifest;
+}
+
+const fraction = (n: unknown): n is number => typeof n === "number" && n >= 0 && n <= 1;
+const listOf = (value: unknown, allowed: readonly string[]) => Array.isArray(value) && value.length > 0 && value.every((v) => allowed.includes(v));
+
+/** Problems with a manifest's optional poses. A base set's poses must include an idle one, so every chain ends at a pose. */
+function poseErrors(data: unknown, options: { base?: boolean }): string[] {
+	if (data === undefined) return [];
+	if (typeof data !== "object" || data === null || Array.isArray(data)) return ["poses must be an object"];
+	const errors: string[] = [];
+	const poses = data as Record<string, Partial<Pose>>;
+	for (const [name, p] of Object.entries(poses)) {
+		const at = `pose ${name}`;
+		if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name)) errors.push(`${at}: name must be lowercase words joined by hyphens`);
+		if (typeof p?.file !== "string" || !/^[\w./-]+\.(png|webp|svg)$/i.test(p.file) || p.file.startsWith("/") || p.file.split("/").includes(".."))
+			errors.push(`${at}: file must be a .png, .webp, or .svg path inside the set`);
+		if (!Array.isArray(p?.size) || p.size.length !== 2 || !p.size.every(positiveInt)) errors.push(`${at}: size must be [width, height] in pixels`);
+		if (typeof p?.expression !== "string" || !isExpression(p.expression)) errors.push(`${at}: expression must be in the vocabulary`);
+		const face = p?.face;
+		if (!Array.isArray(face) || face.length !== 4 || !face.every(fraction) || !(face[2]! > 0 && face[3]! > 0) || face[0]! + face[2]! > 1 || face[1]! + face[3]! > 1)
+			errors.push(`${at}: face must be [x, y, width, height] inside the image, as fractions`);
+		const mouth = p?.mouth;
+		if (!Array.isArray(mouth) || mouth.length !== 2 || !mouth.every(fraction)) errors.push(`${at}: mouth must be [x, y] as fractions`);
+		else if (Array.isArray(face) && face.length === 4 && !(mouth[0]! >= face[0]! && mouth[0]! <= face[0]! + face[2]! && mouth[1]! >= face[1]! && mouth[1]! <= face[1]! + face[3]!))
+			errors.push(`${at}: mouth must be inside the face`);
+		if (!["left", "right", "front"].includes(p?.facing as string)) errors.push(`${at}: facing must be left, right, or front`);
+		if (p?.mirror !== undefined && typeof p.mirror !== "boolean") errors.push(`${at}: mirror must be true or false`);
+		if (p?.framings !== undefined && !listOf(p.framings, FRAMINGS)) errors.push(`${at}: framings must list some of ${FRAMINGS.join(", ")}`);
+		if (p?.marks !== undefined && !listOf(p.marks, MARKS)) errors.push(`${at}: marks must list some of ${MARKS.join(", ")}`);
+		if (p?.props !== undefined && !(Array.isArray(p.props) && p.props.every((v) => typeof v === "string"))) errors.push(`${at}: props must be words`);
+		if (p?.description !== undefined && typeof p.description !== "string") errors.push(`${at}: description must be text`);
+	}
+	const names = Object.values(poses);
+	if (options.base && names.length > 0 && !names.some((p) => p?.expression === "idle")) errors.push("a base set with poses must have an idle pose");
+	return errors;
 }
 
 /** The names to try for an expression: itself, its fallbacks, then idle. An unknown name is idle. */

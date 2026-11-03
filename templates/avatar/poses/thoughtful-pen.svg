@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1300" width="1000" height="1300">
+<path d="M 260 1300 C 210 900 250 260 510 230 C 770 260 810 900 760 1300 Z" fill="#45291c"/>
+<rect x="460" y="585" width="100" height="110" fill="#f0c3a8" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 130 1300 C 140 790 280 680 510 680 C 740 680 880 790 890 1300 Z" fill="#ee7fa4" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 430 684 Q 510 745 590 684" fill="#f0c3a8" stroke="#2a1f22" stroke-width="6"/>
+<g transform="rotate(0 510 430)">
+<ellipse cx="522" cy="430" rx="150" ry="175" fill="#f9d9c4" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 320 470 C 310 230 450 200 530 215 C 660 225 720 300 700 470 C 660 360 600 320 574 300 C 500 360 420 380 360 360 C 340 400 335 440 320 470 Z" fill="#5b3a29" stroke="#2a1f22" stroke-width="6"/>
+<ellipse cx="449" cy="500" rx="30" ry="14" fill="#f39aa6" opacity="0.55"/><ellipse cx="619" cy="500" rx="30" ry="14" fill="#f39aa6" opacity="0.55"/>
+<ellipse cx="472" cy="445" rx="24" ry="30" fill="#6e8f4a" stroke="#2a1f22" stroke-width="5"/><circle cx="478" cy="433" r="11" fill="#2b2a1e"/><circle cx="485" cy="425" r="6" fill="#fff"/><ellipse cx="596" cy="445" rx="24" ry="30" fill="#6e8f4a" stroke="#2a1f22" stroke-width="5"/><circle cx="602" cy="433" r="11" fill="#2b2a1e"/><circle cx="609" cy="425" r="6" fill="#fff"/>
+<path d="M 508 532 L 560 532" stroke="#2a1f22" stroke-width="6" stroke-linecap="round"/>
+<path d="M 338 450 A 172 205 0 0 1 682 450" fill="none" stroke="#2b2d33" stroke-width="26"/><rect x="650" y="395" width="56" height="110" rx="24" fill="#2b2d33"/><rect x="314" y="395" width="56" height="110" rx="24" fill="#2b2d33"/><path d="M 678 495 Q 660 585 609 560" fill="none" stroke="#2b2d33" stroke-width="12" stroke-linecap="round"/><circle cx="604" cy="560" r="16" fill="#2b2d33"/>
+</g>
+<path d="M 570 1300 L 590 780 L 670 780 L 690 1300 Z" fill="#ee7fa4" stroke="#2a1f22" stroke-width="6"/><ellipse cx="615" cy="690" rx="52" ry="46" transform="rotate(-20 615 690)" fill="#f9d9c4" stroke="#2a1f22" stroke-width="6"/><path d="M 605 700 L 550 560" stroke="#3b5ba5" stroke-width="16" stroke-linecap="round"/><path d="M 550 560 L 542 540" stroke="#2a1f22" stroke-width="8" stroke-linecap="round"/>
+
+<text x="500" y="1260" font-family="sans-serif" font-size="40" font-weight="700" text-anchor="middle" fill="#3a1f2a" opacity="0.75">thoughtful-pen · placeholder</text>
+</svg>

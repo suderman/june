@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1300" width="1000" height="1300">
+<path d="M 250 1300 C 200 900 240 260 500 230 C 760 260 800 900 750 1300 Z" fill="#45291c"/>
+<rect x="450" y="585" width="100" height="110" fill="#f0c3a8" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 120 1300 C 130 790 270 680 500 680 C 730 680 870 790 880 1300 Z" fill="#ee7fa4" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 420 684 Q 500 745 580 684" fill="#f0c3a8" stroke="#2a1f22" stroke-width="6"/>
+<g transform="rotate(0 500 430)">
+<ellipse cx="500" cy="430" rx="150" ry="175" fill="#f9d9c4" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 310 470 C 300 230 440 200 520 215 C 650 225 710 300 690 470 C 650 360 590 320 540 300 C 490 360 410 380 350 360 C 330 400 325 440 310 470 Z" fill="#5b3a29" stroke="#2a1f22" stroke-width="6"/>
+<ellipse cx="415" cy="500" rx="30" ry="14" fill="#f39aa6" opacity="0.55"/><ellipse cx="585" cy="500" rx="30" ry="14" fill="#f39aa6" opacity="0.55"/>
+<path d="M 412 445 Q 438 463 464 445" fill="none" stroke="#2a1f22" stroke-width="7" stroke-linecap="round"/><path d="M 536 445 Q 562 463 588 445" fill="none" stroke="#2a1f22" stroke-width="7" stroke-linecap="round"/>
+<path d="M 466 536 Q 488 524 500 534 Q 512 544 534 530" fill="none" stroke="#2a1f22" stroke-width="6" stroke-linecap="round"/>
+<path d="M 328 450 A 172 205 0 0 1 672 450" fill="none" stroke="#2b2d33" stroke-width="26"/><rect x="640" y="395" width="56" height="110" rx="24" fill="#2b2d33"/><rect x="304" y="395" width="56" height="110" rx="24" fill="#2b2d33"/><path d="M 668 495 Q 650 585 575 560" fill="none" stroke="#2b2d33" stroke-width="12" stroke-linecap="round"/><circle cx="570" cy="560" r="16" fill="#2b2d33"/>
+</g>
+<path d="M 270 1300 L 310 800 L 400 780 L 380 1300 Z" fill="#ee7fa4" stroke="#2a1f22" stroke-width="6"/><ellipse cx="480" cy="360" rx="110" ry="72" transform="rotate(12 480 360)" fill="#f9d9c4" stroke="#2a1f22" stroke-width="6"/>
+
+<text x="500" y="1260" font-family="sans-serif" font-size="40" font-weight="700" text-anchor="middle" fill="#3a1f2a" opacity="0.75">exasperated-facepalm · placeholder</text>
+</svg>

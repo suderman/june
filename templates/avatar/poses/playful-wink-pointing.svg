@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1300" width="1000" height="1300">
+<path d="M 230 1300 C 180 900 220 260 480 230 C 740 260 780 900 730 1300 Z" fill="#45291c"/>
+<rect x="430" y="585" width="100" height="110" fill="#f0c3a8" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 100 1300 C 110 790 250 680 480 680 C 710 680 850 790 860 1300 Z" fill="#ee7fa4" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 400 684 Q 480 745 560 684" fill="#f0c3a8" stroke="#2a1f22" stroke-width="6"/>
+<g transform="rotate(0 480 430)">
+<ellipse cx="492" cy="430" rx="150" ry="175" fill="#f9d9c4" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 290 470 C 280 230 420 200 500 215 C 630 225 690 300 670 470 C 630 360 570 320 544 300 C 470 360 390 380 330 360 C 310 400 305 440 290 470 Z" fill="#5b3a29" stroke="#2a1f22" stroke-width="6"/>
+<ellipse cx="419" cy="500" rx="30" ry="14" fill="#f39aa6" opacity="0.55"/><ellipse cx="589" cy="500" rx="30" ry="14" fill="#f39aa6" opacity="0.55"/>
+<ellipse cx="442" cy="445" rx="24" ry="30" fill="#6e8f4a" stroke="#2a1f22" stroke-width="5"/><circle cx="442" cy="445" r="11" fill="#2b2a1e"/><circle cx="450" cy="435" r="7" fill="#fff"/><path d="M 540 445 Q 566 463 592 445" fill="none" stroke="#2a1f22" stroke-width="7" stroke-linecap="round"/>
+<path d="M 466 524 Q 504 572 542 524 Z" fill="#fff" stroke="#2a1f22" stroke-width="6" stroke-linejoin="round"/>
+<path d="M 308 450 A 172 205 0 0 1 652 450" fill="none" stroke="#2b2d33" stroke-width="26"/><rect x="620" y="395" width="56" height="110" rx="24" fill="#2b2d33"/><rect x="284" y="395" width="56" height="110" rx="24" fill="#2b2d33"/><path d="M 648 495 Q 630 585 579 560" fill="none" stroke="#2b2d33" stroke-width="12" stroke-linecap="round"/><circle cx="574" cy="560" r="16" fill="#2b2d33"/>
+</g>
+<path d="M 600 1300 L 680 820 L 780 840 L 740 1300 Z" fill="#ee7fa4" stroke="#2a1f22" stroke-width="6"/><ellipse cx="750" cy="760" rx="58" ry="48" transform="rotate(-30 750 760)" fill="#f9d9c4" stroke="#2a1f22" stroke-width="6"/><path d="M 790 735 L 890 670" stroke="#f9d9c4" stroke-width="30" stroke-linecap="round"/><path d="M 790 735 L 890 670" stroke="#2a1f22" stroke-width="40" stroke-linecap="round" opacity="0"/>
+<g transform="rotate(-14 780 980)"><rect x="690" y="900" width="180" height="160" rx="26" fill="#e9e4ff" stroke="#2a1f22" stroke-width="7"/><text x="780" y="1005" font-family="sans-serif" font-size="70" font-weight="700" text-anchor="middle" fill="#2a1f22">Alt</text></g>
+<text x="500" y="1260" font-family="sans-serif" font-size="40" font-weight="700" text-anchor="middle" fill="#3a1f2a" opacity="0.75">playful-wink-pointing · placeholder</text>
+</svg>

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { ACTIVITIES, EXPRESSIONS, fallbacks, parseManifest, resolveExpression } from "../src/avatar.ts";
+import { ACTIVITIES, EXPRESSIONS, FRAMINGS, MARKS, fallbacks, parseManifest, resolveExpression } from "../src/avatar.ts";
 import { TEMPLATES } from "../src/init.ts";
 
 const base = new URL("avatar/", `file://${TEMPLATES}`);
@@ -48,4 +48,54 @@ test("a bad manifest names each problem", () => {
 	);
 	assert.throws(() => parseManifest(null), /not an object/);
 	assert.throws(() => parseManifest({ version: 1, size: [1, 1] }), /expressions must be an object/);
+});
+
+test("the placeholder poses validate, exist at their declared size, and keep the mouth inside the face", async () => {
+	const manifest = parseManifest(JSON.parse(await readFile(new URL("manifest.json", base), "utf8")), { base: true });
+	const poses = Object.entries(manifest.poses ?? {});
+	assert.ok(poses.length >= 6, `${poses.length} poses`);
+	assert.ok(poses.some(([, p]) => p.expression === "idle"), "an idle pose ends every chain");
+	for (const [name, pose] of poses) {
+		const svg = await readFile(new URL(pose.file, base), "utf8");
+		const [width, height] = [Number(/width="(\d+)"/.exec(svg)?.[1]), Number(/height="(\d+)"/.exec(svg)?.[1])];
+		assert.deepEqual([width, height], pose.size, name);
+		assert.ok(FRAMINGS.length >= (pose.framings?.length ?? 0), name);
+		for (const mark of pose.marks ?? []) assert.ok((MARKS as readonly string[]).includes(mark), `${name}: ${mark}`);
+	}
+});
+
+test("a bad pose names each problem, and a base set's poses need an idle one", () => {
+	const idle = { idle: { file: "idle.png", play: "still" as const } };
+	const good = { file: "p/a.webp", size: [800, 1000], expression: "smug", face: [0.3, 0.1, 0.4, 0.3], mouth: [0.5, 0.35], facing: "right" };
+	assert.doesNotThrow(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { "smug-chin-on-hand": good } }));
+	assert.throws(
+		() =>
+			parseManifest(
+				{
+					version: 1,
+					size: [64, 64],
+					expressions: idle,
+					poses: {
+						Smug_Pose: { ...good, file: "../x.gif" },
+						"bad-geometry": { ...good, expression: "thinking", face: [0.8, 0.1, 0.4, 0.3], mouth: [0.1, 0.9], facing: "up", mirror: "no" },
+						"bad-lists": { ...good, framings: ["portrait"], marks: [], props: [3] },
+					},
+				},
+				{ base: true },
+			),
+		(e: Error) =>
+			[
+				"pose Smug_Pose: name must be",
+				"pose Smug_Pose: file must be",
+				"pose bad-geometry: expression must be",
+				"pose bad-geometry: face must be",
+				"pose bad-geometry: facing must be",
+				"pose bad-geometry: mirror must be",
+				"pose bad-lists: framings must list",
+				"pose bad-lists: marks must list",
+				"pose bad-lists: props must be words",
+				"must have an idle pose",
+			].every((s) => e.message.includes(s)),
+	);
+	assert.throws(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { "mouth-out": { ...good, mouth: [0.9, 0.9] } } }), /mouth must be inside the face/);
 });

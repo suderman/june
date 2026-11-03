@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1300" width="1000" height="1300">
+<path d="M 270 1300 C 220 900 260 260 520 230 C 780 260 820 900 770 1300 Z" fill="#45291c"/>
+<rect x="470" y="585" width="100" height="110" fill="#f0c3a8" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 140 1300 C 150 790 290 680 520 680 C 750 680 890 790 900 1300 Z" fill="#ee7fa4" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 440 684 Q 520 745 600 684" fill="#f0c3a8" stroke="#2a1f22" stroke-width="6"/>
+<g transform="rotate(0 520 430)">
+<ellipse cx="532" cy="430" rx="150" ry="175" fill="#f9d9c4" stroke="#2a1f22" stroke-width="6"/>
+<path d="M 330 470 C 320 230 460 200 540 215 C 670 225 730 300 710 470 C 670 360 610 320 584 300 C 510 360 430 380 370 360 C 350 400 345 440 330 470 Z" fill="#5b3a29" stroke="#2a1f22" stroke-width="6"/>
+<ellipse cx="459" cy="500" rx="30" ry="14" fill="#f39aa6" opacity="0.55"/><ellipse cx="629" cy="500" rx="30" ry="14" fill="#f39aa6" opacity="0.55"/>
+<ellipse cx="482" cy="445" rx="24" ry="30" fill="#6e8f4a" stroke="#2a1f22" stroke-width="5"/><circle cx="482" cy="445" r="11" fill="#2b2a1e"/><circle cx="490" cy="435" r="7" fill="#fff"/><path d="M 452 439 L 512 439 L 512 411 L 452 411 Z" fill="#f9d9c4"/><path d="M 454 440 L 510 440" stroke="#2a1f22" stroke-width="6" stroke-linecap="round"/><ellipse cx="606" cy="445" rx="24" ry="30" fill="#6e8f4a" stroke="#2a1f22" stroke-width="5"/><circle cx="606" cy="445" r="11" fill="#2b2a1e"/><circle cx="614" cy="435" r="7" fill="#fff"/><path d="M 576 439 L 636 439 L 636 411 L 576 411 Z" fill="#f9d9c4"/><path d="M 578 440 L 634 440" stroke="#2a1f22" stroke-width="6" stroke-linecap="round"/>
+<path d="M 518 534 Q 554 546 582 520" fill="none" stroke="#2a1f22" stroke-width="6" stroke-linecap="round"/>
+<path d="M 348 450 A 172 205 0 0 1 692 450" fill="none" stroke="#2b2d33" stroke-width="26"/><rect x="660" y="395" width="56" height="110" rx="24" fill="#2b2d33"/><rect x="324" y="395" width="56" height="110" rx="24" fill="#2b2d33"/><path d="M 688 495 Q 670 585 619 560" fill="none" stroke="#2b2d33" stroke-width="12" stroke-linecap="round"/><circle cx="614" cy="560" r="16" fill="#2b2d33"/>
+</g>
+<path d="M 560 1300 L 590 760 L 670 760 L 690 1300 Z" fill="#ee7fa4" stroke="#2a1f22" stroke-width="6"/><ellipse cx="590" cy="640" rx="70" ry="50" transform="rotate(-15 590 640)" fill="#f9d9c4" stroke="#2a1f22" stroke-width="6"/>
+
+<text x="500" y="1260" font-family="sans-serif" font-size="40" font-weight="700" text-anchor="middle" fill="#3a1f2a" opacity="0.75">smug-chin-on-hand · placeholder</text>
+</svg>
