@@ -61,6 +61,8 @@ test("a slow command gets patter in the transcript, never in a model context, an
 	assert.match(patter.heard[0]!.update, /just starting/, "the first line is the opener");
 	assert.match(patter.heard[0]!.update, /Alex just said: build it/);
 	assert.match(patter.heard[0]!.system, new RegExp(`It is now [^\\n]*${new Date().getFullYear()}`), "patter knows the date");
+	assert.match(patter.heard[0]!.system, /Never reply to what Alex said in June's place: no answers, greetings, or goodbyes/, "replies are June's to give");
+	assert.match(patter.heard[0]!.system, /Never tease Alex about the wait or about whether they are still around/);
 	assert.match(patter.heard.at(-1)!.all, /sleep 1\.5/, "patter sees the real activity");
 	assert.deepEqual(patter.heard.at(-1)!.said, lines.slice(0, -1), "and its own earlier lines, as its own turns");
 	assert.doesNotMatch(patter.heard.at(-1)!.all, /\d+ seconds/, "elapsed time comes in rough words");
