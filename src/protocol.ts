@@ -1,4 +1,4 @@
-// Client/daemon protocol: one JSON object per line over a Unix socket. After `attach` the daemon sends the folded view:
+// Client/daemon protocol: one JSON object per line over a Unix socket, or per text frame over the WebSocket (remote.ts). After `attach` the daemon sends the folded view:
 // a reset with every item, then the changes to it (see "Attaching to the folded view" in docs/architecture.org).
 import { connect, type Socket } from "node:net";
 import type { ImageContent } from "@earendil-works/pi-ai";
@@ -40,7 +40,13 @@ export type Request =
 	| { op: "history"; requestId: string; since?: number; limit?: number }
 	/** `files` land in June's inbox on the daemon's host (see "Inbox" in docs/architecture.org); `data` is base64. */
 	| { op: "submit"; requestId: string; text: string; images?: ImageContent[]; files?: FileAttachment[]; source: Source; whenBusy?: "steer" | "followUp"; wait?: boolean }
-	| { op: "command"; requestId: string; name: string; args?: string };
+	| { op: "command"; requestId: string; name: string; args?: string }
+	/** The first frame on the WebSocket, and only there. */
+	| { op: "hello"; requestId: string; token: string; protocol: number }
+	/** Devices allowed on the WebSocket: Unix socket only. `add` answers with the new token, once. */
+	| { op: "device"; requestId: string; action: "add" | "list" | "revoke"; name?: string };
+
+export type DeviceInfo = { name: string; createdAt: string; connections: number };
 
 export type Status = {
 	ok: true;
@@ -58,6 +64,8 @@ export type Status = {
 	tools: string[];
 	/** The directory the daemon's code runs from: a checkout or the Nix store. */
 	source: string;
+	/** The WebSocket listener, when a port is configured; `error` when it could not listen. */
+	remote?: { port: number; connections: number; error?: string };
 };
 
 export type Reply =
@@ -70,7 +78,10 @@ export type Reply =
 	| { type: "accepted"; requestId: string; submissionId: number }
 	| { type: "settled"; requestId: string; status: "done" | "unanswered"; text?: string; reason?: string }
 	| { type: "reply"; requestId: string; text: string }
-	| { type: "error"; requestId?: string; message: string };
+	| { type: "error"; requestId?: string; message: string }
+	| { type: "hello"; requestId: string; device: string; protocol: number }
+	/** `token` after add; `closed` after revoke, the connections it closed. */
+	| { type: "devices"; requestId: string; devices: DeviceInfo[]; token?: string; closed?: number };
 
 /** Split a stream into JSON lines; malformed lines go to `onBad`. */
 export function readLines(socket: Socket, onMessage: (value: unknown) => void, onBad?: (line: string) => void): void {

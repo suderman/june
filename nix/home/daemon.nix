@@ -25,7 +25,8 @@ in {
         # Herdr, org-dispatch, Emacs, and ssh come from the profile and system.
         Environment =
           ["PATH=${config.home.profileDirectory}/bin:/run/current-system/sw/bin"]
-          ++ allowedUsers;
+          ++ allowedUsers
+          ++ lib.optional cfg.remote.enable "JUNE_REMOTE_PORT=${toString cfg.remote.port}";
         Restart = "on-failure";
         RestartSec = 5;
         # SIGTERM closes the harness; unfinished work resumes on the next start.

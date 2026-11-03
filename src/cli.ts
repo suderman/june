@@ -18,6 +18,9 @@ const USAGE = `usage:
   june transcript [--last N] [--since WHEN] [--detail] [--json]
                           the recent conversation as text: the last N entries (200 by default), or those since
                           WHEN (30m, 2h, 1d, 16:20, or a date); --detail adds thinking, tool output, and private looks
+  june device add NAME    allow a device on the WebSocket and print its token, once
+  june device list        devices, when each was added, and live connections
+  june device revoke NAME remove a device and close its connections
   june doctor             check configuration and dependencies
   june init [NAME]        create missing personal files from the templates, for NAME or user.name
   june serve              run the daemon
@@ -29,7 +32,7 @@ async function main(argv: string[]): Promise<number> {
 	const json = rest.includes("--json");
 	const args = rest.filter((a) => a !== "--json");
 	const p = paths();
-	if (["tui", "ask", "status", "transcript"].includes(command)) {
+	if (["tui", "ask", "status", "transcript", "device"].includes(command)) {
 		const remote = remoteHost(p);
 		if (remote !== undefined) return overSsh(remote, command, argv);
 	}
@@ -51,6 +54,8 @@ async function main(argv: string[]): Promise<number> {
 			return status(p.socket, json);
 		case "transcript":
 			return transcript(p, args, json);
+		case "device":
+			return device(p.socket, args, json);
 		case "doctor":
 			return doctor();
 		case "init": {
@@ -187,6 +192,28 @@ async function transcript(p: ReturnType<typeof paths>, args: string[], json: boo
 	return 0;
 }
 
+async function device(socket: string, args: string[], json: boolean): Promise<number> {
+	const [action, name, ...extra] = args;
+	if (!((action === "list" && name === undefined) || ((action === "add" || action === "revoke") && name !== undefined)) || extra.length > 0) {
+		console.error(USAGE);
+		return 2;
+	}
+	const client = await connect(socket);
+	if (client === undefined) return 3;
+	const reply = await client.request({ op: "device", requestId: randomUUID(), action, ...(name ? { name } : {}) });
+	client.close();
+	if (reply.type !== "devices") {
+		console.error(reply.type === "error" ? reply.message : "unexpected reply");
+		return 1;
+	}
+	if (json) console.log(JSON.stringify({ devices: reply.devices, ...(reply.token ? { token: reply.token } : {}), ...(reply.closed !== undefined ? { closed: reply.closed } : {}) }));
+	else if (action === "add") console.log(`${name}: ${reply.token}\nShown once; paste it into the device. Revoke with: june device revoke ${name}`);
+	else if (action === "revoke") console.log(`revoked ${name}${reply.closed ? `, closed ${reply.closed} connection${reply.closed === 1 ? "" : "s"}` : ""}`);
+	else if (reply.devices.length === 0) console.log("no devices");
+	else for (const d of reply.devices) console.log(`${d.name}\tadded ${d.createdAt}${d.connections ? `\t${d.connections} connected` : ""}`);
+	return 0;
+}
+
 async function status(socket: string, json: boolean): Promise<number> {
 	const client = await Client.open(socket).catch(() => undefined);
 	if (client === undefined) {
@@ -212,6 +239,7 @@ function formatStatus(s: Status): string {
 		`model ${s.model} (${s.thinkingLevel})`,
 		`conversation ${s.conversation}: ${s.entries} entries, ${s.busy ? "working" : "idle"}${s.background ? `, ${s.background} in the background` : ""}${s.queued ? `, ${s.queued} queued` : ""}`,
 		`tools ${s.tools.join(", ")}`,
+		...(s.remote ? [`remote 127.0.0.1:${s.remote.port}: ${s.remote.error ? `not listening, ${s.remote.error}` : `${s.remote.connections} connected`}`] : []),
 	].join("\n");
 }
 

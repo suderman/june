@@ -75,6 +75,7 @@ export async function openTestDaemon(options: {
 	looseEndsClock?: { now: () => Date; tickMs: number };
 	mailRun?: (argv: readonly string[]) => Promise<string>;
 	watchClock?: { now: () => Date; tickMs: number; home: string; run: (argv: readonly string[]) => Promise<string> };
+	remoteTiming?: { helloMs?: number; pingMs?: number; maxBuffered?: number };
 }): Promise<Daemon> {
 	const models = createModels();
 	models.setProvider(options.faux.provider);
@@ -93,6 +94,7 @@ export async function openTestDaemon(options: {
 		...(options.looseEndsClock ? { looseEndsClock: options.looseEndsClock } : {}),
 		...(options.mailRun ? { mailRun: options.mailRun } : {}),
 		...(options.watchClock ? { watchClock: options.watchClock } : {}),
+		...(options.remoteTiming ? { remoteTiming: options.remoteTiming } : {}),
 	});
 }
 

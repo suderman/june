@@ -179,6 +179,10 @@ She never writes =asana.org=, =inbox.org=, archives, or conflict copies. The dis
 
 =june telegram= is the Telegram bridge: a separate client of the daemon's socket, run as the =june-telegram= user service when =programs.june.telegram.enable= is set (the default when =programs.june.telegram.allowedUsers= is not empty). It needs =TELEGRAM_BOT_TOKEN= in one of =programs.june.environmentFiles=, and allowed user ids from =telegram.allowedUsers= or =TELEGRAM_ALLOWED_USERS=. It takes text, photos, and other files up to 20 MB with their captions: an image sent as a file goes to June inline like a photo, and any other file lands in her inbox. Voice notes, audio, video, and stickers get a short refusal. It answers with rich Markdown, shows June's reply as a draft while she writes it, keeps patter in one edited message per wait, and offers =/stop=, =/new=, =/status=, =/compact=, and =/help=. June's own notices reach it when the user last spoke there. Its state is =$XDG_STATE_HOME/june/telegram.json=; see "Telegram bridge" in [[file:docs/architecture.org][docs/architecture.org]].
 
+* Graphical clients
+
+With =programs.june.remote.enable=, the daemon also serves its protocol as a WebSocket on =127.0.0.1= at =remote.port= (7347 by default), one JSON object per text frame. It binds no network interface: a reverse proxy in front of it gives the name and TLS, on kit =services.traefik.proxy.june = "http://127.0.0.1:7347";= for =wss://june.kit/=. Each device needs a token: =june device add NAME= prints one once, =june device list= shows devices and live connections, and =june device revoke NAME= removes one and closes its connections at once. Tokens are kept hashed in =$XDG_STATE_HOME/june/devices.json=. The first frame must be ={"op": "hello", "requestId": ..., "token": ..., "protocol": 1}=; see "Client protocol for graphical clients" in [[file:docs/architecture.org][docs/architecture.org]].
+
 * Development
 
 #+begin_src sh
@@ -208,6 +212,7 @@ The module sets up =programs.june=: the =june= client, =org-edit=, and =herdr-li
   programs.june = {
     enable = true;
     daemon.enable = true;   # on the host that runs her
+    remote.enable = true;   # WebSocket on 127.0.0.1:7347, for the overlay and the phone
     dispatch.enable = true; # on each host that runs AUTO tasks
     daemonHost = "kit";
     environmentFiles = ["/run/user/1000/june.env"];

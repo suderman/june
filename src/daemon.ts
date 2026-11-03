@@ -36,7 +36,9 @@ import { createGreeting } from "./greeting.ts";
 import { createLooseEnds } from "./loose.ts";
 import { createReflection } from "./reflect.ts";
 import { createWatch } from "./watch.ts";
-import { readLines, type Reply, type Request, SOURCES, type Status, writeLine } from "./protocol.ts";
+import { type DeviceInfo, readLines, type Reply, type Request, SOURCES, type Status, writeLine } from "./protocol.ts";
+import { Devices } from "./devices.ts";
+import { type Remote, type Session, startRemote } from "./remote.ts";
 import { createCodingExtension } from "./tools/coding.ts";
 import { createHerdrExtension, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
@@ -72,6 +74,8 @@ export type DaemonOptions = {
 	readonly heartbeatClock?: { now: () => Date; tickMs: number };
 	/** Tests set the clock and loop speed of the evening look for loose ends. */
 	readonly looseEndsClock?: { now: () => Date; tickMs: number };
+	/** Tests shorten the WebSocket's hello timeout, ping interval, and backlog limit. */
+	readonly remoteTiming?: { helloMs?: number; pingMs?: number; maxBuffered?: number };
 	/** Tests answer notmuch themselves. */
 	readonly mailRun?: Run;
 	/** Tests set the watch's clock, loop speed, home directory for local run records, and commands. */
@@ -248,20 +252,34 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				entries: view.entries.length,
 				tools: resolvedAgent.tools.map((tool) => tool.name),
 				source: dirname(import.meta.dirname),
+				...(config.remote ? { remote: { port: remote?.port ?? config.remote.port, connections: [...(remote?.connections().values() ?? [])].reduce((a, b) => a + b, 0), ...(remoteError ? { error: remoteError } : {}) } } : {}),
 			};
 		};
 
 		const inbox = `${paths.state}/inbox`;
 		const stopInbox = startInboxExpiry(inbox, (error) => log.warn("inbox_expiry_failed", { error: error.message }));
 
+		const devices = new Devices(`${paths.state}/devices.json`);
+		let remote: Remote | undefined;
+		let remoteError: string | undefined;
+		const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
+		const scope: Scope = { harness, root, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, remote: () => remote };
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
 			socket.once("close", () => clients.delete(socket));
-			const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
-			serve(socket, { harness, root, models: options.models, status, reload: prompt.reload, relax, log, inbox });
+			serve(socket, scope);
 		});
-		log.info("june_started", { pid: process.pid, socket: paths.socket, conversation: root.id });
+		// The listener is a convenience beside the socket: a port already taken is logged and shown in status, not fatal.
+		if (config.remote) {
+			try {
+				remote = await startRemote({ port: config.remote.port, devices, log, session: (send) => session(send, scope, false), ...options.remoteTiming });
+			} catch (error) {
+				remoteError = (error as Error).message;
+				log.error("remote_listen_failed", { port: config.remote.port, error: remoteError });
+			}
+		}
+		log.info("june_started", { pid: process.pid, socket: paths.socket, conversation: root.id, ...(remote ? { remote: remote.port } : {}) });
 
 		let closing: Promise<void> | undefined;
 		const close = () =>
@@ -271,6 +289,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				const closed = new Promise<void>((resolve) => server.close(() => resolve()));
 				for (const socket of clients) socket.destroy();
 				await closed;
+				await remote?.close();
 				stopPatter?.();
 				if (unfocus) clearInterval(unfocus);
 				stopReflection?.();
@@ -303,29 +322,21 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 	});
 }
 
-type Scope = CommandScope & { log: Logger; inbox: string };
+type Scope = CommandScope & { log: Logger; inbox: string; devices: Devices; remote: () => Remote | undefined };
 
 function serve(socket: Socket, scope: Scope): void {
+	socket.on("error", () => {});
+	const send = (reply: Reply) => writeLine(socket, reply);
+	const connection = session(send, scope, true);
+	socket.on("close", () => connection.close());
+	readLines(socket, connection.handle, () => send({ type: "error", message: "Malformed request line" }));
+}
+
+/** One client's requests, on the Unix socket (`local`) or the WebSocket after its hello. */
+function session(send: (reply: Reply) => void, scope: Scope, local: boolean): Session {
 	const abort = new AbortController();
 	const context = withAbortSignal(abort.signal, BG);
 	let view: View | undefined;
-	socket.on("error", () => {});
-	socket.on("close", () => {
-		abort.abort();
-		void view?.stop();
-	});
-	const send = (reply: Reply) => writeLine(socket, reply);
-
-	readLines(
-		socket,
-		(value) => {
-			const request = value as Request;
-			void handle(request).catch((error: Error) =>
-				send({ type: "error", requestId: request?.requestId, message: error.message }),
-			);
-		},
-		() => send({ type: "error", message: "Malformed request line" }),
-	);
 
 	async function handle(request: Request): Promise<void> {
 		switch (request.op) {
@@ -335,6 +346,8 @@ function serve(socket: Socket, scope: Scope): void {
 				// A second attach on one connection starts the view over.
 				await view?.stop();
 				view = await attachView(scope.root, context, send, request.requestId, { detail: request.detail === true });
+				// The connection closed while the view was starting.
+				if (abort.signal.aborted) void view.stop();
 				return;
 			}
 			case "detail":
@@ -401,10 +414,35 @@ function serve(socket: Socket, scope: Scope): void {
 				const text = await runCommand(scope, request.name, request.args ?? "", request.requestId, context);
 				return send({ type: "reply", requestId: request.requestId, text });
 			}
+			case "device": {
+				if (!local) throw new Error("Devices are managed over the Unix socket");
+				const name = String(request.name ?? "");
+				let token: string | undefined;
+				let closed: number | undefined;
+				if (request.action === "add") token = scope.devices.add(name).token;
+				else if (request.action === "revoke") {
+					scope.devices.revoke(name);
+					closed = scope.remote()?.revoke(name) ?? 0;
+				} else if (request.action !== "list") throw new Error(`Unknown device action ${String(request.action)}`);
+				const live = scope.remote()?.connections() ?? new Map<string, number>();
+				const devices: DeviceInfo[] = scope.devices.list().map(({ name, createdAt }) => ({ name, createdAt, connections: live.get(name) ?? 0 }));
+				return send({ type: "devices", requestId: request.requestId, devices, ...(token ? { token } : {}), ...(closed !== undefined ? { closed } : {}) });
+			}
 			default:
 				throw new Error(`Unknown op ${(request as { op?: string }).op}`);
 		}
 	}
+
+	return {
+		handle(value) {
+			const request = value as Request;
+			void handle(request).catch((error: Error) => send({ type: "error", requestId: request?.requestId, message: error.message }));
+		},
+		close() {
+			abort.abort();
+			void view?.stop();
+		},
+	};
 }
 
 export function assistantText(message: unknown): string {

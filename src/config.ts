@@ -1,7 +1,7 @@
 // Paths and runtime configuration, in XDG directories. The config directory holds config.json and AGENTS.md, which
 // `agents apply` copies there from ~/.agents; the data directory holds what June keeps herself: SOUL.org, MEMORY.org,
-// and JOURNAL.org. Machine plumbing comes from the environment June's Home Manager module sets: JUNE_DAEMON_HOST, and
-// TELEGRAM_ALLOWED_USERS beside the bot token.
+// and JOURNAL.org. Machine plumbing comes from the environment June's Home Manager module sets: JUNE_DAEMON_HOST,
+// JUNE_REMOTE_PORT, and TELEGRAM_ALLOWED_USERS beside the bot token.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
@@ -70,6 +70,8 @@ export type Config = {
 		readonly allowPrompt: boolean;
 	};
 	readonly telegram?: { readonly tokenEnv: string; readonly allowedUserIds: readonly number[] };
+	/** The WebSocket listener on 127.0.0.1, from JUNE_REMOTE_PORT; none without it. Port 0 picks a free one, for tests. */
+	readonly remote?: { readonly port: number };
 	/**
 	 * The user's day, in local "HH:MM": heartbeats run from `wake` until `quiet`, when they no longer want to be bothered even
 	 * if he is up, and the nightly reflection runs from `sleep`, when he is surely asleep, until `wake`.
@@ -195,6 +197,8 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 	for (const key of ["daemonHost"]) if (key in raw) throw new Error(`${file}: ${key} now comes from the Home Manager module, not config.json`);
 	const allowed = (env.TELEGRAM_ALLOWED_USERS ?? "").split(/[\s,]+/).filter(Boolean);
 	if (allowed.some((id) => !/^\d+$/.test(id))) throw new Error("TELEGRAM_ALLOWED_USERS must be numeric user ids, separated by commas");
+	const port = env.JUNE_REMOTE_PORT?.trim();
+	if (port && !(/^\d+$/.test(port) && Number(port) >= 1 && Number(port) <= 65535)) throw new Error("JUNE_REMOTE_PORT must be a port number, 1 to 65535");
 	const herdr = { ...DEFAULTS.herdr, ...raw.herdr };
 	const org = { ...DEFAULTS.org, ...raw.org };
 	return {
@@ -223,6 +227,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 		patter: patterTiming({ ...DEFAULTS.patter, ...raw.patter }),
 		situation: situation(raw.situation ?? {}),
 		// Telegram is on where the module names who may use it; the token sits beside the ids in June's secret.
+		...(port ? { remote: { port: Number(port) } } : {}),
 		...(allowed.length > 0 ? { telegram: { tokenEnv: "TELEGRAM_BOT_TOKEN", allowedUserIds: allowed.map(Number) } } : {}),
 	};
 }

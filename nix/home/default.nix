@@ -75,6 +75,12 @@ in {
       defaultText = lib.literalExpression "config.programs.june.telegram.allowedUsers != []";
       description = "Run june telegram, the Telegram bridge, as a user service beside the daemon. It needs TELEGRAM_BOT_TOKEN in an environment file, and allowed users from telegram.allowedUsers or TELEGRAM_ALLOWED_USERS; set this when those come only from an environment file.";
     };
+    remote.enable = lib.mkEnableOption "the daemon's WebSocket listener for graphical clients, on 127.0.0.1 only; put a reverse proxy such as Traefik in front of it, and add devices with june device add";
+    remote.port = lib.mkOption {
+      type = lib.types.port;
+      default = 7347;
+      description = "The loopback port of the WebSocket listener.";
+    };
     herdrPackage = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
       default = lib.attrByPath ["programs" "herdr" "package"] null config;
