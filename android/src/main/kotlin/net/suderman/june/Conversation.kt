@@ -30,8 +30,6 @@ import android.util.Log
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.platform.LocalContext
-import org.json.JSONArray
-import org.json.JSONObject
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -76,33 +74,39 @@ private fun Prompt(text: String, onClick: () -> Unit) {
     }
 }
 
-/** The conversation itself: the status line, the items newest last, and the words to send. */
+/**
+ * The conversation itself: the status line, the items newest last, and the words to send; `settings` opens June's
+ * settings. `keyboard` pads it above the keyboard: an app's window no longer shrinks for one (Android 15 and later),
+ * but the session's still does, and padding it too doubled the gap.
+ */
 @Composable
-fun Sheet(link: Link) {
+fun Sheet(link: Link, settings: (() -> Unit)? = null, keyboard: Boolean = false) {
     var draft by remember { mutableStateOf("") }
     val list = rememberLazyListState()
     val shown = link.items.filter { !it.private }
     // Stay on the newest item as the conversation grows.
     LaunchedEffect(shown.size, shown.lastOrNull()?.text?.length) { if (shown.isNotEmpty()) list.scrollToItem(shown.size - 1) }
-    // The shared decisions, proven on the phone while the strip is drawn plainly: what they make of this view.
+    // The comic strip, from the decisions the phone shares with the desktop; the plain list until they load, or if
+    // they cannot.
     val context = LocalContext.current
     val decisions by produceState<Decisions?>(null) {
         value = runCatching { Decisions.load(context) }.onFailure { Log.w(TAG, "decisions did not load: $it") }.getOrNull()
         awaitDispose { value?.close() }
     }
-    LaunchedEffect(decisions, link.items.size) {
-        val d = decisions ?: return@LaunchedEffect
-        runCatching {
-            val panels = d.panels(link.items)
-            val plan = JSONObject(d.call("compose.plan", JSONObject().put("width", 380).put("side", "left").put("elements", JSONArray().put(JSONObject().put("kind", "june").put("w", 300).put("h", 80)))))
-            Log.i(TAG, "decisions: ${panels.length()} panels from ${link.items.size} items; a 380-wide panel stacks=${plan.getJSONObject("metrics").getBoolean("stacked")}, height ${plan.getInt("height")}")
-        }.onFailure { Log.w(TAG, "decisions failed: $it") }
-    }
+    val avatar = remember { runCatching { Avatar(context) }.onFailure { Log.w(TAG, "avatar set did not load: $it") }.getOrNull() }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
-        Text(statusLine(link), color = Color(0xFF9AA0AE), fontSize = 13.sp, modifier = Modifier.padding(top = 14.dp, bottom = 8.dp))
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(shown, key = { it.id }) { ItemRow(it) }
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().then(if (keyboard) Modifier.imePadding() else Modifier)) {
+        Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(statusLine(link), color = Color(0xFF9AA0AE), fontSize = 13.sp, modifier = Modifier.weight(1f))
+            if (settings != null) Text("settings", color = Color(0xFF9AA0AE), fontSize = 13.sp, modifier = Modifier.clickable(onClick = settings).padding(start = 12.dp))
+        }
+        val ready = decisions
+        if (ready != null && avatar != null) {
+            Strip(link, ready, avatar, Modifier.weight(1f).fillMaxWidth())
+        } else {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(shown, key = { it.id }) { ItemRow(it) }
+            }
         }
         if (link.notice.isNotEmpty()) Text(link.notice, color = Color(0xFFFFD36B), fontSize = 13.sp, modifier = Modifier.padding(vertical = 4.dp))
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -114,7 +118,7 @@ fun Sheet(link: Link) {
 }
 
 private fun statusLine(link: Link): String = when (val s = link.status) {
-    LinkStatus.Unpaired -> "not paired: open June's app to pair this phone"
+    LinkStatus.Unpaired -> "not paired: open June's settings to pair this phone"
     LinkStatus.Connecting -> "connecting…"
     LinkStatus.Refused -> "pairing needed: this phone's token was refused"
     is LinkStatus.Offline -> "offline, retrying: ${s.reason}"

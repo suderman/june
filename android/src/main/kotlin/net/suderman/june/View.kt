@@ -47,6 +47,8 @@ data class ViewState(
     val background: Int = 0,
     val following: Int = 0,
     val activity: String = "",
+    /** The state as the daemon sent it, for the shared decisions. */
+    val raw: JSONObject = JSONObject(),
 ) {
     companion object {
         fun from(json: JSONObject) = ViewState(
@@ -55,6 +57,7 @@ data class ViewState(
             background = json.optInt("background"),
             following = json.optInt("following"),
             activity = json.optString("activity"),
+            raw = json,
         )
     }
 }

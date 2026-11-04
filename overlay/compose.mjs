@@ -218,6 +218,18 @@ export function tallFor(poses, pose) {
 }
 
 /**
+ * Lay out a composed panel (composeStrip): planned with its pose first, and if the words run long enough to need an
+ * inset, a pose of the same expression drawn tall takes over and she fills the panel instead. Returns the layout and
+ * the pose it framed.
+ */
+export function panelLayout({ panel, width, sizes, poses }) {
+	const first = plan({ width, side: panel.side, pose: panel.pose, elements: sizes, framing: panel.framing });
+	const tall = first.clip.inset ? tallFor(poses, panel.pose) : null;
+	if (!tall) return { layout: first, pose: panel.pose };
+	return { layout: plan({ width, side: panel.side, pose: tall, elements: sizes, framing: panel.framing }), pose: tall };
+}
+
+/**
  * Which side June stands on: the other side from the panel before, unless the pose faces away from the text there and
  * may not be mirrored, in which case she takes the side where she faces in.
  */

@@ -10,6 +10,8 @@
   jdk17_headless,
   esbuild,
   runCommand,
+  imagemagick,
+  google-fonts,
   writeShellApplication,
   android-tools,
 }: let
@@ -35,6 +37,21 @@
     runCommand "june-decisions.js" {nativeBuildInputs = [esbuild];} ''
       esbuild ${src}/android/js/june.mjs --bundle --format=iife --global-name=June --target=es2020 --log-level=warning --outfile=$out
     '';
+
+  # The base avatar set the app ships, so June has a face before the daemon's set loads. Android cannot draw the
+  # SVG placeholders, so they become lossless WebP and the manifest names those.
+  avatar = runCommand "june-avatar-base" {nativeBuildInputs = [imagemagick];} ''
+    cp -r ${../templates/avatar} $out
+    chmod -R u+w $out
+    find $out -name '*.svg' | while read -r f; do
+      magick -background none "$f" -define webp:lossless=true "''${f%.svg}.webp"
+      rm "$f"
+    done
+    sed -i 's/\.svg"/.webp"/g' $out/manifest.json
+  '';
+
+  # The strip's lettering, display, and caption faces, as the overlay uses them.
+  fonts = "${google-fonts.override {fonts = ["ShantellSans" "DelaGothicOne" "ZenKakuGothicNew"];}}/share/fonts/truetype";
 
   apk = stdenv.mkDerivation (finalAttrs: {
     pname = "june-android";
@@ -66,6 +83,11 @@
     preBuild = ''
       export ANDROID_USER_HOME="$TMPDIR/android-user"
       install -Dm644 ${decisions} src/main/assets/june.js
+      mkdir -p src/main/assets && cp -r ${avatar} src/main/assets/avatar && chmod -R u+w src/main/assets/avatar
+      install -Dm644 "${fonts}/ShantellSans[BNCE,INFM,SPAC,wght].ttf" src/main/res/font/shantell_sans.ttf
+      install -Dm644 ${fonts}/DelaGothicOne-Regular.ttf src/main/res/font/dela_gothic_one.ttf
+      install -Dm644 ${fonts}/ZenKakuGothicNew-Medium.ttf src/main/res/font/zen_kaku_gothic_new_medium.ttf
+      install -Dm644 ${fonts}/ZenKakuGothicNew-Bold.ttf src/main/res/font/zen_kaku_gothic_new_bold.ttf
     '';
 
     installPhase = ''
@@ -96,4 +118,4 @@
     '';
   };
 in
-  apk // {inherit install sdk decisions;}
+  apk // {inherit install sdk decisions avatar;}

@@ -8,3 +8,5 @@ android/build/
 android/.gradle/
 android/.kotlin/
 android/src/main/assets/june.js
+android/src/main/assets/avatar/
+android/src/main/res/font/

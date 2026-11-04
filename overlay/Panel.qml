@@ -31,11 +31,10 @@ Item {
   // Measured sizes, in element order, as the layout engine reads them.
   property var sizes: []
   // Planned with the panel's pose first; if the words run long enough to need an inset, a pose of the same expression
-  // drawn tall takes over and she fills the panel instead (see tallFor in compose.mjs).
-  readonly property var first: Compose.plan({ width: width, side: p.side, pose: p.pose, elements: sizes, framing: p.framing })
-  readonly property var tall: first.clip.inset ? Compose.tallFor(poses, p.pose) : null
-  readonly property var pose: tall ?? p.pose
-  readonly property var layout: tall ? Compose.plan({ width: width, side: p.side, pose: tall, elements: sizes, framing: p.framing }) : first
+  // drawn tall takes over and she fills the panel instead (see panelLayout in compose.mjs).
+  readonly property var laid: Compose.panelLayout({ panel: p, width: width, sizes: sizes, poses: poses })
+  readonly property var pose: laid.pose
+  readonly property var layout: laid.layout
 
   implicitHeight: layout.height
   clip: true
