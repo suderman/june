@@ -76,11 +76,11 @@ function scene(panel, laid, pose, sizes, width, now, hourOverride, sky) {
 	const g = (c) => (c === "transparent" ? c : light.graded(c, L));
 	const back = sc.backdrop;
 	const pattern = back.kind === "abstract" ? light.PATTERNS[back.pattern] : null;
-	const ground = back.kind === "cutaway" ? light.cutaway(back, width, laid.height, sc.seed).ground : g(back.kind === "calm" ? light.CALM_GROUND : pattern ? pattern.ground : tint(panel.id));
+	const ground = back.kind === "cutaway" ? light.cutaway(back, width, laid.height, sc.seed, sc.clear).ground : g(back.kind === "calm" ? light.CALM_GROUND : pattern ? pattern.ground : tint(panel.id));
 	const win = sc.roomPlace ? sc.roomPlace.window : null;
 	return {
 		kind: back.kind,
-		cutaway: back.kind === "cutaway" ? Object.assign({ scene: back.scene }, light.cutaway(back, width, laid.height, sc.seed)) : null,
+		cutaway: back.kind === "cutaway" ? Object.assign({ scene: back.scene }, light.cutaway(back, width, laid.height, sc.seed, sc.clear)) : null,
 		ground,
 		pattern: pattern ? { path: light.patternPath(back.pattern, width, laid.height, sc.faceCentre, sc.seed), stroke: g(pattern.stroke), fill: g(pattern.fill), width: pattern.width, opacity: pattern.opacity } : null,
 		room: sc.roomPlace ? { url: sc.room.url, place: sc.roomPlace } : null,

@@ -215,12 +215,13 @@ export function panelScene({ panel, layout, pose, sizes, width, now, hourOverrid
 	const roomPlace = room && width > 0 && layout.height > 0 ? placeRoom(room, width, layout.height, panel.side) : null;
 	const weather = sky && sky.condition && Math.abs(now - when) < WEATHER_MS ? sky : null;
 	const plate = room ? choosePlate(scenery.plates, season(new Date(when)), seed) : null;
+	// Her words and face, which a prop or a cutaway's pieces keep clear of.
+	const clear = layout.elements.filter((e) => e !== null && e !== undefined);
+	if (layout.face) clear.push(layout.face);
 	let props = [];
 	if (roomPlace) {
-		const obstacles = layout.elements.filter((e) => e !== null && e !== undefined);
-		if (layout.face) obstacles.push(layout.face);
 		const chosen = chooseProps(scenery.props, { date: new Date(when), weather, room, seed });
-		props = placeProps(chosen, room, roomPlace, width, layout.height, obstacles);
+		props = placeProps(chosen, room, roomPlace, width, layout.height, clear);
 	}
 	return {
 		when,
@@ -233,6 +234,7 @@ export function panelScene({ panel, layout, pose, sizes, width, now, hourOverrid
 		weather,
 		plate,
 		props,
+		clear,
 		sky: skyLook(light, weather ? weather.condition : ""),
 		blur: focusBlur(layout.framing),
 	};

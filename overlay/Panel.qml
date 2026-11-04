@@ -69,6 +69,7 @@ Item {
     tint: Theme.tint(panel.p.id)
     centre: panel.faceCentre
     seed: panel.seed
+    clear: panel.scene.clear
   }
 
   Scenery {

@@ -610,6 +610,10 @@ test("behind her: a cutaway while tools run, a calm ground or a rare face's effe
 	assert.equal(dig.kind, "cutaway");
 	assert.equal(dig.scene, "digging");
 	assert.deepEqual(cutaway(dig, 600, 300).drawers.map((d) => d.label), ["mail", "june.org"], "named by where her calls looked");
+	const words = { x: 0, y: 0, w: 600, h: 150 };
+	const overlapsWords = (d) => d.y - 14 < words.y + words.h && d.x < words.x + words.w;
+	assert.ok(cutaway(dig, 600, 300).drawers.some(overlapsWords), "unobstructed, drawers stand near the top");
+	assert.ok(!cutaway(dig, 600, 400, 0, [words]).drawers.some(overlapsWords), "under the words, they move clear");
 	const briefing = panels([user("u1", "farm it out"), tool("t1", "work", "task=email triage"), tool("t2", "bash", "command=ls", "done")]);
 	const brief = backdrop(briefing[0], { live: true });
 	assert.equal(brief.scene, "delegating");

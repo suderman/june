@@ -292,12 +292,49 @@ export function place(tool) {
 	return name;
 }
 
+/** A delegating pane's height (Backdrop.qml: its header and three lines), and how far a drawer's tab stands above it. */
+const PANE_H = 69;
+const DRAWER_TAB = 14;
+const overlaps = (a, b, pad) => a.x < b.x + b.w + pad && b.x < a.x + a.w + pad && a.y < b.y + b.h + pad && b.y < a.y + a.h + pad;
+
+/**
+ * Move each piece ({x, y, w}, `height` tall or a drawer's w * 0.69, `above` more for a tab) clear of `clear` and the
+ * pieces before it, to the free spot nearest where it wanted to be; one with nowhere free stays put.
+ */
+function settle(pieces, height, above, w, h, clear) {
+	if (clear.length === 0) return;
+	const placed = [];
+	for (const p of pieces) {
+		const ph = (height ?? p.w * 0.69) + above;
+		const box = (x, y) => ({ x, y: y - above, w: p.w, h: ph });
+		const free = (b) => !clear.some((o) => overlaps(b, o, 6)) && !placed.some((o) => overlaps(b, o, 8));
+		let best = free(box(p.x, p.y)) ? { x: p.x, y: p.y } : null;
+		if (!best) {
+			let far = Infinity;
+			for (let y = above + 8; y + ph - above <= h - 8; y += 8)
+				for (let x = 8; x + p.w <= w - 8; x += 8) {
+					const d = (x - p.x) ** 2 + (y - p.y) ** 2;
+					if (d < far && free(box(x, y))) {
+						far = d;
+						best = { x, y };
+					}
+				}
+		}
+		if (best) {
+			p.x = best.x;
+			p.y = best.y;
+		}
+		placed.push(box(p.x, p.y));
+	}
+}
+
 /**
  * A cutaway's pieces over a `w` by `h` panel, from the run's tool calls and nothing else. Delegating shows a pane per
  * brief, named by its narration, and the run's calls as a chain coloured by status; digging shows the places her calls
- * looked, as labelled drawers on a dotted ground.
+ * looked, as labelled drawers on a dotted ground. `clear` are the panel's words and her face ({x, y, w, h}); a pane or
+ * drawer that would sit under them moves to the nearest free spot, so a narrow panel still shows the work.
  */
-export function cutaway(spec, w, h, seed = 0) {
+export function cutaway(spec, w, h, seed = 0, clear = []) {
 	const tools = spec.tools;
 	if (spec.scene === "delegating") {
 		const briefs = tools.filter((t) => DELEGATING.includes(t.name));
@@ -312,6 +349,7 @@ export function cutaway(spec, w, h, seed = 0) {
 			r: (((seed + i * 5) % 7) - 3) * 0.8,
 			lines: [0, 1, 2].map((k) => 48 + ((seed + i * 17 + k * 29) % 42)),
 		}));
+		settle(panes, PANE_H, 0, w, h, clear);
 		const chain = tools.slice(Math.max(0, tools.length - 5));
 		const y = h * 0.72;
 		const nodes = chain.map((t, i) => ({ x: n(w * (0.18 + (0.64 * (i + 0.5)) / chain.length)), y: n(y + (i % 2 === 0 ? 0 : -h * 0.08)), fill: STATUS[t.status] ?? STATUS.running }));
@@ -339,5 +377,6 @@ export function cutaway(spec, w, h, seed = 0) {
 		w: n(drawerW),
 		r: (((seed + i * 3) % 9) - 4) * 0.9,
 	}));
+	settle(drawers, null, DRAWER_TAB, w, h, clear);
 	return { ground: "#e8dfcf", drawers };
 }

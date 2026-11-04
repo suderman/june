@@ -16,9 +16,11 @@ Item {
   // Her face's centre, in this item's coordinates, for focus lines and a burst.
   property var centre: null
   property int seed: 0
+  // Her words and face, which a cutaway's panes and drawers keep clear of.
+  property var clear: []
 
   readonly property var pattern: spec.kind === "abstract" ? Light.PATTERNS[spec.pattern] : null
-  readonly property var scene: spec.kind === "cutaway" ? Light.cutaway(spec, width, height, seed) : null
+  readonly property var scene: spec.kind === "cutaway" ? Light.cutaway(spec, width, height, seed, clear) : null
   function g(c) { return c === "transparent" ? c : Light.graded(c, light); }
   readonly property string ground: scene ? scene.ground
     : g(spec.kind === "calm" ? Light.CALM_GROUND : pattern ? pattern.ground : tint)

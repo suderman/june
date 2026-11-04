@@ -623,6 +623,8 @@ private fun CutawayView(cut: JSONObject) {
                 Box(Modifier.offset(14.dp, (-14).dp).size(60.dp, 18.dp).background(fill, RoundedCornerShape(6.dp)).border(2.5.dp, Look.ink, RoundedCornerShape(6.dp)))
                 Box(Modifier.fillMaxSize().background(fill, RoundedCornerShape(6.dp)).border(2.5.dp, Look.ink, RoundedCornerShape(6.dp)))
                 Text(drawer.optString("label"), style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Look.ink), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.offset(12.dp, 14.dp).width((w - 24).dp))
+                Box(Modifier.offset(12.dp, (w * 0.69f * 0.42f).dp).size((w - 26).dp, 6.dp).background(Look.ink.copy(alpha = 0.25f), RoundedCornerShape(3.dp)))
+                Box(Modifier.offset(12.dp, (w * 0.69f * 0.56f).dp).size((w - 52).dp, 6.dp).background(Look.ink.copy(alpha = 0.25f), RoundedCornerShape(3.dp)))
             }
         }
     }
