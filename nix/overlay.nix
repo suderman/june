@@ -2,7 +2,8 @@
 # `june-overlay cycle` steps the running one through live June, the full strip, and hidden, for a single compositor
 # bind; `toggle`, `open`, `close`, and `mini` reach each directly; `window` opens the strip in an ordinary window;
 # `live off` keeps live June away until `live on`; `look console` drops the comic for a terminal style, `look comic`
-# brings it back. `light 21.5` previews every panel at that hour, and `light now` puts
+# brings it back; `quiet on` is do not disturb (mako's mode); `scheme dark` or `light` holds the colour scheme, and
+# `scheme system` follows the desktop again. `light 21.5` previews every panel at that hour, and `light now` puts
 # each back at its own. It ships the base avatar set from templates/avatar; JUNE_OVERLAY_ART can put a
 # personal set in front of it.
 {
@@ -11,6 +12,7 @@
   writeShellApplication,
   quickshell,
   qt6,
+  systemd,
   google-fonts,
 }: let
   fonts = google-fonts.override {fonts = ["ShantellSans" "DelaGothicOne" "ZenKakuGothicNew"];};
@@ -27,7 +29,8 @@
 in
   writeShellApplication {
     name = "june-overlay";
-    runtimeInputs = [quickshell];
+    # busctl reads the desktop's do-not-disturb and colour scheme.
+    runtimeInputs = [quickshell systemd];
     text = ''
       # Only this Qt's modules and plugins: the desktop's Qt settings may name plugins built against another Qt.
       export QML2_IMPORT_PATH=${qt6.qtwebsockets}/lib/qt-6/qml
@@ -44,8 +47,10 @@ in
         light) exec qs -p ${config} ipc call june light "''${2:-now}" ;;
         live) exec qs -p ${config} ipc call june live "''${2:-flip}" ;;
         look) exec qs -p ${config} ipc call june look "''${2:-flip}" ;;
+        quiet) exec qs -p ${config} ipc call june quiet "''${2:-flip}" ;;
+        scheme) exec qs -p ${config} ipc call june scheme "''${2:-system}" ;;
         *)
-          echo "usage: june-overlay [cycle|toggle|open|close|mini|window|light HOUR|live on/off|look comic/console]" >&2
+          echo "usage: june-overlay [cycle|toggle|open|close|mini|window|light HOUR|live on/off|look comic/console|quiet on/off|scheme system/dark/light]" >&2
           exit 2
           ;;
       esac

@@ -151,7 +151,15 @@ From the user on 2026-11-04: a mode that drops "all the artwork and cuteness" fo
 
 - The same strip, drawn as lines (=overlay/console.mjs=, =ConsolePanel.qml=): the user's message after a =›= prompt and its source, her reply after =june= and its face, tool calls as =✓=, =…=, or =✗= lines, patter after =~=, notices after =!=; code without its fences, since the console is monospace already. No art, rooms, light, or marks. A quiet status line says what she is doing while she works.
 - Every expression is a text face (=FACES=): idle =:)=, warm =^_^=, wry =;)=, curious =o_o=, skeptical =¬_¬=, determined =>:]=, serious =:|=, gentle =c:=, smug =:>=, exasperated =-_-=, laughing =XD=, surprised =:O=, confused =:S=, indignant =>:(=, pout =:<=, bashful =^^;=, delighted =:D=, cheering =\o/=. A reply shows its face once the daemon has picked one. Live June's card shows her latest face, =x_x= offline and =-.-= asleep.
-- =Theme.qml= switches its tokens by look (=consoleLook=): a dark terminal ground, monospace type, thinner lines. The masthead, balloon input, toasts, toggles, and live June's card follow without knowing which look is on.
+- =Theme.qml= switches its tokens by look (=consoleLook=): a terminal ground, monospace type, thinner lines. The masthead, balloon input, toasts, toggles, and live June's card follow without knowing which look is on.
+
+** Do not disturb and dark mode
+From the user on 2026-11-04: a do-not-disturb mode where June can still be summoned but "doesn't pop up on her own", perhaps "a system setting she responds to, like dark mode". Both come from the desktop over D-Bus, read with =busctl= every three seconds (=overlay/desktop.mjs=).
+
+- Do not disturb is mako's =do-not-disturb= mode, so the desktop and June keep one switch: while it is on, she never pops up by herself and anything she popped up for is put away, though Alt and the launcher summon her as ever; the masthead says so. The window's "do not disturb" toggle and =june-overlay quiet on|off= set mako's modes (=SetModes=), keeping its others. Without mako it is the device's own switch.
+- Dark mode follows the portal's =org.freedesktop.appearance color-scheme=, light when it states no preference; the window's scheme toggle and =june-overlay scheme dark|light|system= hold the device to one or follow again. In the comic look dark darkens the page while panels and balloons stay printed, so words and controls set on the page use =Theme.pageInk=; the console look has a dark terminal and a light one.
+- A meeting is then one line for a compositor bind: =june-overlay look console; june-overlay quiet on=.
+- Android reads the same two states natively: the interruption filter and =uiMode=.
 
 ** Desktop context and taking over, later
 Read =hyprctl activewindow -j= (class, title, workspace); offer an explicit screenshot of the active window with =grim=; read the primary selection with =wl-paste --primary=. Each is sent only when the user asks, and framed as outside content as mail already is.

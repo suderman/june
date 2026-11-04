@@ -20,7 +20,7 @@ Item {
   function colour(line) {
     if (line.kind === "user") return Theme.consoleUser;
     if (line.kind === "june") return Theme.consoleJune;
-    if (line.kind === "tool") return line.status === "error" ? Theme.cardFail : line.status === "running" ? Theme.cardBusy : Theme.cardOk;
+    if (line.kind === "tool") return line.status === "error" ? Theme.consoleFail : line.status === "running" ? Theme.consoleBusy : Theme.consoleOk;
     if (line.kind === "burst") return Theme.accent;
     return Theme.muted;
   }
@@ -57,7 +57,7 @@ Item {
       text: "… " + row.activity
       font.family: "monospace"
       font.pixelSize: 13
-      color: Theme.cardBusy
+      color: Theme.consoleBusy
     }
   }
 }

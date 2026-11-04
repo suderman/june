@@ -10,6 +10,7 @@ import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
 import { CALM_GROUND, LONG_SHARE, PATTERNS, TIMES, WEATHER_MS, backdrop, cutaway, fallingPath, graded, hourOf, look, moment, patternPath, place, skyLook, sunFor, sunKeys, sunTimes } from "../overlay/light.mjs";
 import { MAX_PROPS, focusBlur, SEASONS as SCENE_SEASONS, SETTINGS as SCENE_SETTINGS, SPOTS, choosePlate, chooseProps, chooseRoom, mergeScenery, placeProps, placeRoom, readScenery, roomPoint, season } from "../overlay/scenery.mjs";
 import { SEASONS, SETTINGS, SPOTS as AVATAR_SPOTS } from "../src/avatar.ts";
+import { DND_MODE, MODES_CALL, SCHEMES, SCHEME_CALL, isDark, parseModes, parseScheme, quietIn, setQuietCall } from "../overlay/desktop.mjs";
 import { FACES, LOOKS, face, liveFace, lines as consoleLines } from "../overlay/console.mjs";
 import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent } from "../overlay/live.mjs";
 
@@ -401,7 +402,7 @@ test("a balloon and its tail are one closed outline from any side, and a burst s
 
 test("the shared modules use only JavaScript that QML's engine runs", async () => {
 	// Each of these loaded under Node but failed in Quickshell, blanking the overlay.
-	for (const file of ["strip.mjs", "compose.mjs", "live.mjs", "scroll.mjs", "light.mjs", "scenery.mjs", "console.mjs"]) {
+	for (const file of ["strip.mjs", "compose.mjs", "live.mjs", "scroll.mjs", "light.mjs", "scenery.mjs", "console.mjs", "desktop.mjs"]) {
 		const source = (await readFile(new URL(`../overlay/${file}`, import.meta.url), "utf8")).replace(/^\s*(\/\/|\*).*$/gm, "");
 		assert.doesNotMatch(source, /\.at\(/, `${file}: Array.prototype.at`);
 		assert.doesNotMatch(source, /Object\.hasOwn\(/, `${file}: Object.hasOwn`);
@@ -790,4 +791,32 @@ test("a panel becomes console lines: her name and face once a reply, tools as ma
 	assert.equal(fenced[0].text, "run this:\n\nls -la");
 	const failed = consoleLines(panels([{ kind: "notice", id: "n1", text: "kit rebooted" }])[0]);
 	assert.deepEqual(failed, [{ kind: "burst", prefix: "!", text: "kit rebooted" }]);
+});
+
+test("the desktop's do-not-disturb comes from mako's modes, and June's toggle sets them", () => {
+	assert.deepEqual(parseModes('as 1 "default"'), ["default"]);
+	assert.deepEqual(parseModes('as 2 "default" "do-not-disturb"\n'), ["default", DND_MODE]);
+	assert.equal(parseModes("Call failed: The name is not activatable"), null);
+	assert.equal(parseModes('as 3 "default"'), null);
+	assert.equal(quietIn(["default", DND_MODE]), true);
+	assert.equal(quietIn(["default"]), false);
+	assert.equal(quietIn(null), false);
+	assert.deepEqual(setQuietCall(["default"], true).slice(-4), ["as", "2", "default", DND_MODE]);
+	assert.deepEqual(setQuietCall(["default", DND_MODE], false).slice(-3), ["as", "1", "default"]);
+	assert.deepEqual(setQuietCall(["default", DND_MODE], true).slice(-4), ["as", "2", "default", DND_MODE]);
+	assert.deepEqual(setQuietCall(null, true).slice(-4), ["as", "2", "default", DND_MODE]);
+	assert.equal(MODES_CALL[0], "busctl");
+});
+
+test("dark mode follows the portal's colour scheme unless the device holds to one", () => {
+	assert.equal(parseScheme("v u 1"), "dark");
+	assert.equal(parseScheme("v u 2\n"), "light");
+	assert.equal(parseScheme("v u 0"), null);
+	assert.equal(parseScheme("Call failed"), null);
+	assert.deepEqual(SCHEMES, ["system", "dark", "light"]);
+	assert.equal(isDark("system", "dark"), true);
+	assert.equal(isDark("system", null), false);
+	assert.equal(isDark("light", "dark"), false);
+	assert.equal(isDark("dark", "light"), true);
+	assert.equal(SCHEME_CALL.includes("color-scheme"), true);
 });

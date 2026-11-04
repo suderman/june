@@ -20,6 +20,7 @@ import "compose.mjs" as Compose
 import "live.mjs" as Live
 import "scenery.mjs" as Scenery
 import "console.mjs" as Console
+import "desktop.mjs" as Desktop
 
 ShellRoot {
   id: root
@@ -32,6 +33,42 @@ ShellRoot {
   // The comic strip, or the console look for when June should look professional (a client meeting).
   property string look: "comic"
   Binding { target: Theme; property: "consoleLook"; value: root.look === "console" }
+
+  // The desktop's say, polled over D-Bus (desktop.mjs): mako's modes, null without mako, and the portal's colour scheme.
+  property var systemModes: null
+  property var systemScheme: null
+  // This device's colour scheme: follow the system, or hold to dark or light.
+  property string scheme: "system"
+  Binding { target: Theme; property: "dark"; value: Desktop.isDark(root.scheme, root.systemScheme) }
+  // Do not disturb: she never pops up by herself, though summoning her works as ever. It is mako's mode, so the
+  // desktop and June keep one switch; without mako it is this device's alone.
+  property bool localQuiet: false
+  readonly property bool quiet: systemModes === null ? localQuiet : Desktop.quietIn(systemModes)
+  onQuietChanged: if (quiet && miniShown && !miniSummoned) hideMini()
+  function setQuiet(on) {
+    if (systemModes === null) { localQuiet = on; return; }
+    quietSetter.command = Desktop.setQuietCall(systemModes, on);
+    quietSetter.running = true;
+  }
+  Process {
+    id: modesReader
+    command: Desktop.MODES_CALL
+    stdout: StdioCollector { onStreamFinished: root.systemModes = Desktop.parseModes(text) }
+    onExited: (code, status) => { if (code !== 0) root.systemModes = null; }
+  }
+  Process {
+    id: schemeReader
+    command: Desktop.SCHEME_CALL
+    stdout: StdioCollector { onStreamFinished: root.systemScheme = Desktop.parseScheme(text) }
+  }
+  Process { id: quietSetter; onExited: modesReader.running = true }
+  Timer {
+    interval: 3000
+    running: true
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: { modesReader.running = true; schemeReader.running = true; }
+  }
   property alias stripModel: strip
   property var targetScreen: Quickshell.screens[0]
   property var view: Strip.emptyView()
@@ -289,7 +326,7 @@ ShellRoot {
     seenReply = latest.id;
     miniText = Live.excerpt(latest.text);
     miniTextAt = Date.now();
-    if (!shown && liveEnabled) popReply(latest);
+    if (!shown && liveEnabled && !quiet) popReply(latest);
   }
   // Turning live June off puts her away at once.
   onLiveEnabledChanged: if (!liveEnabled) hideMini()
@@ -311,6 +348,10 @@ ShellRoot {
     function window(): void { root.windowShown = true; }
     // Live June on, off, or flipped (anything else), as the window's toggle does.
     function live(state: string): void { root.liveEnabled = state === "on" ? true : state === "off" ? false : !root.liveEnabled; }
+    // Do not disturb on or off (mako's mode when mako runs); anything else flips it.
+    function quiet(state: string): void { root.setQuiet(state === "on" ? true : state === "off" ? false : !root.quiet); }
+    // Follow the system's colour scheme, or hold to dark or light.
+    function scheme(name: string): void { if (Desktop.SCHEMES.includes(name)) root.scheme = name; }
     // The comic strip or the console look; anything else flips between them.
     function look(name: string): void { root.look = Console.LOOKS.includes(name) ? name : root.look === "console" ? "comic" : "console"; }
     // Hidden, then live June with the note open, then the full strip, then hidden: one key for everything. When she has
@@ -540,6 +581,7 @@ ShellRoot {
             busy: Boolean(root.view.state.running || root.view.state.compacting)
             activity: root.activity
             background: root.view.state.background ?? 0
+            quiet: root.quiet
           }
 
           StripList {

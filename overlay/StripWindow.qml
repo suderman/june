@@ -4,6 +4,7 @@
 import QtQuick
 import QtQuick.Controls
 import Quickshell
+import "desktop.mjs" as Desktop
 
 FloatingWindow {
   id: win
@@ -46,6 +47,7 @@ FloatingWindow {
       busy: Boolean(win.shell.view.state.running || win.shell.view.state.compacting)
       activity: win.shell.activity
       background: win.shell.view.state.background ?? 0
+      quiet: win.shell.quiet
     }
 
     // This device's toggles: state for now, gone when the overlay restarts.
@@ -63,6 +65,16 @@ FloatingWindow {
         text: "console"
         on: win.shell.look === "console"
         onClicked: win.shell.look = win.shell.look === "console" ? "comic" : "console"
+      }
+      Pill {
+        text: "do not disturb"
+        on: win.shell.quiet
+        onClicked: win.shell.setQuiet(!win.shell.quiet)
+      }
+      Pill {
+        text: win.shell.scheme === "system" ? (Theme.dark ? "dark · system" : "light · system") : win.shell.scheme
+        on: win.shell.scheme !== "system"
+        onClicked: win.shell.scheme = Desktop.SCHEMES[(Desktop.SCHEMES.indexOf(win.shell.scheme) + 1) % Desktop.SCHEMES.length]
       }
       Pill {
         text: "live June"
@@ -93,7 +105,7 @@ FloatingWindow {
           height: 4
           radius: 2
           color: Theme.muted
-          Rectangle { width: hour.visualPosition * parent.width; height: parent.height; radius: 2; color: Theme.ink }
+          Rectangle { width: hour.visualPosition * parent.width; height: parent.height; radius: 2; color: Theme.pageInk }
         }
         handle: Rectangle {
           x: hour.leftPadding + hour.visualPosition * (hour.availableWidth - width)
@@ -150,7 +162,7 @@ FloatingWindow {
     return String(h % 24).padStart(2, "0") + ":" + String(m).padStart(2, "0");
   }
 
-  // A toggle in the strip's lettering: inked when on.
+  // A toggle in the strip's lettering.
   component Pill: Rectangle {
     id: pill
     property string text: ""
@@ -159,15 +171,16 @@ FloatingWindow {
     width: label.implicitWidth + 24
     height: 30
     radius: 15
-    color: on ? Theme.ink : Theme.balloon
-    border.color: Theme.ink
+    // Outlined when off, filled when on, so either reads on any page.
+    color: on ? Theme.pageInk : "transparent"
+    border.color: Theme.pageInk
     border.width: 2
     Text {
       id: label
       anchors.centerIn: parent
       text: pill.text
       font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
-      color: pill.on ? Theme.paper : Theme.ink
+      color: pill.on ? Theme.paper : Theme.pageInk
     }
     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: pill.clicked() }
   }
