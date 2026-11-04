@@ -443,9 +443,15 @@ test("she pops up for a newly finished desktop reply, once, with its opening lin
 	assert.equal(newReply([user("u1"), { ...june("a1", "writing", true), alert: "gui" }], null), null, "still streaming");
 	assert.equal(newReply([user("u1"), done("a1", "on telegram", "telegram")], null), null, "meant for another surface");
 	assert.equal(newReply([done("a0", "older"), user("u1"), done("a1", "  ")], null).id, "a0", "an empty reply is skipped");
-	assert.equal(excerpt("short reply.\n\nmore detail"), "short reply.");
+	assert.equal(excerpt("short reply.\n\nmore detail"), "more detail", "the last paragraph: the most recent thing she said");
+	assert.equal(
+		excerpt("i read two reviews and now i'm apparently the authority on handheld emulation.\n\nnext i'll be explaining frame pacing to Davy while he just wants to play Mario.\n\n"),
+		"next i'll be explaining frame pacing to Davy while he just wants to play Mario.",
+		"Jon's case: the second paragraph, trailing blank lines ignored",
+	);
+	assert.equal(excerpt("one part only."), "one part only.");
 	const long = `${"word ".repeat(30)}ends here. ${"more ".repeat(40)}`;
-	assert.equal(excerpt(long, 200), `${"word ".repeat(30)}ends here.`, "cut at a sentence");
+	assert.equal(excerpt(`earlier.\n\n${long}`, 200), `${"word ".repeat(30)}ends here.`, "a long last paragraph is cut at a sentence");
 	assert.ok(excerpt("a".repeat(50) + " " + "b".repeat(300), 200).endsWith("…"), "or at a word, with an ellipsis");
 });
 

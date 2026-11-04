@@ -79,11 +79,18 @@ export function newReply(items, seen) {
 	return null;
 }
 
-/** The start of a reply for live June's balloon: its first paragraph, cut at a sentence or word near `max` characters. */
+/**
+ * What live June's balloon says of a reply: its last paragraph, the most recent thing she said, cut at a sentence or
+ * word near `max` characters.
+ */
 export function excerpt(text, max = 200) {
-	const first = text.trim().split(/\n\s*\n/)[0] ?? "";
-	if (first.length <= max) return first;
-	const cut = first.slice(0, max);
+	const paragraphs = text
+		.trim()
+		.split(/\n\s*\n/)
+		.filter((p) => p.trim() !== "");
+	const last = (paragraphs[paragraphs.length - 1] ?? "").trim();
+	if (last.length <= max) return last;
+	const cut = last.slice(0, max);
 	const sentence = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("? "), cut.lastIndexOf("! "));
 	if (sentence > max * 0.5) return cut.slice(0, sentence + 1);
 	return `${cut.slice(0, cut.lastIndexOf(" ") > 0 ? cut.lastIndexOf(" ") : max)}…`;
