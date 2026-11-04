@@ -186,7 +186,7 @@ test("June's text reaches Jon as a keyboard types it: straight quotes, no em das
 
 test("a command reply stays where it was given, after the streaming reply it interrupted is replaced", () => {
 	const t = new Transcript();
-	const state = { running: true, background: 0, queued: 0, model: "", compacting: false };
+	const state = { running: true, background: 0, queued: 0, model: "", compacting: false, expression: "idle" };
 	t.apply({ type: "view", reset: true, earlier: false, state, items: [{ kind: "user", id: "1", source: "kitty", text: "go" }, { kind: "assistant", id: "live", text: "on it", streaming: true, answers: "tui" }] });
 	t.reply("stop", "Stopped.");
 	t.apply({ type: "view", changes: [{ op: "drop", id: "live" }, { op: "put", item: { kind: "assistant", id: "2", text: "on it", streaming: false, answers: "tui", error: "aborted" }, after: "1" }, { op: "put", item: { kind: "note", id: "3", text: "stopped" }, after: "2" }] });

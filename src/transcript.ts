@@ -30,7 +30,7 @@ export type ViewItem =
 	 * the source of the input the reply follows, empty when that input is before the transcript. `alert` names the client
 	 * kind that should interrupt the user, on a finished reply only.
 	 */
-	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: Surface; error?: string; thinking?: string; private?: true }
+	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: Surface; error?: string; thinking?: string; private?: true; expression?: string; pose?: string }
 	/** `error` is the first line of a failed call's output; `output`, in detail only, is all of what the call kept. */
 	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; error?: string; output?: string; private?: true }
 	| { kind: "note"; id: string; text: string }
@@ -44,6 +44,8 @@ export type ViewState = {
 	model: string;
 	notice?: string;
 	compacting: boolean;
+	/** The face June shows for her newest reply that has one (see expression.ts), "idle" when none in the view has. */
+	expression: string;
 };
 
 export type Change = { op: "put"; item: ViewItem; after: string | null } | { op: "drop"; id: string };
@@ -68,6 +70,8 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 	const tools = new Map<string, Extract<ViewItem, { kind: "tool" }>>();
 	const background = new Set<string>();
 	let hidden = false;
+	/** The face of her newest reply that has one. */
+	let expression = "idle";
 	/** The reply follows a Telegram message, already Markdown; anything else June answers in Org. */
 	let markdown = false;
 	/** The source of the input being answered, and where a notice was routed. */
@@ -120,6 +124,16 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 			case "june.patter":
 				items.push({ kind: "patter", id, text: entry.data?.text ?? "" });
 				break;
+			case "june.expression": {
+				// The face picked for a reply, after it settled; it rides on the reply's item.
+				const reply = items.findLast((item) => item.kind === "assistant" && item.id === String(entry.data?.for));
+				if (reply?.kind === "assistant" && typeof entry.data?.expression === "string") {
+					reply.expression = entry.data.expression;
+					if (typeof entry.data.pose === "string") reply.pose = entry.data.pose;
+					expression = entry.data.expression;
+				}
+				break;
+			}
 			case "june.work":
 				if (entry.data?.state === "started") background.add(String(entry.data.id));
 				else background.delete(String(entry.data?.id));
@@ -220,6 +234,7 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 		queued: ((docs["pi.inbox"] as { items?: unknown[] } | undefined)?.items ?? []).length,
 		model: agent?.model?.modelId ? `${agent.model.modelId}${agent.thinkingLevel ? `:${agent.thinkingLevel}` : ""}` : "",
 		compacting: (live.compactions?.length ?? 0) > 0,
+		expression,
 		...(retry ? { notice: `retrying: ${retry.error}` } : live.compactionFailure ? { notice: `compaction failed: ${live.compactionFailure.error}` } : {}),
 	};
 	return { items, state, earlier };

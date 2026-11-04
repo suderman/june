@@ -43,7 +43,7 @@ test("the fold: thinking as one line each, tool lines with their status, Org as 
 		{ kind: "user", id: "9", source: "telegram", text: "and from the phone?" },
 		{ kind: "assistant", id: "10", text: "Markdown *stays*.", streaming: false, answers: "telegram" },
 	]);
-	assert.deepEqual(state, { running: false, background: 0, queued: 0, model: "terra:medium", compacting: false });
+	assert.deepEqual(state, { running: false, background: 0, queued: 0, model: "terra:medium", compacting: false, expression: "idle" });
 });
 
 test("the fold: the streaming reply, running tools, the queue, and a retry come from pi.live and pi.inbox", () => {
@@ -117,14 +117,14 @@ test("a root replacement starts the view over with a reset", async () => {
 	};
 	const sent: Reply[] = [];
 	const stop = await serveView(root as never, BG, (r) => sent.push(r), "attach-1");
-	assert.deepEqual(sent, [{ type: "view", requestId: "attach-1", reset: true, items: [{ kind: "patter", id: "1", text: "one" }], state: { running: false, background: 0, queued: 0, model: "", compacting: false }, earlier: false }]);
+	assert.deepEqual(sent, [{ type: "view", requestId: "attach-1", reset: true, items: [{ kind: "patter", id: "1", text: "one" }], state: { running: false, background: 0, queued: 0, model: "", compacting: false, expression: "idle" }, earlier: false }]);
 	await listener!({ kind: "value", value: view(["one", "two"]), ops: [["p", ["entries"], 1, 0, [{}]]], retired: false }, BG);
 	await until(() => sent.length === 2);
 	assert.deepEqual(sent[1], { type: "view", changes: [{ op: "put", item: { kind: "patter", id: "2", text: "two" }, after: "1" }] });
 	const replacement = view(["fresh"]);
 	await listener!({ kind: "value", value: replacement, ops: [["r", replacement]], retired: false }, BG);
 	await until(() => sent.length === 3);
-	assert.deepEqual(sent[2], { type: "view", reset: true, items: [{ kind: "patter", id: "1", text: "fresh" }], state: { running: false, background: 0, queued: 0, model: "", compacting: false }, earlier: false });
+	assert.deepEqual(sent[2], { type: "view", reset: true, items: [{ kind: "patter", id: "1", text: "fresh" }], state: { running: false, background: 0, queued: 0, model: "", compacting: false, expression: "idle" }, earlier: false });
 	await stop.stop();
 });
 

@@ -264,15 +264,15 @@ async function doctor(): Promise<number> {
 		models.setProvider(providerFromPiModels(config!.providersFile, config!.model.chat.provider));
 		const { provider, modelId } = config!.model.chat;
 		if (models.getModel(provider, modelId) === undefined) throw new Error(`${provider}/${modelId} is not in ${config!.providersFile}`);
-		const { focus, patter } = config!.model;
-		for (const [name, mode] of Object.entries({ focus, patter })) {
+		const { focus, patter, expression } = config!.model;
+		for (const [name, mode] of Object.entries({ focus, patter, expression })) {
 			if (mode === undefined) continue;
 			if (mode.provider !== provider) models.setProvider(providerFromPiModels(config!.providersFile, mode.provider));
 			if (models.getModel(mode.provider, mode.modelId) === undefined) throw new Error(`${name} model ${mode.provider}/${mode.modelId} is not in ${config!.providersFile}`);
 		}
 		const auth = await models.getAuth(provider);
 		// The service reads keys from its EnvironmentFile, which an ordinary shell does not have.
-		const modes = Object.entries({ focus, patter }).flatMap(([name, m]) => (m ? [`${name} ${m.provider}/${m.modelId} ${m.thinkingLevel}`] : []));
+		const modes = Object.entries({ focus, patter, expression }).flatMap(([name, m]) => (m ? [`${name} ${m.provider}/${m.modelId} ${m.thinkingLevel}`] : []));
 		const both = [`chat ${provider}/${modelId} ${config!.model.chat.thinkingLevel}`, ...modes].join(", ");
 		if (auth === undefined) return `${both}; no key in this shell, the service has its own`;
 		return `${both}, key from ${auth.source ?? "?"}`;

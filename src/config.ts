@@ -14,7 +14,7 @@ export type ModelChoice = { readonly provider: string; readonly modelId: string;
 export type Config = {
 	/** The person June serves; her prompts use the name. Without one she says "the user". */
 	readonly user: { readonly name?: string };
-	/** June's three modes. Focus and patter take the provider they leave out from chat. */
+	/** June's three modes, and the model that picks her face. Focus, patter, and expression take the provider they leave out from chat. */
 	readonly model: {
 		/** Everyday conversation, and where every conversation starts. */
 		readonly chat: ModelChoice;
@@ -22,6 +22,8 @@ export type Config = {
 		readonly focus?: ModelChoice;
 		/** The cheap model that keeps the user company during long waits; thinking defaults to medium, which keeps its planning out of the line. */
 		readonly patter?: ModelChoice;
+		/** The model that picks June's face for each reply (expression.ts); without one, no faces are picked. The 2026-11 trial favoured chat's. */
+		readonly expression?: ModelChoice;
 	};
 	/** Pi's models.json, read for the configured provider so codex-lb is defined in one place. */
 	readonly providersFile: string;
@@ -232,13 +234,14 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 	};
 }
 
-function withModes({ chat: given, focus, patter }: Record<string, any>): Config["model"] {
-	for (const [name, mode] of Object.entries({ focus, patter })) if (mode !== undefined && !mode.modelId) throw new Error(`model.${name} needs a modelId`);
+function withModes({ chat: given, focus, patter, expression }: Record<string, any>): Config["model"] {
+	for (const [name, mode] of Object.entries({ focus, patter, expression })) if (mode !== undefined && !mode.modelId) throw new Error(`model.${name} needs a modelId`);
 	const chat = { thinkingLevel: "medium", ...given };
 	return {
 		chat,
 		...(focus ? { focus: { provider: chat.provider, thinkingLevel: chat.thinkingLevel, ...focus } } : {}),
 		...(patter ? { patter: { provider: chat.provider, thinkingLevel: "medium", ...patter } } : {}),
+		...(expression ? { expression: { provider: chat.provider, thinkingLevel: chat.thinkingLevel, ...expression } } : {}),
 	} as Config["model"];
 }
 

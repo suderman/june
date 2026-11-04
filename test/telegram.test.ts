@@ -259,7 +259,7 @@ test("voice notes, audio, video, and stickers are refused with a reply, and stra
 
 // ---- The view side, with the daemon's replies given directly ----
 
-const STATE: ViewState = { running: false, background: 0, queued: 0, model: "faux-1", compacting: false };
+const STATE: ViewState = { running: false, background: 0, queued: 0, model: "faux-1", compacting: false, expression: "idle" };
 const user = (id: number, source: string, text = "hi"): ViewItem => ({ kind: "user", id: String(id), source, text });
 const june = (id: number | string, text: string, answers: string, extra: Partial<Extract<ViewItem, { kind: "assistant" }>> = {}): ViewItem => ({ kind: "assistant", id: String(id), text, streaming: false, answers, ...extra });
 const patter = (id: number, text: string): ViewItem => ({ kind: "patter", id: String(id), text });

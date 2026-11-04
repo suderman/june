@@ -46,6 +46,8 @@ import { createWorkExtension, FocusDoc, WorkDoc } from "./tools/work.ts";
 import { createOrgExtension, Org } from "./tools/org.ts";
 import { createOrgWriteExtension } from "./tools/write.ts";
 import { createMail } from "./mail.ts";
+import { loadManifest, startExpressions } from "./expression.ts";
+import { TEMPLATES } from "./init.ts";
 
 export const VERSION = "0.1.0";
 /** The entries a view holds: a client starts with the newest 200, and the window drops back to 200 past 400. */
@@ -160,6 +162,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		greeting.start(root);
 		harness.resume();
 		const stopPatter = patter?.start(harness, root);
+		// June's face for each reply that settles, picked by a short model call and carried to clients by the view. Only
+		// when configured: it is a model call for every reply.
+		const expression = config.model.expression;
+		const expressions = expression && startExpressions({
+			root,
+			models: options.models,
+			model: expression,
+			files: prompt.files,
+			manifest: () => loadManifest([`${paths.data}/avatar/manifest.json`, `${TEMPLATES}avatar/manifest.json`], log),
+			attach: (send) => attachView(root, BG, send, "expressions"),
+			log,
+		});
 		// Focus lasts for the turn June tied her hair up in: once the main thread goes quiet, she lets it down again. A held
 		// focus lasts across turns until the user has been quiet for focusHoldMs; a hold left from before a restart or /new,
 		// which start relaxed, is dropped.
@@ -291,6 +305,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				await closed;
 				await remote?.close();
 				stopPatter?.();
+				await expressions?.stop();
 				if (unfocus) clearInterval(unfocus);
 				stopReflection?.();
 				stopSituation();

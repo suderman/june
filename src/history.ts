@@ -86,6 +86,9 @@ export function renderHistory(entries: readonly any[], options: { detail?: boole
 			case "june.patter":
 				say("June (patter)", entry.data?.text ?? "");
 				return;
+			case "june.expression":
+				if (detail) say("June (face)", [entry.data?.expression, entry.data?.pose].filter(Boolean).join(" · "));
+				return;
 			case "june.work":
 				if (detail) say("--", `background work ${entry.data?.state ?? "?"}: ${clip(String(entry.data?.brief ?? ""), 200)}`);
 				return;

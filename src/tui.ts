@@ -164,7 +164,7 @@ function component(item: Item): Component[] {
 /** What the daemon sent, and the command replies shown after the item that was last when each arrived. */
 export class Transcript {
 	items: ViewItem[] = [];
-	state: ViewState = { running: false, background: 0, queued: 0, model: "", compacting: false };
+	state: ViewState = { running: false, background: 0, queued: 0, model: "", compacting: false, expression: "idle" };
 	earlier = false;
 	/** When the running compaction started, as this client first saw it; undefined when none runs. */
 	compacting: number | undefined;
