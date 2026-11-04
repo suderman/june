@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -237,6 +238,7 @@ private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONO
     val scene = l.optJSONObject("scene")
     Box(Modifier.width(width.dp).height(l.getDouble("height").dp).clipToBounds().background(Look.color(scene?.optString("ground") ?: l.optString("tint")))) {
         if (scene != null) SceneView(scene, avatar, panel.optInt("seed"))
+        scene?.optJSONObject("cutaway")?.let { CutawayView(it) }
         val art = l.optJSONObject("art")
         val clip = l.getJSONObject("clip")
         val picture = image
@@ -564,5 +566,64 @@ fun LiveBadge(link: Link, decisions: Decisions, avatar: Avatar) {
     )
     Box(Modifier.size(40.dp)) {
         image?.let { Canvas(Modifier.fillMaxSize()) { drawImage(it, dstOffset = IntOffset(0, (bob.value * density).toInt()), dstSize = IntSize(size.width.toInt(), size.height.toInt())) } }
+    }
+}
+
+/**
+ * A cutaway to the work while she does it (light.mjs `cutaway`, Backdrop.qml on the desktop): delegating, a pane per
+ * brief named by its narration with the run's calls as a chain coloured by status; digging, the places her calls
+ * looked as labelled drawers on archive shelves. Never graded: it is the work, lit by its own screens.
+ */
+@Composable
+private fun CutawayView(cut: JSONObject) {
+    val label = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = Color(0xFFE4E8F2))
+    if (cut.optString("scene") == "delegating") {
+        val panes = cut.optJSONArray("panes") ?: JSONArray()
+        for (i in 0 until panes.length()) {
+            val pane = panes.getJSONObject(i)
+            val w = pane.getDouble("w").toFloat()
+            Box(
+                Modifier.offset(pane.getDouble("x").dp, pane.getDouble("y").dp).size(w.dp, 69.dp).rotate(pane.getDouble("r").toFloat())
+                    .background(Color(0xFF2B3247), RoundedCornerShape(8.dp)).border(2.dp, Color(0xFF5B6683), RoundedCornerShape(8.dp)),
+            ) {
+                Row(Modifier.offset(2.dp, 2.dp).size((w - 4).dp, 22.dp).background(Color(0xFF353D56)), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.size(8.dp).background(Look.color(pane.optString("dot")), RoundedCornerShape(50)))
+                    Spacer(Modifier.width(6.dp))
+                    Text(pane.optString("name"), style = label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                val lines = pane.optJSONArray("lines") ?: JSONArray()
+                Column(Modifier.offset(10.dp, 32.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    for (k in 0 until lines.length()) Box(Modifier.size(((w - 20) * lines.getDouble(k).toFloat() / 100).dp, 6.dp).background(Color(0xFF7C8AA8).copy(alpha = 0.7f), RoundedCornerShape(3.dp)))
+                }
+            }
+        }
+        val chain = cut.optString("path")
+        val nodes = cut.optJSONArray("nodes") ?: JSONArray()
+        val outline = remember(chain) { chain.takeIf { it.isNotEmpty() }?.let { path(it) } }
+        Canvas(Modifier.fillMaxSize()) {
+            scale(density, density, pivot = Offset.Zero) {
+                outline?.let { drawPath(it, Color(0xFF86E08F), style = Stroke(3f)) }
+                for (i in 0 until nodes.length()) {
+                    val node = nodes.getJSONObject(i)
+                    val c = Offset(node.getDouble("x").toFloat(), node.getDouble("y").toFloat())
+                    drawCircle(Look.color(node.optString("fill")), 14f, c)
+                    drawCircle(Look.ink, 14f, c, style = Stroke(2.5f))
+                }
+            }
+        }
+    } else {
+        Canvas(Modifier.fillMaxSize()) { for (i in 1..3) drawRect(Color(0xFFCBBDA6), topLeft = Offset(0f, size.height * i / 4), size = androidx.compose.ui.geometry.Size(size.width, 3f * density)) }
+        val drawers = cut.optJSONArray("drawers") ?: JSONArray()
+        for (i in 0 until drawers.length()) {
+            val drawer = drawers.getJSONObject(i)
+            val w = drawer.getDouble("w").toFloat()
+            val fill = Look.color(drawer.optString("fill"))
+            Box(Modifier.offset(drawer.getDouble("x").dp, drawer.getDouble("y").dp).size(w.dp, (w * 0.69f).dp).rotate(drawer.getDouble("r").toFloat())) {
+                Box(Modifier.offset(14.dp, (-14).dp).size(60.dp, 18.dp).background(fill, RoundedCornerShape(6.dp)).border(2.5.dp, Look.ink, RoundedCornerShape(6.dp)))
+                Box(Modifier.fillMaxSize().background(fill, RoundedCornerShape(6.dp)).border(2.5.dp, Look.ink, RoundedCornerShape(6.dp)))
+                Text(drawer.optString("label"), style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Look.ink), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.offset(12.dp, 14.dp).width((w - 24).dp))
+            }
+        }
     }
 }

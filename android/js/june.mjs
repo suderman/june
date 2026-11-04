@@ -68,7 +68,7 @@ export function layout(panel, width, sizes, now, hourOverride, sky) {
 /**
  * What stands behind her, ready to paint (Backdrop.qml and Scenery.qml on the desktop): the graded ground, an abstract
  * pattern, her room with the window's sky, sun, stars, weather, view, and props, how far out of focus it is, the
- * lamp, and how she is graded and lit. A cutaway's own drawing is the desktop's alone for now; here it is its ground.
+ * lamp, and how she is graded and lit; or a cutaway's panes, chain, or drawers while she works.
  */
 function scene(panel, laid, pose, sizes, width, now, hourOverride, sky) {
 	const sc = scenery.panelScene({ panel, layout: laid, pose, sizes, width, now, hourOverride, sky, scenery: rooms });
@@ -80,6 +80,7 @@ function scene(panel, laid, pose, sizes, width, now, hourOverride, sky) {
 	const win = sc.roomPlace ? sc.roomPlace.window : null;
 	return {
 		kind: back.kind,
+		cutaway: back.kind === "cutaway" ? Object.assign({ scene: back.scene }, light.cutaway(back, width, laid.height, sc.seed)) : null,
 		ground,
 		pattern: pattern ? { path: light.patternPath(back.pattern, width, laid.height, sc.faceCentre, sc.seed), stroke: g(pattern.stroke), fill: g(pattern.fill), width: pattern.width, opacity: pattern.opacity } : null,
 		room: sc.roomPlace ? { url: sc.room.url, place: sc.roomPlace } : null,
