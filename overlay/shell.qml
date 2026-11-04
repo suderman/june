@@ -7,9 +7,9 @@
 // set directories, colon-separated, a personal set before the base one; see "Poses" in docs/interfaces.org).
 // One key cycles the overlay (`june-overlay cycle`, for an Alt tap): hidden, live June in the corner with her note
 // open, the full strip, hidden again; if she popped up by herself, the first press opens her note. Esc dismisses either. `toggle`, `open`, `close`, and `mini` reach each directly.
+// `window` opens the same strip in an ordinary window with this device's toggles (StripWindow.qml).
 import QtQuick
 import QtQml.Models
-import QtQuick.Controls
 import QtWebSockets
 import Quickshell
 import Quickshell.Io
@@ -18,13 +18,17 @@ import Quickshell.Hyprland
 import "strip.mjs" as Strip
 import "compose.mjs" as Compose
 import "live.mjs" as Live
-import "scroll.mjs" as Scroll
 import "scenery.mjs" as Scenery
 
 ShellRoot {
   id: root
 
   property bool shown: false
+  // The windowed strip, and this device's toggles: state while the overlay runs, never written to config.
+  property bool windowShown: false
+  // Live June in the corner: off, she never pops up and the key goes straight between hidden and the strip.
+  property bool liveEnabled: true
+  property alias stripModel: strip
   property var targetScreen: Quickshell.screens[0]
   property var view: Strip.emptyView()
   property bool linked: false
@@ -140,68 +144,16 @@ ShellRoot {
     unfolding.to = target;
     unfolding.start();
   }
-  // Scrolling: momentum from scroll.mjs, and whether to stay on the newest panel.
-  property var scrollState: Scroll.rest()
-  property bool follow: true
-  function scrollBy(dy) {
-    const top = list.originY;
-    const bottom = list.originY + Math.max(0, list.contentHeight - list.height);
-    const next = Math.max(top, Math.min(bottom, list.contentY + dy));
-    if (next === top || next === bottom) scrollState = Scroll.halt();
-    list.contentY = next;
-  }
-  function scrollWheel(event) {
-    follow = false;
-    const r = Scroll.wheel(scrollState, { angleY: event.angleDelta.y, pixelY: event.pixelDelta.y, now: Date.now() });
-    scrollState = r.state;
-    if (r.dy !== 0) scrollBy(r.dy);
-    glider.running = true;
-    event.accepted = true;
-  }
-  function scrollFrame(dt) {
-    const r = Scroll.step(scrollState, dt, Date.now());
-    scrollState = r.state;
-    if (r.dy !== 0) scrollBy(r.dy);
-    if (r.done) { glider.running = false; follow = list.atYEnd; }
-  }
-  NumberAnimation {
-    id: paging
-    target: list
-    property: "contentY"
-    duration: 260
-    easing.type: Easing.OutCubic
-    onFinished: root.follow = list.atYEnd
-  }
-  function page(direction) {
-    // The user is moving: stop following the newest panel first, or the follow snaps back as panels come into view.
-    follow = false;
-    scrollState = Scroll.rest();
-    glider.running = false;
-    paging.stop();
-    paging.from = list.contentY;
-    paging.to = Scroll.pageTarget(list.contentY, list.height, list.originY, list.originY + Math.max(0, list.contentHeight - list.height), direction);
-    paging.start();
-  }
-  // Opening lands on the newest panel; panels measure themselves a moment later, so land again once they have.
-  Timer { id: settle; interval: 120; onTriggered: if (root.follow) list.positionViewAtBeginning() }
-  function landOnNewest() {
-    follow = true;
-    scrollState = Scroll.rest();
-    glider.running = false;
-    list.positionViewAtBeginning();
-    settle.restart();
-  }
-
   function show() {
     const fromMini = miniShown;
     targetScreen = fromMini ? miniScreen : focusedScreen();
     cardSteady = fromMini;
     // A draft started in the corner carries on in the strip.
-    if (fromMini && live.draft !== "") { input.text = live.draft; live.draft = ""; }
+    if (fromMini && live.draft !== "") { composer.text = live.draft; live.draft = ""; }
     hideMini();
     toMiniAfter = false;
     shown = true;
-    landOnNewest();
+    list.landOnNewest();
     unfoldTo(1);
   }
   function hide() {
@@ -211,8 +163,9 @@ ShellRoot {
   }
   // Shrink the strip back into her card, the note open with any draft.
   function toMini() {
+    if (!liveEnabled) { hide(); return; }
     miniScreen = targetScreen;
-    if (input.text !== "") { live.draft = input.text; input.clear(); }
+    if (composer.text !== "") { live.draft = composer.text; composer.clear(); }
     toMiniAfter = true;
     cardSteady = true;
     hide();
@@ -260,6 +213,7 @@ ShellRoot {
   }
   function showMini() {
     if (shown) return;
+    if (!liveEnabled) { show(); return; }
     miniScreen = focusedScreen();
     if (liveState === "snoozing") playOnce("waking", 1500);
     miniShown = true;
@@ -325,7 +279,13 @@ ShellRoot {
     seenReply = latest.id;
     miniText = Live.excerpt(latest.text);
     miniTextAt = Date.now();
-    if (!shown) popReply(latest);
+    if (!shown && liveEnabled) popReply(latest);
+  }
+  // Turning live June off puts her away at once.
+  onLiveEnabledChanged: if (!liveEnabled) hideMini()
+
+  function stopJune() {
+    if (send({ op: "command", requestId: rid(), name: "stop" })) say("stopping");
   }
 
   IpcHandler {
@@ -337,10 +297,15 @@ ShellRoot {
     // Lights every panel as if at this hour (0 to 24, fractional), to preview the day's light; a negative hour or
     // "now" goes back to each panel's own.
     function light(hour: string): void { const h = Number(hour); root.lightHour = hour === "now" || isNaN(h) ? -1 : h; }
+    // The strip in an ordinary window, for the launcher.
+    function window(): void { root.windowShown = true; }
+    // Live June on, off, or flipped (anything else), as the window's toggle does.
+    function live(state: string): void { root.liveEnabled = state === "on" ? true : state === "off" ? false : !root.liveEnabled; }
     // Hidden, then live June with the note open, then the full strip, then hidden: one key for everything. When she has
     // popped up by herself, the first press opens her note under her reply, as if she had been summoned.
     function cycle(): void {
       if (root.shown) root.hide();
+      else if (!root.liveEnabled) root.show();
       else if (root.miniShown && root.miniInput) root.show();
       else if (root.miniShown) root.answerMini();
       else root.showMini();
@@ -350,7 +315,7 @@ ShellRoot {
   LiveWindow {
     id: live
     screen: root.miniScreen
-    shown: root.miniShown && !root.shown
+    shown: root.miniShown && !root.shown && root.liveEnabled
     liveState: root.liveState
     art: root.liveArt[root.liveState] ?? root.liveArt["sipping"] ?? null
     reaction: root.reaction
@@ -492,6 +457,8 @@ ShellRoot {
     return true;
   }
 
+  StripWindow { shell: root }
+
   // Max mode: the strip at the screen's right edge, full height, unfolding out of live June's card, which stays in the
   // same corner as in min mode. See "Live June" in docs/interfaces.org.
   PanelWindow {
@@ -504,13 +471,13 @@ ShellRoot {
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "june-overlay"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
-    onVisibleChanged: if (visible) input.forceActiveFocus()
+    onVisibleChanged: if (visible) composer.focusInput()
 
     // Esc hides from anywhere in the overlay, even after a click put the focus in a balloon to select its words.
     Shortcut { sequence: "Escape"; onActivated: root.hide() }
     // Page through the strip: Ctrl+N toward newer panels, Ctrl+P toward earlier ones.
-    Shortcut { sequence: "Ctrl+N"; onActivated: root.page(1) }
-    Shortcut { sequence: "Ctrl+P"; onActivated: root.page(-1) }
+    Shortcut { sequence: "Ctrl+N"; onActivated: list.page(1) }
+    Shortcut { sequence: "Ctrl+P"; onActivated: list.page(-1) }
 
     // The backdrop dims as the strip unfolds; a click on it puts everything away.
     Rectangle { anchors.fill: parent; color: Theme.backdrop; opacity: root.unfold }
@@ -548,42 +515,21 @@ ShellRoot {
           anchors.bottom: parent.bottom
           height: page.height
 
-          Row {
+          Masthead {
             id: masthead
             anchors.top: parent.top
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.margins: 16
-            height: 30
-            spacing: 12
-            Text { text: "june"; font.family: Theme.display; font.pixelSize: 22; color: Theme.ink; anchors.verticalCenter: parent.verticalCenter }
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              text: !root.linked ? (root.refusals >= 2 ? "pairing needed: check this device's token" : "reconnecting to " + root.host + "…") : root.view.state.running || root.view.state.compacting ? root.activity : "on " + root.host
-              font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
-              color: root.linked ? Theme.muted : Theme.accent
-            }
-            // Background briefs: a small inked "meanwhile" card, the comic's cutaway to work going on elsewhere.
-            Rectangle {
-              visible: root.linked && (root.view.state.background ?? 0) > 0
-              anchors.verticalCenter: parent.verticalCenter
-              width: meanwhile.implicitWidth + 20
-              height: 26
-              radius: 6
-              color: Theme.cardFill
-              border.color: Theme.cardLine
-              border.width: 1.5
-              Text {
-                id: meanwhile
-                anchors.centerIn: parent
-                text: "meanwhile, on " + root.host + " · " + (root.view.state.background === 1 ? "1 brief" : root.view.state.background + " briefs")
-                font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
-                color: Theme.cardBusy
-              }
-            }
+            linked: root.linked
+            refusals: root.refusals
+            host: root.host
+            busy: Boolean(root.view.state.running || root.view.state.compacting)
+            activity: root.activity
+            background: root.view.state.background ?? 0
           }
 
-          ListView {
+          StripList {
             id: list
             anchors.top: masthead.bottom
             anchors.bottom: parent.bottom
@@ -593,49 +539,21 @@ ShellRoot {
             anchors.leftMargin: 16
             anchors.rightMargin: 16
             anchors.topMargin: 16
-            verticalLayoutDirection: ListView.BottomToTop
-            spacing: 14
-            clip: true
-            opacity: root.linked ? 1 : 0.5
             model: strip
-            // Stay on the newest panel as panels arrive and settle their height, unless the user has scrolled away.
-            onContentHeightChanged: if (root.follow) Qt.callLater(list.positionViewAtBeginning)
-            onCountChanged: if (root.follow) Qt.callLater(list.positionViewAtBeginning)
-            onMovementEnded: root.follow = list.atYEnd
-            // Momentum scrolling (scroll.mjs): a wheel notch glides, a touchpad coasts on when the fingers lift.
-            WheelHandler {
-              target: null
-              onWheel: event => root.scrollWheel(event)
-            }
-            FrameAnimation {
-              id: glider
-              running: false
-              onTriggered: root.scrollFrame(frameTime)
-            }
-            delegate: Panel {
-              required property int index
-              width: list.width
-              newest: index === 0
-              activity: root.activity
-              poses: root.poses
-              now: root.now
-              hourOverride: root.lightHour
-              scenery: root.scenery
-              sky: root.view.state.sky ?? null
-            }
+            activity: root.activity
+            poses: root.poses
+            now: root.now
+            hourOverride: root.lightHour
+            scenery: root.scenery
+            sky: root.view.state.sky ?? null
+            linked: root.linked
           }
 
-          Rectangle {
-            visible: root.toast !== ""
+          Toast {
             anchors.bottom: list.bottom
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottomMargin: 6
-            width: Math.min(toastText.implicitWidth + 28, parent.width - 48)
-            height: toastText.height + 14
-            color: Theme.captionFill
-            border.color: Theme.ink
-            border.width: 2
-            Text { id: toastText; anchors.centerIn: parent; width: Math.min(implicitWidth, page.width - 76); wrapMode: Text.Wrap; text: root.toast; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13; color: Theme.ink }
+            text: root.toast
           }
         }
       }
@@ -656,9 +574,8 @@ ShellRoot {
         onClicked: root.toMini()
       }
 
-      // The user's balloon, growing leftward out of her card: Enter steers, Shift+Enter queues, Alt+Enter adds a line,
-      // Ctrl+C stops June, Ctrl+N and Ctrl+P page through the strip, Esc hides.
-      Rectangle {
+      // The user's balloon, growing leftward out of her card; Ctrl+N and Ctrl+P page through the strip, Esc hides.
+      Composer {
         id: composer
         anchors.right: maxCard.left
         anchors.rightMargin: 14
@@ -666,41 +583,8 @@ ShellRoot {
         anchors.bottomMargin: 44
         width: Math.max(0, maxCard.x - 14 - 16) * page.inputPhase
         visible: width > 30
-        height: Math.min(input.contentHeight + 34, 220)
-        radius: Math.min(height / 2, 30)
-        color: Theme.balloon
-        border.color: Theme.ink
-        border.width: 3
-        clip: true
-
-        ScrollView {
-          anchors.fill: parent
-          anchors.leftMargin: 26
-          anchors.rightMargin: 26
-          anchors.topMargin: 10
-          anchors.bottomMargin: 10
-          TextArea {
-            id: input
-            placeholderText: "your balloon…"
-            wrapMode: TextEdit.Wrap
-            font.family: Theme.lettering
-            font.pixelSize: 19
-            color: Theme.ink
-            placeholderTextColor: "#9a958a"
-            background: null
-            Keys.onPressed: event => {
-              if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier) && input.selectedText === "") {
-                if (root.send({ op: "command", requestId: root.rid(), name: "stop" })) root.say("stopping");
-                event.accepted = true;
-                return;
-              }
-              if (event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter) return;
-              if (event.modifiers & Qt.AltModifier) { input.insert(input.cursorPosition, "\n"); event.accepted = true; return; }
-              if (root.submit(input.text, event.modifiers & Qt.ShiftModifier)) input.clear();
-              event.accepted = true;
-            }
-          }
-        }
+        send: (text, followUp) => root.submit(text, followUp)
+        stop: () => root.stopJune()
       }
     }
   }

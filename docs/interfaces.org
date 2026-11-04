@@ -141,6 +141,11 @@ From the user on 2026-11-03. The strip is the historical record: her reactions, 
 - Min mode is built: her card in the focused screen's bottom-right corner, a word for what she is doing above it. The first Alt tap summons her with the user's note open (Enter steers, Shift+Enter queues, Esc puts her away); the second opens the strip. A finished reply meant for the desktop (=alert= "gui") pops her up by herself while the strip is hidden, with its last paragraph (the most recent thing she said) in a balloon; a click on the balloon answers it, a click on her card opens the strip, and she tucks herself away once it has had time to be read (five seconds plus about 60 ms a character, at most thirty) unless the pointer is on her or the note is open. Summoned within ten minutes of her latest desktop reply, she shows it again above the note. Only what she draws takes the mouse, and she takes the keyboard only while the note is open.
 - Live June's art is the manifest's =live= section, by state, with the asset fields expressions use (a still, or a looping sprite sheet); a still placeholder bobs gently so she reads as alive. =templates/avatar/live/= holds a placeholder chibi for every state.
 
+** The windowed strip
+From the user on 2026-11-04: the strip in an ordinary window, found in the launcher, with toggles for state rather than config. =overlay/StripWindow.qml= is a Quickshell =FloatingWindow= in the same process as the overlay, over the same panels: =june-overlay window= opens it, and the Home Manager module adds a "June" launcher entry that starts the service first if needed. Ctrl+N and Ctrl+P page, Ctrl+W closes, and closing it from the compositor works too. Its column is the window's width up to the overlay's 820 px, centred; below 480 px the strip stacks her above the words, the phone's layout, so the window is where the Android app's look is worked out first.
+
+The toggles are this device's state while the overlay runs, never written to config: live June (off, she never pops up and the Alt key goes straight between hidden and the strip; also =june-overlay live on|off=) and the light preview (each panel's own hour, or one hour from a slider; also =june-overlay light=). State that belongs to June rather than the device, such as a quiet mode, will be protocol commands to the daemon, so every client shows it. The overlay and the window share their parts: =StripList.qml= (the panels with momentum scrolling and paging), =Composer.qml=, =Masthead.qml=, and =Toast.qml=.
+
 ** Desktop context and taking over, later
 Read =hyprctl activewindow -j= (class, title, workspace); offer an explicit screenshot of the active window with =grim=; read the primary selection with =wl-paste --primary=. Each is sent only when the user asks, and framed as outside content as mail already is.
 
@@ -162,26 +167,6 @@ Hermes Relay (MIT, Kotlin, active in October 2026) implements =VoiceInteractionS
 ** Recommended
 The user already knows GrapheneOS lets them pick a custom assistant, so the proof of concept is about June's own app taking the role and opening cleanly. A native Kotlin and Jetpack Compose app in an =android/= directory of this repository, built with the Android SDK through Nix. Prove role selection and invocation with a placeholder session before connecting it to June. Voice processing runs on the daemon host rather than on the phone, so the phone and the desktop share one pipeline.
 
-** Proof of concept
-=android/= holds a placeholder assistant: a =VoiceInteractionService=, its session service, a stub =RecognitionService=, and a launcher activity. It has no dependencies beyond the Kotlin standard library, so it builds with the SDK's own tools (=aapt2=, =kotlinc=, =d8=, =zipalign=) inside a Nix derivation, with no Gradle. Compose will need Gradle and a Maven dependency lock; that move belongs to the task that connects the app to June.
-
-#+begin_src sh
-nix build .#android                 # result/june.apk, unsigned
-nix run .#android-install           # sign with ~/.android/debug.keystore, then adb install -r
-#+end_src
-
-The session records each invocation and shows it: =showFlags= by name, the =args= bundle (whose =invocation_type= tells a gesture from a power-button press), whether the keyguard was up, what =onHandleAssist= returned (app, windows, view nodes, nodes with text), and the screenshot's size or =null=. The launcher activity shows whether the app holds =ROLE_ASSISTANT=, its install and update times, and the last invocation's report, and offers buttons for Default apps and for =RoleManager.createRequestRoleIntent=. The same lines go to logcat under the tag =June=, so =adb logcat -s June= collects them.
-
-Built and checked on kit: the APK targets API 36 with minimum 33, its manifest and voice interaction metadata are as intended, all classes are in the dex, and the install app signs it with APK Signature Scheme v3. d8 warns that it cannot rewrite Kotlin 2.3's class metadata; nothing reads that metadata at runtime.
-
-Still to check on the phone:
-- Whether June appears under Default apps, Digital assistant app, without Google Play services, and whether it does without the stub =RecognitionService=.
-- Whether the role request button works or Android refuses it, since the assistant role is normally not requestable.
-- Which gestures and power-button options invoke the session, and their =invocation_type=.
-- What shows over the lock screen.
-- What =onHandleAssist= and the screenshot return with "use text from screen" and "use screenshot" on and off.
-- Whether =nix run .#android-install= (a reinstall) clears the role.
-- Whether selecting June also makes the stub the system speech recognizer, which would break voice typing in other apps.
 
 * Avatar
 ** Two signals

@@ -1,6 +1,7 @@
 # programs.june.overlay: June's Hyprland overlay as a user service in the graphical session, and june-overlay on PATH
 # for the compositor bind (`june-overlay toggle`). It reaches the daemon over its WebSocket listener with a device
-# token from `june device add`, kept in a file outside the store.
+# token from `june device add`, kept in a file outside the store. A "June" launcher entry opens the strip in an
+# ordinary window, starting the service first if it is not running.
 self: {
   config,
   lib,
@@ -9,6 +10,16 @@ self: {
 }: let
   cfg = config.programs.june;
   overlay = self.packages.${pkgs.stdenv.hostPlatform.system}.overlay;
+  # The service may still be starting, so try the window for a few seconds.
+  openWindow = pkgs.writeShellScript "june-window" ''
+    ${pkgs.systemd}/bin/systemctl --user start june-overlay.service
+    for _ in {1..40}; do
+      ${lib.getExe overlay} window 2>/dev/null && exit 0
+      ${pkgs.coreutils}/bin/sleep 0.25
+    done
+    echo "june-overlay did not start; see journalctl --user -u june-overlay" >&2
+    exit 1
+  '';
 in {
   options.programs.june.overlay = {
     enable = lib.mkEnableOption "June's Hyprland overlay";
@@ -33,6 +44,15 @@ in {
     ];
 
     home.packages = [overlay];
+
+    xdg.desktopEntries.june = {
+      name = "June";
+      genericName = "Assistant";
+      comment = "June's conversation as a comic strip";
+      exec = "${openWindow}";
+      categories = ["Utility"];
+      terminal = false;
+    };
 
     systemd.user.services.june-overlay = {
       Unit = {

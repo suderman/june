@@ -27,6 +27,8 @@ Singleton {
   readonly property color cardFail: "#ff8f80"
   readonly property color cardBusy: "#ffd36b"
   readonly property color burstFill: "#ffd6cf"
+  // Captions and toasts: a pale yellow box, as a comic's narration.
+  readonly property color captionFill: "#fff3c4"
 
   // Panel grounds, picked per panel so neighbours differ: dusk lilac, peach, sky, sage, sand.
   readonly property var tints: ["#e6d7ea", "#f6dccb", "#d7e4f2", "#dfead6", "#f2e3c8"]
