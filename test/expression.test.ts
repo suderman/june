@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Manifest } from "../src/avatar.ts";
-import { EXPRESSION, expressionRules, parsePick, replyToPick, startExpressions } from "../src/expression.ts";
+import { EXPRESSION, expressionRules, parsePick, pickRequest, replyToPick, startExpressions } from "../src/expression.ts";
 import type { Reply } from "../src/protocol.ts";
 import { silentLogger } from "../src/runtime.ts";
 import { fold, type ViewItem, type ViewState } from "../src/transcript.ts";
@@ -42,13 +42,37 @@ test("a pick is a known expression, and a pose only when the set has it as a rea
 
 test("the reply to pick is the newest settled one, once the run has ended, with the message it answers", () => {
 	const items = [ask("1", "any mail?"), say("2", "checking"), { kind: "tool", id: "c", name: "bash", summary: "", status: "done" } as ViewItem, say("3", "two need a reply.")];
-	assert.deepEqual(replyToPick(items, idle, new Set()), { reply: items[3], said: "any mail?" });
+	assert.deepEqual(replyToPick(items, idle, new Set()), { reply: items[3], said: "any mail?", earlier: [] });
 	assert.equal(replyToPick(items, { running: true, compacting: false }, new Set()), null, "not while she works");
 	assert.equal(replyToPick(items, idle, new Set(["3"])), null, "not twice");
 	assert.equal(replyToPick([...items.slice(0, 3), say("3", "two", { expression: "warm" })], idle, new Set()), null, "already has a face");
 	assert.equal(replyToPick([...items, ask("4", "thanks")], idle, new Set()), null, "the user has spoken since: nothing new to pick");
 	assert.equal(replyToPick([ask("1", "hi"), say("2", "", { error: "timeout" })], idle, new Set()), null, "a failed reply has no face");
-	assert.deepEqual(replyToPick([say("2", "good morning.")], idle, new Set()), { reply: say("2", "good morning."), said: "" }, "she spoke first");
+	assert.deepEqual(replyToPick([say("2", "good morning.")], idle, new Set()), { reply: say("2", "good morning."), said: "", earlier: [] }, "she spoke first");
+});
+
+test("the pass sees up to two earlier exchanges for context, clipped, and asks about the newest reply only", () => {
+	const long = "x".repeat(600);
+	const items = [
+		ask("1", "first"),
+		say("2", "one"),
+		ask("3", "nicknames are my thing"),
+		say("4", "thinking", { private: true }),
+		say("5", "hmm. skipper, maybe."),
+		ask("6", long),
+		say("7", "fair."),
+		ask("8", "you win."),
+		say("9", "a hollow victory."),
+	];
+	const next = replyToPick(items, idle, new Set());
+	assert.equal(next?.reply.id, "9");
+	assert.deepEqual(next?.earlier.map((e) => e.said.slice(0, 22)), ["nicknames are my thing", "x".repeat(22)], "the two exchanges before, oldest first");
+	assert.equal(next?.earlier[0]!.replied, "hmm. skipper, maybe.", "June's settled reply, not a private look");
+	assert.equal(next?.earlier[1]!.said.length, 400, "each clipped");
+	const request = pickRequest(next!.said, next!.reply.text, next!.earlier);
+	assert.match(request, /^Earlier, for context only:\n.*nicknames are my thing\nJune: hmm\. skipper, maybe\./);
+	assert.match(request, /Now, the reply to choose for\.\n.* wrote:\nyou win\.\n\nJune replied:\na hollow victory\.$/);
+	assert.doesNotMatch(pickRequest("hi", "hello", []), /Earlier/, "no context, no preamble");
 });
 
 test("the fold puts a pick on its reply and the newest on the state, and keeps it out of everything else", () => {

@@ -57,12 +57,20 @@ export function parsePick(text: string, manifest: Manifest | undefined): FacePic
 }
 
 type Assistant = Extract<ViewItem, { kind: "assistant" }>;
+/** An earlier exchange the pass sees for context: what the user said, and June's settled reply. */
+export type Exchange = { said: string; replied: string };
+
+// How many earlier exchanges the pass sees, and how much of each, so a running joke or a mood carries over cheaply.
+const EARLIER = 2;
+const CLIP = 400;
+const clip = (text: string) => (text.length <= CLIP ? text : `${text.slice(0, CLIP - 1).trimEnd()}…`);
 
 /**
  * The reply that needs a face now: the newest visible reply, settled, with words and no error or face yet, once the run
- * has ended, with the user's message before it. Null while she is still working or when there is nothing new.
+ * has ended, with the user's message before it and up to two exchanges before that. Null while she is still working or
+ * when there is nothing new.
  */
-export function replyToPick(items: readonly ViewItem[], state: Pick<ViewState, "running" | "compacting">, done: ReadonlySet<string>): { reply: Assistant; said: string } | null {
+export function replyToPick(items: readonly ViewItem[], state: Pick<ViewState, "running" | "compacting">, done: ReadonlySet<string>): { reply: Assistant; said: string; earlier: Exchange[] } | null {
 	if (state.running || state.compacting) return null;
 	for (let i = items.length - 1; i >= 0; i--) {
 		const item = items[i]!;
@@ -70,16 +78,38 @@ export function replyToPick(items: readonly ViewItem[], state: Pick<ViewState, "
 		if (item.kind !== "assistant" || item.private || item.streaming || item.error || !item.text.trim()) continue;
 		if (item.expression !== undefined || done.has(item.id)) return null;
 		let said = "";
-		for (let j = i - 1; j >= 0; j--) {
+		let j = i - 1;
+		for (; j >= 0; j--) {
 			const before = items[j]!;
 			if (before.kind === "user" && !before.private) {
 				said = before.text;
 				break;
 			}
 		}
-		return { reply: item, said };
+		return { reply: item, said, earlier: exchangesBefore(items, j, EARLIER) };
 	}
 	return null;
+}
+
+/** Up to `count` exchanges before index `end`, oldest first: each user message with June's last settled reply to it. */
+function exchangesBefore(items: readonly ViewItem[], end: number, count: number): Exchange[] {
+	const out: Exchange[] = [];
+	let replied = "";
+	for (let k = end - 1; k >= 0 && out.length < count; k--) {
+		const item = items[k]!;
+		if (item.kind === "assistant" && !item.private && !item.error && item.text.trim() && !replied) replied = item.text;
+		else if (item.kind === "user" && !item.private) {
+			if (replied) out.unshift({ said: clip(item.text), replied: clip(replied) });
+			replied = "";
+		}
+	}
+	return out;
+}
+
+/** The words of one pick request: the earlier exchanges for context, then the message and the reply to read. */
+export function pickRequest(said: string, reply: string, earlier: readonly Exchange[]): string {
+	const before = earlier.map((e) => `${user()}: ${e.said}\nJune: ${e.replied}`).join("\n\n");
+	return `${before ? `Earlier, for context only:\n${before}\n\nNow, the reply to choose for.\n` : ""}${user()} wrote:\n${said || "(nothing: June spoke first)"}\n\nJune replied:\n${reply}`;
 }
 
 /** The avatar set whose poses June may name: the user's own in the data directory, else the base set. */
@@ -118,7 +148,7 @@ export function startExpressions(options: {
 	let asking = false;
 	let stopped = false;
 
-	const pick = async (said: string, reply: string): Promise<FacePick | null> => {
+	const pick = async (said: string, reply: string, earlier: readonly Exchange[]): Promise<FacePick | null> => {
 		const model = models.getModel(options.model.provider, options.model.modelId);
 		if (model === undefined) throw new Error(`Unknown expression model ${options.model.provider}/${options.model.modelId}`);
 		const soul = options.files().soulFile;
@@ -127,11 +157,12 @@ export function startExpressions(options: {
 		const request: ModelContext = {
 			messages: [
 				{ role: "system", content: `${soul && existsSync(soul) ? readFileSync(soul, "utf8") : ""}\n\n${expressionRules(manifest)}`, timestamp: now } as Message,
-				{ role: "user", content: `${user()} wrote:\n${said || "(nothing: June spoke first)"}\n\nJune replied:\n${reply}`, timestamp: now } as Message,
+				{ role: "user", content: pickRequest(said, reply, earlier), timestamp: now } as Message,
 			],
 		};
 		const thinking = options.model.thinkingLevel === "off" ? {} : { reasoning: options.model.thinkingLevel as never };
-		const answer = await models.completeSimple(model, request, { signal: AbortSignal.timeout(options.timeoutMs ?? 20_000), cacheRetention: "none", maxTokens: 2000, ...thinking });
+		// The system prompt (her soul and the rules) is the same every time, so a short cache saves resending it.
+		const answer = await models.completeSimple(model, request, { signal: AbortSignal.timeout(options.timeoutMs ?? 20_000), cacheRetention: "short", maxTokens: 2000, ...thinking });
 		if (answer.stopReason === "error" || answer.stopReason === "aborted") throw new Error(answer.errorMessage ?? answer.stopReason);
 		const text = answer.content.find((block) => block.type === "text")?.text ?? "";
 		return parsePick(text, manifest);
@@ -145,7 +176,7 @@ export function startExpressions(options: {
 		done.add(next.reply.id);
 		const started = Date.now();
 		try {
-			const chosen = await pick(next.said, next.reply.text);
+			const chosen = await pick(next.said, next.reply.text, next.earlier);
 			if (chosen === null) log.warn("expression_unparsed", { reply: next.reply.id });
 			else if (!stopped) {
 				await options.root.submit({ type: "write", entry: { kind: EXPRESSION, data: { for: next.reply.id, ...chosen } } }, BG);
