@@ -473,6 +473,12 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 			const kept = pose.framings.filter((f) => f !== "full");
 			framing = chooseFraming(width, clip.h, Object.assign({}, pose, { framings: kept.length > 0 ? kept : USUAL }), m.stacked ? (hint ?? "close-up") : hint);
 			framed = frame(pose, clip, side, edgeOf(clip), framing, mirror);
+			// Framed in her band, but seen on down behind her first balloon under it, so her body runs on behind the words
+			// rather than stopping at a gap above them.
+			if (m.stacked) {
+				const under = placed.find((e) => e.y >= bandTop + m.band);
+				if (under) clip = Object.assign({}, clip, { h: Math.min(height, under.y + under.h) - bandTop });
+			}
 		}
 		art = framed.image;
 		face = framed.face;

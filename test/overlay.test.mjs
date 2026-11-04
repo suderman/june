@@ -369,7 +369,7 @@ test("narrow strips give the words more of the width, and a phone-narrow one sta
 	const lead = elements.findIndex((e) => e.kind === "june");
 	assert.ok(lead > 1, "the report set opens with the user's note and a status card");
 	assert.ok(out.elements.slice(0, lead).every((e) => e.y + e.h <= out.clip.y), "the note and the tools above her band");
-	assert.ok(out.elements.slice(lead).every((e) => e.y >= out.clip.y + out.clip.h), "her words below it");
+	assert.ok(out.elements.slice(lead).every((e) => e.y >= out.clip.y + out.metrics.band), "her words below her band");
 	assert.equal(out.elements[lead].tail?.edge, "top", "her first balloon right under her, its tail up to her mouth");
 	const bare = plan({ width: 360, side: "right", pose: pose("idle-attentive"), elements: elements.slice(lead) });
 	assert.equal(bare.clip.y, 0, "a panel that opens with her words has the band at the top");
@@ -857,4 +857,7 @@ test("in a stacked panel a tail leaves the top under her mouth, or there is none
 	assert.ok(laid.metrics.stacked);
 	assert.ok(laid.elements[0].y + laid.elements[0].h <= laid.clip.y, "the note above her band");
 	assert.equal(laid.elements[1].tail?.edge, "top", "her balloon right under her, its tail up to her mouth");
+	const balloon = laid.elements[1];
+	assert.equal(laid.clip.y + laid.clip.h, balloon.y + balloon.h, "she runs on behind her balloon, no gap above it");
+	assert.ok(laid.face.y + laid.face.h <= balloon.y, "her face stays clear of it");
 });
