@@ -1,0 +1,86 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { CANVAS, FACE, MARGIN, kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "../art/layout.mjs";
+
+const close = (a, b, tolerance = 0.002) => assert.ok(Math.abs(a - b) <= tolerance, `${a} is not within ${tolerance} of ${b}`);
+
+test("a pose's face lands at its kind's size and height, centred across", () => {
+	// A 500 × 650 source, the figure inside a margin, the face 150 × 175 at (175, 127).
+	const place = placePose("pose", { x: 58, y: 104, w: 384, h: 546 }, { x: 175, y: 127, w: 150, h: 175 });
+	assert.deepEqual(place.size, CANVAS.pose);
+	close(place.face[3], FACE.pose.h);
+	close(place.face[1] + place.face[3] / 2, FACE.pose.cy);
+	close(place.face[0] + place.face[2] / 2, 0.5);
+	assert.deepEqual(place.problems, []);
+});
+
+test("a tall pose keeps her face smaller and higher", () => {
+	const place = placePose("tall", { x: 100, y: 40, w: 600, h: 1500 }, { x: 330, y: 80, w: 130, h: 160 });
+	assert.deepEqual(place.size, CANVAS.tall);
+	close(place.face[3], FACE.tall.h);
+	close(place.face[1] + place.face[3] / 2, FACE.tall.cy);
+});
+
+test("a pose is moved in from a side, and too wide a figure is reported", () => {
+	// Her face at the source's left edge, the figure reaching far right of it.
+	const shifted = placePose("pose", { x: 10, y: 100, w: 300, h: 550 }, { x: 20, y: 130, w: 100, h: 120 });
+	const left = shifted.x + 10 * shifted.scale;
+	const right = shifted.x + 310 * shifted.scale;
+	assert.ok(left >= CANVAS.pose[0] * MARGIN - 0.5 && right <= CANVAS.pose[0] * (1 - MARGIN) + 0.5);
+	assert.ok(shifted.face[0] + shifted.face[2] / 2 < 0.5, "her face moves off centre rather than the figure leaving the canvas");
+	const wide = placePose("pose", { x: 0, y: 100, w: 1000, h: 550 }, { x: 450, y: 130, w: 100, h: 120 });
+	assert.match(wide.problems.join(), /wide/);
+});
+
+test("a pose whose hair would touch the top sits lower, and says so", () => {
+	const place = placePose("pose", { x: 50, y: 0, w: 400, h: 900 }, { x: 175, y: 300, w: 150, h: 175 });
+	assert.ok(place.y >= CANVAS.pose[1] * MARGIN - 0.5);
+	assert.match(place.problems.join(), /lower/);
+});
+
+test("a pose that stops short of the bottom is reported", () => {
+	const place = placePose("pose", { x: 50, y: 50, w: 400, h: 250 }, { x: 175, y: 80, w: 150, h: 175 });
+	assert.match(place.problems.join(), /floating/);
+});
+
+test("a chibi fills its square inside the margins, standing on the bottom margin", () => {
+	const [W, H] = CANVAS.chibi;
+	const place = placeChibi({ x: 400, y: 400, w: 1800, h: 2200 });
+	const bottom = place.y + 2600 * place.scale;
+	close(bottom, H * (1 - MARGIN), 0.5);
+	const top = place.y + 400 * place.scale;
+	close(top, H * MARGIN, 0.5);
+	const centre = place.x + 1300 * place.scale;
+	close(centre, W / 2, 0.5);
+});
+
+test("rooms and views cover their canvas, and a different shape is reported", () => {
+	const room = placeCover("room", { x: 0, y: 0, w: 1600, h: 1000 });
+	assert.equal(room.scale, 2);
+	assert.deepEqual([room.x, room.y], [0, 0]);
+	assert.deepEqual(room.problems, []);
+	const square = placeCover("plate", { x: 0, y: 0, w: 1024, h: 1024 });
+	close(square.scale, 1600 / 1024);
+	assert.ok(square.y < 0 && square.x === 0);
+	assert.match(square.problems.join(), /top and bottom/);
+});
+
+test("a prop is trimmed and fitted inside its planned size", () => {
+	const place = placeProp({ x: 8, y: 18, w: 324, h: 497 }, [340, 520]);
+	assert.ok(place.size[0] <= 340 && place.size[1] <= 520);
+	assert.ok(place.size[1] === 520 || place.size[0] === 340);
+	close(place.x, -8 * place.scale, 1e-9);
+});
+
+test("geometry helpers", () => {
+	assert.deepEqual(windowOf({ x: 1856, y: 200, w: 1024, h: 920 }, [3200, 2000]), [0.58, 0.1, 0.32, 0.46]);
+	assert.deepEqual(parseBox("384x546+58+104"), { w: 384, h: 546, x: 58, y: 104 });
+	assert.equal(parseBox("0x0+0+0"), null);
+	assert.deepEqual(parseNumbers("175,127,150,175", 4), [175, 127, 150, 175]);
+	assert.throws(() => parseNumbers("1,2", 4), /4 numbers/);
+	assert.deepEqual(mouthOf([0.35, 0.196, 0.3, 0.269]), [0.5, 0.411]);
+	assert.equal(kindOf("poses", { framings: ["bust", "full"] }), "tall");
+	assert.equal(kindOf("poses", { framings: ["bust"] }), "pose");
+	assert.equal(kindOf("rooms", {}), "room");
+	assert.equal(kindOf("live", {}), null);
+});

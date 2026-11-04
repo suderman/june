@@ -1,0 +1,287 @@
+#!/usr/bin/env node
+// june-art: turn approved generated images into finished pieces of an avatar set outside the repository.
+//
+//   june-art status SET           what is planned, waiting in incoming/, and finished
+//   june-art ingest SET NAME      finish incoming/NAME.png: key, trim, upscale, place on its canvas, write WebP and
+//                                 the manifest entry, and keep the original and its prompt in source/
+//   june-art sheet SET NAME [OUT] a contact sheet: the piece, its face box and mouth, and its crop at every framing
+//
+// ingest options: --file PATH (instead of incoming/NAME.png), --face X,Y,W,H and --mouth X,Y in source pixels,
+// --key COLOUR to make a flat colour see-through (a room's window, a view's sky), --fuzz PERCENT (default 12).
+//
+// An entry's details (expression, description, facing, setting, ...) come from incoming/NAME.json, a flat manifest
+// entry with "section" (poses, chibi, rooms, plates, props) and optionally "faceBox" [x, y, w, h] in source pixels;
+// else from the entry already in manifest.json; else from planned.json, a manifest-shaped catalogue of what is still
+// to be made. Needs magick and realesrgan-ncnn-vulkan on PATH; the Nix package provides both.
+import { execFileSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseManifest } from "../src/avatar.ts";
+import { FRAMINGS, frame, readPoses } from "../overlay/compose.mjs";
+import { kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "./layout.mjs";
+
+const SECTIONS = ["poses", "chibi", "rooms", "plates", "props"];
+const BACKGROUND = ["rooms", "plates", "props"];
+
+const magick = (...args) => execFileSync("magick", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+const readJson = (path, fallback) => (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : fallback);
+const writeJson = (path, value) => writeFileSync(path, `${JSON.stringify(value, null, "\t")}\n`);
+const offset = (n) => `${n < 0 ? "-" : "+"}${Math.abs(Math.round(n))}`;
+
+/** A set's entries by section, flattened so backgrounds sit beside poses and chibi. */
+function entries(manifest, section) {
+	const holder = BACKGROUND.includes(section) ? manifest?.backgrounds : manifest;
+	return holder?.[section] ?? {};
+}
+
+function setEntry(manifest, section, key, entry) {
+	if (BACKGROUND.includes(section)) {
+		manifest.backgrounds ??= {};
+		manifest.backgrounds[section] ??= {};
+		manifest.backgrounds[section][key] = entry;
+	} else {
+		manifest[section] ??= {};
+		manifest[section][key] = entry;
+	}
+}
+
+function deleteEntry(manifest, section, key) {
+	const holder = entries(manifest, section);
+	delete holder[key];
+}
+
+/** The manifest key for a name: chibi stills are keyed by expression, so chibi-warm is chibi "warm". */
+const keyFor = (section, name) => (section === "chibi" ? name.replace(/^chibi-/, "") : name);
+
+/** Where a name's details come from, and its section. */
+function findEntry(set, name, manifest, planned) {
+	const sidecar = readJson(join(set, "incoming", `${name}.json`), null);
+	if (sidecar) {
+		if (!SECTIONS.includes(sidecar.section)) throw new Error(`incoming/${name}.json: section must be one of ${SECTIONS.join(", ")}`);
+		const { section, faceBox, ...entry } = sidecar;
+		const existing = entries(manifest, section)[keyFor(section, name)] ?? entries(planned, section)[keyFor(section, name)] ?? {};
+		return { section, entry: { ...existing, ...entry }, faceBox, from: `incoming/${name}.json` };
+	}
+	for (const [source, label] of [
+		[manifest, "manifest.json"],
+		[planned, "planned.json"],
+	])
+		for (const section of SECTIONS) {
+			const entry = entries(source, section)[keyFor(section, name)];
+			if (entry) return { section, entry: { ...entry }, faceBox: null, from: label };
+		}
+	throw new Error(`${name}: no details; add incoming/${name}.json with its section, or an entry in planned.json`);
+}
+
+/** The box of a source's solid pixels, or with `holes`, of its see-through ones. */
+function alphaBox(file, holes = false) {
+	const args = [file, "-alpha", "extract", "-threshold", "50%"];
+	if (holes) args.push("-negate");
+	const box = parseBox(magick(...args, "-bordercolor", "black", "-border", "1", "-format", "%@", "info:"));
+	return box ? { x: box.x - 1, y: box.y - 1, w: box.w, h: box.h } : null;
+}
+
+function size(file) {
+	const [w, h] = magick(file, "-format", "%w %h", "info:").split(" ").map(Number);
+	return { x: 0, y: 0, w, h };
+}
+
+function ingest(set, name, options) {
+	const manifestPath = join(set, "manifest.json");
+	const manifest = readJson(manifestPath, { version: 1, size: [256, 256], expressions: {} });
+	const planned = readJson(join(set, "planned.json"), {});
+	const { section, entry, faceBox, from } = findEntry(set, name, manifest, planned);
+	const key = keyFor(section, name);
+	const kind = kindOf(section, entry);
+	const source = options.file ?? join(set, "incoming", `${name}.png`);
+	if (!existsSync(source)) throw new Error(`${source}: no such file`);
+	const dir = { poses: "poses", chibi: "chibi", rooms: "backgrounds/rooms", plates: "backgrounds/plates", props: "backgrounds/props" }[section];
+	const file = `${dir}/${key}.webp`;
+
+	// Check the details before any pixel work, with stand-in geometry.
+	const trial = structuredClone(manifest);
+	setEntry(trial, section, key, { ...entry, file, size: [1, 1], ...(section === "poses" ? { face: [0.4, 0.2, 0.2, 0.2], mouth: [0.5, 0.35] } : {}), ...(section === "chibi" ? { play: "still" } : {}) });
+	parseManifest(trial);
+
+	const work = mkdtempSync(join(tmpdir(), "june-art-"));
+	try {
+		let image = join(work, "keyed.png");
+		if (options.key) magick(source, "-alpha", "set", "-fuzz", `${options.fuzz ?? 12}%`, "-transparent", options.key, `PNG32:${image}`);
+		else magick(source, "-alpha", "set", `PNG32:${image}`);
+		const whole = size(image);
+		const figure = alphaBox(image);
+		if (!figure) throw new Error(`${name}: the image is entirely see-through`);
+		const holes = alphaBox(image, true);
+		if (!holes) throw new Error(`${name}: nothing is see-through; give --key COLOUR for its flat background${section === "rooms" ? " or window" : section === "plates" ? " or sky" : ""}`);
+
+		let place;
+		let face = null;
+		if (kind === "pose" || kind === "tall") {
+			const box = options.face ?? faceBox;
+			if (!box) throw new Error(`${name}: a pose needs its face box in source pixels: --face X,Y,W,H`);
+			face = { x: box[0], y: box[1], w: box[2], h: box[3] };
+			place = placePose(kind, figure, face);
+		} else if (kind === "chibi") place = placeChibi(figure);
+		else if (kind === "room" || kind === "plate") place = placeCover(kind, whole);
+		else {
+			const fit = Array.isArray(entry.size) ? entry.size : [400, 400];
+			place = placeProp(figure, fit);
+		}
+
+		// Upscale when the piece would be drawn larger than generated, then scale down to the exact size.
+		const fromSource = place.scale;
+		if (place.scale > 1.05) {
+			const up = join(work, "up.png");
+			execFileSync("realesrgan-ncnn-vulkan", ["-i", image, "-o", up, "-n", "realesrgan-x4plus-anime", "-s", "4"], { stdio: ["ignore", "ignore", "pipe"] });
+			image = up;
+			place = { ...place, scale: place.scale / 4 };
+		}
+		const src = size(image);
+		const [W, H] = place.size;
+		mkdirSync(join(set, dir), { recursive: true });
+		const out = join(set, file);
+		magick(
+			"-size", `${W}x${H}`, "xc:none",
+			"(", image, "-filter", "Lanczos", "-resize", `${Math.round(src.w * place.scale)}x${Math.round(src.h * place.scale)}!`, ")",
+			"-geometry", `${offset(place.x)}${offset(place.y)}`, "-composite",
+			"-define", "webp:lossless=true", "-define", "webp:exact=false", `WEBP:${out}`,
+		);
+
+		const finished = { ...entry, file, size: [W, H] };
+		if (section === "chibi") finished.play ??= "still";
+		if (face) {
+			finished.face = place.face;
+			const at = (px, py) => [Math.round(((place.x + px * fromSource) / W) * 1000) / 1000, Math.round(((place.y + py * fromSource) / H) * 1000) / 1000];
+			finished.mouth = options.mouth ? at(options.mouth[0], options.mouth[1]) : mouthOf(place.face);
+		}
+		if (section === "rooms") {
+			const hole = alphaBox(out, true);
+			if (!hole) throw new Error(`${name}: the finished room has no window`);
+			finished.window = windowOf(hole, [W, H]);
+		}
+		setEntry(manifest, section, key, finished);
+		parseManifest(manifest);
+		writeJson(manifestPath, manifest);
+
+		// Keep the original and its prompt beside the set; incoming/ empties as pieces finish.
+		mkdirSync(join(set, "source"), { recursive: true });
+		copyFileSync(source, join(set, "source", `${name}.png`));
+		for (const ext of ["txt", "json"]) {
+			const side = join(set, "incoming", `${name}.${ext}`);
+			if (existsSync(side)) renameSync(side, join(set, "source", `${name}.${ext}`));
+		}
+		if (!options.file) rmSync(source);
+		if (entries(planned, section)[key]) {
+			deleteEntry(planned, section, key);
+			writeJson(join(set, "planned.json"), planned);
+		}
+
+		console.log(`${name}: ${file}, ${W} × ${H}, details from ${from}`);
+		if (finished.face) console.log(`  face ${finished.face.join(", ")}, mouth ${finished.mouth.join(", ")}`);
+		if (finished.window) console.log(`  window ${finished.window.join(", ")}`);
+		for (const p of place.problems) console.log(`  look: ${p}`);
+	} finally {
+		rmSync(work, { recursive: true, force: true });
+	}
+}
+
+function status(set) {
+	const manifest = readJson(join(set, "manifest.json"), {});
+	const planned = readJson(join(set, "planned.json"), {});
+	for (const section of SECTIONS) {
+		const done = Object.keys(entries(manifest, section));
+		const todo = Object.keys(entries(planned, section));
+		if (done.length + todo.length === 0) continue;
+		console.log(`${section}: ${done.length} finished, ${todo.length} planned`);
+		if (todo.length > 0) console.log(`  to make: ${todo.map((k) => (section === "chibi" ? `chibi-${k}` : k)).join(", ")}`);
+	}
+	const incoming = join(set, "incoming");
+	if (existsSync(incoming)) {
+		const waiting = execFileSync("ls", [incoming], { encoding: "utf8" }).split("\n").filter((f) => f.endsWith(".png"));
+		console.log(`incoming: ${waiting.length === 0 ? "empty" : waiting.join(", ")}`);
+	}
+}
+
+/** Panel art areas for the contact sheet, one per framing, as the strip would size them. */
+const AREAS = { "close-up": [330, 150], head: [330, 210], bust: [330, 300], waist: [330, 400], full: [330, 700] };
+
+function sheet(set, name, outPath) {
+	const manifest = readJson(join(set, "manifest.json"), {});
+	const out = outPath ?? join(set, "sheets", `${name}.png`);
+	mkdirSync(join(out, ".."), { recursive: true });
+	const pose = readPoses(manifest, `${set}/`).find((p) => p.id === name);
+	const tiles = [];
+	if (pose) {
+		const path = join(set, manifest.poses[name].file);
+		const S = 600 / pose.height;
+		const f = pose.face;
+		tiles.push([
+			"(", path, "-resize", `x600`, "-background", "#f4efe6", "-flatten",
+			"-fill", "none", "-stroke", "#d33", "-strokewidth", "3",
+			"-draw", `rectangle ${f.x * pose.width * S},${f.y * 600} ${(f.x + f.w) * pose.width * S},${(f.y + f.h) * 600}`,
+			"-fill", "#d33", "-draw", `circle ${pose.mouth.x * pose.width * S},${pose.mouth.y * 600} ${pose.mouth.x * pose.width * S + 5},${pose.mouth.y * 600}`,
+			")",
+		]);
+		for (const framing of FRAMINGS.filter((fr) => pose.framings.includes(fr))) {
+			const [w, h] = AREAS[framing];
+			const r = frame(pose, { x: 0, y: 0, w, h }, "right", w * 0.25, framing, false).image;
+			tiles.push([
+				"(", "-size", `${w}x${h}`, "xc:#f4efe6",
+				"(", path, "-resize", `${Math.round(r.w)}x${Math.round(r.h)}!`, ")",
+				"-geometry", `${offset(r.x)}${offset(r.y)}`, "-composite",
+				"-fill", "#333", "-pointsize", "16", "-gravity", "southwest", "-annotate", "+6+4", framing, "-gravity", "northwest",
+				"-bordercolor", "#333", "-border", "2", ")",
+			]);
+		}
+	} else {
+		let found = null;
+		for (const section of SECTIONS) {
+			const e = entries(manifest, section)[keyFor(section, name)];
+			if (e) found = { section, entry: e };
+		}
+		if (!found) throw new Error(`${name}: not in ${set}/manifest.json`);
+		const path = join(set, found.entry.file);
+		const draw = [];
+		if (found.section === "rooms") {
+			const [W, H] = found.entry.size;
+			const s = 900 / W;
+			const win = found.entry.window;
+			draw.push("-fill", "none", "-stroke", "#d33", "-strokewidth", "3", "-draw", `rectangle ${win[0] * W * s},${win[1] * H * s} ${(win[0] + win[2]) * W * s},${(win[1] + win[3]) * H * s}`);
+			for (const [spot, points] of Object.entries(found.entry.spots ?? {}))
+				for (const [x, y] of points) draw.push("-fill", "#2a6", "-stroke", "none", "-draw", `circle ${x * W * s},${y * H * s} ${x * W * s + 7},${y * H * s}`, "-fill", "#2a6", "-pointsize", "16", "-annotate", `+${x * W * s + 10}+${y * H * s - 6}`, spot);
+		}
+		// See-through parts show as a checkerboard, so a missing or ragged cut-out shows.
+		const room = found.section === "rooms";
+		tiles.push(["(", "-size", room ? "900x562" : "600x600", "pattern:checkerboard", "(", path, "-resize", room ? "900x562!" : "600x600>", ")", "-gravity", room ? "northwest" : "center", "-composite", "-gravity", "northwest", ...draw, ")"]);
+	}
+	magick(...tiles.flat(), "-background", "#ffffff", "-gravity", "north", "+append", "-gravity", "northwest", out);
+	console.log(out);
+}
+
+function main(argv) {
+	const [command, set, name, ...rest] = argv;
+	const options = {};
+	const positional = [];
+	for (let i = 0; i < rest.length; i++) {
+		const arg = rest[i];
+		if (arg === "--file") options.file = rest[++i];
+		else if (arg === "--face") options.face = parseNumbers(rest[++i], 4);
+		else if (arg === "--mouth") options.mouth = parseNumbers(rest[++i], 2);
+		else if (arg === "--key") options.key = rest[++i];
+		else if (arg === "--fuzz") options.fuzz = Number(rest[++i]);
+		else positional.push(arg);
+	}
+	if (command === "status" && set) return status(set);
+	if (command === "ingest" && set && name) return ingest(set, name, options);
+	if (command === "sheet" && set && name) return sheet(set, name, positional[0]);
+	console.error("usage: june-art status SET | ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--key COLOUR] [--fuzz PERCENT] | sheet SET NAME [OUT]");
+	process.exit(2);
+}
+
+try {
+	main(process.argv.slice(2));
+} catch (error) {
+	console.error(`june-art: ${error instanceof Error ? error.message : error}`);
+	process.exit(1);
+}
