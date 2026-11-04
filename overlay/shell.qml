@@ -130,9 +130,9 @@ ShellRoot {
     const next = Math.max(top, Math.min(bottom, list.contentY + dy));
     if (next === top || next === bottom) scrollState = Scroll.halt();
     list.contentY = next;
-    follow = list.atYEnd;
   }
   function scrollWheel(event) {
+    follow = false;
     const r = Scroll.wheel(scrollState, { angleY: event.angleDelta.y, pixelY: event.pixelDelta.y, now: Date.now() });
     scrollState = r.state;
     if (r.dy !== 0) scrollBy(r.dy);
@@ -143,7 +143,7 @@ ShellRoot {
     const r = Scroll.step(scrollState, dt, Date.now());
     scrollState = r.state;
     if (r.dy !== 0) scrollBy(r.dy);
-    if (r.done) glider.running = false;
+    if (r.done) { glider.running = false; follow = list.atYEnd; }
   }
   NumberAnimation {
     id: paging
@@ -154,6 +154,8 @@ ShellRoot {
     onFinished: root.follow = list.atYEnd
   }
   function page(direction) {
+    // The user is moving: stop following the newest panel first, or the follow snaps back as panels come into view.
+    follow = false;
     scrollState = Scroll.rest();
     glider.running = false;
     paging.stop();
