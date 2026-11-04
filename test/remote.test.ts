@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { WebSocket } from "ws";
 import { loadConfig } from "../src/config.ts";
 import { Client, type Reply } from "../src/protocol.ts";
-import { UNAUTHORIZED, UNSUPPORTED } from "../src/remote.ts";
+import { avatarFile, UNAUTHORIZED, UNSUPPORTED } from "../src/remote.ts";
 import { applyChanges, type ViewItem } from "../src/transcript.ts";
 import { lines, openTestDaemon, tempDir, until } from "./helpers.ts";
 
@@ -95,7 +95,9 @@ test("a paired device attaches, sends, and a repeated submit is one message", as
 	const c = await connect(port);
 	t.after(() => c.ws.terminate());
 	c.send({ op: "hello", requestId: "h1", token, protocol: 1 });
-	assert.deepEqual(await c.reply("h1"), { type: "hello", requestId: "h1", device: "cog", protocol: 1 });
+	const hello = (await c.reply("h1")) as Extract<Reply, { type: "hello" }>;
+	assert.deepEqual({ ...hello, avatar: undefined }, { type: "hello", requestId: "h1", device: "cog", protocol: 1, avatar: undefined });
+	assert.match(hello.avatar ?? "", /^\/avatar\/[\w-]{24}\/$/, "a path to the avatar set, with this device's key");
 
 	let items: ViewItem[] = [];
 	c.ws.on("message", (data) => {
@@ -233,4 +235,47 @@ test("JUNE_REMOTE_PORT turns the listener on", async (t) => {
 	assert.equal(loadConfig(tmp.paths, {}).remote, undefined);
 	assert.deepEqual(loadConfig(tmp.paths, { JUNE_REMOTE_PORT: "7347" }).remote, { port: 7347 });
 	for (const bad of ["0", "70000", "http"]) assert.throws(() => loadConfig(tmp.paths, { JUNE_REMOTE_PORT: bad }), /JUNE_REMOTE_PORT/);
+});
+
+test("a paired device loads the avatar set over HTTP under its key, and nothing else", async (t) => {
+	const { tmp, port } = await remoteDaemon(t);
+	const set = join(tmp.paths.data, "avatar");
+	await mkdir(join(set, "poses"), { recursive: true });
+	await writeFile(join(set, "manifest.json"), '{"version":1}');
+	await writeFile(join(set, "poses", "idle.webp"), "RIFFwebp");
+	await writeFile(join(set, "notes.txt"), "not art");
+	await writeFile(join(tmp.paths.data, "secret.png"), "outside the set");
+	await symlink(join(tmp.paths.data, "secret.png"), join(set, "escape.png"));
+	const token = ((await device(tmp.paths.socket, "add", "cog")) as Extract<Reply, { type: "devices" }>).token!;
+	const c = await connect(port);
+	t.after(() => c.ws.terminate());
+	c.send({ op: "hello", requestId: "h", token, protocol: 1 });
+	const base = `http://127.0.0.1:${port}${((await c.reply("h")) as Extract<Reply, { type: "hello" }>).avatar}`;
+
+	const manifest = await fetch(`${base}manifest.json`);
+	assert.equal(manifest.status, 200);
+	assert.equal(manifest.headers.get("content-type"), "application/json");
+	assert.equal(await manifest.text(), '{"version":1}');
+	const pose = await fetch(`${base}poses/idle.webp`);
+	assert.equal(pose.status, 200);
+	assert.equal(pose.headers.get("content-type"), "image/webp");
+	const etag = pose.headers.get("etag")!;
+	assert.equal((await fetch(`${base}poses/idle.webp`, { headers: { "if-none-match": etag } })).status, 304, "unchanged art is not sent again");
+
+	for (const path of ["notes.txt", "escape.png", "..%2Fsecret.png", "poses%2F..%2F..%2Fsecret.png", "missing.png", "poses"]) assert.equal((await fetch(`${base}${path}`)).status, 404, path);
+	// fetch itself resolves a literal "..", so the path rule is checked directly.
+	for (const path of ["poses/../manifest.json", "./manifest.json", "poses//idle.webp", "/manifest.json"]) assert.equal(avatarFile(set, path), undefined, path);
+	assert.equal(avatarFile(set, "poses/idle.webp")?.type, "image/webp");
+	assert.equal((await fetch(`http://127.0.0.1:${port}/avatar/not-a-key/manifest.json`)).status, 404, "an unknown key");
+	assert.equal((await fetch(`${base}manifest.json`, { method: "POST" })).status, 404, "read only");
+
+	c.send({ op: "hello", requestId: "h2", token, protocol: 1 });
+	await c.reply("h2", "error");
+	const again = await connect(port);
+	t.after(() => again.ws.terminate());
+	again.send({ op: "hello", requestId: "h", token, protocol: 1 });
+	assert.equal(`http://127.0.0.1:${port}${((await again.reply("h")) as Extract<Reply, { type: "hello" }>).avatar}`, base, "one key per device");
+
+	await device(tmp.paths.socket, "revoke", "cog");
+	assert.equal((await fetch(`${base}manifest.json`)).status, 404, "a revoked device's key stops working");
 });

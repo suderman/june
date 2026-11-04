@@ -22,7 +22,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { type CommandScope, runCommand } from "./commands.ts";
 import { type Config, expandHome, type Paths } from "./config.ts";
 import { acquireDataDirLock, createLogger, createSettings, type Logger } from "./runtime.ts";
-import { diff, type Folded, foldView, sourceName } from "./transcript.ts";
+import { diff, type Folded, foldView, sourceName, type ViewState } from "./transcript.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { createHeartbeat } from "./heartbeat.ts";
 import { entryTimes } from "./history.ts";
@@ -40,6 +40,7 @@ import { type DeviceInfo, readLines, type Reply, type Request, SOURCES, type Sta
 import { Devices } from "./devices.ts";
 import { type Remote, type Session, startRemote } from "./remote.ts";
 import { createCodingExtension } from "./tools/coding.ts";
+import { countFollowing } from "./tools/follow.ts";
 import { createHerdrExtension, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
 import { createWorkExtension, FocusDoc, WorkDoc } from "./tools/work.ts";
@@ -78,6 +79,8 @@ export type DaemonOptions = {
 	readonly looseEndsClock?: { now: () => Date; tickMs: number };
 	/** Tests shorten the WebSocket's hello timeout, ping interval, and backlog limit. */
 	readonly remoteTiming?: { helloMs?: number; pingMs?: number; maxBuffered?: number };
+	/** Tests check the followed tasks more often than every 15 seconds. */
+	readonly followingMs?: number;
 	/** Tests answer notmuch themselves. */
 	readonly mailRun?: Run;
 	/** Tests set the watch's clock, loop speed, home directory for local run records, and commands. */
@@ -277,7 +280,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		let remote: Remote | undefined;
 		let remoteError: string | undefined;
 		const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
-		const scope: Scope = { harness, root, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, remote: () => remote, sky: situation };
+		const follows = pollFollowing(() => harness.commit((tx) => countFollowing(tx), BG), options.followingMs ?? 15_000, log);
+		const scope: Scope = { harness, root, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, remote: () => remote, sky: situation, follows };
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
@@ -287,7 +291,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		// The listener is a convenience beside the socket: a port already taken is logged and shown in status, not fatal.
 		if (config.remote) {
 			try {
-				remote = await startRemote({ port: config.remote.port, devices, log, session: (send) => session(send, scope, false), ...options.remoteTiming });
+				remote = await startRemote({ port: config.remote.port, devices, log, session: (send) => session(send, scope, false), avatar: `${paths.data}/avatar`, ...options.remoteTiming });
 			} catch (error) {
 				remoteError = (error as Error).message;
 				log.error("remote_listen_failed", { port: config.remote.port, error: remoteError });
@@ -309,6 +313,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				if (unfocus) clearInterval(unfocus);
 				stopReflection?.();
 				stopSituation();
+				follows.stop();
 				stopHeartbeat?.();
 				stopLooseEnds?.();
 				stopWatch?.();
@@ -337,9 +342,55 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 	});
 }
 
-type Scope = CommandScope & { log: Logger; inbox: string; devices: Devices; remote: () => Remote | undefined; sky?: SkySource };
+type Scope = CommandScope & { log: Logger; inbox: string; devices: Devices; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource };
 /** The sky a view sends with its state, and how it learns of a change. */
 type SkySource = Pick<Situation, "sky" | "onSky">;
+/** How many followed tasks are still going, and how a view learns of a change. */
+export type FollowSource = { following(): number; onFollowing(listener: () => void): () => void };
+
+/**
+ * Count June's followed tasks every `everyMs`, telling listeners when the count changes. The follows live in a
+ * session document rather than the conversation a view watches, and a task ends without touching that document, so
+ * this polls; a check fails quietly and keeps the last count.
+ */
+export function pollFollowing(read: () => Promise<number>, everyMs: number, log: Logger): FollowSource & { stop(): void } {
+	let count = 0;
+	const listeners = new Set<() => void>();
+	let busy = false;
+	const check = async () => {
+		if (busy) return;
+		busy = true;
+		try {
+			const next = await read();
+			if (next !== count) {
+				count = next;
+				for (const listener of listeners) listener();
+			}
+		} catch (error) {
+			log.warn("following_check_failed", { error: (error as Error).message });
+		} finally {
+			busy = false;
+		}
+	};
+	void check();
+	const timer = setInterval(() => void check(), everyMs);
+	return {
+		following: () => count,
+		onFollowing(listener) {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+		stop: () => clearInterval(timer),
+	};
+}
+
+/** What June is doing, for clients: the first of thinking, working, and watching that holds. */
+export function activityOf(state: Pick<ViewState, "running" | "compacting" | "background" | "following">): ViewState["activity"] {
+	if (state.running || state.compacting) return "thinking";
+	if (state.background > 0) return "working";
+	if ((state.following ?? 0) > 0) return "watching";
+	return undefined;
+}
 
 function serve(socket: Socket, scope: Scope): void {
 	socket.on("error", () => {});
@@ -362,7 +413,7 @@ function session(send: (reply: Reply) => void, scope: Scope, local: boolean): Se
 			case "attach": {
 				// A second attach on one connection starts the view over.
 				await view?.stop();
-				view = await attachView(scope.root, context, send, request.requestId, { detail: request.detail === true, ...(scope.sky ? { sky: scope.sky } : {}) });
+				view = await attachView(scope.root, context, send, request.requestId, { detail: request.detail === true, ...(scope.sky ? { sky: scope.sky } : {}), ...(scope.follows ? { follows: scope.follows } : {}) });
 				// The connection closed while the view was starting.
 				if (abort.signal.aborted) void view.stop();
 				return;
@@ -484,14 +535,17 @@ export async function attachView(
 	context: Context,
 	send: (reply: Reply) => void,
 	requestId: string,
-	options: { detail?: boolean; sky?: SkySource } = {},
+	options: { detail?: boolean; sky?: SkySource; follows?: FollowSource } = {},
 ): Promise<View> {
 	let detail = options.detail === true;
-	// The fold knows nothing of the sky; it joins the state here, so a change in the weather is a state change like any.
+	// The fold knows nothing of the sky or the follows; they join the state here, so a change in the weather or in what
+	// she follows is a state change like any. The activity is left out while none holds.
 	const fold = (value: Parameters<typeof foldView>[0]) => {
 		const folded = foldView(value, { detail });
 		const sky = options.sky?.sky();
-		return sky ? { ...folded, state: { ...folded.state, sky } } : folded;
+		const state: ViewState = { ...folded.state, ...(sky ? { sky } : {}), ...(options.follows ? { following: options.follows.following() } : {}) };
+		const activity = activityOf(state);
+		return { ...folded, state: activity ? { ...state, activity } : state };
 	};
 	const load = (query: Parameters<Conversation["entries"]>[0], limit: number, ctx: Context) => root.entries(query, limit, undefined, ctx);
 	let transcript = new ConversationTranscript(load);
@@ -537,6 +591,9 @@ export async function attachView(
 	const stopSky = options.sky?.onSky(() => {
 		timer ??= setTimeout(flush, Math.max(0, flushed + FLUSH_MS - Date.now()));
 	});
+	const stopFollows = options.follows?.onFollowing(() => {
+		timer ??= setTimeout(flush, Math.max(0, flushed + FLUSH_MS - Date.now()));
+	});
 	return {
 		// The reset holds everything a pending flush would send.
 		detail(on, id) {
@@ -549,6 +606,7 @@ export async function attachView(
 		async stop() {
 			clearTimeout(timer);
 			stopSky?.();
+			stopFollows?.();
 			await watch.stop();
 		},
 	};

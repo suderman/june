@@ -3,6 +3,7 @@ declare module "ws" {
 	import type { EventEmitter } from "node:events";
 	import type { IncomingMessage } from "node:http";
 	import type { AddressInfo } from "node:net";
+	import type { Duplex } from "node:stream";
 
 	export class WebSocket extends EventEmitter {
 		static readonly OPEN: 1;
@@ -24,8 +25,9 @@ declare module "ws" {
 	}
 
 	export class WebSocketServer extends EventEmitter {
-		constructor(options: { host?: string; port?: number; maxPayload?: number; clientTracking?: boolean });
+		constructor(options: { host?: string; port?: number; noServer?: boolean; maxPayload?: number; clientTracking?: boolean });
 		readonly clients: Set<WebSocket>;
+		handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, callback: (socket: WebSocket, request: IncomingMessage) => void): void;
 		address(): AddressInfo | string | null;
 		close(callback?: (error?: Error) => void): void;
 		on(event: "connection", listener: (socket: WebSocket, request: IncomingMessage) => void): this;

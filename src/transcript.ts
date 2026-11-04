@@ -50,6 +50,14 @@ export type ViewState = {
 	expression: string;
 	/** Where home is and the weather now, from Home Assistant (see situation.ts); added by the daemon, not the fold. */
 	sky?: Sky;
+	/** How many dispatched tasks June is following and that are still going; added by the daemon, not the fold. */
+	following?: number;
+	/**
+	 * What June is doing, the first that holds: thinking (a run is busy or compacting), working (briefs in the
+	 * background), watching (following tasks). Absent when none does. Clients add their own offline and voice states
+	 * (see "Activities" in docs/interfaces.org). Added by the daemon, not the fold.
+	 */
+	activity?: "thinking" | "working" | "watching";
 };
 
 export type Change = { op: "put"; item: ViewItem; after: string | null } | { op: "drop"; id: string };

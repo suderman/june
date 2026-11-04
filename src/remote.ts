@@ -1,6 +1,11 @@
 // The WebSocket listener for graphical clients: the socket's JSON objects, one per text frame, on 127.0.0.1 only, behind
 // Traefik as wss://june.kit/. The first frame must be a hello with a device token (see "Client protocol for graphical
-// clients" in docs/architecture.org).
+// clients" in docs/architecture.org). The same port serves the user's avatar set over HTTP under a path the hello gives
+// each device, so a client loads June's art from the daemon rather than a synced folder.
+import { randomBytes } from "node:crypto";
+import { createReadStream, realpathSync, statSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { extname, sep } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import type { Devices } from "./devices.ts";
 import type { Reply } from "./protocol.ts";
@@ -19,6 +24,8 @@ export type RemoteOptions = {
 	readonly devices: Devices;
 	readonly log: Logger;
 	readonly session: (send: (reply: Reply) => void, device: string) => Session;
+	/** The user's avatar set, served read-only to paired devices; none without it. */
+	readonly avatar?: string;
 	/** Tests shorten these. */
 	readonly helloMs?: number;
 	readonly pingMs?: number;
@@ -38,18 +45,92 @@ type Entry = { device?: string; alive: boolean; shut(code: number, reason: strin
 
 const MAX_PAYLOAD = 32 * 1024 * 1024;
 
+/** What the avatar route serves: the manifest and the art, nothing else in the set's directory. */
+const TYPES: Record<string, string> = { ".png": "image/png", ".webp": "image/webp", ".svg": "image/svg+xml" };
+
+/** The file an avatar path names inside `root`, with its type; undefined for anything else. */
+export function avatarFile(root: string, path: string): { file: string; type: string } | undefined {
+	if (!/^[\w.\/-]+$/.test(path) || path.split("/").some((part) => part === "" || part === "." || part === "..")) return undefined;
+	const type = path === "manifest.json" ? "application/json" : TYPES[extname(path).toLowerCase()];
+	if (type === undefined) return undefined;
+	let base: string;
+	let file: string;
+	try {
+		base = realpathSync(root);
+		file = realpathSync(`${base}/${path}`);
+	} catch {
+		return undefined;
+	}
+	// A link inside the set must not lead out of it.
+	if (!file.startsWith(base + sep)) return undefined;
+	return { file, type };
+}
+
 export async function startRemote(options: RemoteOptions): Promise<Remote> {
 	const { devices, log } = options;
 	const helloMs = options.helloMs ?? 10_000;
 	const pingMs = options.pingMs ?? 30_000;
 	const maxBuffered = options.maxBuffered ?? 8 * 1024 * 1024;
-	const server = new WebSocketServer({ host: "127.0.0.1", port: options.port, maxPayload: MAX_PAYLOAD });
-	await new Promise<void>((resolve, reject) => {
-		server.once("listening", resolve);
-		server.once("error", reject);
+	// A key per device for the avatar route, made at its first hello and good until the daemon stops or the device is
+	// revoked. A path rather than a header, because an image element cannot send one.
+	const keys = new Map<string, string>();
+	const keyFor = (device: string) => {
+		for (const [key, name] of keys) if (name === device) return key;
+		const key = randomBytes(18).toString("base64url");
+		keys.set(key, device);
+		return key;
+	};
+	const listed = (device: string) => {
+		try {
+			return devices.list().some((d) => d.name === device);
+		} catch {
+			return false;
+		}
+	};
+	const http = createServer((request: IncomingMessage, response: ServerResponse) => {
+		const notFound = () => {
+			response.writeHead(404, { "content-type": "text/plain" });
+			response.end("not found\n");
+		};
+		const m = /^\/avatar\/([\w-]+)\/(.+)$/.exec((request.url ?? "").split("?")[0]);
+		if (!m || (request.method !== "GET" && request.method !== "HEAD") || options.avatar === undefined) return notFound();
+		const device = keys.get(m[1]);
+		if (device === undefined || !listed(device)) return notFound();
+		let path: string;
+		try {
+			path = decodeURIComponent(m[2]);
+		} catch {
+			return notFound();
+		}
+		const found = avatarFile(options.avatar, path);
+		if (found === undefined) return notFound();
+		let info: ReturnType<typeof statSync>;
+		try {
+			info = statSync(found.file);
+		} catch {
+			return notFound();
+		}
+		if (!info.isFile()) return notFound();
+		const etag = `"${info.size.toString(36)}-${Math.floor(info.mtimeMs).toString(36)}"`;
+		const headers = { "content-type": found.type, "cache-control": "private, no-cache", etag };
+		if (request.headers["if-none-match"] === etag) {
+			response.writeHead(304, headers);
+			return response.end();
+		}
+		response.writeHead(200, { ...headers, "content-length": String(info.size) });
+		if (request.method === "HEAD") return response.end();
+		createReadStream(found.file).on("error", () => response.destroy()).pipe(response);
 	});
+	const server = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
+	http.on("upgrade", (request, socket, head) => server.handleUpgrade(request, socket, head, (ws) => server.emit("connection", ws, request)));
+	await new Promise<void>((resolve, reject) => {
+		http.once("listening", resolve);
+		http.once("error", reject);
+		http.listen(options.port, "127.0.0.1");
+	});
+	http.on("error", (error) => log.warn("remote_error", { error: error.message }));
 	server.on("error", (error) => log.warn("remote_error", { error: error.message }));
-	const address = server.address();
+	const address = http.address();
 	const port = typeof address === "object" && address !== null ? address.port : options.port;
 
 	/** Every open connection; `device` is set after hello. */
@@ -117,7 +198,7 @@ export async function startRemote(options: RemoteOptions): Promise<Remote> {
 				clearTimeout(hello);
 				device = entry.device = name;
 				log.info("remote_hello", { device });
-				send({ type: "hello", requestId: String(request.requestId ?? ""), device, protocol: PROTOCOL });
+				send({ type: "hello", requestId: String(request.requestId ?? ""), device, protocol: PROTOCOL, ...(options.avatar !== undefined ? { avatar: `/avatar/${keyFor(name)}/` } : {}) });
 				session = options.session(send, device);
 				return;
 			}
@@ -150,6 +231,7 @@ export async function startRemote(options: RemoteOptions): Promise<Remote> {
 			return counts;
 		},
 		revoke(name) {
+			for (const [key, device] of keys) if (device === name) keys.delete(key);
 			let closed = 0;
 			for (const entry of [...open.values()]) {
 				if (entry.device !== name) continue;
@@ -161,7 +243,9 @@ export async function startRemote(options: RemoteOptions): Promise<Remote> {
 		close() {
 			clearInterval(pinger);
 			for (const ws of server.clients) ws.terminate();
-			return new Promise((resolve) => server.close(() => resolve()));
+			server.close();
+			http.closeAllConnections();
+			return new Promise((resolve) => http.close(() => resolve()));
 		},
 	};
 }

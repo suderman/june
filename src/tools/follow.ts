@@ -36,6 +36,16 @@ export const Follows = defineDoc<{ ids: Record<string, number> }>({
 	initial: () => ({ ids: {} }),
 });
 
+/** How many of the tasks June follows are still going: the "watching" activity clients show. */
+export async function countFollowing(tx: Tx): Promise<number> {
+	let count = 0;
+	for (const task of Object.values((await tx.doc(Follows)).ids)) {
+		const record = await tx.task(task as never);
+		if (record !== undefined && record.state.status !== "terminal") count++;
+	}
+	return count;
+}
+
 export type Observation = {
 	state: string | undefined;
 	missing: boolean;

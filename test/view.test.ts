@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
-import { attachView as serveView } from "../src/daemon.ts";
+import { activityOf, attachView as serveView, pollFollowing } from "../src/daemon.ts";
 import type { Reply } from "../src/protocol.ts";
 import { createCodingExtension } from "../src/tools/coding.ts";
 import { applyChanges, diff, fold, type ViewItem } from "../src/transcript.ts";
@@ -213,4 +213,33 @@ test("a compaction shows while it runs and leaves a note", async (t) => {
 	await until(() => view.items().some((i) => i.kind === "note" && i.text === "earlier conversation compacted") && !view.state().compacting);
 	const compacting = view.replies.flatMap((r) => (r.state ? [r.state.compacting] : []));
 	assert.ok(compacting.includes(true), "the state said so while it ran");
+});
+
+test("the view says what June is doing, following tasks included, and updates when that changes", async () => {
+	assert.equal(activityOf({ running: true, compacting: false, background: 2, following: 3 }), "thinking");
+	assert.equal(activityOf({ running: false, compacting: true, background: 0 }), "thinking");
+	assert.equal(activityOf({ running: false, compacting: false, background: 1, following: 3 }), "working");
+	assert.equal(activityOf({ running: false, compacting: false, background: 0, following: 1 }), "watching");
+	assert.equal(activityOf({ running: false, compacting: false, background: 0 }), undefined);
+
+	let count = 2;
+	const log = { info() {}, warn() {}, error() {} } as never;
+	const follows = pollFollowing(async () => count, 20, log);
+	await until(() => follows.following() === 2);
+	const root = {
+		watch: async () => ({ value: { conversation: {}, docs: {}, entries: [] }, start: () => {}, stop: async () => ({ kind: "stopped" }) }),
+		entries: async () => ({ items: [] }),
+	};
+	const sent: Reply[] = [];
+	const view = await serveView(root as never, BG, (r) => sent.push(r), "a", { follows });
+	const first = sent[0] as Extract<Reply, { type: "view" }>;
+	assert.equal(first.state?.following, 2);
+	assert.equal(first.state?.activity, "watching");
+	count = 0;
+	await until(() => sent.length === 2);
+	const next = sent[1] as Extract<Reply, { type: "view" }> & { state: { following?: number; activity?: string } };
+	assert.equal(next.state.following, 0);
+	assert.equal(next.state.activity, undefined, "no activity while none holds");
+	await view.stop();
+	follows.stop();
 });
