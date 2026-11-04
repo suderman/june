@@ -16,6 +16,10 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1"
+        // QuickJS is native: only the phone's own architecture, not a copy for every Android CPU.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildFeatures {
@@ -45,4 +49,6 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     // The WebSocket to June's listener.
     implementation("com.squareup.okhttp3:okhttp:5.5.1")
+    // QuickJS, to run the decisions the phone shares with the desktop overlay (assets/june.js, built by Nix).
+    implementation("io.github.dokar3:quickjs-kt:1.0.15")
 }

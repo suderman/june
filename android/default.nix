@@ -8,6 +8,8 @@
   androidenv,
   gradle_9,
   jdk17_headless,
+  esbuild,
+  runCommand,
   writeShellApplication,
   android-tools,
 }: let
@@ -22,6 +24,17 @@
   home = "${sdk.androidsdk}/libexec/android-sdk";
   tools = "${home}/build-tools/${buildTools}";
   jdk = "${jdk17_headless}/lib/openjdk";
+
+  # The overlay's decision modules as one script for QuickJS (js/june.mjs), so the phone decides as the desktop does.
+  decisions = let
+    src = lib.fileset.toSource {
+      root = ../.;
+      fileset = lib.fileset.unions [./js (lib.fileset.fileFilter (file: file.hasExt "mjs") ../overlay)];
+    };
+  in
+    runCommand "june-decisions.js" {nativeBuildInputs = [esbuild];} ''
+      esbuild ${src}/android/js/june.mjs --bundle --format=iife --global-name=June --target=es2020 --log-level=warning --outfile=$out
+    '';
 
   apk = stdenv.mkDerivation (finalAttrs: {
     pname = "june-android";
@@ -52,6 +65,7 @@
     # AGP keeps its own state in ~/.android, which the sandbox lacks.
     preBuild = ''
       export ANDROID_USER_HOME="$TMPDIR/android-user"
+      install -Dm644 ${decisions} src/main/assets/june.js
     '';
 
     installPhase = ''
@@ -82,4 +96,4 @@
     '';
   };
 in
-  apk // {inherit install sdk;}
+  apk // {inherit install sdk decisions;}

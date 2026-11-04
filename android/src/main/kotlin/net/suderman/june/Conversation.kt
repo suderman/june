@@ -26,7 +26,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import android.util.Log
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.platform.LocalContext
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -79,6 +84,20 @@ fun Sheet(link: Link) {
     val shown = link.items.filter { !it.private }
     // Stay on the newest item as the conversation grows.
     LaunchedEffect(shown.size, shown.lastOrNull()?.text?.length) { if (shown.isNotEmpty()) list.scrollToItem(shown.size - 1) }
+    // The shared decisions, proven on the phone while the strip is drawn plainly: what they make of this view.
+    val context = LocalContext.current
+    val decisions by produceState<Decisions?>(null) {
+        value = runCatching { Decisions.load(context) }.onFailure { Log.w(TAG, "decisions did not load: $it") }.getOrNull()
+        awaitDispose { value?.close() }
+    }
+    LaunchedEffect(decisions, link.items.size) {
+        val d = decisions ?: return@LaunchedEffect
+        runCatching {
+            val panels = d.panels(link.items)
+            val plan = JSONObject(d.call("compose.plan", JSONObject().put("width", 380).put("side", "left").put("elements", JSONArray().put(JSONObject().put("kind", "june").put("w", 300).put("h", 80)))))
+            Log.i(TAG, "decisions: ${panels.length()} panels from ${link.items.size} items; a 380-wide panel stacks=${plan.getJSONObject("metrics").getBoolean("stacked")}, height ${plan.getInt("height")}")
+        }.onFailure { Log.w(TAG, "decisions failed: $it") }
+    }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
         Text(statusLine(link), color = Color(0xFF9AA0AE), fontSize = 13.sp, modifier = Modifier.padding(top = 14.dp, bottom = 8.dp))

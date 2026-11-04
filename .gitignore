@@ -7,3 +7,4 @@ result-*
 android/build/
 android/.gradle/
 android/.kotlin/
+android/src/main/assets/june.js

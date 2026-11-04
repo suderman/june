@@ -19,6 +19,8 @@ data class Item(
     val status: String = "",
     val expression: String = "",
     val private: Boolean = false,
+    /** The item as the daemon sent it, for the shared decisions (Decisions.kt). */
+    val raw: JSONObject = JSONObject(),
 ) {
     companion object {
         fun from(json: JSONObject) = Item(
@@ -33,6 +35,7 @@ data class Item(
             status = json.optString("status"),
             expression = json.optString("expression"),
             private = json.optBoolean("private"),
+            raw = json,
         )
     }
 }
