@@ -63,6 +63,8 @@ export function liveState({ view, linked, now, idleSince, once }) {
 		return "thinking";
 	}
 	if ((state.background ?? 0) > 0) return "delegating";
+	// Tasks she dispatched and follows are still going (the daemon's state.following).
+	if ((state.following ?? 0) > 0) return "watching";
 	return idleState(now, Math.max(0, (now.getTime() - (idleSince ?? now.getTime())) / 60000));
 }
 

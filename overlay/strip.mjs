@@ -179,5 +179,6 @@ export function activity(state, linked) {
 	if (state.compacting) return "tidying up";
 	if (state.running) return "thinking";
 	if (state.background > 0) return state.background === 1 ? "1 brief running" : `${state.background} briefs running`;
+	if ((state.following ?? 0) > 0) return state.following === 1 ? "following 1 task" : `following ${state.following} tasks`;
 	return "";
 }

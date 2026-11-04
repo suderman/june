@@ -820,3 +820,14 @@ test("dark mode follows the portal's colour scheme unless the device holds to on
 	assert.equal(isDark("dark", "light"), true);
 	assert.equal(SCHEME_CALL.includes("color-scheme"), true);
 });
+
+test("live June watches while the daemon says she follows tasks, after anything busier", () => {
+	const at = new Date(2026, 10, 4, 14, 0);
+	const view = (state) => ({ items: [], state: { running: false, background: 0, compacting: false, ...state } });
+	assert.equal(liveState({ view: view({ following: 2 }), linked: true, now: at, idleSince: at.getTime() }), "watching");
+	assert.equal(liveState({ view: view({ following: 2, background: 1 }), linked: true, now: at, idleSince: at.getTime() }), "delegating");
+	assert.notEqual(liveState({ view: view({ following: 0 }), linked: true, now: at, idleSince: at.getTime() }), "watching");
+	assert.equal(activity({ running: false, background: 0, following: 1 }, true), "following 1 task");
+	assert.equal(activity({ running: false, background: 0, following: 3 }, true), "following 3 tasks");
+	assert.equal(activity({ running: false, background: 0 }, true), "");
+});

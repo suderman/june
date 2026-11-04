@@ -4,8 +4,8 @@
 # `live off` keeps live June away until `live on`; `look console` drops the comic for a terminal style, `look comic`
 # brings it back; `quiet on` is do not disturb (mako's mode); `scheme dark` or `light` holds the colour scheme, and
 # `scheme system` follows the desktop again. `light 21.5` previews every panel at that hour, and `light now` puts
-# each back at its own. It ships the base avatar set from templates/avatar; JUNE_OVERLAY_ART can put a
-# personal set in front of it.
+# each back at its own. It ships the base avatar set from templates/avatar; a personal set goes in front of it: one
+# named in JUNE_OVERLAY_ART, June's data directory's avatar/ when this machine has one, or else the daemon's.
 {
   lib,
   runCommand,
@@ -39,7 +39,11 @@ in
       export QT_QUICK_CONTROLS_STYLE=Basic
       unset QT_STYLE_OVERRIDE QT_QPA_PLATFORMTHEME
       export JUNE_OVERLAY_FONTS=${fonts}/share/fonts/truetype
-      # A personal avatar set named in JUNE_OVERLAY_ART comes first; the base set fills the rest.
+      # A personal avatar set comes first: one named in JUNE_OVERLAY_ART, else June's data directory's when this machine
+      # has it (synced, or the daemon's own host). Without either, the overlay loads the daemon's set over HTTP. The base
+      # set fills the rest.
+      personal="''${XDG_DATA_HOME:-$HOME/.local/share}/june/avatar"
+      if [ -z "''${JUNE_OVERLAY_ART:-}" ] && [ -f "$personal/manifest.json" ]; then JUNE_OVERLAY_ART=$personal; fi
       export JUNE_OVERLAY_ART="''${JUNE_OVERLAY_ART:+$JUNE_OVERLAY_ART:}${art}"
       case "''${1:-}" in
         "") exec qs -p ${config} ;;

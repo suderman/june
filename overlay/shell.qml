@@ -85,18 +85,19 @@ ShellRoot {
   readonly property string activity: Strip.activity(view.state, linked)
 
   // June's poses from every avatar set, the first set winning a shared name, and each panel's side and pose, kept once
-  // chosen so the strip does not rearrange itself as it grows.
+  // chosen so the strip does not rearrange itself as it grows. The wrapper names the local sets, a personal one (when
+  // this machine has it) before the base set from the package; without a local personal set, the daemon's comes first,
+  // loaded over HTTP from the path its hello gives this device.
   readonly property var artDirs: (Quickshell.env("JUNE_OVERLAY_ART") || "").split(":").filter(d => d !== "")
-  property var artSets: ({})
-  property var liveSets: ({})
+  readonly property bool localPersonal: artDirs.length > 1
+  // Each set read, by its place in the order: the daemon's at -1, then the local ones from 0.
+  property var artSources: ({})
   property var poses: []
   // Live June's art by state, the first set winning.
   property var liveArt: ({})
   // Live June's chibi reactions by expression, the first set winning.
-  property var chibiSets: ({})
   property var chibiArt: ({})
-  // Rooms, window views, and props by set, and all of them merged, the first set winning a shared id.
-  property var scenerySets: ({})
+  // Rooms, window views, and props from every set, the first set winning a shared id.
   property var scenery: ({ rooms: [], plates: [], props: [] })
   property var sides: ({})
   property var poseIds: ({})
@@ -108,39 +109,45 @@ ShellRoot {
       path: modelData + "/manifest.json"
       blockLoading: true
     }
-    onObjectAdded: (index, object) => root.addArt(index, root.artDirs[index], object.text())
+    onObjectAdded: (index, object) => root.addArt(index, "file://" + root.artDirs[index] + "/", object.text())
   }
 
-  function addArt(index, dir, text) {
-    const sets = Object.assign({}, artSets);
-    const lives = Object.assign({}, liveSets);
+  // The daemon's set, when this machine has no personal set of its own: its manifest from the hello's path, on the
+  // listener's host. A daemon without a set answers 404 and the local sets stand alone.
+  function fetchArt(path) {
+    if (localPersonal || typeof path !== "string" || path === "") return;
+    const origin = /^(wss?):\/\/([^/]+)/.exec(url);
+    if (!origin) return;
+    const base = (origin[1] === "wss" ? "https://" : "http://") + origin[2] + path;
+    const request = new XMLHttpRequest();
+    request.onreadystatechange = () => {
+      if (request.readyState !== XMLHttpRequest.DONE) return;
+      if (request.status === 200) addArt(-1, base, request.responseText);
+      else if (request.status !== 404) console.warn("june overlay: the daemon's avatar set did not load:", request.status);
+    };
+    request.open("GET", base + "manifest.json");
+    request.send();
+  }
+
+  function addArt(order, base, text) {
+    const sources = Object.assign({}, artSources);
     try {
       const manifest = JSON.parse(text);
-      sets[index] = Compose.readPoses(manifest, "file://" + dir + "/");
-      lives[index] = Live.readLive(manifest, "file://" + dir + "/");
-      const chibis = Object.assign({}, chibiSets);
-      chibis[index] = Live.readChibi(manifest, "file://" + dir + "/");
-      chibiSets = chibis;
-      const scenes = Object.assign({}, scenerySets);
-      scenes[index] = Scenery.readScenery(manifest, "file://" + dir + "/");
-      scenerySets = scenes;
+      sources[order] = { poses: Compose.readPoses(manifest, base), live: Live.readLive(manifest, base), chibi: Live.readChibi(manifest, base), scenery: Scenery.readScenery(manifest, base) };
     }
-    catch (e) { console.warn("june overlay: no usable avatar set in", dir); sets[index] = []; lives[index] = {}; }
-    artSets = sets;
-    liveSets = lives;
+    catch (e) { console.warn("june overlay: no usable avatar set at", base); sources[order] = { poses: [], live: {}, chibi: {}, scenery: null }; }
+    artSources = sources;
+    const ordered = Object.keys(sources).map(Number).sort((a, b) => a - b).map(k => sources[k]);
     const art = {};
-    for (let i = artDirs.length - 1; i >= 0; i--) Object.assign(art, liveSets[i] ?? {});
-    liveArt = art;
     const chibi = {};
-    for (let i = artDirs.length - 1; i >= 0; i--) Object.assign(chibi, chibiSets[i] ?? {});
+    for (let i = ordered.length - 1; i >= 0; i--) { Object.assign(art, ordered[i].live); Object.assign(chibi, ordered[i].chibi); }
+    liveArt = art;
     chibiArt = chibi;
-    const sceneList = [];
-    for (let i = 0; i < artDirs.length; i++) sceneList.push(scenerySets[i] ?? null);
-    scenery = Scenery.mergeScenery(sceneList);
+    scenery = Scenery.mergeScenery(ordered.map(s => s.scenery));
     const seen = {};
     const all = [];
-    for (let i = 0; i < artDirs.length; i++)
-      for (const pose of (artSets[i] ?? [])) if (!seen[pose.id]) { seen[pose.id] = true; all.push(pose); }
+    for (const set of ordered)
+      for (const pose of set.poses) if (!seen[pose.id]) { seen[pose.id] = true; all.push(pose); }
     poses = all;
     sync();
   }
@@ -429,6 +436,7 @@ ShellRoot {
       helloSeen = true;
       linked = true;
       refusals = 0;
+      fetchArt(reply.avatar);
       send({ op: "attach", requestId: rid() });
       return;
     }
