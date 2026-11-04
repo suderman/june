@@ -29,7 +29,12 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -94,6 +99,9 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
     val panels by produceState(JSONArray(), ready, link.items, link.state) {
         if (ready) value = JSONArray(decisions.call("panels", JSONArray(link.items.map { it.raw }), link.state.raw, false))
     }
+    // The clock, for panels lit by the hour now (a reply still streaming), ticking each minute; the daemon's sky.
+    val now by produceState(System.currentTimeMillis()) { while (true) { kotlinx.coroutines.delay(60_000); value = System.currentTimeMillis() } }
+    val sky = link.state.raw.optJSONObject("sky")
     BoxWithConstraints(modifier) {
         val width = maxWidth
         val metrics by produceState<JSONObject?>(null, width) { value = JSONObject(decisions.call("compose.metrics", width.value.toDouble())) }
@@ -103,7 +111,7 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
         // arrive and settle their height, with no scrolling after them.
         LazyColumn(Modifier.fillMaxSize(), state = rememberLazyListState(), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
             items(count, key = { panels.getJSONObject(count - 1 - it).getString("id") }) { i ->
-                PanelView(panels.getJSONObject(count - 1 - i), newest = i == 0, width.value, m, decisions, avatar)
+                PanelView(panels.getJSONObject(count - 1 - i), newest = i == 0, width.value, m, decisions, avatar, now, sky)
             }
         }
     }
@@ -203,7 +211,7 @@ private fun path(d: String): Path = PathParser().parsePathString(d).toPath()
 
 /** One panel: its ground, June framed into her clip, the words where the layout put them, and the frame over all. */
 @Composable
-private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONObject, decisions: Decisions, avatar: Avatar) {
+private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONObject, decisions: Decisions, avatar: Avatar, now: Long, sky: JSONObject?) {
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val textWidth = m.getDouble("textWidth").toFloat()
@@ -213,8 +221,10 @@ private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONO
         List(elements.length()) { measure(elements.getJSONObject(it), newest, textWidth, measurer, density) }
     }
     val sizes = JSONArray(measured.map { JSONObject().put("kind", it.kind).put("w", it.w.toDouble()).put("h", it.h.toDouble()) })
-    val layout by produceState<JSONObject?>(null, key, width, sizes.toString()) {
-        value = runCatching { JSONObject(decisions.call("layout", panel, width.toDouble(), sizes)) }.getOrNull()
+    val skyText = sky?.toString()
+    val layout by produceState<JSONObject?>(null, key, width, sizes.toString(), now / 60_000, skyText) {
+        value = runCatching { JSONObject(decisions.call("layout", panel, width.toDouble(), sizes, now.toDouble(), -1, sky)) }
+            .onFailure { android.util.Log.w(TAG, "layout failed: $it") }.getOrNull()
     }
     val l = layout
     if (l == null) {
@@ -223,13 +233,28 @@ private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONO
     }
     val pose = l.optJSONObject("pose")
     val image by produceState<ImageBitmap?>(null, pose?.optString("url")) { value = pose?.optString("url")?.takeIf { it.isNotEmpty() }?.let { avatar.image(it) } }
-    Box(Modifier.width(width.dp).height(l.getDouble("height").dp).clipToBounds().background(Look.color(l.optString("tint")))) {
+    val scene = l.optJSONObject("scene")
+    Box(Modifier.width(width.dp).height(l.getDouble("height").dp).clipToBounds().background(Look.color(scene?.optString("ground") ?: l.optString("tint")))) {
+        if (scene != null) SceneView(scene, avatar, panel.optInt("seed"))
         val art = l.optJSONObject("art")
         val clip = l.getJSONObject("clip")
         val picture = image
         if (art != null && picture != null) {
             val mirror = l.optBoolean("mirror")
-            Canvas(Modifier.fillMaxSize()) {
+            val figure = scene?.optJSONObject("figure")
+            val grade = Look.color(scene?.optString("grade") ?: "#ffffff")
+            val key = scene?.optJSONObject("key")
+            // She takes the room's grade more gently, and the key light from the open side falls on her alone.
+            val filter = remember(figure?.toString()) {
+                figure?.let {
+                    val m = androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(it.optDouble("saturation", 1.0).toFloat()) }
+                    val b = it.optDouble("brightness", 1.0).toFloat()
+                    m.timesAssign(androidx.compose.ui.graphics.ColorMatrix().apply { setToScale(b, b, b, 1f) })
+                    androidx.compose.ui.graphics.ColorFilter.colorMatrix(m)
+                }
+            }
+            val side = panel.optString("side")
+            Canvas(Modifier.fillMaxSize().graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)) {
                 val d = density.density
                 clipRect(clip.getDouble("x").toFloat() * d, clip.getDouble("y").toFloat() * d, (clip.getDouble("x") + clip.getDouble("w")).toFloat() * d, (clip.getDouble("y") + clip.getDouble("h")).toFloat() * d) {
                     val x = art.getDouble("x").toFloat() * d
@@ -237,7 +262,14 @@ private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONO
                     val w = art.getDouble("w").toFloat() * d
                     val h = art.getDouble("h").toFloat() * d
                     scale(if (mirror) -1f else 1f, 1f, pivot = Offset(x + w / 2, y + h / 2)) {
-                        drawImage(picture, dstOffset = IntOffset(x.toInt(), y.toInt()), dstSize = IntSize(w.toInt(), h.toInt()))
+                        drawImage(picture, dstOffset = IntOffset(x.toInt(), y.toInt()), dstSize = IntSize(w.toInt(), h.toInt()), colorFilter = filter)
+                    }
+                    if (figure != null) drawRect(grade.copy(alpha = figure.optDouble("grade", 0.0).toFloat().coerceIn(0f, 1f)), blendMode = BlendMode.SrcAtop)
+                    if (key != null) {
+                        val glow = Look.color(key.optString("colour"))
+                        val clear = glow.copy(alpha = 0f)
+                        val strength = (key.optDouble("strength", 0.0) * 0.4).toFloat().coerceIn(0f, 1f)
+                        drawRect(Brush.horizontalGradient(if (side == "left") listOf(clear, glow) else listOf(glow, clear)), alpha = strength, blendMode = BlendMode.SrcAtop)
                     }
                 }
             }
@@ -253,6 +285,94 @@ private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONO
             }
         }
         Box(Modifier.matchParentSize().border(3.dp, Look.ink))
+    }
+}
+
+/** Stars in the window's sky, at fractions of it, as Scenery.qml places them. */
+private val STARS = listOf(0.12f to 0.2f, 0.44f to 0.1f, 0.7f to 0.26f, 0.3f to 0.36f, 0.86f to 0.12f, 0.58f to 0.4f)
+
+/**
+ * What stands behind her (the glue's `scene`): an abstract pattern on the ground, or her room with its window's sky,
+ * sun or moon, stars, view, and weather, the room cut around it, and the props, graded by the hour as one print and out
+ * of focus behind a close framing; then the lamp's warm pool after dark.
+ */
+@Composable
+private fun SceneView(scene: JSONObject, avatar: Avatar, seed: Int) {
+    val density = LocalDensity.current.density
+    scene.optJSONObject("pattern")?.let { pattern ->
+        val shape = remember(pattern.optString("path")) { path(pattern.optString("path")) }
+        Canvas(Modifier.fillMaxSize()) {
+            scale(density, density, pivot = Offset.Zero) {
+                val alpha = pattern.optDouble("opacity", 1.0).toFloat()
+                if (pattern.optString("fill") != "transparent") drawPath(shape, Look.color(pattern.optString("fill")), alpha = alpha)
+                if (pattern.optString("stroke") != "transparent") drawPath(shape, Look.color(pattern.optString("stroke")), alpha = alpha, style = Stroke(pattern.optDouble("width", 1.0).toFloat(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+            }
+        }
+    }
+    val room = scene.optJSONObject("room")
+    if (room != null) {
+        val place = room.getJSONObject("place")
+        val win = scene.optJSONObject("window")
+        val sky = scene.getJSONObject("sky")
+        val plate = scene.optJSONObject("plate")
+        val props = scene.optJSONArray("props") ?: JSONArray()
+        val roomImage by produceState<ImageBitmap?>(null, room.optString("url")) { value = avatar.image(room.optString("url")) }
+        val plateImage by produceState<ImageBitmap?>(null, plate?.optString("url")) { value = plate?.optString("url")?.let { avatar.image(it) } }
+        val propImages by produceState(emptyMap<String, ImageBitmap>(), props.toString()) {
+            value = (0 until props.length()).mapNotNull { i -> props.getJSONObject(i).optString("url").let { url -> avatar.image(url)?.let { url to it } } }.toMap()
+        }
+        val falling = remember(scene.optString("falling")) { scene.optString("falling").takeIf { it.isNotEmpty() }?.let { path(it) } }
+        val grade = Look.color(scene.optString("grade"))
+        val amount = scene.optDouble("gradeAmount", 0.0).toFloat().coerceIn(0f, 1f)
+        val blur = scene.optDouble("blur", 0.0).toFloat()
+        Canvas(Modifier.fillMaxSize().then(if (blur > 0) Modifier.blur((blur * 12).dp) else Modifier).graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)) {
+            val d = density
+            if (win != null) {
+                val wx = win.getDouble("x").toFloat() * d
+                val wy = win.getDouble("y").toFloat() * d
+                val ww = win.getDouble("w").toFloat() * d
+                val wh = win.getDouble("h").toFloat() * d
+                clipRect(wx, wy, wx + ww, wy + wh) {
+                    drawRect(Brush.verticalGradient(listOf(Look.color(sky.optString("top")), Look.color(sky.optString("bottom"))), startY = wy, endY = wy + wh), topLeft = Offset(wx, wy), size = androidx.compose.ui.geometry.Size(ww, wh))
+                    val stars = sky.optDouble("stars", 0.0).toFloat()
+                    if (stars > 0) for ((fx, fy) in STARS) drawCircle(Color.White.copy(alpha = stars.coerceIn(0f, 1f)), 1.5f * d, Offset(wx + fx * ww, wy + fy * wh))
+                    val sunOpacity = sky.optDouble("sunOpacity", 0.0).toFloat()
+                    if (sunOpacity > 0) drawCircle(Look.color(sky.optString("sun")).copy(alpha = sunOpacity.coerceIn(0f, 1f)), max(8f * d, min(ww, wh) * 0.09f), Offset(wx + sky.optDouble("sunX", 0.5).toFloat() * ww, wy + sky.optDouble("sunY", 0.3).toFloat() * wh))
+                    plateImage?.let { img ->
+                        val ph = max(wh * 0.5f, ww * plate!!.getDouble("height").toFloat() / plate.getDouble("width").toFloat())
+                        drawImage(img, dstOffset = IntOffset(wx.toInt(), (wy + wh - ph).toInt()), dstSize = IntSize(ww.toInt(), ph.toInt()))
+                    }
+                    if (falling != null) translate(wx, wy) {
+                        scale(d, d, pivot = Offset.Zero) {
+                            if (sky.optString("falling") == "snow") drawPath(falling, Color.White) else drawPath(falling, Color(0xFFC9D6E8), style = Stroke(2f, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                        }
+                    }
+                }
+            }
+            roomImage?.let { img ->
+                val x = place.getDouble("x").toFloat() * d
+                val y = place.getDouble("y").toFloat() * d
+                val w = place.getDouble("w").toFloat() * d
+                val h = place.getDouble("h").toFloat() * d
+                scale(if (place.optBoolean("mirror")) -1f else 1f, 1f, pivot = Offset(x + w / 2, y + h / 2)) {
+                    drawImage(img, dstOffset = IntOffset(x.toInt(), y.toInt()), dstSize = IntSize(w.toInt(), h.toInt()))
+                }
+            }
+            for (i in 0 until props.length()) {
+                val prop = props.getJSONObject(i)
+                val img = propImages[prop.optString("url")] ?: continue
+                drawImage(img, dstOffset = IntOffset((prop.getDouble("x") * d).toInt(), (prop.getDouble("y") * d).toInt()), dstSize = IntSize((prop.getDouble("w") * d).toInt(), (prop.getDouble("h") * d).toInt()))
+            }
+            // The hour's grade over the whole room, as one print under coloured light.
+            if (amount > 0) drawRect(grade.copy(alpha = amount), blendMode = BlendMode.SrcAtop)
+        }
+    }
+    val lamp = scene.optDouble("lamp", 0.0).toFloat()
+    val face = scene.optJSONObject("faceCentre")
+    if (lamp > 0 && face != null) Canvas(Modifier.fillMaxSize()) {
+        val centre = Offset(face.getDouble("x").toFloat() * density, (face.getDouble("y").toFloat() + 40) * density)
+        val r = max(size.width, size.height) * 0.45f
+        drawRect(Brush.radialGradient(listOf(Color(0x8CFFC478), Color(0x00FFC478)), center = centre, radius = r), alpha = lamp.coerceIn(0f, 1f))
     }
 }
 
