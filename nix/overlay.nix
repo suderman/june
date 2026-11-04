@@ -29,6 +29,8 @@ in
     text = ''
       # Only this Qt's modules and plugins: the desktop's Qt settings may name plugins built against another Qt.
       export QML2_IMPORT_PATH=${qt6.qtwebsockets}/lib/qt-6/qml
+      # WebP, which finished avatar art is; Qt's own image formats stop at GIF, JPEG, and SVG.
+      export QT_PLUGIN_PATH="${qt6.qtimageformats}/lib/qt-6/plugins''${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
       export QT_QUICK_CONTROLS_STYLE=Basic
       unset QT_STYLE_OVERRIDE QT_QPA_PLATFORMTHEME
       export JUNE_OVERLAY_FONTS=${fonts}/share/fonts/truetype
