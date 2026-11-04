@@ -31,7 +31,6 @@ class ConversationActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         link = Link(this)
-        locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(Modifier.fillMaxSize(), color = Color(0xFF141418), contentColor = Color(0xFFECE6DA)) {
@@ -74,9 +73,18 @@ class ConversationActivity : ComponentActivity() {
             })
     }
 
+    // Checked every time the screen comes to the front, not only when it is made: Android brings back an existing one
+    // over the lock screen, and one made while the phone was unlocked would otherwise show the conversation there.
+    // isDeviceLocked, not isKeyguardLocked: the phone wants the user's credentials, whatever shows on screen.
     override fun onStart() {
         super.onStart()
-        if (!locked) link.open()
+        locked = getSystemService(KeyguardManager::class.java).isDeviceLocked
+        if (locked) {
+            asked = false
+            link.close()
+        } else {
+            link.open()
+        }
     }
 
     override fun onStop() {

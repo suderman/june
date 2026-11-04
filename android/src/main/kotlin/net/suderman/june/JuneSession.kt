@@ -57,7 +57,8 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
         super.onShow(args, showFlags)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         lines.clear()
-        locked = context.getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        // Whether the phone wants the user's credentials, not merely whether the lock screen shows.
+        locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
         if (!locked) link.open()
         record("time: ${java.time.LocalDateTime.now().withNano(0)}")
         record("locked: $locked")
