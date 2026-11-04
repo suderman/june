@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">
+<path d="M 0 300 Q 200 240 400 290 T 800 270 V 500 H 0 Z" fill="#eef3f8" stroke="#2a1f22" stroke-width="3"/>
+<path d="M 0 380 Q 240 330 480 370 T 800 360 V 500 H 0 Z" fill="#dfe8f1" stroke="#2a1f22" stroke-width="3"/>
+<path d="M 170 367.2 V 266.4 M 170 294.4 L 136.4 260.8 M 170 311.2 L 203.6 272" stroke="#6b5a4b" stroke-width="7" stroke-linecap="round" fill="none"/>
+<path d="M 250 378 V 306 M 250 326 L 226 302 M 250 338 L 274 310" stroke="#6b5a4b" stroke-width="7" stroke-linecap="round" fill="none"/>
+<path d="M 620 377.6 V 291.2 M 620 315.2 L 591.2 286.4 M 620 329.6 L 648.8 296" stroke="#6b5a4b" stroke-width="7" stroke-linecap="round" fill="none"/>
+<text x="400" y="470" font-family="sans-serif" font-size="26" font-weight="700" text-anchor="middle" fill="#3a2a22" opacity="0.7">hills-winter · placeholder</text>
+</svg>

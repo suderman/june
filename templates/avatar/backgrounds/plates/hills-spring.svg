@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">
+<path d="M 0 300 Q 200 240 400 290 T 800 270 V 500 H 0 Z" fill="#a6d49a" stroke="#2a1f22" stroke-width="3"/>
+<path d="M 0 380 Q 240 330 480 370 T 800 360 V 500 H 0 Z" fill="#7fbf72" stroke="#2a1f22" stroke-width="3"/>
+<rect x="164" y="300" width="12" height="67.2" fill="#6b4b33"/><circle cx="170" cy="300" r="56" fill="#6aa85e" stroke="#2a1f22" stroke-width="3"/><circle cx="151.33333333333334" cy="281.3333333333333" r="11.2" fill="#ffb6cf"/><circle cx="188.66666666666666" cy="300" r="9.333333333333334" fill="#ffb6cf"/>
+<rect x="244" y="330" width="12" height="48" fill="#6b4b33"/><circle cx="250" cy="330" r="40" fill="#6aa85e" stroke="#2a1f22" stroke-width="3"/><circle cx="236.66666666666666" cy="316.6666666666667" r="8" fill="#ffb6cf"/><circle cx="263.3333333333333" cy="330" r="6.666666666666667" fill="#ffb6cf"/>
+<rect x="614" y="320" width="12" height="57.599999999999994" fill="#6b4b33"/><circle cx="620" cy="320" r="48" fill="#6aa85e" stroke="#2a1f22" stroke-width="3"/><circle cx="604" cy="304" r="9.6" fill="#ffb6cf"/><circle cx="636" cy="320" r="8" fill="#ffb6cf"/>
+<text x="400" y="470" font-family="sans-serif" font-size="26" font-weight="700" text-anchor="middle" fill="#3a2a22" opacity="0.7">hills-spring · placeholder</text>
+</svg>

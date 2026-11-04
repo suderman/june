@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+<path fill-rule="evenodd" fill="#e9dfd2" d="M 0 0 H 1600 V 800 H 0 Z M 927.9999999999999 100 V 560 H 1440 V 100 Z"/>
+<rect x="0" y="800" width="1600" height="200" fill="#a98b6c"/>
+<path d="M 0 800 H 1600" stroke="#2a1f22" stroke-width="6"/>
+<rect x="913.9999999999999" y="86" width="540" height="488" fill="none" stroke="#b89a7c" stroke-width="28"/>
+<rect x="899.9999999999999" y="72" width="568" height="516" fill="none" stroke="#2a1f22" stroke-width="5"/>
+<path d="M 1184 100 V 560" stroke="#b89a7c" stroke-width="14"/>
+<rect x="877.9999999999999" y="574" width="612" height="26" fill="#c9ad8e" stroke="#2a1f22" stroke-width="5"/>
+<rect x="140" y="620" width="700" height="34" fill="#b89a7c" stroke="#2a1f22" stroke-width="6"/>
+<rect x="170" y="654" width="30" height="146" fill="#8d7257" stroke="#2a1f22" stroke-width="5"/><rect x="780" y="654" width="30" height="146" fill="#8d7257" stroke="#2a1f22" stroke-width="5"/>
+<rect x="420" y="430" width="260" height="170" rx="10" fill="#3b4258" stroke="#2a1f22" stroke-width="6"/><rect x="530" y="600" width="40" height="20" fill="#2b2d33"/>
+<path d="M 230 620 V 500 L 290 450" stroke="#2b2d33" stroke-width="10" fill="none"/><path d="M 250 430 L 340 430 L 360 480 L 230 480 Z" fill="#2b2d33"/>
+<rect x="120" y="230" width="300" height="20" fill="#b89a7c" stroke="#2a1f22" stroke-width="5"/><rect x="140" y="160" width="40" height="70" fill="#d98b6a"/><rect x="190" y="175" width="34" height="55" fill="#7fa3c9"/><rect x="232" y="150" width="44" height="80" fill="#a6c48a"/>
+<text x="800" y="960" font-family="sans-serif" font-size="34" font-weight="700" text-anchor="middle" fill="#3a2a22" opacity="0.7">study · placeholder</text>
+</svg>

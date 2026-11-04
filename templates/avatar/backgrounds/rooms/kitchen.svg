@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+<path fill-rule="evenodd" fill="#ece4d6" d="M 0 0 H 1600 V 800 H 0 Z M 608 80 V 480 H 1024 V 80 Z"/>
+<rect x="0" y="800" width="1600" height="200" fill="#c7b39a"/>
+<path d="M 0 800 H 1600" stroke="#2a1f22" stroke-width="6"/>
+<rect x="594" y="66" width="444" height="428" fill="none" stroke="#b89a7c" stroke-width="28"/>
+<rect x="580" y="52" width="472" height="456" fill="none" stroke="#2a1f22" stroke-width="5"/>
+<path d="M 816 80 V 480" stroke="#b89a7c" stroke-width="14"/>
+<rect x="558" y="494" width="516" height="26" fill="#c9ad8e" stroke="#2a1f22" stroke-width="5"/>
+<rect x="0" y="600" width="1600" height="200" fill="#d9cdb8" stroke="#2a1f22" stroke-width="6"/><rect x="0" y="580" width="1600" height="30" fill="#f1ebe0" stroke="#2a1f22" stroke-width="6"/>
+<rect x="60" y="120" width="420" height="260" fill="#cbb89c" stroke="#2a1f22" stroke-width="6"/><path d="M 270 120 V 380" stroke="#2a1f22" stroke-width="5"/>
+<rect x="1120" y="120" width="420" height="260" fill="#cbb89c" stroke="#2a1f22" stroke-width="6"/><path d="M 1330 120 V 380" stroke="#2a1f22" stroke-width="5"/>
+<path d="M 1180 580 L 1190 500 Q 1230 470 1270 500 L 1280 580 Z" fill="#c95a4a" stroke="#2a1f22" stroke-width="5"/>
+<text x="800" y="960" font-family="sans-serif" font-size="34" font-weight="700" text-anchor="middle" fill="#3a2a22" opacity="0.7">kitchen · placeholder</text>
+</svg>

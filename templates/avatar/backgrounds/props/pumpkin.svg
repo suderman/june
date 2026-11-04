@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="170" height="150" viewBox="0 0 170 150">
+<path d="M 85 30 Q 80 10 95 4" stroke="#4f7a3a" stroke-width="10" fill="none" stroke-linecap="round"/><ellipse cx="85" cy="90" rx="78" ry="56" fill="#f08a2a" stroke="#2a1f22" stroke-width="6"/><path d="M 85 36 V 144 M 50 40 Q 35 90 50 140 M 120 40 Q 135 90 120 140" stroke="#c96a1a" stroke-width="5" fill="none"/><path d="M 55 75 L 70 90 L 55 90 Z M 115 75 L 100 90 L 115 90 Z M 55 110 Q 85 130 115 110 L 105 118 L 95 110 L 85 120 L 75 110 L 65 118 Z" fill="#3a2410"/>
+<text x="85" y="83" font-family="sans-serif" font-size="21.25" font-weight="700" text-anchor="middle" fill="#1b1a1f" opacity="0.7">pumpkin</text>
+</svg>

@@ -57,6 +57,13 @@ export type Framing = (typeof FRAMINGS)[number];
  */
 export const POSE_ACTIVITIES = ["thinking", "working", "watching"] as const;
 export type PoseActivity = (typeof POSE_ACTIVITIES)[number];
+/** Where a pose has her, which picks the room behind her: at her desk, on the couch, in the kitchen, or standing. */
+export const SETTINGS = ["desk", "couch", "kitchen", "standing"] as const;
+export type Setting = (typeof SETTINGS)[number];
+/** The seasons a window view is drawn for. */
+export const SEASONS = ["spring", "summer", "autumn", "winter"] as const;
+/** Where a prop can stand in a room. */
+export const SPOTS = ["floor", "desk", "wall", "sill"] as const;
 /** Marks a client may draw beside a pose's face to reinforce it; never baked into the art. */
 export const MARKS = ["sparkle", "heart", "sweat", "vein", "steam", "emphasis"] as const;
 export type Mark = (typeof MARKS)[number];
@@ -75,6 +82,8 @@ export type Pose = {
 	size: [number, number];
 	expression: Expression;
 	activity?: PoseActivity;
+	/** Where she is, so a client puts her in a room that fits; desk when not given. */
+	setting?: Setting;
 	description?: string;
 	face: [number, number, number, number];
 	mouth: [number, number];
@@ -120,7 +129,33 @@ export type Manifest = {
 	live?: Partial<Record<LiveState, Asset>>;
 	/** Live June's brief reaction when a reply's face is picked, by expression; a missing one falls back along the chain. */
 	chibi?: Partial<Record<Expression, Asset>>;
+	/** What stands behind her in a comic panel: rooms, the view through their window by season, and props. */
+	backgrounds?: Backgrounds;
 };
+
+/**
+ * A room, drawn in flat neutral light with its window cut out (transparent), so a client can put the hour's sky and the
+ * season's view behind it and grade the whole by the hour. `window` is [x, y, width, height] in fractions of the image;
+ * `spots` are where props can stand, as [x, y] fractions marking a prop's bottom centre; `settings` are the pose
+ * settings the room serves.
+ */
+export type Room = { file: string; size: [number, number]; settings: Setting[]; window?: [number, number, number, number]; spots?: Partial<Record<(typeof SPOTS)[number], [number, number][]>>; description?: string };
+/** The view through a window in one season: hills, trees, sky left transparent so the client's sky shows. */
+export type Plate = { file: string; size: [number, number]; season: (typeof SEASONS)[number]; description?: string };
+/**
+ * A prop brought out by conditions, every one of which must hold: a temperature range in °C (the weather now), Home
+ * Assistant weather conditions, date ranges as ["MM-DD", "MM-DD"] (wrapping the new year allowed), or seasons. `size`
+ * is in the room's pixels, so it scales with the room; `rooms` limits it to some rooms.
+ */
+export type Prop = {
+	file: string;
+	size: [number, number];
+	spots: (typeof SPOTS)[number][];
+	when: { temperature?: [number, number]; weather?: string[]; dates?: [string, string][]; seasons?: (typeof SEASONS)[number][] };
+	rooms?: string[];
+	description?: string;
+};
+export type Backgrounds = { rooms?: Record<string, Room>; plates?: Record<string, Plate>; props?: Record<string, Prop> };
 
 const isExpression = (name: string): name is Expression => Object.hasOwn(EXPRESSIONS, name);
 const positiveInt = (n: unknown) => Number.isInteger(n) && (n as number) > 0;
@@ -149,6 +184,7 @@ export function parseManifest(data: unknown, options: { base?: boolean } = {}): 
 	errors.push(...poseErrors(m.poses, options));
 	errors.push(...liveErrors(m.live));
 	errors.push(...chibiErrors(m.chibi));
+	errors.push(...backgroundErrors(m.backgrounds));
 	if (errors.length > 0) throw new Error(`manifest: ${errors.join("; ")}`);
 	return m as Manifest;
 }
@@ -170,6 +206,7 @@ function poseErrors(data: unknown, options: { base?: boolean }): string[] {
 		if (!Array.isArray(p?.size) || p.size.length !== 2 || !p.size.every(positiveInt)) errors.push(`${at}: size must be [width, height] in pixels`);
 		if (typeof p?.expression !== "string" || !isExpression(p.expression)) errors.push(`${at}: expression must be in the vocabulary`);
 		if (p?.activity !== undefined && !(POSE_ACTIVITIES as readonly string[]).includes(p.activity)) errors.push(`${at}: activity must be one of ${POSE_ACTIVITIES.join(", ")}`);
+		if (p?.setting !== undefined && !(SETTINGS as readonly string[]).includes(p.setting)) errors.push(`${at}: setting must be one of ${SETTINGS.join(", ")}`);
 		const face = p?.face;
 		if (!Array.isArray(face) || face.length !== 4 || !face.every(fraction) || !(face[2]! > 0 && face[3]! > 0) || face[0]! + face[2]! > 1 || face[1]! + face[3]! > 1)
 			errors.push(`${at}: face must be [x, y, width, height] inside the image, as fractions`);
@@ -186,6 +223,70 @@ function poseErrors(data: unknown, options: { base?: boolean }): string[] {
 	}
 	const names = Object.values(poses);
 	if (options.base && names.length > 0 && !names.some((p) => p?.expression === "idle" && p.activity === undefined)) errors.push("a base set with poses must have an idle pose");
+	return errors;
+}
+
+const imageFile = (file: unknown) => typeof file === "string" && /^[\w./-]+\.(png|webp|svg)$/i.test(file) && !file.startsWith("/") && !file.split("/").includes("..");
+const pixels = (size: unknown) => Array.isArray(size) && size.length === 2 && size.every(positiveInt);
+const monthDay = (s: unknown) => typeof s === "string" && /^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(s);
+const record = (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value);
+const slug = (name: string) => /^[a-z0-9]+(-[a-z0-9]+)*$/.test(name);
+
+/** Problems with a manifest's optional backgrounds: rooms, window views, and props. */
+function backgroundErrors(data: unknown): string[] {
+	if (data === undefined) return [];
+	if (!record(data)) return ["backgrounds must be an object"];
+	const errors: string[] = [];
+	const b = data as Record<string, unknown>;
+	for (const key of Object.keys(b)) if (!["rooms", "plates", "props"].includes(key)) errors.push(`backgrounds: ${key} is not rooms, plates, or props`);
+	for (const kind of ["rooms", "plates", "props"] as const) if (b[kind] !== undefined && !record(b[kind])) errors.push(`backgrounds.${kind} must be an object`);
+	const rooms = (record(b.rooms) ? b.rooms : {}) as Record<string, Partial<Room>>;
+	for (const [name, r] of Object.entries(rooms)) {
+		const at = `room ${name}`;
+		if (!slug(name)) errors.push(`${at}: name must be lowercase words joined by hyphens`);
+		if (!imageFile(r?.file)) errors.push(`${at}: file must be a .png, .webp, or .svg path inside the set`);
+		if (!pixels(r?.size)) errors.push(`${at}: size must be [width, height] in pixels`);
+		if (!listOf(r?.settings, SETTINGS)) errors.push(`${at}: settings must list some of ${SETTINGS.join(", ")}`);
+		const w = r?.window;
+		if (w !== undefined && (!Array.isArray(w) || w.length !== 4 || !w.every(fraction) || !(w[2]! > 0 && w[3]! > 0) || w[0]! + w[2]! > 1 || w[1]! + w[3]! > 1))
+			errors.push(`${at}: window must be [x, y, width, height] inside the image, as fractions`);
+		if (r?.spots !== undefined) {
+			if (!record(r.spots)) errors.push(`${at}: spots must be an object`);
+			else
+				for (const [spot, points] of Object.entries(r.spots)) {
+					if (!(SPOTS as readonly string[]).includes(spot)) errors.push(`${at}: ${spot} is not one of ${SPOTS.join(", ")}`);
+					if (!Array.isArray(points) || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every(fraction))) errors.push(`${at}: spots.${spot} must list [x, y] fractions`);
+				}
+		}
+	}
+	for (const [name, p] of Object.entries((record(b.plates) ? b.plates : {}) as Record<string, Partial<Plate>>)) {
+		const at = `plate ${name}`;
+		if (!slug(name)) errors.push(`${at}: name must be lowercase words joined by hyphens`);
+		if (!imageFile(p?.file)) errors.push(`${at}: file must be a .png, .webp, or .svg path inside the set`);
+		if (!pixels(p?.size)) errors.push(`${at}: size must be [width, height] in pixels`);
+		if (!(SEASONS as readonly string[]).includes(p?.season as string)) errors.push(`${at}: season must be one of ${SEASONS.join(", ")}`);
+	}
+	for (const [name, p] of Object.entries((record(b.props) ? b.props : {}) as Record<string, Partial<Prop>>)) {
+		const at = `prop ${name}`;
+		if (!slug(name)) errors.push(`${at}: name must be lowercase words joined by hyphens`);
+		if (!imageFile(p?.file)) errors.push(`${at}: file must be a .png, .webp, or .svg path inside the set`);
+		if (!pixels(p?.size)) errors.push(`${at}: size must be [width, height] in pixels`);
+		if (!listOf(p?.spots, SPOTS)) errors.push(`${at}: spots must list some of ${SPOTS.join(", ")}`);
+		const when = p?.when;
+		if (!record(when)) {
+			errors.push(`${at}: when must name the conditions that bring it out`);
+			continue;
+		}
+		const w = when as Prop["when"];
+		if (w.temperature === undefined && w.weather === undefined && w.dates === undefined && w.seasons === undefined) errors.push(`${at}: when must name at least one condition`);
+		if (w.temperature !== undefined && !(Array.isArray(w.temperature) && w.temperature.length === 2 && w.temperature.every((t) => typeof t === "number") && w.temperature[0] <= w.temperature[1]))
+			errors.push(`${at}: when.temperature must be [low, high] in °C`);
+		if (w.weather !== undefined && !(Array.isArray(w.weather) && w.weather.length > 0 && w.weather.every((c) => typeof c === "string"))) errors.push(`${at}: when.weather must list Home Assistant conditions`);
+		if (w.dates !== undefined && !(Array.isArray(w.dates) && w.dates.length > 0 && w.dates.every((d) => Array.isArray(d) && d.length === 2 && d.every(monthDay))))
+			errors.push(`${at}: when.dates must list ["MM-DD", "MM-DD"] ranges`);
+		if (w.seasons !== undefined && !listOf(w.seasons, SEASONS)) errors.push(`${at}: when.seasons must list some of ${SEASONS.join(", ")}`);
+		if (p?.rooms !== undefined && !(Array.isArray(p.rooms) && p.rooms.every((r) => typeof r === "string" && Object.hasOwn(rooms, r)))) errors.push(`${at}: rooms must name rooms of this set`);
+	}
 	return errors;
 }
 

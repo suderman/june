@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">
+<path d="M 0 300 Q 200 240 400 290 T 800 270 V 500 H 0 Z" fill="#7fbf6a" stroke="#2a1f22" stroke-width="3"/>
+<path d="M 0 380 Q 240 330 480 370 T 800 360 V 500 H 0 Z" fill="#5ea84f" stroke="#2a1f22" stroke-width="3"/>
+<rect x="164" y="300" width="12" height="67.2" fill="#5b3f2a"/><circle cx="170" cy="300" r="56" fill="#3f8a3c" stroke="#2a1f22" stroke-width="3"/>
+<rect x="244" y="330" width="12" height="48" fill="#5b3f2a"/><circle cx="250" cy="330" r="40" fill="#3f8a3c" stroke="#2a1f22" stroke-width="3"/>
+<rect x="614" y="320" width="12" height="57.599999999999994" fill="#5b3f2a"/><circle cx="620" cy="320" r="48" fill="#3f8a3c" stroke="#2a1f22" stroke-width="3"/>
+<text x="400" y="470" font-family="sans-serif" font-size="26" font-weight="700" text-anchor="middle" fill="#3a2a22" opacity="0.7">hills-summer · placeholder</text>
+</svg>

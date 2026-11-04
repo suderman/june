@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="200" viewBox="0 0 180 200">
+<rect x="10" y="10" width="160" height="170" rx="18" fill="#d9d4cc" stroke="#2a1f22" stroke-width="6"/><rect x="35" y="40" width="110" height="90" rx="6" fill="#ff8f4a" stroke="#2a1f22" stroke-width="5"/><path d="M 45 60 H 135 M 45 85 H 135 M 45 110 H 135" stroke="#ffd36b" stroke-width="6"/><rect x="30" y="180" width="30" height="16" fill="#2b2d33"/><rect x="120" y="180" width="30" height="16" fill="#2b2d33"/>
+<text x="90" y="108" font-family="sans-serif" font-size="22" font-weight="700" text-anchor="middle" fill="#1b1a1f" opacity="0.7">space-heater</text>
+</svg>

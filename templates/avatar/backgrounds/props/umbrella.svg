@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="110" height="300" viewBox="0 0 110 300">
+<path d="M 55 10 V 270 Q 55 295 30 290" stroke="#2a1f22" stroke-width="8" fill="none" stroke-linecap="round"/><path d="M 55 20 Q 95 120 70 230 L 40 230 Q 15 120 55 20 Z" fill="#d8432f" stroke="#2a1f22" stroke-width="5"/>
+<text x="55" y="158" font-family="sans-serif" font-size="13.75" font-weight="700" text-anchor="middle" fill="#1b1a1f" opacity="0.7">umbrella</text>
+</svg>

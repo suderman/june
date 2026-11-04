@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { ACTIVITIES, EXPRESSIONS, FRAMINGS, LIVE_STATES, MARKS, POSE_ACTIVITIES, fallbacks, parseManifest, resolveExpression } from "../src/avatar.ts";
+import { ACTIVITIES, EXPRESSIONS, FRAMINGS, LIVE_STATES, MARKS, POSE_ACTIVITIES, SEASONS, SETTINGS, fallbacks, parseManifest, resolveExpression } from "../src/avatar.ts";
 import { TEMPLATES } from "../src/init.ts";
 
 const base = new URL("avatar/", `file://${TEMPLATES}`);
@@ -132,3 +132,37 @@ test("chibi reactions validate by expression, and the placeholder set has the te
 	);
 });
 
+
+test("the placeholder backgrounds validate, cover every setting and season, and exist at their declared size", async () => {
+	const manifest = parseManifest(JSON.parse(await readFile(new URL("manifest.json", base), "utf8")), { base: true });
+	const b = manifest.backgrounds!;
+	const rooms = Object.values(b.rooms ?? {});
+	for (const setting of SETTINGS) assert.ok(rooms.some((r) => r.settings.includes(setting)), `a room for ${setting}`);
+	for (const season of SEASONS) assert.ok(Object.values(b.plates ?? {}).some((p) => p.season === season), `a view for ${season}`);
+	assert.ok(Object.values(manifest.poses ?? {}).some((p) => p.setting && p.setting !== "desk"), "poses name their settings");
+	for (const [name, item] of [...Object.entries(b.rooms ?? {}), ...Object.entries(b.plates ?? {}), ...Object.entries(b.props ?? {})]) {
+		const svg = await readFile(new URL(item.file, base), "utf8");
+		assert.deepEqual([Number(/width="(\d+)"/.exec(svg)?.[1]), Number(/height="(\d+)"/.exec(svg)?.[1])], item.size, name);
+	}
+	const props = Object.values(b.props ?? {});
+	assert.ok(props.some((p) => p.when.dates) && props.some((p) => p.when.weather) && props.some((p) => p.when.temperature), "props by holiday, weather, and temperature");
+});
+
+test("bad backgrounds name each problem", () => {
+	const idle = { idle: { file: "idle.png", play: "still" as const } };
+	const room = { file: "rooms/study.svg", size: [1600, 1000], settings: ["desk"], window: [0.5, 0.1, 0.3, 0.4], spots: { desk: [[0.2, 0.6]] } };
+	const prop = { file: "props/fan.svg", size: [100, 200], spots: ["desk"], when: { temperature: [26, 60] }, rooms: ["study"] };
+	const plate = { file: "plates/hills.svg", size: [800, 500], season: "autumn" };
+	assert.doesNotThrow(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, backgrounds: { rooms: { study: room }, plates: { hills: plate }, props: { fan: prop } } }));
+	const bad = (backgrounds: unknown) => () => parseManifest({ version: 1, size: [64, 64], expressions: idle, backgrounds } as never);
+	assert.throws(bad({ rooms: { study: { ...room, settings: ["garden"] } } }), /room study: settings must list/);
+	assert.throws(bad({ rooms: { study: { ...room, window: [0.8, 0.1, 0.3, 0.4] } } }), /room study: window must be/);
+	assert.throws(bad({ rooms: { study: { ...room, spots: { roof: [[0.1, 0.1]] } } } }), /roof is not one of/);
+	assert.throws(bad({ plates: { hills: { ...plate, season: "monsoon" } } }), /plate hills: season must be/);
+	assert.throws(bad({ props: { fan: { ...prop, when: {} } } }), /prop fan: when must name at least one condition/);
+	assert.throws(bad({ props: { fan: { ...prop, when: { dates: [["13-01", "12-31"]] } } } }), /when.dates must list/);
+	assert.throws(bad({ props: { fan: { ...prop, when: { temperature: [30, 20] } } } }), /when.temperature must be/);
+	assert.throws(bad({ rooms: { study: room }, props: { fan: { ...prop, rooms: ["attic"] } } }), /rooms must name rooms of this set/);
+	assert.throws(bad({ lawns: {} }), /lawns is not rooms, plates, or props/);
+	assert.throws(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { "idle-sat": { file: "a.svg", size: [10, 10], expression: "idle", face: [0, 0, 1, 1], mouth: [0.5, 0.5], facing: "front", setting: "garden" } } } as never), /setting must be one of/);
+});

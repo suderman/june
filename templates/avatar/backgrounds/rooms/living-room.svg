@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+<path fill-rule="evenodd" fill="#e4dccd" d="M 0 0 H 1600 V 800 H 0 Z M 128 100 V 540 H 608 V 100 Z"/>
+<rect x="0" y="800" width="1600" height="200" fill="#b39575"/>
+<path d="M 0 800 H 1600" stroke="#2a1f22" stroke-width="6"/>
+<rect x="114" y="86" width="508" height="468" fill="none" stroke="#b89a7c" stroke-width="28"/>
+<rect x="100" y="72" width="536" height="496" fill="none" stroke="#2a1f22" stroke-width="5"/>
+<path d="M 368 100 V 540" stroke="#b89a7c" stroke-width="14"/>
+<rect x="78" y="554" width="580" height="26" fill="#c9ad8e" stroke="#2a1f22" stroke-width="5"/>
+<rect x="700" y="560" width="760" height="200" rx="40" fill="#8fa7b8" stroke="#2a1f22" stroke-width="6"/><rect x="660" y="520" width="90" height="260" rx="30" fill="#7f97a8" stroke="#2a1f22" stroke-width="6"/><rect x="1410" y="520" width="90" height="260" rx="30" fill="#7f97a8" stroke="#2a1f22" stroke-width="6"/>
+<rect x="760" y="470" width="300" height="130" rx="30" fill="#9fb7c8" stroke="#2a1f22" stroke-width="5"/><rect x="1100" y="470" width="300" height="130" rx="30" fill="#9fb7c8" stroke="#2a1f22" stroke-width="5"/>
+<rect x="530" y="640" width="110" height="16" fill="#b89a7c" stroke="#2a1f22" stroke-width="5"/><rect x="575" y="656" width="20" height="144" fill="#8d7257"/>
+<rect x="900" y="180" width="360" height="220" fill="#f6efe2" stroke="#2a1f22" stroke-width="6"/><path d="M 930 370 L 1030 260 L 1110 330 L 1170 280 L 1230 370 Z" fill="#a6c48a"/>
+<text x="800" y="960" font-family="sans-serif" font-size="34" font-weight="700" text-anchor="middle" fill="#3a2a22" opacity="0.7">living-room · placeholder</text>
+</svg>
