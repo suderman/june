@@ -190,13 +190,23 @@ Settled with the user on 2026-11-04: each client draws natively, the best its pl
 - The decisions: =overlay/*.mjs= (strip, compose, light, scenery, live, scroll) stay plain JavaScript with no Qt or Node dependencies, and new behaviour goes there rather than into QML. The Android app runs them in an embedded JavaScript engine (QuickJS) and draws in Compose; their tests become fixtures both clients pass. Embedding the QML itself in the Android app (Qt 6.7's =QtQuickView=) would share the drawing too, but Qt for Android is not in nixpkgs, so the build would be a project of its own.
 - Toggles split by owner: a device's look and behaviour (live June, comic or console, reduced motion) stays on the device; June's own state (quiet mode, a paused heartbeat) is a daemon command every client shows. The system's dark mode and do-not-disturb come from each platform: the desktop portal and mako's mode on Hyprland, =uiMode= and the interruption filter on Android.
 
-** Proof of concept
-=android/= holds a placeholder assistant: a =VoiceInteractionService=, its session service, a stub =RecognitionService=, and a launcher activity. It has no dependencies beyond the Kotlin standard library, so it builds with the SDK's own tools (=aapt2=, =kotlinc=, =d8=, =zipalign=) inside a Nix derivation, with no Gradle. Compose will need Gradle and a Maven dependency lock; that move belongs to the task that connects the app to June.
+** Building and pairing the app
+=android/= is a Gradle project (Android Gradle Plugin 9.5 on nixpkgs' Gradle 9.8, Kotlin 2.4 built into the plugin, Compose BOM 2026.09, OkHttp 5), compiled against API 37, targeting 36, minimum 33, and shrunk by R8 to about 2.7 MB. Nix builds it offline: =gradle.fetchDeps= replays the Maven downloads recorded in =android/deps.json=, the SDK comes from =androidenv=, and AGP is pointed at the SDK's =aapt2= because the one it downloads does not run on NixOS. Changing a dependency means recording again; a local Gradle home only speeds up local builds and can vanish.
 
 #+begin_src sh
-nix build .#android                 # result/june.apk, unsigned
-nix run .#android-install           # sign with ~/.android/debug.keystore, then adb install -r
+nix build .#android                                           # result/june.apk, unsigned
+nix run .#android-install                                     # sign with ~/.android/debug.keystore, adb install -r, grant network access
+$(nix build .#android.mitmCache.updateScript --print-out-paths)   # after changing a dependency: record android/deps.json again
 #+end_src
+
+- Installs come from one host's debug key (cog's now); another signature cannot install over the app without an uninstall, which clears the assistant role.
+- GrapheneOS makes network access a per-app permission that an ADB install leaves off, and an app without it fails every lookup with "Unable to resolve host"; the install app grants it.
+- Pairing: =june device add NAME= on the daemon's host prints a token once. The app's launcher screen takes the address and a pasted token, or a computer pairs it over ADB without the token ever being shown: =adb shell am start -n net.suderman.june/.PairActivity --es url wss://june.kit/ --es token TOKEN=. =PairActivity= requires =WRITE_SECURE_SETTINGS=, which only the ADB shell and the system hold, so no other app can point June at a server of its own. The phone is paired as =gem=.
+- The network security config trusts the CAs the user installed on the phone beside the system's, which covers the user's own CA behind =june.kit=.
+- The session shows the conversation over the lower three quarters of the screen while it is open, connected only then (=Link.kt=): hello, attach, the folded view applied as =applyChanges= does, reconnecting every two seconds after a drop, and stopping at 4401 as pairing needed. A first, plain look (=Conversation.kt=): the status line with the daemon's activity, the user's messages on the right, hers with Markdown emphasis and code, tool calls and patter as quiet lines, a field to send and a stop button while she works. A tap above the sheet or Back puts it away; over the lock screen it shows only the unlock prompt and does not connect. The phone's comic strip comes later from the shared decisions.
+
+** Proof of concept
+The first build (2026-10-30) was a placeholder assistant compiled with the SDK's own tools and no Gradle; the Gradle build above replaced it on 2026-11-04, keeping its invocation report.
 
 The session records each invocation and shows it: =showFlags= by name, the =args= bundle (whose =invocation_type= tells a gesture from a power-button press), whether the keyguard was up, what =onHandleAssist= returned (app, windows, view nodes, nodes with text), and the screenshot's size or =null=. The launcher activity shows whether the app holds =ROLE_ASSISTANT=, its install and update times, and the last invocation's report, and offers buttons for Default apps and for =RoleManager.createRequestRoleIntent=. The same lines go to logcat under the tag =June=, so =adb logcat -s June= collects them.
 

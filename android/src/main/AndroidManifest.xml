@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="net.suderman.june"
-    android:versionCode="1"
-    android:versionName="0.1">
+<!-- The package name, version, and SDK levels are in build.gradle.kts. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <application android:label="June" android:allowBackup="false">
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application android:label="June" android:allowBackup="false"
+        android:networkSecurityConfig="@xml/network_security_config">
 
         <!-- Launcher entry: role status, a way into Default apps, and the last invocation's report. -->
         <activity android:name=".MainActivity" android:exported="true">
@@ -13,6 +14,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Pairing over ADB; only the shell and the system hold this permission, so no app can re-pair June. -->
+        <activity android:name=".PairActivity" android:exported="true"
+            android:permission="android.permission.WRITE_SECURE_SETTINGS"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:excludeFromRecents="true" />
 
         <!-- Declaring this service is what makes the app eligible for Digital assistant app. -->
         <service android:name=".JuneInteractionService"

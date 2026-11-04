@@ -4,55 +4,77 @@ import android.app.KeyguardManager
 import android.app.assist.AssistStructure
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Color
 import android.os.Bundle
 import android.service.voice.VoiceInteractionSession
 import android.util.Log
-import android.view.Gravity
 import android.view.View
-import android.widget.LinearLayout
-import android.widget.TextView
+import android.view.WindowManager
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.ComposeView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.savedstate.SavedStateRegistry
+import androidx.savedstate.SavedStateRegistryController
+import androidx.savedstate.SavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 
-// A placeholder session that records how it was invoked and what the system handed it,
-// so the proof of concept can be read off the phone afterwards.
-class JuneSession(context: Context) : VoiceInteractionSession(context) {
+/**
+ * June's assistant session: the conversation over whatever is on screen, connected while it shows. Over the lock
+ * screen it shows only a prompt to unlock and does not connect. Each invocation is still recorded (how it was opened,
+ * what screen context arrived) to logcat under the tag June and for the launcher activity.
+ */
+class JuneSession(context: Context) : VoiceInteractionSession(context), LifecycleOwner, SavedStateRegistryOwner {
+    private val lifecycleRegistry = LifecycleRegistry(this)
+    private val savedState = SavedStateRegistryController.create(this)
+    override val lifecycle: Lifecycle get() = lifecycleRegistry
+    override val savedStateRegistry: SavedStateRegistry get() = savedState.savedStateRegistry
+
+    private val link = Link(context)
+    private var locked by mutableStateOf(false)
     private val lines = mutableListOf<String>()
-    private var status: TextView? = null
-    private var detail: TextView? = null
 
-    override fun onCreateContentView(): View {
-        val pad = (16 * context.resources.displayMetrics.density).toInt()
-        val title = TextView(context).apply {
-            textSize = 24f
-            setTextColor(Color.WHITE)
-        }
-        val body = TextView(context).apply {
-            textSize = 13f
-            setTextColor(Color.LTGRAY)
-            setPadding(0, pad, 0, 0)
-        }
-        status = title
-        detail = body
-        return LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.BOTTOM
-            setBackgroundColor(Color.argb(235, 20, 20, 28))
-            setPadding(pad, pad, pad, pad * 3)
-            addView(title)
-            addView(body)
-            setOnClickListener { hide() }
-        }
+    override fun onCreate() {
+        super.onCreate()
+        savedState.performRestore(null)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+        // The sheet moves up with the keyboard rather than hiding under it.
+        window.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+    }
+
+    // Compose needs a lifecycle and saved state, which a session does not have; it is its own owner of both.
+    override fun onCreateContentView(): View = ComposeView(context).apply {
+        setViewTreeLifecycleOwner(this@JuneSession)
+        setViewTreeSavedStateRegistryOwner(this@JuneSession)
+        setContent { Conversation(link, locked) { hide() } }
     }
 
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         lines.clear()
-        val locked = context.getSystemService(KeyguardManager::class.java).isKeyguardLocked
-        status?.text = if (locked) "Unlock to talk to June" else "June is listening (placeholder)"
+        locked = context.getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        if (!locked) link.open()
         record("time: ${java.time.LocalDateTime.now().withNano(0)}")
         record("locked: $locked")
         record("showFlags: ${describeFlags(showFlags)}")
         record("args: ${describe(args)}")
+    }
+
+    override fun onHide() {
+        super.onHide()
+        link.close()
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+        Log.i(TAG, "session hidden")
+    }
+
+    override fun onDestroy() {
+        link.close()
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+        super.onDestroy()
     }
 
     override fun onHandleAssist(state: AssistState) {
@@ -78,15 +100,9 @@ class JuneSession(context: Context) : VoiceInteractionSession(context) {
         record("screenshot: ${screenshot?.let { "${it.width}x${it.height}" } ?: "null"}")
     }
 
-    override fun onHide() {
-        super.onHide()
-        Log.i(TAG, "session hidden")
-    }
-
     private fun record(line: String) {
         Log.i(TAG, line)
         lines.add(line)
-        detail?.text = lines.joinToString("\n")
         Report.save(context, lines)
     }
 

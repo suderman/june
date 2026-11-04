@@ -3,3 +3,7 @@ result
 result-*
 *.sqlite
 *.sqlite-*
+# Local Gradle builds of the Android app (Nix builds in its sandbox).
+android/build/
+android/.gradle/
+android/.kotlin/

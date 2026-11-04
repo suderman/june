@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- June's listener is reached as wss://june.kit/ with a certificate from the user's own CA, which Android apps ignore
+     unless they say otherwise: trust the CAs the user installed on the phone, beside the system's. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

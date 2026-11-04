@@ -1,17 +1,18 @@
-# June's Android assistant, built with the SDK's own tools rather than Gradle while it has no dependencies.
+# June's Android assistant, built with Gradle and the Android Gradle Plugin. Maven dependencies come from deps.json,
+# recorded by `gradle.fetchDeps`: regenerate it after changing a dependency with
+#   $(nix build .#android.mitmCache.updateScript --print-out-paths)
 # The APK is unsigned; the install app signs it with the local debug key and installs it over adb.
 {
   lib,
   stdenv,
   androidenv,
-  kotlin,
+  gradle_9,
   jdk17_headless,
-  zip,
   writeShellApplication,
   android-tools,
 }: let
-  platform = "36";
-  buildTools = "36.1.0";
+  platform = "37.0";
+  buildTools = "37.0.0";
   sdk = androidenv.composeAndroidPackages {
     platformVersions = [platform];
     buildToolsVersions = [buildTools];
@@ -20,34 +21,45 @@
   };
   home = "${sdk.androidsdk}/libexec/android-sdk";
   tools = "${home}/build-tools/${buildTools}";
-  androidJar = "${home}/platforms/android-${platform}/android.jar";
+  jdk = "${jdk17_headless}/lib/openjdk";
 
-  apk = stdenv.mkDerivation {
+  apk = stdenv.mkDerivation (finalAttrs: {
     pname = "june-android";
     version = "0.1";
     src = lib.fileset.toSource {
       root = ./.;
-      fileset = lib.fileset.unions [./AndroidManifest.xml ./res ./src];
+      fileset = lib.fileset.unions [./settings.gradle.kts ./build.gradle.kts ./gradle.properties ./src];
     };
-    nativeBuildInputs = [kotlin jdk17_headless zip];
+    nativeBuildInputs = [gradle_9 jdk17_headless];
 
-    buildPhase = ''
-      runHook preBuild
-      ${tools}/aapt2 compile --dir res -o res.zip
-      ${tools}/aapt2 link -I ${androidJar} --manifest AndroidManifest.xml \
-        --min-sdk-version 33 --target-sdk-version ${platform} -o base.apk res.zip
-      kotlinc -nowarn -jvm-target 17 -no-reflect -cp ${androidJar} -d classes $(find src -name '*.kt')
-      ${tools}/d8 --release --min-api 33 --lib ${androidJar} --output . \
-        $(find classes -name '*.class') ${kotlin}/lib/kotlin-stdlib.jar
-      zip -qj base.apk classes.dex
-      ${tools}/zipalign -p -f 4 base.apk june.apk
-      runHook postBuild
+    mitmCache = gradle_9.fetchDeps {
+      pkg = finalAttrs.finalPackage;
+      data = ./deps.json;
+    };
+
+    env = {
+      ANDROID_HOME = home;
+      JAVA_HOME = jdk;
+    };
+    # The aapt2 that AGP downloads is a generic Linux binary that does not run on NixOS; the SDK's is patched.
+    gradleFlags = [
+      "-Pandroid.aapt2FromMavenOverride=${tools}/aapt2"
+      "-Dorg.gradle.java.home=${jdk}"
+    ];
+    gradleBuildTask = "assembleRelease";
+    # Record dependencies by building: the default task resolves every configuration, which AGP's do not allow.
+    gradleUpdateTask = finalAttrs.gradleBuildTask;
+    # AGP keeps its own state in ~/.android, which the sandbox lacks.
+    preBuild = ''
+      export ANDROID_USER_HOME="$TMPDIR/android-user"
     '';
 
     installPhase = ''
-      install -Dm644 june.apk $out/june.apk
+      runHook preInstall
+      install -Dm644 build/outputs/apk/release/june-release-unsigned.apk $out/june.apk
+      runHook postInstall
     '';
-  };
+  });
 
   install = writeShellApplication {
     name = "june-android-install";
@@ -65,6 +77,8 @@
       ${tools}/apksigner sign --ks "$key" --ks-pass pass:android --key-pass pass:android \
         --out "$out/june.apk" ${apk}/june.apk
       adb install -r "$@" "$out/june.apk"
+      # GrapheneOS makes network access a permission an ADB install leaves off; elsewhere it cannot be changed.
+      adb shell pm grant net.suderman.june android.permission.INTERNET 2>/dev/null || true
     '';
   };
 in
