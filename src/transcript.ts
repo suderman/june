@@ -1,6 +1,7 @@
 // Folds a Pi Durable conversation view into the display items every client renders. The daemon runs it, one fold per
 // connection, over `Conversation.watch()` and a `ConversationTranscript`; clients only render. It is a pure function of
 // the view, so a reconnect, a reset, and a live update all show the same thing.
+import type { Sky } from "./situation.ts";
 import type { ConversationView, LiveState } from "@earendil-works/pi-durable";
 import { orgToMarkdown } from "./org.ts";
 import { plain } from "./plain.ts";
@@ -47,6 +48,8 @@ export type ViewState = {
 	compacting: boolean;
 	/** The face June shows for her newest reply that has one (see expression.ts), "idle" when none in the view has. */
 	expression: string;
+	/** Where home is and the weather now, from Home Assistant (see situation.ts); added by the daemon, not the fold. */
+	sky?: Sky;
 };
 
 export type Change = { op: "put"; item: ViewItem; after: string | null } | { op: "drop"; id: string };

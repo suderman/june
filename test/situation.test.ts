@@ -58,6 +58,7 @@ test("the now section joins the day, the sun, the calendars, and where people ar
 			attributes: { next_setting: new Date(2026, 9, 28, 18, 22).toISOString(), next_rising: new Date(2026, 9, 29, 8, 18).toISOString() },
 		},
 		"weather.home": { state: "snowy", last_changed: "", attributes: { temperature: -1.7, temperature_unit: "°C" } },
+		config: { latitude: 50.9123, longitude: -113.9871, time_zone: "America/Edmonton" },
 		"get_forecasts?return_response": {
 			service_response: {
 				"weather.home": {
@@ -79,6 +80,9 @@ test("the now section joins the day, the sun, the calendars, and where people ar
 	const situation = createSituation({ config, env: { HASS_URL: "https://hass.test/", HASS_TOKEN: "t" }, log, fetch });
 	const now = new Date(2026, 9, 28, 11, 40);
 	assert.doesNotMatch(await situation.render(now), /sun|Alex is/, "nothing from Home Assistant before its first poll");
+	assert.equal(situation.sky(), undefined);
+	const skies: unknown[] = [];
+	situation.onSky((sky) => skies.push(sky));
 	const stop = situation.start();
 	t.after(stop);
 	await new Promise((r) => setTimeout(r, 50));
@@ -91,6 +95,8 @@ test("the now section joins the day, the sun, the calendars, and where people ar
 	assert.match(text, /\nToday: Payday \(family\); 09:30 Standup \(work\)\.\nTomorrow: Garbage day \(family\)\.\n/);
 	assert.match(text, /\nAlex is at Work \(since 9:02\)\.$/);
 	assert.doesNotMatch(text, /Kim/, "an unknown zone is left out, not guessed");
+	assert.deepEqual(situation.sky(), { latitude: 50.9, longitude: -114, condition: "snowy", unit: "°C", temperature: -2 }, "home to a tenth of a degree, the weather now");
+	assert.equal(skies.length, 1, "clients hear of the sky once it changes");
 	const quiet = createSituation({ config: { calendars: [], homeAssistant: { people: [], pollSeconds: 300 } }, env: {}, log });
 	quiet.start()();
 	assert.equal((await quiet.render(now)).split("\n").length, 2, "without calendars or Home Assistant, only the day");

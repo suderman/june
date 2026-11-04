@@ -26,7 +26,7 @@ import { diff, type Folded, foldView, sourceName } from "./transcript.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { createHeartbeat } from "./heartbeat.ts";
 import { entryTimes } from "./history.ts";
-import { createSituation } from "./situation.ts";
+import { createSituation, type Situation } from "./situation.ts";
 import { setUser } from "./user.ts";
 import { validateImages } from "./images.ts";
 import { describeFiles, saveFiles, startInboxExpiry, validateFiles } from "./inbox.ts";
@@ -277,7 +277,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		let remote: Remote | undefined;
 		let remoteError: string | undefined;
 		const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
-		const scope: Scope = { harness, root, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, remote: () => remote };
+		const scope: Scope = { harness, root, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, remote: () => remote, sky: situation };
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
@@ -337,7 +337,9 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 	});
 }
 
-type Scope = CommandScope & { log: Logger; inbox: string; devices: Devices; remote: () => Remote | undefined };
+type Scope = CommandScope & { log: Logger; inbox: string; devices: Devices; remote: () => Remote | undefined; sky?: SkySource };
+/** The sky a view sends with its state, and how it learns of a change. */
+type SkySource = Pick<Situation, "sky" | "onSky">;
 
 function serve(socket: Socket, scope: Scope): void {
 	socket.on("error", () => {});
@@ -360,7 +362,7 @@ function session(send: (reply: Reply) => void, scope: Scope, local: boolean): Se
 			case "attach": {
 				// A second attach on one connection starts the view over.
 				await view?.stop();
-				view = await attachView(scope.root, context, send, request.requestId, { detail: request.detail === true });
+				view = await attachView(scope.root, context, send, request.requestId, { detail: request.detail === true, ...(scope.sky ? { sky: scope.sky } : {}) });
 				// The connection closed while the view was starting.
 				if (abort.signal.aborted) void view.stop();
 				return;
@@ -482,9 +484,15 @@ export async function attachView(
 	context: Context,
 	send: (reply: Reply) => void,
 	requestId: string,
-	options: { detail?: boolean } = {},
+	options: { detail?: boolean; sky?: SkySource } = {},
 ): Promise<View> {
 	let detail = options.detail === true;
+	// The fold knows nothing of the sky; it joins the state here, so a change in the weather is a state change like any.
+	const fold = (value: Parameters<typeof foldView>[0]) => {
+		const folded = foldView(value, { detail });
+		const sky = options.sky?.sky();
+		return sky ? { ...folded, state: { ...folded.state, sky } } : folded;
+	};
 	const load = (query: Parameters<Conversation["entries"]>[0], limit: number, ctx: Context) => root.entries(query, limit, undefined, ctx);
 	let transcript = new ConversationTranscript(load);
 	const watch = await root.watch(context, WINDOW);
@@ -493,7 +501,7 @@ export async function attachView(
 	let state = "";
 	const sent = new Map<string, string>();
 	const reset = (id?: string) => {
-		shown = foldView(latest, { detail });
+		shown = fold(latest);
 		sent.clear();
 		for (const item of shown.items) sent.set(item.id, JSON.stringify(item));
 		state = JSON.stringify(shown.state);
@@ -510,7 +518,7 @@ export async function attachView(
 			replaced = false;
 			return reset();
 		}
-		const next = foldView(latest, { detail });
+		const next = fold(latest);
 		const changes = diff(shown!.items, next.items, sent);
 		const nextState = JSON.stringify(next.state);
 		if (changes.length > 0 || nextState !== state) send({ type: "view", changes, ...(nextState !== state ? { state: next.state } : {}) });
@@ -526,6 +534,9 @@ export async function attachView(
 		latest = transcript.merge(call.value);
 		timer ??= setTimeout(flush, Math.max(0, flushed + FLUSH_MS - Date.now()));
 	});
+	const stopSky = options.sky?.onSky(() => {
+		timer ??= setTimeout(flush, Math.max(0, flushed + FLUSH_MS - Date.now()));
+	});
 	return {
 		// The reset holds everything a pending flush would send.
 		detail(on, id) {
@@ -537,6 +548,7 @@ export async function attachView(
 		},
 		async stop() {
 			clearTimeout(timer);
+			stopSky?.();
 			await watch.stop();
 		},
 	};

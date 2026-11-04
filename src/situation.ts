@@ -13,11 +13,25 @@ import { User, user } from "./user.ts";
 type Env = Readonly<Record<string, string | undefined>>;
 type Person = { name: string; zone: string; since: Date };
 type Forecast = { date: string; condition: string; high?: number; low?: number; precipitation?: number };
-type Weather = { condition: string; unit: string; days: Forecast[] };
+type Weather = { condition: string; unit: string; days: Forecast[]; temperature?: number };
 type Home = { people: Person[]; sun?: { up: boolean; rising: Date; setting: Date }; weather?: Weather };
 type Event = { title: string; time?: string; calendar: string };
 
-export type Situation = { render(now?: Date): Promise<string>; start(): () => void };
+/**
+ * What a graphical client needs to light June's panels and dress her room: where home is, rounded to a tenth of a degree
+ * (about 10 km), which is enough for sunrise and sunset; the weather now, as Home Assistant names it; and the
+ * temperature now, rounded. Polled with the rest of the situation.
+ */
+export type Sky = { latitude: number; longitude: number; condition?: string; temperature?: number; unit?: string };
+
+export type Situation = {
+	render(now?: Date): Promise<string>;
+	start(): () => void;
+	/** The sky for clients, once Home Assistant has answered; undefined before or without it. */
+	sky(): Sky | undefined;
+	/** Calls `listener` whenever the sky changes; returns the unsubscribe. */
+	onSky(listener: (sky: Sky | undefined) => void): () => void;
+};
 
 export function createSituation(options: {
 	config: Config["situation"];
@@ -31,6 +45,10 @@ export function createSituation(options: {
 	const url = env.HASS_URL?.replace(/\/+$/, "");
 	const token = env.HASS_TOKEN;
 	let home: Home = { people: [] };
+	let sky: Sky | undefined;
+	const listeners = new Set<(sky: Sky | undefined) => void>();
+	let place: { latitude: number; longitude: number } | undefined;
+	const tenth = (n: number) => Math.round(n * 10) / 10;
 
 	const state = async (entity: string) => {
 		const response = await get(`${url}/api/states/${entity}`, {
@@ -60,7 +78,8 @@ export function createSituation(options: {
 			...(typeof f.templow === "number" ? { low: f.templow } : {}),
 			...(typeof f.precipitation_probability === "number" ? { precipitation: f.precipitation_probability } : {}),
 		}));
-		return { condition: now.state, unit: String(now.attributes.temperature_unit ?? "°"), days };
+		const temperature = typeof now.attributes.temperature === "number" ? now.attributes.temperature : undefined;
+		return { condition: now.state, unit: String(now.attributes.temperature_unit ?? "°"), days, ...(temperature !== undefined ? { temperature } : {}) };
 	};
 
 	const poll = async () => {
@@ -87,9 +106,31 @@ export function createSituation(options: {
 					}
 				: {}),
 		};
+		// Home's location changes never, so it is asked once; without it there is no sky to send.
+		if (!place) {
+			const response = await get(`${url}/api/config`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
+			const body = response?.ok ? ((await response.json()) as { latitude?: unknown; longitude?: unknown }) : undefined;
+			if (typeof body?.latitude === "number" && typeof body.longitude === "number") place = { latitude: tenth(body.latitude), longitude: tenth(body.longitude) };
+		}
+		const next: Sky | undefined = place
+			? {
+					...place,
+					...(weather ? { condition: weather.condition, unit: weather.unit } : {}),
+					...(weather?.temperature !== undefined ? { temperature: Math.round(weather.temperature) } : {}),
+				}
+			: undefined;
+		if (JSON.stringify(next) !== JSON.stringify(sky)) {
+			sky = next;
+			for (const listener of listeners) listener(sky);
+		}
 	};
 
 	return {
+		sky: () => sky,
+		onSky: (listener) => {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
 		render: async (now = new Date()) => {
 			const lines = [
 				`Where things stand right now. The time of day is rounded to the hour, so for the exact time use clock; the rest is current, since where people are comes from their phones every few minutes, so state it plainly rather than as a guess. Let it inform your judgment when it bears on the moment, such as how late it is, a commute, or something time-sensitive on the calendars, and flag what ${user()} may need to act on; do not narrate it otherwise. The calendars are ${user()}'s curated ones, which their agenda also shows.`,
