@@ -137,12 +137,12 @@ Item {
   Component.onCompleted: present()
 
   function layerAt(i) { return i === 0 ? layerA : layerB; }
+  // A layer keeps its art's rectangle (`box`, in panel coordinates) and positions itself against the layout's clip by
+  // binding, so any re-layout finds it right. Set once here, a position read the clip before it caught up and shifted
+  // her by the clip's offset: in a stacked panel, by everything above her band.
   function place(layer, a) {
     layer.source = a.url;
-    layer.x = a.x - artBox.x;
-    layer.y = a.y - artBox.y;
-    layer.width = a.w;
-    layer.height = a.h;
+    layer.box = { x: a.x, y: a.y, w: a.w, h: a.h };
     layer.mirror = a.mirror;
     layer.focusX = a.face ? a.face.x + a.face.w / 2 - a.x : a.w / 2;
     layer.focusY = a.face ? a.face.y + a.face.h / 2 - a.y : a.h / 3;
@@ -213,6 +213,11 @@ Item {
       layer.enabled: true
     Image {
       id: layerA
+      property var box: null
+      x: box ? box.x - panel.layout.clip.x : 0
+      y: box ? box.y - panel.layout.clip.y : 0
+      width: box ? box.w : 0
+      height: box ? box.h : 0
       property real settle: 1
       property real focusX: 0
       property real focusY: 0
@@ -225,6 +230,11 @@ Item {
     }
     Image {
       id: layerB
+      property var box: null
+      x: box ? box.x - panel.layout.clip.x : 0
+      y: box ? box.y - panel.layout.clip.y : 0
+      width: box ? box.w : 0
+      height: box ? box.h : 0
       opacity: 0
       property real settle: 1
       property real focusX: 0
