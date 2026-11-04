@@ -202,14 +202,14 @@ The session records each invocation and shows it: =showFlags= by name, the =args
 
 Built and checked on kit: the APK targets API 36 with minimum 33, its manifest and voice interaction metadata are as intended, all classes are in the dex, and the install app signs it with APK Signature Scheme v3. d8 warns that it cannot rewrite Kotlin 2.3's class metadata; nothing reads that metadata at runtime.
 
-Still to check on the phone:
-- Whether June appears under Default apps, Digital assistant app, without Google Play services, and whether it does without the stub =RecognitionService=.
-- Whether the role request button works or Android refuses it, since the assistant role is normally not requestable.
-- Which gestures and power-button options invoke the session, and their =invocation_type=.
-- What shows over the lock screen.
-- What =onHandleAssist= and the screenshot return with "use text from screen" and "use screenshot" on and off.
-- Whether =nix run .#android-install= (a reinstall) clears the role.
-- Whether selecting June also makes the stub the system speech recognizer, which would break voice typing in other apps.
+Checked on the user's Pixel 10 Pro (GrapheneOS, Android 17, SDK 37, no Google Play services) on 2026-11-04, installed from cog:
+
+- June appears under Default apps, Digital assistant app, and selecting it takes the role (=cmd role get-role-holders android.app.role.ASSISTANT= reads =net.suderman.june=). The launcher's role request button was not needed and not tried; whether June is listed without the stub =RecognitionService= was not tried either, since the stub does no harm (below).
+- The corner swipe opens the session (=invocation_type= 1, =SOURCE_ASSIST_GESTURE=). GrapheneOS's Gestures settings offer no power-button choice for the assistant (double press opens Camera or Wallet), but Android's hidden =global power_button_long_press 5= still works: holding power opens June (=invocation_type= 6). With it, =global key_chord_power_volume_up 2= gives the power menu (Lockdown, restart, power off) on power and volume up. The user kept both; they live in the termux repository's =android-settings.conf=, restored with =android-settings apply=.
+- Over the lock screen the session reports =locked: true= and shows only "Unlock to talk to June"; a tap dismisses it back to the lock screen. A later improvement: the tap asks for the PIN or fingerprint (=requestDismissKeyguard= from an activity the session starts) and opens June.
+- Screen context: with "Use screen and app data" off, =onHandleAssist= returns nothing (=nodes=0=) and the screenshot is =null=; on, a Vanadium page gave one window of 786 view nodes, 386 with text, the app's assist context, and a 1080 × 2410 screenshot. The user wants June to have full access, so it stays on.
+- A reinstall with the same key keeps the role and the screen-context settings. =nix run .#android-install= signs with =~/.android/debug.keystore= on the host it runs on, so installs must come from one host (now cog) or that keystore must be shared; a different signature cannot install over the app without uninstalling it, which would clear the role.
+- The stub recognizer does not take over: the secure =voice_recognition_service= stays unset, and voice typing from the keyboard (HeliBoard, through FUTO Voice Input) works as before.
 
 * Avatar
 ** Two signals
