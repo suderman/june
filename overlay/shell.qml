@@ -589,6 +589,7 @@ ShellRoot {
             busy: Boolean(root.view.state.running || root.view.state.compacting)
             activity: root.activity
             background: root.view.state.background ?? 0
+            following: root.view.state.following ?? 0
             quiet: root.quiet
           }
 

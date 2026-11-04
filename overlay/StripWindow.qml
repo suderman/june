@@ -47,6 +47,7 @@ FloatingWindow {
       busy: Boolean(win.shell.view.state.running || win.shell.view.state.compacting)
       activity: win.shell.activity
       background: win.shell.view.state.background ?? 0
+      following: win.shell.view.state.following ?? 0
       quiet: win.shell.quiet
     }
 

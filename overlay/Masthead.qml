@@ -10,6 +10,8 @@ Row {
   property bool busy: false
   property string activity: ""
   property int background: 0
+  // Dispatched tasks she follows that are still going (the daemon's state.following).
+  property int following: 0
   // Do not disturb: she stays down until summoned.
   property bool quiet: false
 
@@ -18,7 +20,7 @@ Row {
   Text { text: "june"; font.family: Theme.display; font.pixelSize: 22; color: Theme.pageInk; anchors.verticalCenter: parent.verticalCenter }
   Text {
     anchors.verticalCenter: parent.verticalCenter
-    text: (!masthead.linked ? (masthead.refusals >= 2 ? "pairing needed: check this device's token" : "reconnecting to " + masthead.host + "…") : masthead.busy ? masthead.activity : "on " + masthead.host) + (masthead.quiet ? " · do not disturb" : "")
+    text: (!masthead.linked ? (masthead.refusals >= 2 ? "pairing needed: check this device's token" : "reconnecting to " + masthead.host + "…") : masthead.busy ? masthead.activity : "on " + masthead.host + (masthead.following > 0 ? " · following " + (masthead.following === 1 ? "1 task" : masthead.following + " tasks") : "")) + (masthead.quiet ? " · do not disturb" : "")
     font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
     color: masthead.linked ? Theme.muted : Theme.accent
   }
