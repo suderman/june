@@ -52,32 +52,15 @@ Item {
     sizes = out;
   }
 
-  // The hour its words were written, and what stands behind her (see light.mjs). The words' share of the panel keeps a
-  // long one plain.
-  readonly property real when: Light.moment(p) ?? now
-  readonly property var light: Light.look(hourOverride >= 0 ? hourOverride : Light.hourOf(when), Light.sunFor(hourOverride >= 0 ? now : when, sky))
-  readonly property real share: {
-    let covered = 0;
-    for (const s of sizes) covered += s.w * s.h;
-    return width > 0 && layout.height > 0 ? covered / (width * layout.height) : 0;
-  }
-  readonly property var backdrop: Light.backdrop(p, { live: Boolean(p.live), share: share })
-  readonly property var faceCentre: layout.face ? { x: layout.face.x + layout.face.w / 2, y: layout.face.y + layout.face.h / 2 } : null
-  readonly property int seed: Compose.hash(p.id) % 997
-
-  // Her room, when the backdrop is her room and the set has rooms, out of focus behind a close framing. The weather now
-  // holds for a panel from the last few hours; an older one shows a clear sky rather than a guess.
-  readonly property var room: backdrop.kind === "room" && pose ? Scenery.chooseRoom(scenery.rooms, pose.setting, seed) : null
-  readonly property var roomPlace: room && width > 0 && layout.height > 0 ? Scenery.placeRoom(room, width, layout.height, p.side) : null
-  readonly property var weather: sky && sky.condition && Math.abs(now - when) < Light.WEATHER_MS ? sky : null
-  readonly property var scenePlate: room ? Scenery.choosePlate(scenery.plates, Scenery.season(new Date(when)), seed) : null
-  readonly property var sceneProps: {
-    if (!roomPlace) return [];
-    const obstacles = layout.elements.filter(e => e !== null && e !== undefined);
-    if (layout.face) obstacles.push(layout.face);
-    const chosen = Scenery.chooseProps(scenery.props, { date: new Date(when), weather: weather, room: room, seed: seed });
-    return Scenery.placeProps(chosen, room, roomPlace, width, layout.height, obstacles);
-  }
+  // The hour its words were written, its light, and what stands behind her: her room, its window and props, or a
+  // backdrop (panelScene in scenery.mjs, shared with the phone).
+  readonly property var scene: Scenery.panelScene({ panel: p, layout: layout, pose: pose, sizes: sizes, width: width, now: now, hourOverride: hourOverride, sky: sky, scenery: scenery })
+  readonly property var light: scene.light
+  readonly property var backdrop: scene.backdrop
+  readonly property var faceCentre: scene.faceCentre
+  readonly property int seed: scene.seed
+  readonly property var room: scene.room
+  readonly property var roomPlace: scene.roomPlace
 
   Backdrop {
     anchors.fill: parent
@@ -93,12 +76,12 @@ Item {
     visible: panel.roomPlace !== null
     room: panel.room
     place: panel.roomPlace
-    plate: panel.scenePlate
-    sky: Light.skyLook(panel.light, panel.weather ? panel.weather.condition : "")
-    props: panel.sceneProps
+    plate: panel.scene.plate
+    sky: panel.scene.sky
+    props: panel.scene.props
     light: panel.light
     seed: panel.seed
-    blur: Scenery.focusBlur(panel.layout.framing)
+    blur: panel.scene.blur
   }
 
   // The lamp after dark: a warm pool of light behind her, over the graded room.

@@ -4,6 +4,7 @@
 // test/overlay.test.mjs runs it under Node, so it is plain JavaScript as QML's engine knows it: no Array.prototype.at,
 // Object.hasOwn, or object spread. See "Rooms, windows, and props" in docs/interfaces.org.
 import { SETTINGS, hash } from "./compose.mjs";
+import { WEATHER_MS, backdrop as chooseBackdrop, hourOf, look, moment, skyLook, sunFor } from "./light.mjs";
 
 export { SETTINGS };
 export const SEASONS = ["spring", "summer", "autumn", "winter"];
@@ -190,4 +191,49 @@ export function placeProps(props, room, place, w, h, obstacles = []) {
 		if (placed) out.push(placed);
 	}
 	return out;
+}
+
+/**
+ * Everything behind June in a laid-out panel, as every client decides it: the hour its words were written (or the
+ * clock, or `hourOverride` when previewing the light), the light then at home under the daemon's `sky`, what stands
+ * behind her (light.mjs `backdrop`, the words' share of the panel keeping a long one plain), and when that is her
+ * room, which room for her pose, where it sits, the season's view, the window's sky with the weather now (for a panel
+ * from the last few hours only), the props the day brings out placed clear of her face and the words, and how far out
+ * of focus it is. `sizes` are the elements' measured sizes; `scenery` is mergeScenery's.
+ */
+export function panelScene({ panel, layout, pose, sizes, width, now, hourOverride = -1, sky = null, scenery }) {
+	const when = moment(panel) ?? now;
+	const light = look(hourOverride >= 0 ? hourOverride : hourOf(when), sunFor(hourOverride >= 0 ? now : when, sky));
+	let covered = 0;
+	for (const s of sizes) covered += s.w * s.h;
+	const share = width > 0 && layout.height > 0 ? covered / (width * layout.height) : 0;
+	const back = chooseBackdrop(panel, { live: Boolean(panel.live), share });
+	const faceCentre = layout.face ? { x: layout.face.x + layout.face.w / 2, y: layout.face.y + layout.face.h / 2 } : null;
+	const seed = hash(panel.id) % 997;
+	const rooms = scenery ? scenery.rooms : [];
+	const room = back.kind === "room" && pose ? chooseRoom(rooms, pose.setting, seed) : null;
+	const roomPlace = room && width > 0 && layout.height > 0 ? placeRoom(room, width, layout.height, panel.side) : null;
+	const weather = sky && sky.condition && Math.abs(now - when) < WEATHER_MS ? sky : null;
+	const plate = room ? choosePlate(scenery.plates, season(new Date(when)), seed) : null;
+	let props = [];
+	if (roomPlace) {
+		const obstacles = layout.elements.filter((e) => e !== null && e !== undefined);
+		if (layout.face) obstacles.push(layout.face);
+		const chosen = chooseProps(scenery.props, { date: new Date(when), weather, room, seed });
+		props = placeProps(chosen, room, roomPlace, width, layout.height, obstacles);
+	}
+	return {
+		when,
+		light,
+		backdrop: back,
+		faceCentre,
+		seed,
+		room,
+		roomPlace,
+		weather,
+		plate,
+		props,
+		sky: skyLook(light, weather ? weather.condition : ""),
+		blur: focusBlur(layout.framing),
+	};
 }

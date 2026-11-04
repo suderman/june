@@ -4,11 +4,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { activity, applyView, beats, caption, emptyView, markup, panels, readInput } from "../overlay/strip.mjs";
-import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, jagged, liveActivity, metrics, picked, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
+import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, panelLayout, jagged, liveActivity, metrics, picked, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
 import { CALM_GROUND, LONG_SHARE, PATTERNS, TIMES, WEATHER_MS, backdrop, cutaway, fallingPath, graded, hourOf, look, moment, patternPath, place, skyLook, sunFor, sunKeys, sunTimes } from "../overlay/light.mjs";
-import { MAX_PROPS, focusBlur, SEASONS as SCENE_SEASONS, SETTINGS as SCENE_SETTINGS, SPOTS, choosePlate, chooseProps, chooseRoom, mergeScenery, placeProps, placeRoom, readScenery, roomPoint, season } from "../overlay/scenery.mjs";
+import { MAX_PROPS, focusBlur, panelScene, SEASONS as SCENE_SEASONS, SETTINGS as SCENE_SETTINGS, SPOTS, choosePlate, chooseProps, chooseRoom, mergeScenery, placeProps, placeRoom, readScenery, roomPoint, season } from "../overlay/scenery.mjs";
 import { SEASONS, SETTINGS, SPOTS as AVATAR_SPOTS } from "../src/avatar.ts";
 import { DND_MODE, MODES_CALL, SCHEMES, SCHEME_CALL, isDark, parseModes, parseScheme, quietIn, setQuietCall } from "../overlay/desktop.mjs";
 import { FACES, LOOKS, face, liveFace, lines as consoleLines } from "../overlay/console.mjs";
@@ -886,4 +886,26 @@ test("the strip is composed the same way on every client: sides and poses kept o
 	const settled = streaming.slice(0, 5).concat([{ kind: "assistant", id: "a3", text: "busy" }]);
 	assert.equal(composeStrip(panels(settled), { running: false }, poses, memory, true)[2].pose.id, memory.livePoses[live[2].id]);
 	assert.ok(composeStrip(panels(settled), { running: false }, poses, memory, false)[2].pose);
+});
+
+test("a panel's scene is decided once for every client: the hour's light, her room, its window, and what is behind her", () => {
+	const poses = readPoses(manifest, "");
+	const sceneryAll = readScenery(manifest, "");
+	const at = new Date(2026, 9, 14, 21, 30).getTime();
+	const items = [
+		{ kind: "user", id: "u1", text: "evening", at },
+		{ kind: "assistant", id: "a1", text: "evening yourself; the lamp is on.", expression: "warm", at },
+	];
+	const [panel] = composeStrip(panels(items), { running: false }, poses, { sides: {}, poseIds: {}, livePoses: {} });
+	const sizes = [{ kind: "user", w: 140, h: 44 }, { kind: "june", w: 260, h: 70 }];
+	const { layout, pose } = panelLayout({ panel, width: 700, sizes, poses });
+	const scene = panelScene({ panel, layout, pose, sizes, width: 700, now: at, sky: null, scenery: sceneryAll });
+	assert.equal(scene.when, at, "lit by its own time");
+	assert.equal(scene.backdrop.kind, "room");
+	assert.ok(scene.room && scene.roomPlace && scene.roomPlace.window, "her room for her pose, with its window");
+	assert.ok(scene.light.lampOn > 0, "the lamp on at half past nine");
+	assert.equal(scene.weather, null, "no sky, no weather");
+	assert.ok(scene.props.some((p) => p.id === "pumpkin"), "October brings the pumpkin out where it fits");
+	const noon = panelScene({ panel, layout, pose, sizes, width: 700, now: at, hourOverride: 12, sky: null, scenery: sceneryAll });
+	assert.equal(noon.light.lampOn, 0, "a previewed noon turns the lamp off");
 });
