@@ -156,9 +156,10 @@ Item {
     const back = layerAt(1 - front);
     reveal.stop();
     revealing = true;
-    place(back, a);
+    // Hidden before the source is set: a cached image is ready at once, and lands inside place().
     back.opacity = 0;
     back.settle = 1;
+    place(back, a);
     if (back.status === Image.Ready) land();
   }
   // The new pose is ready: printed, cut, or revealed as a reaction.
