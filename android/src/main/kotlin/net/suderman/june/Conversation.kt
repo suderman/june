@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -168,6 +169,11 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, keyboard: Boolean = false)
     val palette = pagePalette()
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().then(if (keyboard) Modifier.imePadding() else Modifier)) {
         Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            val ready = decisions
+            if (ready != null && avatar != null) {
+                LiveBadge(link, ready, avatar)
+                Spacer(Modifier.width(8.dp))
+            }
             Text(statusLine(link), color = palette.muted, fontSize = 13.sp, fontFamily = if (LookChoice.console) FontFamily.Monospace else null, modifier = Modifier.weight(1f))
             // The look, toggled as the desktop's window toggles it: outlined when off, filled when on.
             val on = LookChoice.console

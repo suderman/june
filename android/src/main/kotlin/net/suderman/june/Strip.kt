@@ -3,6 +3,7 @@ package net.suderman.june
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.util.LruCache
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -514,4 +515,54 @@ private fun ConsoleLine(line: JSONObject, palette: Look.Palette) {
         if (line.optBoolean("streaming")) withStyle(SpanStyle(color = palette.accent)) { append(" ▍") }
     }
     Text(text, color = palette.ink, fontFamily = FontFamily.Monospace, fontSize = if (quiet) 13.sp else 15.sp)
+}
+
+/**
+ * Live June in the status line: what she is doing now as her live art (live.mjs on the desktop), bobbing gently and
+ * quicker while she works, and her brief reaction when the daemon picks a face for a new reply: that face's chibi for
+ * a moment, then back. A still from the set until real loops exist.
+ */
+@Composable
+fun LiveBadge(link: Link, decisions: Decisions, avatar: Avatar) {
+    var ready by remember { mutableStateOf(false) }
+    LaunchedEffect(decisions) {
+        decisions.call("setArt", avatar.manifest)
+        ready = true
+    }
+    // When her last run ended, for her idle moods; she settles from busy to idle as runs finish.
+    var idleSince by remember { mutableStateOf(System.currentTimeMillis()) }
+    var wasRunning by remember { mutableStateOf(false) }
+    val running = link.state.running || link.state.compacting
+    LaunchedEffect(running) {
+        if (wasRunning && !running) idleSince = System.currentTimeMillis()
+        wasRunning = running
+    }
+    val minute by produceState(System.currentTimeMillis()) { while (true) { kotlinx.coroutines.delay(30_000); value = System.currentTimeMillis() } }
+    val linked = link.status is LinkStatus.Linked
+    val now by produceState(JSONObject(), ready, link.items, link.state, linked, idleSince, minute) {
+        if (ready) value = runCatching { JSONObject(decisions.call("liveNow", JSONArray(link.items.map { it.raw }), link.state.raw, linked, idleSince.toDouble(), minute.toDouble())) }.getOrDefault(value)
+    }
+    // Her reaction to a newly picked face: none for faces already there when she opened.
+    var seen by remember { mutableStateOf<String?>(null) }
+    var reaction by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(ready, link.items) {
+        if (!ready) return@LaunchedEffect
+        val latest = link.items.lastOrNull { it.kind == "assistant" && it.expression.isNotEmpty() }?.id ?: ""
+        if (seen == null) { seen = latest; return@LaunchedEffect }
+        val face = JSONObject(decisions.call("reactionTo", JSONArray(link.items.map { it.raw }), seen))
+        if (!face.has("id")) return@LaunchedEffect
+        seen = face.getString("id")
+        reaction = face.optString("url").takeIf { it.isNotEmpty() && it != "null" } ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(2600)
+        reaction = null
+    }
+    val url = reaction ?: now.optJSONObject("art")?.optString("url")
+    val image by produceState<ImageBitmap?>(null, url) { value = url?.let { avatar.image(it) } }
+    val busy = now.optString("state") in setOf("typing", "thinking", "digging", "delegating", "watching", "tidying", "listening", "speaking")
+    val bob = androidx.compose.animation.core.rememberInfiniteTransition(label = "bob").animateFloat(
+        0f, 3f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(if (busy) 380 else 900), androidx.compose.animation.core.RepeatMode.Reverse), label = "bob",
+    )
+    Box(Modifier.size(40.dp)) {
+        image?.let { Canvas(Modifier.fillMaxSize()) { drawImage(it, dstOffset = IntOffset(0, (bob.value * density).toInt()), dstSize = IntSize(size.width.toInt(), size.height.toInt())) } }
+    }
 }

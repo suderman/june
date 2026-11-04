@@ -6,21 +6,25 @@
 import * as compose from "../../overlay/compose.mjs";
 import * as looks from "../../overlay/console.mjs";
 import * as light from "../../overlay/light.mjs";
+import * as live from "../../overlay/live.mjs";
 import * as scenery from "../../overlay/scenery.mjs";
 import * as strip from "../../overlay/strip.mjs";
 
-export { compose, light, looks, scenery, strip };
-export * as live from "../../overlay/live.mjs";
+export { compose, light, live, looks, scenery, strip };
 
 // Each panel's side and pose once chosen, kept for as long as the screen lives (composeStrip).
 const memory = { sides: {}, poseIds: {}, livePoses: {} };
 let poses = [];
 let rooms = { rooms: [], plates: [], props: [] };
+let liveArt = {};
+let chibiArt = {};
 
 /** Read an avatar set's manifest: its poses, rooms, views, and props, their urls its files as the app's assets name them. */
 export function setArt(manifest) {
 	poses = compose.readPoses(manifest, "");
 	rooms = scenery.mergeScenery([scenery.readScenery(manifest, "")]);
+	liveArt = live.readLive(manifest, "");
+	chibiArt = live.readChibi(manifest, "");
 	return poses.length;
 }
 
@@ -97,4 +101,21 @@ function scene(panel, laid, pose, sizes, width, now, hourOverride, sky) {
 /** The strip in the console look: each panel's lines (console.mjs), and whether she is still working in it. */
 export function consoleStrip(items, state, holding) {
 	return panels(items, state, holding).map((panel) => ({ id: panel.id, live: panel.live === true, lines: looks.lines(panel) }));
+}
+
+/**
+ * Live June now (live.mjs): what she is doing from the view and the clock, `idleSince` being when her last run ended,
+ * and the art for it, the set's sipping loop standing in for a state it lacks.
+ */
+export function liveNow(items, state, linked, idleSince, now) {
+	const which = live.liveState({ view: { items, state }, linked, now: new Date(now), idleSince, once: null });
+	return { state: which, art: liveArt[which] ?? liveArt.sipping ?? null };
+}
+
+/** A newly picked face since `seen` (a reply's id), with its chibi for her brief reaction; an empty object when none. */
+export function reactionTo(items, seen) {
+	const face = live.newFace(items, seen);
+	if (!face) return {};
+	const art = live.reactionArt(chibiArt, compose.chain(face.expression));
+	return { id: face.id, expression: face.expression, url: art ? art.url : null };
 }
