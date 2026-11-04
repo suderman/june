@@ -8,6 +8,9 @@ Rectangle {
   property string liveState: "sipping"
   property var art: null
   property bool running: true
+  // Her brief reaction when a reply's face is picked ({ url, plain }), shown over the loop; null otherwise.
+  property var reaction: null
+  onReactionChanged: if (reaction && !reaction.plain) { settle.stop(); stage.scale = 1.05; settle.start(); }
 
   signal clicked()
 
@@ -21,6 +24,8 @@ Rectangle {
   border.width: 3
   clip: true
 
+  NumberAnimation { id: settle; target: stage; property: "scale"; to: 1; duration: 220; easing.type: Easing.OutCubic }
+
   Item {
     id: stage
     anchors.fill: parent
@@ -33,7 +38,16 @@ Rectangle {
       NumberAnimation { to: 0; duration: cardBox.liveState === "snoozing" ? 1600 : cardBox.busy ? 380 : 900; easing.type: Easing.InOutSine }
     }
     Image {
-      visible: cardBox.art !== null && cardBox.art.frames <= 1
+      visible: cardBox.reaction !== null
+      anchors.fill: parent
+      source: cardBox.reaction ? cardBox.reaction.url : ""
+      sourceSize.width: 288
+      sourceSize.height: 288
+      fillMode: Image.PreserveAspectFit
+      smooth: true
+    }
+    Image {
+      visible: cardBox.reaction === null && cardBox.art !== null && cardBox.art.frames <= 1
       y: stage.bob
       width: stage.width
       height: stage.height
@@ -45,7 +59,7 @@ Rectangle {
     }
     Image { id: sheetSize; visible: false; source: cardBox.art && cardBox.art.frames > 1 ? cardBox.art.url : "" }
     AnimatedSprite {
-      visible: cardBox.art !== null && cardBox.art.frames > 1
+      visible: cardBox.reaction === null && cardBox.art !== null && cardBox.art.frames > 1
       anchors.fill: parent
       source: cardBox.art && cardBox.art.frames > 1 ? cardBox.art.url : ""
       frameCount: cardBox.art ? Math.max(1, cardBox.art.frames) : 1

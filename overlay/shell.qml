@@ -46,6 +46,9 @@ ShellRoot {
   property var poses: []
   // Live June's art by state, the first set winning.
   property var liveArt: ({})
+  // Live June's chibi reactions by expression, the first set winning.
+  property var chibiSets: ({})
+  property var chibiArt: ({})
   property var sides: ({})
   property var poseIds: ({})
 
@@ -66,6 +69,9 @@ ShellRoot {
       const manifest = JSON.parse(text);
       sets[index] = Compose.readPoses(manifest, "file://" + dir + "/");
       lives[index] = Live.readLive(manifest, "file://" + dir + "/");
+      const chibis = Object.assign({}, chibiSets);
+      chibis[index] = Live.readChibi(manifest, "file://" + dir + "/");
+      chibiSets = chibis;
     }
     catch (e) { console.warn("june overlay: no usable avatar set in", dir); sets[index] = []; lives[index] = {}; }
     artSets = sets;
@@ -73,6 +79,9 @@ ShellRoot {
     const art = {};
     for (let i = artDirs.length - 1; i >= 0; i--) Object.assign(art, liveSets[i] ?? {});
     liveArt = art;
+    const chibi = {};
+    for (let i = artDirs.length - 1; i >= 0; i--) Object.assign(chibi, chibiSets[i] ?? {});
+    chibiArt = chibi;
     const seen = {};
     const all = [];
     for (let i = 0; i < artDirs.length; i++)
@@ -270,12 +279,34 @@ ShellRoot {
     tuckAway.interval = Live.readingTime(miniText);
     tuckAway.restart();
   }
-  // After each view change: note when a run ends, and pop up for a newly finished desktop reply while the strip is hidden.
+  // Live June's reaction: when a reply's face is picked, she shows its chibi for a moment, then goes back to her loop.
+  property var reaction: null
+  property var seenFace: null
+  Timer { id: reactionEnd; interval: Live.REACTION_MS; onTriggered: root.reaction = null }
+  function react(expression) {
+    const art = Live.reactionArt(chibiArt, Compose.chain(expression));
+    if (!art) return;
+    reaction = { url: art.url, plain: ["serious", "gentle"].includes(expression) };
+    reactionEnd.restart();
+  }
+
+  // After each view change: note when a run ends, react to a newly picked face, and pop up for a newly finished
+  // desktop reply while the strip is hidden.
   function watchLive() {
     const running = Boolean(view.state.running || view.state.compacting);
     if (wasRunning && !running) idleSince = Date.now();
     wasRunning = running;
     now = Date.now();
+    const face = Live.newFace(view.items, seenFace);
+    if (seenFace === null) {
+      // On first sight, the faces already there are history: no reaction to them.
+      let latestFace = "";
+      for (let i = view.items.length - 1; i >= 0; i--) if (view.items[i].kind === "assistant" && view.items[i].expression) { latestFace = view.items[i].id; break; }
+      seenFace = latestFace;
+    } else if (face) {
+      seenFace = face.id;
+      if (miniShown || shown) react(face.expression);
+    }
     const latest = Live.newReply(view.items, seenReply);
     if (seenReply === null) { seenReply = latest ? latest.id : ""; return; }
     if (!latest) return;
@@ -307,6 +338,7 @@ ShellRoot {
     shown: root.miniShown && !root.shown
     liveState: root.liveState
     art: root.liveArt[root.liveState] ?? root.liveArt["sipping"] ?? null
+    reaction: root.reaction
     status: root.liveWords[root.liveState] ?? ""
     message: root.miniText
     messageShown: root.miniMessage
@@ -379,8 +411,23 @@ ShellRoot {
   // Bring the list model in step with the view, touching only panels that changed, so streaming redraws one panel.
   // Each panel gets June's pose and side here, oldest first: the side alternates from the panel before unless her pose
   // says otherwise, and both stay put once chosen. The panel she is answering in shows the pose of the moment instead.
+  // When a run ends, the panel she answered in keeps her talking pose until her real face arrives (expression.ts picks
+  // it a few seconds later), so no guessed face shows in between; after this long, a stand-in.
+  readonly property int faceHoldMs: 6000
+  property real faceHoldUntil: 0
+  property bool syncWasRunning: false
+  property var livePoses: ({})
+  Timer { id: faceHold; onTriggered: root.sync() }
+
   function sync() {
     const list = Strip.panels(view.items);
+    const running = Boolean(view.state.running || view.state.compacting);
+    if (syncWasRunning && !running) {
+      faceHoldUntil = Date.now() + faceHoldMs;
+      faceHold.interval = faceHoldMs + 50;
+      faceHold.restart();
+    }
+    syncWasRunning = running;
     let previousSide = undefined;
     let previousPose = "";
     const composed = list.map((p, i) => {
@@ -389,9 +436,12 @@ ShellRoot {
       // picked for her reply, or a kept stand-in until it arrives.
       const doing = live ? Compose.liveActivity(view.state, p) : null;
       const face = live ? null : Compose.picked(p);
+      const holding = !live && !face && i === list.length - 1 && Date.now() < faceHoldUntil && livePoses[p.id] !== undefined;
       let pose = live ? Compose.choosePose(poses, doing ? { activity: doing, expression: "curious" } : Compose.standIn(p, true), previousPose, p.id)
         : face ? Compose.choosePose(poses, face, previousPose, p.id)
+        : holding ? (poses.find(x => x.id === livePoses[p.id]) ?? null)
         : (poses.find(x => x.id === poseIds[p.id]) ?? null);
+      if (live && pose) livePoses[p.id] = pose.id;
       if (!pose && !live) {
         pose = Compose.choosePose(poses, Compose.standIn(p, false), previousPose, p.id);
         if (pose) poseIds[p.id] = pose.id;
@@ -580,6 +630,7 @@ ShellRoot {
         anchors.bottomMargin: 22
         liveState: root.liveState
         art: root.liveArt[root.liveState] ?? root.liveArt["sipping"] ?? null
+        reaction: root.reaction
         running: root.shown
         // Already on screen when the strip grows out of min mode or shrinks back to it; otherwise she fades in with it.
         opacity: root.cardSteady ? 1 : Math.min(1, root.unfold * 3)

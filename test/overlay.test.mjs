@@ -7,7 +7,7 @@ import { activity, applyView, beats, caption, emptyView, markup, panels, readInp
 import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, jagged, liveActivity, metrics, picked, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
-import { LIVE_STATES as LIVE, RECENT_MS, excerpt, idleState, liveState, newReply, readLive, readingTime, recent } from "../overlay/live.mjs";
+import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent } from "../overlay/live.mjs";
 
 const user = (id, text = "hi", source = "gui") => ({ kind: "user", id, source, text });
 const june = (id, text = "hello", streaming = false) => ({ kind: "assistant", id, text, streaming, answers: "gui" });
@@ -535,5 +535,21 @@ test("a settled panel shows the face the daemon picked for its reply, the pose w
 	assert.deepEqual(picked(noPose[0]), { expression: "warm" });
 	assert.equal(choosePose(POSES, picked(noPose[0])).expression, "warm");
 	assert.equal(picked(panels([user("u1"), june("a1", "not yet")])[0]), null, "before the pick: none, so the stand-in shows");
+});
+
+test("live June reacts once to each newly picked face, with the nearest chibi along its chain", () => {
+	const chibi = readChibi(manifest, "file:///set/");
+	assert.equal(Object.keys(chibi).length, 10);
+	assert.equal(chibi.smug.url, "file:///set/chibi/smug.svg");
+	assert.equal(reactionArt(chibi, chain("smug")).url, "file:///set/chibi/smug.svg");
+	assert.equal(reactionArt(chibi, chain("indignant")).url, "file:///set/chibi/exasperated.svg", "indignant falls back to exasperated");
+	assert.equal(reactionArt(chibi, chain("serious")).url, "file:///set/chibi/idle.svg", "no serious chibi: idle");
+	assert.equal(reactionArt({}, chain("smug")), null);
+	const faced = { ...june("a2", "a hollow victory."), expression: "wry" };
+	assert.equal(newFace([user("u1"), june("a1", "no face yet")], null), null);
+	assert.equal(newFace([user("u1"), faced], null).id, "a2");
+	assert.equal(newFace([user("u1"), faced], "a2"), null, "once");
+	assert.equal(newFace([user("u1"), faced, user("u2"), june("a3", "pending")], "a1").id, "a2", "the newest that has a face");
+	assert.ok(REACTION_MS >= 2000 && REACTION_MS <= 4000);
 });
 

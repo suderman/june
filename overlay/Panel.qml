@@ -46,7 +46,76 @@ Item {
   // The panel's ground.
   Rectangle { anchors.fill: parent; color: Theme.tint(panel.p.id) }
 
-  // June, framed into the panel or, when the words run long, into an inset at the top of her side.
+  // June, framed into the panel or, when the words run long, into an inset at the top of her side. Two layers, so a new
+  // pose loads unseen and is revealed only when it is ready: never a blank frame. A change in the newest panel, once it
+  // is on screen, is a beat of the comic (see present()); everywhere else the page is printed: the final face, still.
+  readonly property var art: layout.art && pose ? { url: pose.url, x: layout.art.x, y: layout.art.y, w: layout.art.w, h: layout.art.h, mirror: layout.mirror, face: layout.face, plain: ["serious", "gentle"].includes(pose.expression) || Boolean(pose.activity) } : null
+  property bool presented: false
+  property int front: 0
+  property bool revealing: false
+  // Marks wait a beat after the face lands, so the reaction reads face first, emphasis second.
+  property bool marksShown: true
+  onArtChanged: present()
+  Component.onCompleted: present()
+
+  function layerAt(i) { return i === 0 ? layerA : layerB; }
+  function place(layer, a) {
+    layer.source = a.url;
+    layer.x = a.x - artBox.x;
+    layer.y = a.y - artBox.y;
+    layer.width = a.w;
+    layer.height = a.h;
+    layer.mirror = a.mirror;
+    layer.focusX = a.face ? a.face.x + a.face.w / 2 - a.x : a.w / 2;
+    layer.focusY = a.face ? a.face.y + a.face.h / 2 - a.y : a.h / 3;
+  }
+  function present() {
+    const a = art;
+    const shown = layerAt(front);
+    if (a === null) { shown.source = ""; return; }
+    // The same pose re-laid (the panel grew as she wrote): move it, no beat.
+    if (shown.source.toString() === a.url && !revealing) { place(shown, a); return; }
+    const back = layerAt(1 - front);
+    reveal.stop();
+    revealing = true;
+    place(back, a);
+    back.opacity = 0;
+    back.settle = 1;
+    if (back.status === Image.Ready) land();
+  }
+  // The new pose is ready: printed, cut, or revealed as a reaction.
+  function land() {
+    if (!revealing) return;
+    const back = layerAt(1 - front);
+    const shown = layerAt(front);
+    const beat = presented && panel.newest;
+    revealing = false;
+    if (!beat) {
+      back.opacity = 1;
+      shown.opacity = 0;
+      front = 1 - front;
+      presented = true;
+      return;
+    }
+    const plain = art && art.plain;
+    fadeIn.target = back;
+    fadeOut.target = shown;
+    settleIn.target = back;
+    back.settle = plain ? 1 : 1.03;
+    settleIn.duration = plain ? 0 : 220;
+    marksShown = plain;
+    reveal.start();
+    front = 1 - front;
+    if (!plain) marksBeat.restart();
+  }
+  ParallelAnimation {
+    id: reveal
+    NumberAnimation { id: fadeIn; property: "opacity"; to: 1; duration: 120; easing.type: Easing.OutQuad }
+    NumberAnimation { id: fadeOut; property: "opacity"; to: 0; duration: 120; easing.type: Easing.InQuad }
+    NumberAnimation { id: settleIn; property: "settle"; to: 1; duration: 220; easing.type: Easing.OutCubic }
+  }
+  Timer { id: marksBeat; interval: 220; onTriggered: panel.marksShown = true }
+
   Item {
     id: artBox
     visible: panel.layout.art !== null
@@ -57,17 +126,29 @@ Item {
     clip: true
     Rectangle { anchors.fill: parent; visible: panel.layout.clip.inset; color: Qt.darker(Theme.tint(panel.p.id), 1.06) }
     Image {
-      readonly property var r: panel.layout.art ?? ({ x: 0, y: 0, w: 1, h: 1 })
-      x: r.x - artBox.x
-      y: r.y - artBox.y
-      width: r.w
-      height: r.h
-      source: panel.pose ? panel.pose.url : ""
-      mirror: panel.layout.mirror
-      sourceSize.width: Math.ceil(r.w)
-      sourceSize.height: Math.ceil(r.h)
+      id: layerA
+      property real settle: 1
+      property real focusX: 0
+      property real focusY: 0
+      transform: Scale { origin.x: layerA.focusX; origin.y: layerA.focusY; xScale: layerA.settle; yScale: layerA.settle }
+      sourceSize.width: Math.ceil(width)
+      sourceSize.height: Math.ceil(height)
       smooth: true
       asynchronous: true
+      onStatusChanged: if (status === Image.Ready && panel.front === 1) panel.land()
+    }
+    Image {
+      id: layerB
+      opacity: 0
+      property real settle: 1
+      property real focusX: 0
+      property real focusY: 0
+      transform: Scale { origin.x: layerB.focusX; origin.y: layerB.focusY; xScale: layerB.settle; yScale: layerB.settle }
+      sourceSize.width: Math.ceil(width)
+      sourceSize.height: Math.ceil(height)
+      smooth: true
+      asynchronous: true
+      onStatusChanged: if (status === Image.Ready && panel.front === 0) panel.land()
     }
   }
   Rectangle {
@@ -78,9 +159,9 @@ Item {
     border.width: Theme.line
   }
 
-  // Marks that reinforce her pose, drawn beside her face, never baked into the art.
+  // Marks that reinforce her pose, drawn beside her face, never baked into the art; in a reveal they land a beat late.
   Repeater {
-    model: panel.layout.marks
+    model: panel.marksShown ? panel.layout.marks : []
     delegate: Shape {
       id: mark
       required property var modelData

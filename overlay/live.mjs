@@ -118,3 +118,37 @@ export function recent(at, now) {
 	return at > 0 && now - at <= RECENT_MS;
 }
 
+/** Live June's chibi reactions from one avatar set, by expression, with URLs under `base`; anything unusable is skipped. */
+export function readChibi(manifest, base) {
+	const out = {};
+	const chibi = manifest && typeof manifest.chibi === "object" && manifest.chibi !== null ? manifest.chibi : {};
+	for (const name of Object.keys(chibi)) {
+		const a = chibi[name];
+		if (!a || typeof a.file !== "string") continue;
+		out[name] = { url: base + a.file };
+	}
+	return out;
+}
+
+/** How long live June holds her reaction before going back to what she is doing, in ms. */
+export const REACTION_MS = 2600;
+
+/**
+ * The newest reply whose face has been picked, when it is not `seen`; null when there is none or it was seen. Live June
+ * reacts once to each.
+ */
+export function newFace(items, seen) {
+	for (let i = items.length - 1; i >= 0; i--) {
+		const item = items[i];
+		if (item.kind !== "assistant" || !item.expression) continue;
+		return item.id === seen ? null : item;
+	}
+	return null;
+}
+
+/** The chibi for an expression: the first in its fallback chain (`chain`, from compose.mjs) that the set has. */
+export function reactionArt(chibi, chain) {
+	for (const name of chain) if (chibi[name]) return chibi[name];
+	return null;
+}
+

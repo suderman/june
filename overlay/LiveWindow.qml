@@ -14,6 +14,7 @@ PanelWindow {
   property bool shown: false
   property string liveState: "sipping"
   property var art: null
+  property var reaction: null
   property string status: ""
   property string message: ""
   property bool messageShown: false
@@ -84,6 +85,7 @@ PanelWindow {
     height: win.card
     liveState: win.liveState
     art: win.art
+    reaction: win.reaction
     running: win.shown
     onClicked: win.openStrip()
   }
