@@ -135,6 +135,18 @@ export function liveActivity(state, panel) {
 // what it can see. Common faces only: rare ones stay rare, and these choices must never claim a feeling she did not show.
 const STAND_IN = ["idle", "warm", "wry", "curious", "smug", "laughing", "serious"];
 
+/**
+ * What a settled panel asks for: the face the daemon picked for its latest reply (the expression and, when named, the
+ * pose), or null before one has arrived.
+ */
+export function picked(panel) {
+	for (let i = panel.elements.length - 1; i >= 0; i--) {
+		const e = panel.elements[i];
+		if (e.kind === "june" && e.expression) return e.pose ? { pose: e.pose, expression: e.expression } : { expression: e.expression };
+	}
+	return null;
+}
+
 /** A stand-in request for a panel: a failure gets exasperation, a reply in progress curiosity, the rest a common face. */
 export function standIn(panel, live) {
 	if (panel.elements.some((e) => e.kind === "burst")) return { expression: "exasperated" };

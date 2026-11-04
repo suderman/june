@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { activity, applyView, beats, caption, emptyView, markup, panels, readInput } from "../overlay/strip.mjs";
-import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, jagged, liveActivity, metrics, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
+import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, jagged, liveActivity, metrics, picked, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
 import { LIVE_STATES as LIVE, RECENT_MS, excerpt, idleState, liveState, newReply, readLive, readingTime, recent } from "../overlay/live.mjs";
@@ -524,5 +524,16 @@ test("a page turn moves most of a view, toward newer or earlier panels, and stop
 	assert.equal(pageTarget(3800, 800, 0, 4000, 1), 4000, "not past the newest");
 	assert.equal(pageTarget(200, 800, 0, 4000, -1), 0, "not past the earliest");
 	assert.equal(pageTarget(-500, 800, -3000, 0, 1), 0, "a list laid out bottom to top has negative positions; the same rules hold");
+});
+
+test("a settled panel shows the face the daemon picked for its reply, the pose when named, else a stand-in until it comes", () => {
+	const strip = panels([user("u1", "you win."), { ...june("a1", "a hollow victory, but i'll take it."), expression: "wry", pose: "smug-chin-on-hand" }]);
+	assert.deepEqual(strip[0].elements[1].expression, "wry", "the reply's face rides on its balloon");
+	assert.deepEqual(picked(strip[0]), { pose: "smug-chin-on-hand", expression: "wry" });
+	assert.equal(choosePose(POSES, picked(strip[0])).id, "smug-chin-on-hand");
+	const noPose = panels([user("u1", "thanks"), { ...june("a1", "anytime."), expression: "warm" }]);
+	assert.deepEqual(picked(noPose[0]), { expression: "warm" });
+	assert.equal(choosePose(POSES, picked(noPose[0])).expression, "warm");
+	assert.equal(picked(panels([user("u1"), june("a1", "not yet")])[0]), null, "before the pick: none, so the stand-in shows");
 });
 

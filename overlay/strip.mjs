@@ -91,7 +91,11 @@ export function panels(items) {
 					const carried = current.elements.splice(lastJune + 1);
 					open(`${item.id}#${i}`, carried);
 				}
-				current.elements.push({ kind: "june", id: `${item.id}#${i}`, text, streaming: item.streaming && i === parts.length - 1 });
+				const beat = { kind: "june", id: `${item.id}#${i}`, text, streaming: item.streaming && i === parts.length - 1 };
+				// The face the daemon picked for the reply (expression.ts), once it has settled.
+				if (item.expression) beat.expression = item.expression;
+				if (item.pose) beat.pose = item.pose;
+				current.elements.push(beat);
 			}
 		} else if (item.kind === "tool") {
 			const last = current.elements[current.elements.length - 1];
