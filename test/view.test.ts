@@ -46,6 +46,16 @@ test("the fold: thinking as one line each, tool lines with their status, Org as 
 	assert.deepEqual(state, { running: false, background: 0, queued: 0, model: "terra:medium", compacting: false, expression: "idle" });
 });
 
+test("the fold carries when each message was written, for a client that lights panels by their hour", () => {
+	const entries = [
+		{ ...user(1, "gui", "morning"), model: [{ role: "user", content: "[gui] morning", timestamp: 1000 }] },
+		said(2, [{ type: "text", text: "Morning." }], { timestamp: 2000 }),
+		telegram(3, "later"),
+	];
+	const { items } = fold(entries, {});
+	assert.deepEqual(items.map((i) => ("at" in i ? i.at : undefined)), [1000, 2000, undefined]);
+});
+
 test("the fold: the streaming reply, running tools, the queue, and a retry come from pi.live and pi.inbox", () => {
 	const entries = [user(1, "kitty", "build it"), said(2, [{ type: "toolCall", id: "c1", name: "bash", arguments: { command: "make" } }])];
 	const live = {

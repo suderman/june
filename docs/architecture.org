@@ -150,8 +150,8 @@ Revised on 2026-11-02 for Pi Durable 1.5, which removes =watchEvents()=. =attach
 { type: "view"; changes: ({ op: "put"; item: ViewItem; after: string | null } | { op: "drop"; id: string })[]; state?: ViewState }
 
 type ViewItem =
-	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; files?: { name: string; size: number; path: string }[]; voice?: true; private?: true }
-	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: "gui" | "apk" | "telegram"; error?: string; heard?: number; thinking?: string; private?: true }
+	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; files?: { name: string; size: number; path: string }[]; voice?: true; private?: true; at?: number }
+	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: "gui" | "apk" | "telegram"; error?: string; heard?: number; thinking?: string; private?: true; expression?: string; pose?: string; at?: number }
 	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; error?: string; output?: string; private?: true }
 	| { kind: "note"; id: string; text: string }
 	| { kind: "patter"; id: string; text: string };
@@ -160,6 +160,7 @@ type ViewState = { running: boolean; background: number; queued: number; model: 
 #+end_src
 
 - The daemon folds from state, not events. Each connection holds a =Conversation.watch()= of the root with a window of =min: 200= (=max= 400), and a =ConversationTranscript= merges each value so entries that leave the window stay folded. The fold (=fold()= in =src/transcript.ts=) is a pure function of a view: committed entries from the transcript, and the run, the streaming reply, running tools, the inbox, and compactions from =docs["pi.live"]=, =docs["pi.inbox"]=, and =docs["pi.agent"]=. It runs at flush time, not per watch callback, so a burst of partials costs one fold. An idle conversation is =run === undefined=; =pi.live= may keep =runFailure= after a run that ended without an answer, which the fold shows as an assistant item with =error=, unless the reason is =aborted=, =reset=, or =nothing_to_answer=, or the run's own error entry already says it. A tool call with no result once its run has ended shows as an error, =interrupted=.
+- =at= on a user or assistant item is its message's timestamp in epoch milliseconds, when the log has one; the overlay lights a panel by it (see "Light and backgrounds" in =docs/interfaces.org=). A streaming reply has none until it is committed.
 - Tool items take the tool call's id, so one item goes from running to done or error without being replaced. 1.5's tool slots carry no arguments, so the summary comes from the tool-calling answer, which is committed before its tools run.
 - A reset replaces everything the client holds. It is sent at attach, and again whenever the watch delivers a root replacement (=[["r", view]]=, past 10,000 pending operations).
 - After each watch callback the daemon diffs the item list against what it last sent that connection: a new or changed item is a =put= of the whole item, placed after the item whose id is =after= (=null= for first); a removed item is a =drop=. =state= is sent whole when any field changed. Changes are flushed at most ten times a second per connection, so a streaming reply resends its text at most ten times a second; that is fine on the home network and keeps clients to a single "replace this item" operation.

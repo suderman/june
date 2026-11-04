@@ -24,13 +24,14 @@ export const sourceName = (source: string) => (source === "kitty" ? "tui" : sour
 export type ViewItem =
 	/** `private` marks June's own look, shown only in detail. */
 	/** `files` are those the message brought to June's inbox, with where they were saved. */
-	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; files?: { name: string; size: number; path: string }[]; private?: true }
+	/** `at`, on a user or assistant item, is when its message was written, in epoch milliseconds, when the log has it. */
+	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; files?: { name: string; size: number; path: string }[]; private?: true; at?: number }
 	/**
 	 * `text` is Markdown. `thinking` holds one flattened line per thinking block, or in detail the full text. `answers` is
 	 * the source of the input the reply follows, empty when that input is before the transcript. `alert` names the client
 	 * kind that should interrupt the user, on a finished reply only.
 	 */
-	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: Surface; error?: string; thinking?: string; private?: true; expression?: string; pose?: string }
+	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: Surface; error?: string; thinking?: string; private?: true; expression?: string; pose?: string; at?: number }
 	/** `error` is the first line of a failed call's output; `output`, in detail only, is all of what the call kept. */
 	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; error?: string; output?: string; private?: true }
 	| { kind: "note"; id: string; text: string }
@@ -84,8 +85,8 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 	 * An assistant item. A finished one that ends its turn alerts; one in the middle of a tool round does not, nor does a
 	 * private one. In a look, only real words are a message to the user; the rest is private.
 	 */
-	const assistant = (id: string, content: readonly Block[], options: { streaming?: boolean; error?: string; final?: boolean; shown?: boolean } = {}) => {
-		const { streaming = false, error, final = true } = options;
+	const assistant = (id: string, content: readonly Block[], options: { streaming?: boolean; error?: string; final?: boolean; shown?: boolean; at?: number } = {}) => {
+		const { streaming = false, error, final = true, at } = options;
 		const words = content.filter((b) => b.type === "text" && b.text).map((b) => b.text!).join("\n\n");
 		const blocks = content.filter((b) => b.type === "thinking" && b.thinking?.trim());
 		const thinking = detail ? blocks.map((b) => b.thinking!.trim()).join("\n\n") : blocks.map((b) => flatten(b.thinking!)).join("\n");
@@ -103,12 +104,14 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 			...(error ? { error } : {}),
 			...(thinking ? { thinking } : {}),
 			...mark(shown),
+			...(at !== undefined ? { at } : {}),
 		});
 	};
 
 	for (const entry of entries) {
 		const id = String(entry.id);
 		const message = entry.model?.[0];
+		const at = typeof message?.timestamp === "number" ? { at: message.timestamp as number } : {};
 		switch (entry.kind) {
 			case "june.input": {
 				const source = sourceName(String(entry.data?.source ?? "?"));
@@ -118,7 +121,7 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 				// A private look is answered in the markup of where the user last spoke, so it leaves the markup alone.
 				if (!hidden) markdown = source === "telegram";
 				const said = hidden ? textOf(message?.content) || (entry.data?.text ?? "") : (entry.data?.text ?? "");
-				if (!hidden || detail) items.push({ kind: "user", id, source, text: said, ...(entry.data?.imageCount ? { imageCount: entry.data.imageCount } : {}), ...(Array.isArray(entry.data?.files) && entry.data.files.length ? { files: entry.data.files } : {}), ...mark(!hidden) });
+				if (!hidden || detail) items.push({ kind: "user", id, source, text: said, ...(entry.data?.imageCount ? { imageCount: entry.data.imageCount } : {}), ...(Array.isArray(entry.data?.files) && entry.data.files.length ? { files: entry.data.files } : {}), ...mark(!hidden), ...at });
 				break;
 			}
 			case "june.patter":
@@ -157,7 +160,7 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 				// Untagged user entries came from Telegram before the bridge, and so did notices relayed there.
 				const own = /^\[(work|follow|reminder)[\] ]\s*/.exec(words);
 				answering = own ? own[1]! : "telegram";
-				items.push({ kind: "user", id, source: answering, text: own ? clip(words.slice(own[0].length), 80) : words });
+				items.push({ kind: "user", id, source: answering, text: own ? clip(words.slice(own[0].length), 80) : words, ...at });
 				markdown = true;
 				break;
 			}
@@ -165,10 +168,10 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 				const content: readonly Block[] = message?.content ?? [];
 				const error = message?.stopReason === "error" || message?.stopReason === "aborted" ? String(message.errorMessage ?? message.stopReason) : undefined;
 				if (hidden && !detail) {
-					assistant(id, content.filter((b) => b.type === "text"), { final: message?.stopReason !== "toolUse" });
+					assistant(id, content.filter((b) => b.type === "text"), { final: message?.stopReason !== "toolUse", ...at });
 					break;
 				}
-				assistant(id, content, { ...(error ? { error } : {}), final: message?.stopReason !== "toolUse" });
+				assistant(id, content, { ...(error ? { error } : {}), final: message?.stopReason !== "toolUse", ...at });
 				for (const b of content) {
 					if (b.type !== "toolCall" || !b.id) continue;
 					// Prefixed, so a provider's call id never collides with an entry's; a repeated one also takes the entry's.

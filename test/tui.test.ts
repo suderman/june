@@ -94,7 +94,8 @@ test("terminal images reach the model, persist through restart, and reconnect wi
 	const view = await attachView(tmp.paths.socket);
 	view.close();
 	const user = view.items().find((i) => i.kind === "user" && i.imageCount);
-	assert.deepEqual(user, { kind: "user", id: String(snapshot.entries.find((e) => e.kind === "june.input")!.id), source: "tui", text: "what is this?", imageCount: 1 });
+	assert.equal(typeof (user?.kind === "user" ? user.at : undefined), "number", "the item carries when it was said");
+	assert.deepEqual({ ...user, at: undefined }, { at: undefined, kind: "user", id: String(snapshot.entries.find((e) => e.kind === "june.input")!.id), source: "tui", text: "what is this?", imageCount: 1 });
 	assert.equal(JSON.stringify(snapshot.entries.find((e) => e.kind === "june.input")?.data).includes(PNG), false, "metadata does not duplicate base64");
 });
 
