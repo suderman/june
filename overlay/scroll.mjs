@@ -55,3 +55,15 @@ export function step(state, dt, now) {
 
 /** Stop dead, as at the end of the content. */
 export const halt = () => rest();
+
+// A page keeps this share of the view, so a few lines carry over as context.
+export const PAGE = 0.85;
+
+/**
+ * Where a page turn lands: `direction` 1 for the next page (down, toward newer panels), −1 for the previous (up),
+ * from `y` in a view `height` tall, kept within `top` and `bottom` (Flickable's contentY range).
+ */
+export function pageTarget(y, height, top, bottom, direction) {
+	return Math.max(top, Math.min(bottom, y + direction * height * PAGE));
+}
+

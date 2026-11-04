@@ -145,6 +145,22 @@ ShellRoot {
     if (r.dy !== 0) scrollBy(r.dy);
     if (r.done) glider.running = false;
   }
+  NumberAnimation {
+    id: paging
+    target: list
+    property: "contentY"
+    duration: 260
+    easing.type: Easing.OutCubic
+    onFinished: root.follow = list.atYEnd
+  }
+  function page(direction) {
+    scrollState = Scroll.rest();
+    glider.running = false;
+    paging.stop();
+    paging.from = list.contentY;
+    paging.to = Scroll.pageTarget(list.contentY, list.height, list.originY, list.originY + Math.max(0, list.contentHeight - list.height), direction);
+    paging.start();
+  }
   // Opening lands on the newest panel; panels measure themselves a moment later, so land again once they have.
   Timer { id: settle; interval: 120; onTriggered: if (root.follow) list.positionViewAtBeginning() }
   function landOnNewest() {
@@ -421,6 +437,9 @@ ShellRoot {
 
     // Esc hides from anywhere in the overlay, even after a click put the focus in a balloon to select its words.
     Shortcut { sequence: "Escape"; onActivated: root.hide() }
+    // Page through the strip: Ctrl+N toward newer panels, Ctrl+P toward earlier ones.
+    Shortcut { sequence: "Ctrl+N"; onActivated: root.page(1) }
+    Shortcut { sequence: "Ctrl+P"; onActivated: root.page(-1) }
 
     // The backdrop dims as the strip unfolds; a click on it puts everything away.
     Rectangle { anchors.fill: parent; color: Theme.backdrop; opacity: root.unfold }
@@ -562,7 +581,7 @@ ShellRoot {
       }
 
       // The user's balloon, growing leftward out of her card: Enter steers, Shift+Enter queues, Alt+Enter adds a line,
-      // Ctrl+C stops June, Esc hides.
+      // Ctrl+C stops June, Ctrl+N and Ctrl+P page through the strip, Esc hides.
       Rectangle {
         id: composer
         anchors.right: maxCard.left

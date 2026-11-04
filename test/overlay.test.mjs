@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { activity, applyView, beats, caption, emptyView, markup, panels, readInput } from "../overlay/strip.mjs";
 import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, jagged, liveActivity, metrics, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
-import { rest, step, wheel } from "../overlay/scroll.mjs";
+import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
 import { LIVE_STATES as LIVE, RECENT_MS, excerpt, idleState, liveState, newReply, readLive, readingTime, recent } from "../overlay/live.mjs";
 
 const user = (id, text = "hi", source = "gui") => ({ kind: "user", id, source, text });
@@ -515,5 +515,14 @@ test("a touchpad follows the fingers, then coasts on when they lift", () => {
 	const coast = glide(state, 160 + 50);
 	assert.ok(coast.moved > 60, `released at about 750 px/s, it coasts on down, ${Math.round(coast.moved)} px`);
 	assert.ok(coast.ms < 2500);
+});
+
+test("a page turn moves most of a view, toward newer or earlier panels, and stops at the ends", () => {
+	assert.equal(PAGE, 0.85);
+	assert.equal(pageTarget(1000, 800, 0, 4000, 1), 1680, "Ctrl+N: down toward newer panels");
+	assert.equal(pageTarget(1000, 800, 0, 4000, -1), 320, "Ctrl+P: up toward earlier ones");
+	assert.equal(pageTarget(3800, 800, 0, 4000, 1), 4000, "not past the newest");
+	assert.equal(pageTarget(200, 800, 0, 4000, -1), 0, "not past the earliest");
+	assert.equal(pageTarget(-500, 800, -3000, 0, 1), 0, "a list laid out bottom to top has negative positions; the same rules hold");
 });
 
