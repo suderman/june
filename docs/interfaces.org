@@ -146,6 +146,13 @@ From the user on 2026-11-04: the strip in an ordinary window, found in the launc
 
 The toggles are this device's state while the overlay runs, never written to config: live June (off, she never pops up and the Alt key goes straight between hidden and the strip; also =june-overlay live on|off=) and the light preview (each panel's own hour, or one hour from a slider; also =june-overlay light=). State that belongs to June rather than the device, such as a quiet mode, will be protocol commands to the daemon, so every client shows it. The overlay and the window share their parts: =StripList.qml= (the panels with momentum scrolling and paging), =Composer.qml=, =Masthead.qml=, and =Toast.qml=.
 
+** The console look
+From the user on 2026-11-04: a mode that drops "all the artwork and cuteness" for when the laptop is in a client meeting and June should still be there, "more professional and boring", though it "could still look cool in a techy way": "terminal-style text", with "emoticons (not emojis)", toggled against the comic strip. Each device chooses its look: the window's "console" toggle, or =june-overlay look console= and =look comic=.
+
+- The same strip, drawn as lines (=overlay/console.mjs=, =ConsolePanel.qml=): the user's message after a =›= prompt and its source, her reply after =june= and its face, tool calls as =✓=, =…=, or =✗= lines, patter after =~=, notices after =!=; code without its fences, since the console is monospace already. No art, rooms, light, or marks. A quiet status line says what she is doing while she works.
+- Every expression is a text face (=FACES=): idle =:)=, warm =^_^=, wry =;)=, curious =o_o=, skeptical =¬_¬=, determined =>:]=, serious =:|=, gentle =c:=, smug =:>=, exasperated =-_-=, laughing =XD=, surprised =:O=, confused =:S=, indignant =>:(=, pout =:<=, bashful =^^;=, delighted =:D=, cheering =\o/=. A reply shows its face once the daemon has picked one. Live June's card shows her latest face, =x_x= offline and =-.-= asleep.
+- =Theme.qml= switches its tokens by look (=consoleLook=): a dark terminal ground, monospace type, thinner lines. The masthead, balloon input, toasts, toggles, and live June's card follow without knowing which look is on.
+
 ** Desktop context and taking over, later
 Read =hyprctl activewindow -j= (class, title, workspace); offer an explicit screenshot of the active window with =grim=; read the primary selection with =wl-paste --primary=. Each is sent only when the user asks, and framed as outside content as mail already is.
 

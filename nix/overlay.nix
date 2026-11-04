@@ -1,7 +1,8 @@
 # june-overlay: June's Hyprland overlay (overlay/), a Quickshell config run from the store. `june-overlay` runs it;
 # `june-overlay cycle` steps the running one through live June, the full strip, and hidden, for a single compositor
 # bind; `toggle`, `open`, `close`, and `mini` reach each directly; `window` opens the strip in an ordinary window;
-# `live off` keeps live June away until `live on`. `light 21.5` previews every panel at that hour, and `light now` puts
+# `live off` keeps live June away until `live on`; `look console` drops the comic for a terminal style, `look comic`
+# brings it back. `light 21.5` previews every panel at that hour, and `light now` puts
 # each back at its own. It ships the base avatar set from templates/avatar; JUNE_OVERLAY_ART can put a
 # personal set in front of it.
 {
@@ -42,8 +43,9 @@ in
         cycle | toggle | open | close | mini | window) exec qs -p ${config} ipc call june "$1" ;;
         light) exec qs -p ${config} ipc call june light "''${2:-now}" ;;
         live) exec qs -p ${config} ipc call june live "''${2:-flip}" ;;
+        look) exec qs -p ${config} ipc call june look "''${2:-flip}" ;;
         *)
-          echo "usage: june-overlay [cycle|toggle|open|close|mini|window|light HOUR|live on/off]" >&2
+          echo "usage: june-overlay [cycle|toggle|open|close|mini|window|light HOUR|live on/off|look comic/console]" >&2
           exit 2
           ;;
       esac

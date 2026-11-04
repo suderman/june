@@ -10,6 +10,8 @@ Rectangle {
   property bool running: true
   // Her brief reaction when a reply's face is picked ({ url, plain }), shown over the loop; null otherwise.
   property var reaction: null
+  // Her text face in the console look (console.mjs liveFace), shown instead of the art.
+  property string face: ":)"
   onReactionChanged: if (reaction && !reaction.plain) { settle.stop(); stage.scale = 1.05; settle.start(); }
 
   signal clicked()
@@ -18,21 +20,33 @@ Rectangle {
 
   width: 150
   height: 150
-  radius: 22
-  color: liveState === "offline" ? "#e7e2d6" : busy ? Theme.noteFill : "#f6dccb"
+  radius: Theme.consoleLook ? 10 : 22
+  color: Theme.consoleLook ? Theme.balloon : liveState === "offline" ? "#e7e2d6" : busy ? Theme.noteFill : "#f6dccb"
   border.color: Theme.ink
-  border.width: 3
+  border.width: Theme.consoleLook ? 1.5 : 3
   clip: true
 
   NumberAnimation { id: settle; target: stage; property: "scale"; to: 1; duration: 220; easing.type: Easing.OutCubic }
 
+  Text {
+    visible: Theme.consoleLook
+    anchors.centerIn: parent
+    anchors.verticalCenterOffset: stage.bob
+    text: cardBox.face
+    font.family: "monospace"
+    font.weight: Font.Bold
+    font.pixelSize: 40
+    color: cardBox.liveState === "offline" ? Theme.muted : Theme.consoleJune
+  }
+
   Item {
     id: stage
+    visible: !Theme.consoleLook
     anchors.fill: parent
     anchors.margins: 3
     property real bob: 0
     SequentialAnimation on bob {
-      running: cardBox.running && (!cardBox.art || cardBox.art.frames <= 1)
+      running: cardBox.running && (Theme.consoleLook || !cardBox.art || cardBox.art.frames <= 1)
       loops: Animation.Infinite
       NumberAnimation { to: cardBox.liveState === "snoozing" ? 4 : 3; duration: cardBox.liveState === "snoozing" ? 1600 : cardBox.busy ? 380 : 900; easing.type: Easing.InOutSine }
       NumberAnimation { to: 0; duration: cardBox.liveState === "snoozing" ? 1600 : cardBox.busy ? 380 : 900; easing.type: Easing.InOutSine }

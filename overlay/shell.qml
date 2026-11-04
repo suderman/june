@@ -19,6 +19,7 @@ import "strip.mjs" as Strip
 import "compose.mjs" as Compose
 import "live.mjs" as Live
 import "scenery.mjs" as Scenery
+import "console.mjs" as Console
 
 ShellRoot {
   id: root
@@ -28,6 +29,9 @@ ShellRoot {
   property bool windowShown: false
   // Live June in the corner: off, she never pops up and the key goes straight between hidden and the strip.
   property bool liveEnabled: true
+  // The comic strip, or the console look for when June should look professional (a client meeting).
+  property string look: "comic"
+  Binding { target: Theme; property: "consoleLook"; value: root.look === "console" }
   property alias stripModel: strip
   property var targetScreen: Quickshell.screens[0]
   property var view: Strip.emptyView()
@@ -189,6 +193,12 @@ ShellRoot {
   property real now: Date.now()
   // An hour that lights every panel, set through the `light` IPC call to preview the day; -1 for each panel's own.
   property real lightHour: -1
+  // Her latest picked face, for the console's text face.
+  readonly property string faceExpression: {
+    for (let i = view.items.length - 1; i >= 0; i--) if (view.items[i].kind === "assistant" && view.items[i].expression) return view.items[i].expression;
+    return "idle";
+  }
+  readonly property string liveFace: Console.liveFace(liveState, faceExpression)
   readonly property string liveState: Live.liveState({ view: view, linked: linked, now: new Date(now), idleSince: idleSince, once: oneShot })
   readonly property var liveWords: ({ typing: "writing", thinking: "thinking", digging: "digging", delegating: "delegating", watching: "watching", tidying: "tidying up", listening: "listening", speaking: "speaking", offline: "offline" })
 
@@ -301,6 +311,8 @@ ShellRoot {
     function window(): void { root.windowShown = true; }
     // Live June on, off, or flipped (anything else), as the window's toggle does.
     function live(state: string): void { root.liveEnabled = state === "on" ? true : state === "off" ? false : !root.liveEnabled; }
+    // The comic strip or the console look; anything else flips between them.
+    function look(name: string): void { root.look = Console.LOOKS.includes(name) ? name : root.look === "console" ? "comic" : "console"; }
     // Hidden, then live June with the note open, then the full strip, then hidden: one key for everything. When she has
     // popped up by herself, the first press opens her note under her reply, as if she had been summoned.
     function cycle(): void {
@@ -319,6 +331,7 @@ ShellRoot {
     liveState: root.liveState
     art: root.liveArt[root.liveState] ?? root.liveArt["sipping"] ?? null
     reaction: root.reaction
+    face: root.liveFace
     status: root.liveWords[root.liveState] ?? ""
     message: root.miniText
     messageShown: root.miniMessage
@@ -568,6 +581,7 @@ ShellRoot {
         liveState: root.liveState
         art: root.liveArt[root.liveState] ?? root.liveArt["sipping"] ?? null
         reaction: root.reaction
+        face: root.liveFace
         running: root.shown
         // Already on screen when the strip grows out of min mode or shrinks back to it; otherwise she fades in with it.
         opacity: root.cardSteady ? 1 : Math.min(1, root.unfold * 3)

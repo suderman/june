@@ -14,10 +14,10 @@ Rectangle {
   function focusInput() { input.forceActiveFocus(); }
 
   height: Math.min(input.contentHeight + 34, 220)
-  radius: Math.min(height / 2, 30)
+  radius: Theme.consoleLook ? 6 : Math.min(height / 2, 30)
   color: Theme.balloon
-  border.color: Theme.ink
-  border.width: 3
+  border.color: Theme.consoleLook ? Theme.muted : Theme.ink
+  border.width: Theme.consoleLook ? 1.5 : 3
   clip: true
 
   ScrollView {
@@ -28,12 +28,12 @@ Rectangle {
     anchors.bottomMargin: 10
     TextArea {
       id: input
-      placeholderText: "your balloon…"
+      placeholderText: Theme.consoleLook ? "› message june" : "your balloon…"
       wrapMode: TextEdit.Wrap
       font.family: Theme.lettering
-      font.pixelSize: 19
+      font.pixelSize: Theme.consoleLook ? 15 : 19
       color: Theme.ink
-      placeholderTextColor: "#9a958a"
+      placeholderTextColor: Theme.consoleLook ? Theme.muted : "#9a958a"
       background: null
       Keys.onPressed: event => {
         if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier) && input.selectedText === "") {

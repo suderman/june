@@ -15,6 +15,7 @@ PanelWindow {
   property string liveState: "sipping"
   property var art: null
   property var reaction: null
+  property string face: ":)"
   property string status: ""
   property string message: ""
   property bool messageShown: false
@@ -86,6 +87,7 @@ PanelWindow {
     liveState: win.liveState
     art: win.art
     reaction: win.reaction
+    face: win.face
     running: win.shown
     onClicked: win.openStrip()
   }
@@ -136,7 +138,7 @@ PanelWindow {
         font.weight: Font.Medium
         font.pixelSize: 16
         color: Theme.noteInk
-        placeholderTextColor: "#7b88ad"
+        placeholderTextColor: Theme.consoleLook ? Theme.muted : "#7b88ad"
         background: null
         Keys.onPressed: event => {
           if (event.key === Qt.Key_Escape) { win.dismissed(); event.accepted = true; return; }

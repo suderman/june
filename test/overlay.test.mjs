@@ -10,6 +10,7 @@ import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
 import { CALM_GROUND, LONG_SHARE, PATTERNS, TIMES, WEATHER_MS, backdrop, cutaway, fallingPath, graded, hourOf, look, moment, patternPath, place, skyLook, sunFor, sunKeys, sunTimes } from "../overlay/light.mjs";
 import { MAX_PROPS, focusBlur, SEASONS as SCENE_SEASONS, SETTINGS as SCENE_SETTINGS, SPOTS, choosePlate, chooseProps, chooseRoom, mergeScenery, placeProps, placeRoom, readScenery, roomPoint, season } from "../overlay/scenery.mjs";
 import { SEASONS, SETTINGS, SPOTS as AVATAR_SPOTS } from "../src/avatar.ts";
+import { FACES, LOOKS, face, liveFace, lines as consoleLines } from "../overlay/console.mjs";
 import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent } from "../overlay/live.mjs";
 
 const user = (id, text = "hi", source = "gui") => ({ kind: "user", id, source, text });
@@ -400,7 +401,7 @@ test("a balloon and its tail are one closed outline from any side, and a burst s
 
 test("the shared modules use only JavaScript that QML's engine runs", async () => {
 	// Each of these loaded under Node but failed in Quickshell, blanking the overlay.
-	for (const file of ["strip.mjs", "compose.mjs", "live.mjs", "scroll.mjs", "light.mjs", "scenery.mjs"]) {
+	for (const file of ["strip.mjs", "compose.mjs", "live.mjs", "scroll.mjs", "light.mjs", "scenery.mjs", "console.mjs"]) {
 		const source = (await readFile(new URL(`../overlay/${file}`, import.meta.url), "utf8")).replace(/^\s*(\/\/|\*).*$/gm, "");
 		assert.doesNotMatch(source, /\.at\(/, `${file}: Array.prototype.at`);
 		assert.doesNotMatch(source, /Object\.hasOwn\(/, `${file}: Object.hasOwn`);
@@ -744,4 +745,49 @@ test("a room covers the panel with its window on the open side, and props stand 
 		assert.ok(!overlap(p, face) && !overlap(p, words[0]), `${p.id} clear`);
 	}
 	assert.deepEqual(placeProps(tree, study, place, 820, 420, [{ x: 0, y: 0, w: 820, h: 420 }]), [], "no room, no props");
+});
+
+test("the console look gives every expression a text face, never an emoji", () => {
+	assert.deepEqual(LOOKS, ["comic", "console"]);
+	assert.deepEqual(Object.keys(FACES).sort(), Object.keys(EXPRESSIONS).sort());
+	for (const [name, text] of Object.entries(FACES)) {
+		assert.ok(text.length > 0 && text.length <= 4, `${name}: ${text}`);
+		assert.doesNotMatch(text, /\p{Extended_Pictographic}/u, `${name}: an emoji`);
+	}
+	assert.equal(new Set(Object.values(FACES)).size, Object.keys(FACES).length, "each face distinct");
+	assert.equal(face("wry"), ";)");
+	assert.equal(face("nonsense"), FACES.idle);
+	assert.equal(face(undefined), FACES.idle);
+	assert.equal(liveFace("offline", "warm"), "x_x");
+	assert.equal(liveFace("snoozing", "warm"), "-.-");
+	assert.equal(liveFace("typing", "smug"), ":>");
+});
+
+test("a panel becomes console lines: her name and face once a reply, tools as marked lines", () => {
+	const items = [
+		{ kind: "user", id: "u1", text: "is the deploy done?", source: "telegram" },
+		{ kind: "tool", id: "t1", name: "bash", summary: "command=git log", status: "ok" },
+		{ kind: "tool", id: "t2", name: "read", summary: "path=/a/b/notes.org", status: "error", error: "missing" },
+		{ kind: "patter", id: "p1", text: "checking the logs" },
+		{ kind: "assistant", id: "a1", text: "It went out at noon, after the migration finished, the caches warmed up again on both hosts, and the queue drained to nothing by quarter past.\n\nNothing failed, and the smoke tests passed on every host.", expression: "smug" },
+	];
+	const [panel] = panels(items);
+	const out = consoleLines(panel);
+	assert.deepEqual(out.map((l) => [l.kind, l.prefix]), [
+		["user", "telegram ›"],
+		["tool", "✓"],
+		["tool", "✗"],
+		["thought", "~"],
+		["june", "june :>"],
+		["june", ""],
+	]);
+	assert.equal(out[2].status, "error");
+	assert.match(out[2].text, /failed: missing/);
+	const streaming = consoleLines(panels([{ kind: "user", id: "u2", text: "hi", source: "gui" }, { kind: "assistant", id: "a2", text: "Hel", streaming: true }])[0]);
+	assert.deepEqual(streaming.map((l) => l.prefix), ["›", "june"]);
+	assert.equal(streaming[1].streaming, true);
+	const fenced = consoleLines(panels([{ kind: "assistant", id: "a3", text: "run this:\n\n```sh\nls -la\n```" }])[0]);
+	assert.equal(fenced[0].text, "run this:\n\nls -la");
+	const failed = consoleLines(panels([{ kind: "notice", id: "n1", text: "kit rebooted" }])[0]);
+	assert.deepEqual(failed, [{ kind: "burst", prefix: "!", text: "kit rebooted" }]);
 });

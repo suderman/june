@@ -60,18 +60,25 @@ FloatingWindow {
       spacing: 8
 
       Pill {
+        text: "console"
+        on: win.shell.look === "console"
+        onClicked: win.shell.look = win.shell.look === "console" ? "comic" : "console"
+      }
+      Pill {
         text: "live June"
         on: win.shell.liveEnabled
         onClicked: win.shell.liveEnabled = !win.shell.liveEnabled
       }
+      // The console has no light to preview.
       Pill {
+        visible: !Theme.consoleLook
         text: win.shell.lightHour < 0 ? "light: each panel's hour" : "light: " + win.clock(win.shell.lightHour)
         on: win.shell.lightHour >= 0
         onClicked: win.shell.lightHour = win.shell.lightHour < 0 ? Math.round(new Date().getHours() + new Date().getMinutes() / 60) % 24 : -1
       }
       Slider {
         id: hour
-        visible: win.shell.lightHour >= 0
+        visible: win.shell.lightHour >= 0 && !Theme.consoleLook
         width: Math.min(220, toggles.width)
         height: 30
         from: 0

@@ -13,6 +13,8 @@ ListView {
   property var scenery: ({ rooms: [], plates: [], props: [] })
   property var sky: null
   property bool linked: true
+  // The console look instead of the comic strip.
+  property bool consoleLook: Theme.consoleLook
 
   // Whether to stay on the newest panel, and the wheel's momentum.
   property bool follow: true
@@ -85,15 +87,35 @@ ListView {
     settle.restart();
   }
 
-  delegate: Panel {
+  // A comic panel, or the same exchange as console lines.
+  delegate: Loader {
+    id: cell
     required property int index
+    required property string json
     width: list.width
-    newest: index === 0
-    activity: list.activity
-    poses: list.poses
-    now: list.now
-    hourOverride: list.hourOverride
-    scenery: list.scenery
-    sky: list.sky
+    sourceComponent: list.consoleLook ? consoleCell : comicCell
+    Component {
+      id: comicCell
+      Panel {
+        json: cell.json
+        width: list.width
+        newest: cell.index === 0
+        activity: list.activity
+        poses: list.poses
+        now: list.now
+        hourOverride: list.hourOverride
+        scenery: list.scenery
+        sky: list.sky
+      }
+    }
+    Component {
+      id: consoleCell
+      ConsolePanel {
+        json: cell.json
+        width: list.width
+        newest: cell.index === 0
+        activity: list.activity
+      }
+    }
   }
 }
