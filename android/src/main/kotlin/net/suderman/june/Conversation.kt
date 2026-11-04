@@ -27,6 +27,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import android.util.Log
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.platform.LocalContext
@@ -49,7 +54,11 @@ import androidx.compose.ui.unit.sp
  */
 @Composable
 fun Conversation(link: Link, locked: Boolean, dismiss: () -> Unit, unlock: () -> Unit) {
+    val context = LocalContext.current
+    val sensor = remember { fingerprintSensor(context) }
+    var origin by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     MaterialTheme(colorScheme = darkColorScheme()) {
+      Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionOnScreen() }) {
         Column(Modifier.fillMaxSize()) {
             Spacer(
                 Modifier.weight(0.25f).fillMaxWidth()
@@ -64,8 +73,36 @@ fun Conversation(link: Link, locked: Boolean, dismiss: () -> Unit, unlock: () ->
                 if (locked) Prompt("Unlock to talk to June", unlock) else Sheet(link)
             }
         }
+        // Where the fingerprint is read: the phone's own reader stays live under the session, and unlocking there
+        // shows the conversation at once.
+        if (locked && sensor != null) Canvas(Modifier.fillMaxSize()) {
+            val centre = androidx.compose.ui.geometry.Offset(sensor[0] - origin.x, sensor[1] - origin.y)
+            val r = sensor[2]
+            val line = Color(0xFFECE6DA)
+            drawCircle(line.copy(alpha = 0.12f), r, centre)
+            drawCircle(line.copy(alpha = 0.7f), r, centre, style = Stroke(r * 0.04f))
+            for (i in 1..3) {
+                val a = r * (0.2f + i * 0.15f)
+                drawArc(line.copy(alpha = 0.8f), 200f - i * 8, 140f + i * 16, false, topLeft = centre - androidx.compose.ui.geometry.Offset(a, a), size = androidx.compose.ui.geometry.Size(a * 2, a * 2), style = Stroke(r * 0.05f, cap = StrokeCap.Round))
+            }
+        }
+      }
     }
 }
+
+/**
+ * The under-display fingerprint sensor's centre and radius in screen pixels: from the framework resource
+ * config_udfps_sensor_props (x, y, radius) where a phone sets it, else as the install app read it from SystemUI over
+ * ADB (PairActivity); null when neither knows.
+ */
+private fun fingerprintSensor(context: android.content.Context): FloatArray? = runCatching {
+    val system = android.content.res.Resources.getSystem()
+    val id = system.getIdentifier("config_udfps_sensor_props", "array", "android")
+    val props = if (id != 0) system.getIntArray(id).map { it.toFloat() } else emptyList()
+    val known = props.takeIf { it.size >= 3 && it[2] > 0 }
+        ?: context.getSharedPreferences("device", android.content.Context.MODE_PRIVATE).getString("fingerprint", null)?.split(",")?.mapNotNull { it.trim().toFloatOrNull() }?.takeIf { it.size == 3 && it[2] > 0 }
+    known?.let { floatArrayOf(it[0], it[1], it[2]) }
+}.getOrNull()
 
 @Composable
 private fun Prompt(text: String, onClick: () -> Unit) {

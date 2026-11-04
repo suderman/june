@@ -115,6 +115,13 @@
       adb install -r "$@" "$out/june.apk"
       # GrapheneOS makes network access a permission an ADB install leaves off; elsewhere it cannot be changed.
       adb shell pm grant net.suderman.june android.permission.INTERNET 2>/dev/null || true
+      # The under-display fingerprint sensor, as SystemUI reports it (udfpsBounds=Rect(441, 1666 - 639, 1864)), so June's
+      # lock-screen prompt can show where to touch; an app cannot ask Android for it.
+      bounds=$(adb shell dumpsys activity service SystemUI 2>/dev/null | sed -n 's/.*udfpsBounds=Rect(\([0-9]*\), \([0-9]*\) - \([0-9]*\), \([0-9]*\)).*/\1 \2 \3 \4/p' | head -n 1) || true
+      if [ -n "$bounds" ]; then
+        read -r left top right bottom <<< "$bounds"
+        adb shell am start -n net.suderman.june/.PairActivity --es fingerprint "$(( (left + right) / 2 )),$(( (top + bottom) / 2 )),$(( (right - left) / 2 ))" > /dev/null || true
+      fi
     '';
   };
 in

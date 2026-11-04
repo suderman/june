@@ -59,7 +59,7 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
         lines.clear()
         // Whether the phone wants the user's credentials, not merely whether the lock screen shows.
         locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
-        if (!locked) link.open()
+        if (locked) watchUnlock() else link.open()
         record("time: ${java.time.LocalDateTime.now().withNano(0)}")
         record("locked: $locked")
         record("showFlags: ${describeFlags(showFlags)}")
@@ -76,14 +76,40 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
         hide()
     }
 
+    // Unlocked with the fingerprint sensor while the prompt shows (the phone's own reader stays live under the session),
+    // she shows the conversation at once rather than the prompt a second time.
+    private var unlockWatch: android.content.BroadcastReceiver? = null
+
+    private fun watchUnlock() {
+        if (unlockWatch != null) return
+        val watch = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: Intent) {
+                if (context.getSystemService(KeyguardManager::class.java).isDeviceLocked) return
+                Log.i(TAG, "unlocked under the session")
+                stopWatchingUnlock()
+                locked = false
+                link.open()
+            }
+        }
+        context.registerReceiver(watch, android.content.IntentFilter(Intent.ACTION_USER_PRESENT), Context.RECEIVER_EXPORTED)
+        unlockWatch = watch
+    }
+
+    private fun stopWatchingUnlock() {
+        unlockWatch?.let { runCatching { context.unregisterReceiver(it) } }
+        unlockWatch = null
+    }
+
     override fun onHide() {
         super.onHide()
+        stopWatchingUnlock()
         link.close()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         Log.i(TAG, "session hidden")
     }
 
     override fun onDestroy() {
+        stopWatchingUnlock()
         link.close()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         super.onDestroy()
