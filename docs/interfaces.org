@@ -102,6 +102,17 @@ How a face arrives: the strip is a printed page except where it is still being d
 
 The words are real text: balloons and notes are read-only text fields, so a drag selects and the usual key copies. Until the art exists, the base avatar set's placeholder poses stand in; the composition does not wait on them.
 
+*** Light and backgrounds
+=overlay/light.mjs= decides how each panel is lit and what stands behind June; =overlay/Backdrop.qml= paints it.
+
+- The hour: a panel is lit by the hour its words were written, from the =at= the daemon puts on each user and assistant item (the message's own timestamp), read on the overlay's clock. A panel without one, such as a reply still streaming, uses the current hour. So a strip read at night still shows the morning's exchange in morning light. =june-overlay light 21.5= previews every panel at one hour; =june-overlay light now= puts them back.
+- The day's palettes: dawn at 6:00, morning at 9:00 (the reference look, ungraded), afternoon at 14:00, golden hour at 18:30, evening at 20:30, and night from 23:30 until 4:30. Between two, every value blends, so the light moves rather than jumps.
+- The grade multiplies the ground by the hour's colour. June takes the same colour more gently (a colorization of at most 30%), with her own brightness and saturation, so her face stays readable at any hour. A key light in the hour's colour falls on her from the open side of the panel, clipped to her outline. In the evening and at night a warm lamp glow comes up behind her. Balloons, notes, cards, and marks are never graded.
+- Behind her, in order of precedence: while tool calls run in the panel she is working in, a cutaway of that work; a long panel, whose words cover more than half of it, keeps her room; a serious or gentle reply gets the calm ground; a rare face gets its abstract background; anything else, her room. Her room is the panel's tint until there is room art.
+- Abstract backgrounds, drawn by code: focus lines for surprised, sparkles for delighted and cheering, soft bubbles for bashful, gloom lines for pout and exasperated, and a burst for indignant. Focus lines and the burst centre on her face. Only the face the daemon picked earns one; a stand-in never does.
+- Cutaways show only what the runtime knows. Delegating (a brief through =work=, Herdr, or the Org queue among the run's calls): a pane per brief named by its narration, and the run's calls as a chain coloured by status. Digging: the places her calls looked, as labelled drawers (mail, the calendar, Org, the shell, the web, or the file a call touched). A cutaway is not graded, being lit by its own screens, and when the run ends the panel settles back to her room.
+- Grounds and patterns fade over 220 ms when they change, which only happens in the newest panel.
+
 ** Live June, the minimised form
 From the user on 2026-11-03. The strip is the historical record: her reactions, lively while she writes, settled once she has. Live June is the present tense: a small chibi June showing what she is doing right now, in short animated loops. It is the same app's minimised form, not a second client.
 

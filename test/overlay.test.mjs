@@ -7,6 +7,7 @@ import { activity, applyView, beats, caption, emptyView, markup, panels, readInp
 import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, jagged, liveActivity, metrics, picked, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
+import { CALM_GROUND, LONG_SHARE, PATTERNS, TIMES, backdrop, cutaway, graded, hourOf, look, moment, patternPath, place } from "../overlay/light.mjs";
 import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent } from "../overlay/live.mjs";
 
 const user = (id, text = "hi", source = "gui") => ({ kind: "user", id, source, text });
@@ -397,7 +398,7 @@ test("a balloon and its tail are one closed outline from any side, and a burst s
 
 test("the shared modules use only JavaScript that QML's engine runs", async () => {
 	// Each of these loaded under Node but failed in Quickshell, blanking the overlay.
-	for (const file of ["strip.mjs", "compose.mjs", "live.mjs", "scroll.mjs"]) {
+	for (const file of ["strip.mjs", "compose.mjs", "live.mjs", "scroll.mjs", "light.mjs"]) {
 		const source = (await readFile(new URL(`../overlay/${file}`, import.meta.url), "utf8")).replace(/^\s*(\/\/|\*).*$/gm, "");
 		assert.doesNotMatch(source, /\.at\(/, `${file}: Array.prototype.at`);
 		assert.doesNotMatch(source, /Object\.hasOwn\(/, `${file}: Object.hasOwn`);
@@ -559,3 +560,75 @@ test("live June reacts once to each newly picked face, with the nearest chibi al
 	assert.ok(REACTION_MS >= 2000 && REACTION_MS <= 4000);
 });
 
+
+test("the hour's look blends between the day's palettes, holds night from late evening, and keeps morning ungraded", () => {
+	assert.deepEqual(look(9), { name: "morning", ...TIMES.morning }, "morning is the reference look");
+	assert.equal(look(23.5).name, "night");
+	assert.deepEqual(look(2), look(23.75), "night holds until dawn");
+	assert.equal(look(5).name, "night", "still nearer night than dawn");
+	assert.equal(look(5.5).name, "dawn");
+	const between = look(16.25);
+	assert.ok(between.gradeAmount > TIMES.afternoon.gradeAmount && between.gradeAmount < TIMES.golden.gradeAmount, "blended, not jumped");
+	assert.match(between.grade, /^#[0-9a-f]{6}$/);
+	assert.equal(look(24).name, look(0).name, "the clock wraps");
+	assert.equal(hourOf(new Date(2026, 10, 3, 18, 30).getTime()), 18.5);
+	for (const [name, t] of Object.entries(TIMES)) {
+		assert.ok(t.figureGrade < t.gradeAmount || t.gradeAmount === 0, `${name}: June is graded more gently than her room`);
+		assert.equal(t.lampOn > 0, name === "evening" || name === "night", `${name}: the lamp only after dark`);
+	}
+});
+
+test("a ground is multiplied by the hour's grade, so night darkens and morning leaves it alone", () => {
+	assert.equal(graded("#e6d7ea", look(9)), "#e6d7ea");
+	const night = graded("#ffffff", look(1));
+	assert.ok(parseInt(night.slice(1, 3), 16) < 140 && parseInt(night.slice(5, 7), 16) > parseInt(night.slice(1, 3), 16), "night is dim and blue");
+	assert.equal(graded("#000000", look(1)), "#000000");
+});
+
+test("a panel is lit by when its words were written, and a live one by the clock", () => {
+	const strip = panels([{ ...user("u1", "morning"), at: 1000 }, { ...june("a1", "Morning."), at: 2000 }]);
+	assert.equal(moment(strip[0]), 2000);
+	assert.equal(moment(panels([user("u1"), june("a1", "no times")])[0]), null);
+});
+
+test("behind her: a cutaway while tools run, a calm ground or a rare face's effect when settled, a flat tint when long", () => {
+	const tool = (id, name, summary, status = "running") => ({ kind: "tool", id, name, summary, status });
+	const digging = panels([user("u1", "anything new?"), tool("t1", "notmuch_search", "query=tag:inbox"), tool("t2", "read", "path=/home/jon/org/work/june.org")]);
+	const dig = backdrop(digging[0], { live: true });
+	assert.equal(dig.kind, "cutaway");
+	assert.equal(dig.scene, "digging");
+	assert.deepEqual(cutaway(dig, 600, 300).drawers.map((d) => d.label), ["mail", "june.org"], "named by where her calls looked");
+	const briefing = panels([user("u1", "farm it out"), tool("t1", "work", "task=email triage"), tool("t2", "bash", "command=ls", "done")]);
+	const brief = backdrop(briefing[0], { live: true });
+	assert.equal(brief.scene, "delegating");
+	const scene = cutaway(brief, 600, 300);
+	assert.deepEqual(scene.panes.map((p) => p.name), ["email triage"], "a pane per brief, nothing invented");
+	assert.equal(scene.nodes.length, 2, "the run's calls as a chain");
+	assert.equal(scene.nodes[1].fill, "#86e08f", "coloured by status");
+	assert.equal(backdrop(panels([user("u1"), june("a1", "thinking...")])[0], { live: true }).kind, "room", "no calls yet: her room");
+	assert.equal(backdrop(digging[0], { live: false }).kind, "room", "settled, the cutaway goes");
+
+	const faced = (expression) => panels([user("u1"), { ...june("a1", "ok"), expression }])[0];
+	assert.deepEqual(backdrop(faced("surprised")), { kind: "abstract", pattern: "focus" });
+	assert.deepEqual(backdrop(faced("cheering")), { kind: "abstract", pattern: "sparkle" });
+	assert.deepEqual(backdrop(faced("serious")), { kind: "calm" });
+	assert.deepEqual(backdrop(faced("gentle")), { kind: "calm" });
+	assert.deepEqual(backdrop(faced("warm")), { kind: "room" }, "a common face keeps her room");
+	assert.deepEqual(backdrop(panels([user("u1"), june("a1", "ok")])[0]), { kind: "room" }, "a stand-in never earns an effect");
+	assert.deepEqual(backdrop(faced("surprised"), { share: LONG_SHARE + 0.1 }), { kind: "flat" });
+	assert.ok(CALM_GROUND && Object.keys(PATTERNS).length === 5);
+	assert.equal(place({ name: "bash", summary: "command=git status" }), "shell");
+	assert.equal(place({ name: "org_search", summary: "query=june" }), "org");
+});
+
+test("abstract patterns fill the panel, and focus lines and a burst centre on her face", () => {
+	for (const kind of Object.keys(PATTERNS)) {
+		const path = patternPath(kind, 600, 320, { x: 150, y: 120 }, 7);
+		assert.ok(path.length > 20, kind);
+		assert.equal(path, patternPath(kind, 600, 320, { x: 150, y: 120 }, 7), `${kind}: stable between redraws`);
+		assert.doesNotMatch(path, /NaN|undefined/, kind);
+	}
+	const focus = patternPath("focus", 600, 320, { x: 150, y: 120 });
+	const [, x, y] = /^M (\S+) (\S+)/.exec(focus).map(Number);
+	assert.ok(Math.hypot(x - 150, y - 120) >= 70, "lines start clear of her face");
+});

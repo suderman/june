@@ -2,9 +2,11 @@
 // pose, and the words in reading order. compose.mjs decides every position from the words' measured sizes; this file
 // measures and draws. See "Look: a comic strip" in docs/interfaces.org.
 import QtQuick
+import QtQuick.Effects
 import QtQuick.Shapes
 import "strip.mjs" as Strip
 import "compose.mjs" as Compose
+import "light.mjs" as Light
 
 Item {
   id: panel
@@ -14,6 +16,9 @@ Item {
   property string activity: ""
   // Every pose the shell loaded, for a tall stand-in when the words run long.
   property var poses: []
+  // The clock, for a panel without message times, and an hour that overrides every panel's, for previewing the light.
+  property real now: Date.now()
+  property real hourOverride: -1
 
   // The panel's elements, June's side, and her pose, from the shell (see sync() in shell.qml).
   readonly property var p: JSON.parse(json)
@@ -43,8 +48,47 @@ Item {
     sizes = out;
   }
 
-  // The panel's ground.
-  Rectangle { anchors.fill: parent; color: Theme.tint(panel.p.id) }
+  // The hour its words were written, and what stands behind her (see light.mjs). The words' share of the panel keeps a
+  // long one plain.
+  readonly property var light: Light.look(hourOverride >= 0 ? hourOverride : Light.hourOf(Light.moment(p) ?? now))
+  readonly property real share: {
+    let covered = 0;
+    for (const s of sizes) covered += s.w * s.h;
+    return width > 0 && layout.height > 0 ? covered / (width * layout.height) : 0;
+  }
+  readonly property var backdrop: Light.backdrop(p, { live: Boolean(p.live), share: share })
+  readonly property var faceCentre: layout.face ? { x: layout.face.x + layout.face.w / 2, y: layout.face.y + layout.face.h / 2 } : null
+
+  Backdrop {
+    anchors.fill: parent
+    spec: panel.backdrop
+    light: panel.light
+    tint: Theme.tint(panel.p.id)
+    centre: panel.faceCentre
+    seed: Compose.hash(panel.p.id) % 997
+  }
+
+  // The lamp after dark: a warm pool of light behind her, over the graded room.
+  Shape {
+    anchors.fill: parent
+    visible: opacity > 0
+    opacity: panel.backdrop.kind === "cutaway" || !panel.faceCentre ? 0 : panel.light.lampOn
+    preferredRendererType: Shape.CurveRenderer
+    readonly property real r: Math.max(width, height) * 0.45
+    ShapePath {
+      strokeColor: "transparent"
+      fillGradient: RadialGradient {
+        centerX: panel.faceCentre ? panel.faceCentre.x : 0
+        centerY: panel.faceCentre ? panel.faceCentre.y + 40 : 0
+        centerRadius: Math.max(panel.width, panel.height) * 0.45
+        focalX: centerX
+        focalY: centerY
+        GradientStop { position: 0; color: "#8cffc478" }
+        GradientStop { position: 1; color: "#00ffc478" }
+      }
+      PathSvg { path: "M 0 0 L " + panel.width + " 0 L " + panel.width + " " + panel.height + " L 0 " + panel.height + " Z" }
+    }
+  }
 
   // June, framed into the panel or, when the words run long, into an inset at the top of her side. Two layers, so a new
   // pose loads unseen and is revealed only when it is ready: never a blank frame. A change in the newest panel, once it
@@ -124,7 +168,14 @@ Item {
     width: panel.layout.clip.w
     height: panel.layout.clip.h
     clip: true
-    Rectangle { anchors.fill: parent; visible: panel.layout.clip.inset; color: Qt.darker(Theme.tint(panel.p.id), 1.06) }
+    Rectangle { anchors.fill: parent; visible: panel.layout.clip.inset; color: Light.graded(Qt.darker(Theme.tint(panel.p.id), 1.06).toString(), panel.light) }
+    // Her two layers, drawn once into a texture so the hour can grade them together and the key light can follow her
+    // outline. She takes the room's grade more gently, so her face stays readable at any hour.
+    Item {
+      id: figure
+      anchors.fill: parent
+      visible: false
+      layer.enabled: true
     Image {
       id: layerA
       property real settle: 1
@@ -149,6 +200,37 @@ Item {
       smooth: true
       asynchronous: true
       onStatusChanged: if (status === Image.Ready && panel.front === 0) panel.land()
+    }
+    }
+    MultiEffect {
+      anchors.fill: figure
+      source: figure
+      colorization: panel.light.figureGrade
+      colorizationColor: panel.light.grade
+      brightness: panel.light.figureBrightness - 1
+      saturation: panel.light.figureSaturation - 1
+    }
+    // The key light, from the open side of the panel, clipped to her outline.
+    Rectangle {
+      id: keyFill
+      anchors.fill: parent
+      visible: false
+      layer.enabled: true
+      readonly property string clear: "#00" + panel.light.key.slice(1)
+      gradient: Gradient {
+        orientation: Gradient.Horizontal
+        GradientStop { position: 0; color: panel.p.side === "left" ? keyFill.clear : panel.light.key }
+        GradientStop { position: 1; color: panel.p.side === "left" ? panel.light.key : keyFill.clear }
+      }
+    }
+    MultiEffect {
+      anchors.fill: parent
+      source: keyFill
+      opacity: panel.light.keyStrength * 0.4
+      maskEnabled: true
+      maskSource: figure
+      maskThresholdMin: 0.02
+      maskSpreadAtMin: 0.2
     }
   }
   Rectangle {

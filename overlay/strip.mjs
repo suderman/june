@@ -95,6 +95,8 @@ export function panels(items) {
 				// The face the daemon picked for the reply (expression.ts), once it has settled.
 				if (item.expression) beat.expression = item.expression;
 				if (item.pose) beat.pose = item.pose;
+				// When she wrote it, for the panel's light (light.mjs).
+				if (typeof item.at === "number") beat.at = item.at;
 				current.elements.push(beat);
 			}
 		} else if (item.kind === "tool") {

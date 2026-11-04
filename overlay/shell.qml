@@ -224,6 +224,8 @@ ShellRoot {
   property bool wasRunning: false
   property var oneShot: null
   property real now: Date.now()
+  // An hour that lights every panel, set through the `light` IPC call to preview the day; -1 for each panel's own.
+  property real lightHour: -1
   readonly property string liveState: Live.liveState({ view: view, linked: linked, now: new Date(now), idleSince: idleSince, once: oneShot })
   readonly property var liveWords: ({ typing: "writing", thinking: "thinking", digging: "digging", delegating: "delegating", watching: "watching", tidying: "tidying up", listening: "listening", speaking: "speaking", offline: "offline" })
 
@@ -322,6 +324,9 @@ ShellRoot {
     function open(): void { root.show(); }
     function close(): void { root.hide(); }
     function mini(): void { root.miniShown ? root.hideMini() : root.showMini(); }
+    // Lights every panel as if at this hour (0 to 24, fractional), to preview the day's light; a negative hour or
+    // "now" goes back to each panel's own.
+    function light(hour: string): void { const h = Number(hour); root.lightHour = hour === "now" || isNaN(h) ? -1 : h; }
     // Hidden, then live June with the note open, then the full strip, then hidden: one key for everything. When she has
     // popped up by herself, the first press opens her note under her reply, as if she had been summoned.
     function cycle(): void {
@@ -449,7 +454,7 @@ ShellRoot {
       if (!sides[p.id]) sides[p.id] = Compose.chooseSide(previousSide, pose);
       previousSide = sides[p.id];
       previousPose = pose ? pose.id : "";
-      return Object.assign({}, p, { side: sides[p.id], pose: pose });
+      return Object.assign({}, p, { side: sides[p.id], pose: pose, live: live });
     });
     const rows = composed.reverse().map(p => ({ pid: p.id, json: JSON.stringify(p) }));
     let same = rows.length === strip.count;
@@ -603,6 +608,8 @@ ShellRoot {
               newest: index === 0
               activity: root.activity
               poses: root.poses
+              now: root.now
+              hourOverride: root.lightHour
             }
           }
 

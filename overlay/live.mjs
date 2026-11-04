@@ -26,7 +26,7 @@ export const LIVE_STATES = [
 ];
 
 // Tools that hand work to someone else; any other tool is her digging something up herself.
-const DELEGATING = ["work", "org_queue_task", "org_queue_plan", "org_dispatch_now", "org_resume_task", "herdr_prompt_agent"];
+export const DELEGATING = ["work", "org_queue_task", "org_queue_plan", "org_dispatch_now", "org_resume_task", "herdr_prompt_agent"];
 
 /** How long she has been idle, in minutes, and the hour, decide what she does with herself. */
 export function idleState(date, minutes) {
