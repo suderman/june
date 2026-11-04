@@ -291,14 +291,16 @@ function entry(x, y, ux, uy, box, margin) {
  * A balloon's tail toward June's mouth. It may leave the balloon's side facing her (when the side has a straight run) or
  * its top or bottom edge near her, whichever faces her mouth; beside her face the side is preferred, and otherwise the
  * candidate with the longer clear path wins. The tip stops short of her face and of every box in `obstacles`.
- * Coordinates are relative to the balloon.
+ * `stacked` (a narrow panel, her band above the words) allows only the top edge, under her mouth, so a balloon boxed
+ * in from above goes without a tail rather than pointing out of the panel. Coordinates are relative to the balloon.
  */
-export function aimTail(box, mouth, face, side, obstacles = []) {
+export function aimTail(box, mouth, face, side, obstacles = [], stacked = false) {
 	const r = Math.min(box.h / 2, 26);
 	const straight = box.h - 2 * r;
 	const beside = box.y < face.y + face.h && face.y < box.y + box.h;
 	const candidates = [];
-	if (straight >= 12) {
+	// Stacked, she is above the words, never beside them: a side tail would point out of the panel.
+	if (straight >= 12 && !stacked) {
 		const base = Math.min(TAIL_BASE, straight - 2);
 		const at = clamp(mouth.y - box.y, r + base / 2, box.h - r - base / 2);
 		candidates.push({ edge: side, at, base, bx: side === "left" ? box.x : box.x + box.w, by: box.y + at });
@@ -308,7 +310,8 @@ export function aimTail(box, mouth, face, side, obstacles = []) {
 	if (across >= 12) {
 		const vertical = mouth.y >= box.y + box.h ? "bottom" : "top";
 		const base = Math.min(TAIL_BASE, across - 2);
-		const at = side === "left" ? r + base / 2 : box.w - r - base / 2;
+		// Stacked, the tail leaves the top under her mouth; otherwise near her side.
+		const at = stacked ? clamp(mouth.x - box.x, r + base / 2, box.w - r - base / 2) : side === "left" ? r + base / 2 : box.w - r - base / 2;
 		candidates.push({ edge: vertical, at, base, bx: box.x + at, by: vertical === "bottom" ? box.y + box.h : box.y });
 	}
 	// A balloon too small for any base has no tail; Balloon.qml keeps balloons above that size.
@@ -470,7 +473,7 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 		let run = [];
 		const close = () => {
 			const tailed = run.some((i) => beside(out[i])) ? run.filter((i) => beside(out[i])) : run.length > 0 ? [run.reduce((a, b) => (distance(out[b]) < distance(out[a]) ? b : a))] : [];
-			for (const i of tailed) out[i].tail = aimTail(out[i], mouth, face, side, out.filter((_, j) => j !== i));
+			for (const i of tailed) out[i].tail = aimTail(out[i], mouth, face, side, out.filter((_, j) => j !== i), m.stacked);
 			run = [];
 		};
 		// Tool chips, status cards, and thoughts are narration inside her speech, so they do not end a run; the user's

@@ -831,3 +831,21 @@ test("live June watches while the daemon says she follows tasks, after anything 
 	assert.equal(activity({ running: false, background: 0, following: 3 }, true), "following 3 tasks");
 	assert.equal(activity({ running: false, background: 0 }, true), "");
 });
+
+test("in a stacked panel a tail leaves the top under her mouth, or there is none", () => {
+	const face = { x: 120, y: 20, w: 110, h: 120 };
+	const mouth = { x: 175, y: 120 };
+	// Right under her band: up from the top edge, under her mouth, not out of the side.
+	const top = aimTail({ x: 12, y: 190, w: 380, h: 90 }, mouth, face, "left", [], true);
+	assert.equal(top.edge, "top");
+	assert.ok(Math.abs(top.at - (mouth.x - 12)) < 1, "the base sits under her mouth");
+	// The user's note right above it: no tail rather than one out of the panel's side.
+	assert.equal(aimTail({ x: 12, y: 270, w: 380, h: 90 }, mouth, face, "left", [{ x: 12, y: 190, w: 380, h: 70 }], true), null);
+	// Not stacked, the same balloon may still use its side.
+	assert.equal(aimTail({ x: 12, y: 270, w: 380, h: 90 }, mouth, face, "left", [{ x: 12, y: 190, w: 380, h: 70 }])?.edge, "left");
+	// A whole narrow panel: no balloon's tail leaves by a side.
+	const pose = { width: 1000, height: 1300, face: { x: 0.35, y: 0.196, w: 0.3, h: 0.269 }, mouth: { x: 0.5, y: 0.412 }, facing: "front", mirror: true, framings: ["close-up", "head", "bust", "waist"], marks: [] };
+	const laid = plan({ width: 411, side: "left", pose, elements: [{ kind: "user", w: 380, h: 60 }, { kind: "june", w: 380, h: 110 }] });
+	assert.ok(laid.metrics.stacked);
+	for (const e of laid.elements) if (e.tail) assert.equal(e.tail.edge, "top");
+});
