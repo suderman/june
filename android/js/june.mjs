@@ -4,13 +4,13 @@
 // phone shares with the desktop" in docs/interfaces.org. Below them, the phone's own glue: it keeps the strip's memory
 // and the avatar set's poses in the engine between calls, and hands back layouts ready to draw.
 import * as compose from "../../overlay/compose.mjs";
+import * as looks from "../../overlay/console.mjs";
 import * as light from "../../overlay/light.mjs";
 import * as scenery from "../../overlay/scenery.mjs";
 import * as strip from "../../overlay/strip.mjs";
 
-export { compose, light, scenery, strip };
+export { compose, light, looks, scenery, strip };
 export * as live from "../../overlay/live.mjs";
-export * as looks from "../../overlay/console.mjs";
 
 // Each panel's side and pose once chosen, kept for as long as the screen lives (composeStrip).
 const memory = { sides: {}, poseIds: {}, livePoses: {} };
@@ -92,4 +92,9 @@ function scene(panel, laid, pose, sizes, width, now, hourOverride, sky) {
 		lamp: back.kind === "cutaway" || !sc.faceCentre ? 0 : L.lampOn,
 		faceCentre: sc.faceCentre,
 	};
+}
+
+/** The strip in the console look: each panel's lines (console.mjs), and whether she is still working in it. */
+export function consoleStrip(items, state, holding) {
+	return panels(items, state, holding).map((panel) => ({ id: panel.id, live: panel.live === true, lines: looks.lines(panel) }));
 }

@@ -32,8 +32,13 @@ class ConversationActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         link = Link(this)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(Modifier.fillMaxSize(), color = Color(0xFF141418), contentColor = Color(0xFFECE6DA)) {
+            val palette = pagePalette()
+            // Dark status bar icons on a light page, light ones on a dark page.
+            androidx.compose.runtime.SideEffect {
+                androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = !palette.dark
+            }
+            MaterialTheme(colorScheme = if (palette.dark) darkColorScheme() else androidx.compose.material3.lightColorScheme()) {
+                Surface(Modifier.fillMaxSize(), color = palette.page, contentColor = palette.pageInk) {
                     Box(Modifier.statusBarsPadding()) {
                         if (locked) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Unlock to talk to June", style = MaterialTheme.typography.headlineSmall) }

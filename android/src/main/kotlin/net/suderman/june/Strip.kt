@@ -467,3 +467,51 @@ private fun ElementView(e: Measured, box: JSONObject, newest: Boolean) {
         }
     }
 }
+
+/**
+ * The strip in the console look (console.mjs and ConsolePanel.qml on the desktop): each panel's lines in monospace, a
+ * prefix in its colour and the words after it, her face as an emoticon after her name, tool lines marked by status,
+ * and a quiet status line while she works. Newest at the bottom, as the comic strip.
+ */
+@Composable
+fun ConsoleStrip(link: Link, decisions: Decisions, palette: Look.Palette, modifier: Modifier = Modifier) {
+    val strip by produceState(JSONArray(), link.items, link.state) {
+        value = runCatching { JSONArray(decisions.call("consoleStrip", JSONArray(link.items.map { it.raw }), link.state.raw, false)) }
+            .onFailure { android.util.Log.w(TAG, "console strip failed: $it") }.getOrDefault(value)
+    }
+    val count = strip.length()
+    LazyColumn(modifier, state = rememberLazyListState(), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        items(count, key = { strip.getJSONObject(count - 1 - it).getString("id") }) { i ->
+            val panel = strip.getJSONObject(count - 1 - i)
+            val lines = panel.getJSONArray("lines")
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (j in 0 until lines.length()) ConsoleLine(lines.getJSONObject(j), palette)
+                if (panel.optBoolean("live") && link.state.activity.isNotEmpty()) Text("… " + link.state.activity, color = palette.busy, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConsoleLine(line: JSONObject, palette: Look.Palette) {
+    val kind = line.optString("kind")
+    val quiet = kind == "tool" || kind == "thought"
+    val prefixColour = when (kind) {
+        "user" -> palette.user
+        "june" -> palette.june
+        "tool" -> when (line.optString("status")) { "error" -> palette.fail; "running" -> palette.busy; else -> palette.ok }
+        "burst" -> palette.accent
+        else -> palette.muted
+    }
+    val text = buildAnnotatedString {
+        val prefix = line.optString("prefix")
+        if (prefix.isNotEmpty()) {
+            withStyle(SpanStyle(color = prefixColour, fontWeight = FontWeight.Bold)) { append(prefix) }
+            append(" ")
+        }
+        if (kind == "june") append(markdown(line.optString("text"), code = palette.june))
+        else withStyle(SpanStyle(color = if (quiet) palette.muted else palette.ink)) { append(line.optString("text")) }
+        if (line.optBoolean("streaming")) withStyle(SpanStyle(color = palette.accent)) { append(" ▍") }
+    }
+    Text(text, color = palette.ink, fontFamily = FontFamily.Monospace, fontSize = if (quiet) 13.sp else 15.sp)
+}

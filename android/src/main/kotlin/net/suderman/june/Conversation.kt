@@ -25,6 +25,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.border
 import androidx.compose.runtime.Composable
 import android.util.Log
 import androidx.compose.foundation.Canvas
@@ -52,12 +55,42 @@ import androidx.compose.ui.unit.sp
  * The phone's comic strip comes later, from the overlay's shared decisions; see "What the phone shares with the
  * desktop" in docs/interfaces.org. A tap above the sheet puts June away.
  */
+/**
+ * This phone's look: the comic strip or the console, as the desktop's window toggles it per device. Kept in the app's
+ * preferences, so the session and the full screen agree and the choice outlasts them.
+ */
+object LookChoice {
+    var console by mutableStateOf(false)
+        private set
+    private var loaded = false
+
+    fun load(context: android.content.Context) {
+        if (loaded) return
+        loaded = true
+        console = context.getSharedPreferences("look", android.content.Context.MODE_PRIVATE).getBoolean("console", false)
+    }
+
+    fun set(context: android.content.Context, on: Boolean) {
+        console = on
+        context.getSharedPreferences("look", android.content.Context.MODE_PRIVATE).edit().putBoolean("console", on).apply()
+    }
+}
+
+/** The page's palette for this phone's look and Android's dark mode. */
+@Composable
+fun pagePalette(): Look.Palette {
+    val context = LocalContext.current
+    remember { LookChoice.load(context) }
+    return Look.palette(LookChoice.console, isSystemInDarkTheme())
+}
+
 @Composable
 fun Conversation(link: Link, locked: Boolean, dismiss: () -> Unit, unlock: () -> Unit) {
     val context = LocalContext.current
     val sensor = remember { fingerprintSensor(context) }
     var origin by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-    MaterialTheme(colorScheme = darkColorScheme()) {
+    val palette = pagePalette()
+    MaterialTheme(colorScheme = if (palette.dark) darkColorScheme() else lightColorScheme()) {
       Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionOnScreen() }) {
         Column(Modifier.fillMaxSize()) {
             Spacer(
@@ -67,8 +100,8 @@ fun Conversation(link: Link, locked: Boolean, dismiss: () -> Unit, unlock: () ->
             Surface(
                 Modifier.weight(0.75f).fillMaxWidth(),
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                color = Color(0xFF141418),
-                contentColor = Color(0xFFECE6DA),
+                color = palette.page,
+                contentColor = palette.pageInk,
             ) {
                 if (locked) Prompt("Unlock to talk to June", unlock) else Sheet(link)
             }
@@ -78,7 +111,7 @@ fun Conversation(link: Link, locked: Boolean, dismiss: () -> Unit, unlock: () ->
         if (locked && sensor != null) Canvas(Modifier.fillMaxSize()) {
             val centre = androidx.compose.ui.geometry.Offset(sensor[0] - origin.x, sensor[1] - origin.y)
             val r = sensor[2]
-            val line = Color(0xFFECE6DA)
+            val line = palette.pageInk
             drawCircle(line.copy(alpha = 0.12f), r, centre)
             drawCircle(line.copy(alpha = 0.7f), r, centre, style = Stroke(r * 0.04f))
             for (i in 1..3) {
@@ -132,13 +165,23 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, keyboard: Boolean = false)
     }
     val avatar = remember { runCatching { Avatar(context) }.onFailure { Log.w(TAG, "avatar set did not load: $it") }.getOrNull() }
 
+    val palette = pagePalette()
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().then(if (keyboard) Modifier.imePadding() else Modifier)) {
         Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(statusLine(link), color = Color(0xFF9AA0AE), fontSize = 13.sp, modifier = Modifier.weight(1f))
-            if (settings != null) Text("settings", color = Color(0xFF9AA0AE), fontSize = 13.sp, modifier = Modifier.clickable(onClick = settings).padding(start = 12.dp))
+            Text(statusLine(link), color = palette.muted, fontSize = 13.sp, fontFamily = if (LookChoice.console) FontFamily.Monospace else null, modifier = Modifier.weight(1f))
+            // The look, toggled as the desktop's window toggles it: outlined when off, filled when on.
+            val on = LookChoice.console
+            Text(
+                "console", fontSize = 12.sp, color = if (on) palette.page else palette.pageInk,
+                modifier = Modifier.padding(start = 12.dp).background(if (on) palette.pageInk else Color.Transparent, RoundedCornerShape(50))
+                    .border(1.5.dp, palette.pageInk, RoundedCornerShape(50)).clickable { LookChoice.set(context, !on) }.padding(horizontal = 10.dp, vertical = 3.dp),
+            )
+            if (settings != null) Text("settings", color = palette.muted, fontSize = 13.sp, modifier = Modifier.clickable(onClick = settings).padding(start = 12.dp))
         }
         val ready = decisions
-        if (ready != null && avatar != null) {
+        if (ready != null && LookChoice.console) {
+            ConsoleStrip(link, ready, palette, Modifier.weight(1f).fillMaxWidth())
+        } else if (ready != null && avatar != null) {
             Strip(link, ready, avatar, Modifier.weight(1f).fillMaxWidth())
         } else {
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
