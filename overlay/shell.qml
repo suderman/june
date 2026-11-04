@@ -92,12 +92,58 @@ ShellRoot {
     const name = Hyprland.focusedMonitor?.name;
     return Quickshell.screens.find(s => s.name === name) || Quickshell.screens[0];
   }
-  function show() {
-    targetScreen = focusedScreen();
-    hideMini();
-    shown = true;
+  // The unfold: 0 is her card alone in the corner, 1 the full strip at the right edge. About a quarter second either way.
+  property real unfold: 0
+  // Her card stays put through the unfold when it is already on screen (from min mode, or back to it).
+  property bool cardSteady: false
+  property bool toMiniAfter: false
+  NumberAnimation {
+    id: unfolding
+    target: root
+    property: "unfold"
+    duration: 250
+    easing.type: Easing.OutCubic
+    onFinished: {
+      if (root.unfold > 0.001) return;
+      root.shown = false;
+      if (root.toMiniAfter) {
+        root.toMiniAfter = false;
+        root.miniShown = true;
+        root.miniSummoned = true;
+        root.miniInput = true;
+      }
+    }
   }
-  function hide() { shown = false; }
+  function unfoldTo(target) {
+    unfolding.stop();
+    unfolding.from = unfold;
+    unfolding.to = target;
+    unfolding.start();
+  }
+  function show() {
+    const fromMini = miniShown;
+    targetScreen = fromMini ? miniScreen : focusedScreen();
+    cardSteady = fromMini;
+    // A draft started in the corner carries on in the strip.
+    if (fromMini && live.draft !== "") { input.text = live.draft; live.draft = ""; }
+    hideMini();
+    toMiniAfter = false;
+    shown = true;
+    unfoldTo(1);
+  }
+  function hide() {
+    if (!shown) return;
+    if (!toMiniAfter) cardSteady = false;
+    unfoldTo(0);
+  }
+  // Shrink the strip back into her card, the note open with any draft.
+  function toMini() {
+    miniScreen = targetScreen;
+    if (input.text !== "") { live.draft = input.text; input.clear(); }
+    toMiniAfter = true;
+    cardSteady = true;
+    hide();
+  }
 
   // Live June, the minimised form. Summoned by the first Alt tap, she opens with the user's note ready; she also pops
   // up by herself with a reply that finishes while the strip is hidden, and tucks herself away after a while.
@@ -323,13 +369,15 @@ ShellRoot {
     return true;
   }
 
+  // Max mode: the strip at the screen's right edge, full height, unfolding out of live June's card, which stays in the
+  // same corner as in min mode. See "Live June" in docs/interfaces.org.
   PanelWindow {
     id: window
     visible: root.shown
     screen: root.targetScreen
     anchors { top: true; bottom: true; left: true; right: true }
     exclusionMode: ExclusionMode.Ignore
-    color: Theme.backdrop
+    color: "transparent"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "june-overlay"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
@@ -338,98 +386,144 @@ ShellRoot {
     // Esc hides from anywhere in the overlay, even after a click put the focus in a balloon to select its words.
     Shortcut { sequence: "Escape"; onActivated: root.hide() }
 
+    // The backdrop dims as the strip unfolds; a click on it puts everything away.
+    Rectangle { anchors.fill: parent; color: Theme.backdrop; opacity: root.unfold }
     MouseArea { anchors.fill: parent; onClicked: root.hide() }
 
-    Rectangle {
+    Item {
       id: page
-      anchors.horizontalCenter: parent.horizontalCenter
+      anchors.right: parent.right
       anchors.top: parent.top
       anchors.bottom: parent.bottom
       width: Math.min(Theme.stripWidth, parent.width - 32)
-      color: Theme.paper
-      MouseArea { anchors.fill: parent } // clicks on the page stay on it
+      // The unfold in two overlapping beats: the input grows out of her card, then the paper rises behind it.
+      readonly property real inputPhase: Math.min(1, root.unfold / 0.35)
+      readonly property real stripPhase: Math.max(0, Math.min(1, (root.unfold - 0.3) / 0.7))
+      readonly property int dockHeight: 150 + 22
 
-      Row {
-        id: masthead
-        anchors.top: parent.top
+      // The paper rises from behind the input: the newest panel first, earlier ones following, the masthead last.
+      Rectangle {
+        id: paper
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.margins: 16
-        height: 30
-        spacing: 12
-        Text { text: "june"; font.family: Theme.display; font.pixelSize: 22; color: Theme.ink; anchors.verticalCenter: parent.verticalCenter }
-        Text {
-          anchors.verticalCenter: parent.verticalCenter
-          text: !root.linked ? (root.refusals >= 2 ? "pairing needed: check this device's token" : "reconnecting to " + root.host + "…") : root.view.state.running || root.view.state.compacting ? root.activity : "on " + root.host
-          font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
-          color: root.linked ? Theme.muted : Theme.accent
-        }
-        // Background briefs: a small inked "meanwhile" card, the comic's cutaway to work going on elsewhere.
-        Rectangle {
-          visible: root.linked && (root.view.state.background ?? 0) > 0
-          anchors.verticalCenter: parent.verticalCenter
-          width: meanwhile.implicitWidth + 20
-          height: 26
-          radius: 6
-          color: Theme.cardFill
-          border.color: Theme.cardLine
-          border.width: 1.5
-          Text {
-            id: meanwhile
-            anchors.centerIn: parent
-            text: "meanwhile, on " + root.host + " · " + (root.view.state.background === 1 ? "1 brief" : root.view.state.background + " briefs")
-            font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
-            color: Theme.cardBusy
+        anchors.bottom: parent.bottom
+        height: page.height * page.stripPhase
+        color: Theme.paper
+        clip: true
+        MouseArea { anchors.fill: parent } // clicks on the page stay on it
+
+        // Laid out at full height and revealed by the paper, so the strip does not re-lay itself out as it rises.
+        Item {
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          height: page.height
+
+          Row {
+            id: masthead
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: 16
+            height: 30
+            spacing: 12
+            Text { text: "june"; font.family: Theme.display; font.pixelSize: 22; color: Theme.ink; anchors.verticalCenter: parent.verticalCenter }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: !root.linked ? (root.refusals >= 2 ? "pairing needed: check this device's token" : "reconnecting to " + root.host + "…") : root.view.state.running || root.view.state.compacting ? root.activity : "on " + root.host
+              font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
+              color: root.linked ? Theme.muted : Theme.accent
+            }
+            // Background briefs: a small inked "meanwhile" card, the comic's cutaway to work going on elsewhere.
+            Rectangle {
+              visible: root.linked && (root.view.state.background ?? 0) > 0
+              anchors.verticalCenter: parent.verticalCenter
+              width: meanwhile.implicitWidth + 20
+              height: 26
+              radius: 6
+              color: Theme.cardFill
+              border.color: Theme.cardLine
+              border.width: 1.5
+              Text {
+                id: meanwhile
+                anchors.centerIn: parent
+                text: "meanwhile, on " + root.host + " · " + (root.view.state.background === 1 ? "1 brief" : root.view.state.background + " briefs")
+                font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
+                color: Theme.cardBusy
+              }
+            }
+          }
+
+          ListView {
+            id: list
+            anchors.top: masthead.bottom
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: page.dockHeight + 8
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: 16
+            anchors.rightMargin: 16
+            anchors.topMargin: 16
+            verticalLayoutDirection: ListView.BottomToTop
+            spacing: 14
+            clip: true
+            opacity: root.linked ? 1 : 0.5
+            model: strip
+            delegate: Panel {
+              required property int index
+              width: list.width
+              newest: index === 0
+              activity: root.activity
+              poses: root.poses
+            }
+          }
+
+          Rectangle {
+            visible: root.toast !== ""
+            anchors.bottom: list.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottomMargin: 6
+            width: Math.min(toastText.implicitWidth + 28, parent.width - 48)
+            height: toastText.height + 14
+            color: Theme.captionFill
+            border.color: Theme.ink
+            border.width: 2
+            Text { id: toastText; anchors.centerIn: parent; width: Math.min(implicitWidth, page.width - 76); wrapMode: Text.Wrap; text: root.toast; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13; color: Theme.ink }
           }
         }
       }
 
-      ListView {
-        id: list
-        anchors.top: masthead.bottom
-        anchors.bottom: composer.top
-        anchors.left: parent.left
+      // Live June's card, in the corner where min mode keeps her; a click shrinks the strip back down to her.
+      LiveCard {
+        id: maxCard
         anchors.right: parent.right
-        anchors.margins: 16
-        verticalLayoutDirection: ListView.BottomToTop
-        spacing: 14
-        clip: true
-        opacity: root.linked ? 1 : 0.5
-        model: strip
-        delegate: Panel {
-          required property int index
-          width: list.width
-          newest: index === 0
-          activity: root.activity
-          poses: root.poses
-        }
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 22
+        anchors.bottomMargin: 22
+        liveState: root.liveState
+        art: root.liveArt[root.liveState] ?? root.liveArt["sipping"] ?? null
+        running: root.shown
+        // Already on screen when the strip grows out of min mode or shrinks back to it; otherwise she fades in with it.
+        opacity: root.cardSteady ? 1 : Math.min(1, root.unfold * 3)
+        onClicked: root.toMini()
       }
 
-      Rectangle {
-        visible: root.toast !== ""
-        anchors.bottom: composer.top
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottomMargin: 10
-        width: Math.min(toastText.implicitWidth + 28, parent.width - 48)
-        height: toastText.height + 14
-        color: Theme.captionFill
-        border.color: Theme.ink
-        border.width: 2
-        Text { id: toastText; anchors.centerIn: parent; width: Math.min(implicitWidth, page.width - 76); wrapMode: Text.Wrap; text: root.toast; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13; color: Theme.ink }
-      }
-
-      // The user's balloon: Enter steers, Shift+Enter queues, Alt+Enter adds a line, Ctrl+C stops June, Esc hides.
+      // The user's balloon, growing leftward out of her card: Enter steers, Shift+Enter queues, Alt+Enter adds a line,
+      // Ctrl+C stops June, Esc hides.
       Rectangle {
         id: composer
-        anchors.bottom: parent.bottom
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.margins: 16
+        anchors.right: maxCard.left
+        anchors.rightMargin: 14
+        anchors.bottom: maxCard.bottom
+        anchors.bottomMargin: 44
+        width: Math.max(0, maxCard.x - 14 - 16) * page.inputPhase
+        visible: width > 30
         height: Math.min(input.contentHeight + 34, 220)
         radius: Math.min(height / 2, 30)
         color: Theme.balloon
         border.color: Theme.ink
         border.width: 3
+        clip: true
 
         ScrollView {
           anchors.fill: parent

@@ -19,13 +19,15 @@ PanelWindow {
   property bool messageShown: false
   property bool inputShown: false
   readonly property bool hovered: hover.hovered
+  // The note's text, so a draft can move to the strip's input and back.
+  property alias draft: field.text
 
   signal openStrip()
   signal submitted(string text, bool followUp)
   signal wantInput()
   signal dismissed()
 
-  readonly property bool busy: ["typing", "thinking", "digging", "delegating", "watching", "tidying", "listening", "speaking"].includes(liveState)
+  readonly property bool busy: cardBox.busy
   readonly property int card: 150
   readonly property int reach: 340
 
@@ -73,58 +75,17 @@ PanelWindow {
     Text { id: statusText; anchors.centerIn: parent; text: win.status; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: Theme.cardBusy }
   }
 
-  // Her card: the live loop, gently alive even when the art is a still.
-  Rectangle {
+  // Her card: the same card the strip shows in this corner, so she does not move between the two.
+  LiveCard {
     id: cardBox
     anchors.right: parent.right
     anchors.bottom: parent.bottom
     width: win.card
     height: win.card
-    radius: 22
-    color: win.liveState === "offline" ? "#e7e2d6" : win.busy ? Theme.noteFill : "#f6dccb"
-    border.color: Theme.ink
-    border.width: 3
-    clip: true
-
-    Item {
-      id: stage
-      anchors.fill: parent
-      anchors.margins: 3
-      property real bob: 0
-      SequentialAnimation on bob {
-        running: win.shown && (!win.art || win.art.frames <= 1)
-        loops: Animation.Infinite
-        NumberAnimation { to: win.liveState === "snoozing" ? 4 : 3; duration: win.liveState === "snoozing" ? 1600 : win.busy ? 380 : 900; easing.type: Easing.InOutSine }
-        NumberAnimation { to: 0; duration: win.liveState === "snoozing" ? 1600 : win.busy ? 380 : 900; easing.type: Easing.InOutSine }
-      }
-      Image {
-        visible: win.art !== null && win.art.frames <= 1
-        x: 0
-        y: stage.bob
-        width: stage.width
-        height: stage.height
-        source: win.art && win.art.frames <= 1 ? win.art.url : ""
-        sourceSize.width: 288
-        sourceSize.height: 288
-        fillMode: Image.PreserveAspectFit
-        smooth: true
-      }
-      Image { id: sheetSize; visible: false; source: win.art && win.art.frames > 1 ? win.art.url : "" }
-      AnimatedSprite {
-        visible: win.art !== null && win.art.frames > 1
-        anchors.fill: parent
-        source: win.art && win.art.frames > 1 ? win.art.url : ""
-        frameCount: win.art ? Math.max(1, win.art.frames) : 1
-        frameRate: win.art && win.art.fps > 0 ? win.art.fps : 8
-        frameWidth: win.art && win.art.frames > 1 ? sheetSize.sourceSize.width / win.art.frames : 1
-        frameHeight: sheetSize.sourceSize.height
-        loops: win.art && win.art.play === "once" ? 1 : AnimatedSprite.Infinite
-        running: win.shown && visible
-        interpolate: false
-      }
-    }
-
-    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: win.openStrip() }
+    liveState: win.liveState
+    art: win.art
+    running: win.shown
+    onClicked: win.openStrip()
   }
 
   // Her latest reply, growing out of her card, its tail toward her; above the user's note while they answer it. A click
