@@ -19,6 +19,7 @@ import "strip.mjs" as Strip
 import "compose.mjs" as Compose
 import "live.mjs" as Live
 import "scroll.mjs" as Scroll
+import "scenery.mjs" as Scenery
 
 ShellRoot {
   id: root
@@ -49,6 +50,9 @@ ShellRoot {
   // Live June's chibi reactions by expression, the first set winning.
   property var chibiSets: ({})
   property var chibiArt: ({})
+  // Rooms, window views, and props by set, and all of them merged, the first set winning a shared id.
+  property var scenerySets: ({})
+  property var scenery: ({ rooms: [], plates: [], props: [] })
   property var sides: ({})
   property var poseIds: ({})
 
@@ -72,6 +76,9 @@ ShellRoot {
       const chibis = Object.assign({}, chibiSets);
       chibis[index] = Live.readChibi(manifest, "file://" + dir + "/");
       chibiSets = chibis;
+      const scenes = Object.assign({}, scenerySets);
+      scenes[index] = Scenery.readScenery(manifest, "file://" + dir + "/");
+      scenerySets = scenes;
     }
     catch (e) { console.warn("june overlay: no usable avatar set in", dir); sets[index] = []; lives[index] = {}; }
     artSets = sets;
@@ -82,6 +89,9 @@ ShellRoot {
     const chibi = {};
     for (let i = artDirs.length - 1; i >= 0; i--) Object.assign(chibi, chibiSets[i] ?? {});
     chibiArt = chibi;
+    const sceneList = [];
+    for (let i = 0; i < artDirs.length; i++) sceneList.push(scenerySets[i] ?? null);
+    scenery = Scenery.mergeScenery(sceneList);
     const seen = {};
     const all = [];
     for (let i = 0; i < artDirs.length; i++)
@@ -610,6 +620,8 @@ ShellRoot {
               poses: root.poses
               now: root.now
               hourOverride: root.lightHour
+              scenery: root.scenery
+              sky: root.view.state.sky ?? null
             }
           }
 

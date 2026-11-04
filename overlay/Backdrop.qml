@@ -1,7 +1,7 @@
-// What stands behind June in a panel, under the hour's grade: her room (a tint until there is room art), the calm ground,
-// a procedural abstract background, or a cutaway of the work she is doing. light.mjs decides which and draws the paths;
-// this file only paints them. A cutaway is never graded: it is the work on kit, lit by its own screens. See "Light and
-// backgrounds" in docs/interfaces.org.
+// What stands behind June in a panel, under the hour's grade: the panel's tint (her room's ground; the room itself is
+// Scenery.qml, drawn over it), the calm ground, a procedural abstract background, or a cutaway of the work she is doing.
+// light.mjs decides which and draws the paths; this file only paints them. A cutaway is never graded: it is the work on
+// kit, lit by its own screens. See "Light and backgrounds" in docs/interfaces.org.
 import QtQuick
 import QtQuick.Shapes
 import "light.mjs" as Light

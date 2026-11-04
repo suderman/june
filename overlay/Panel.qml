@@ -7,6 +7,7 @@ import QtQuick.Shapes
 import "strip.mjs" as Strip
 import "compose.mjs" as Compose
 import "light.mjs" as Light
+import "scenery.mjs" as Scenery
 
 Item {
   id: panel
@@ -19,6 +20,10 @@ Item {
   // The clock, for a panel without message times, and an hour that overrides every panel's, for previewing the light.
   property real now: Date.now()
   property real hourOverride: -1
+  // Rooms, window views, and props from every avatar set (mergeScenery), and the daemon's sky: home's location and
+  // the weather now.
+  property var scenery: ({ rooms: [], plates: [], props: [] })
+  property var sky: null
 
   // The panel's elements, June's side, and her pose, from the shell (see sync() in shell.qml).
   readonly property var p: JSON.parse(json)
@@ -50,7 +55,8 @@ Item {
 
   // The hour its words were written, and what stands behind her (see light.mjs). The words' share of the panel keeps a
   // long one plain.
-  readonly property var light: Light.look(hourOverride >= 0 ? hourOverride : Light.hourOf(Light.moment(p) ?? now))
+  readonly property real when: Light.moment(p) ?? now
+  readonly property var light: Light.look(hourOverride >= 0 ? hourOverride : Light.hourOf(when), Light.sunFor(hourOverride >= 0 ? now : when, sky))
   readonly property real share: {
     let covered = 0;
     for (const s of sizes) covered += s.w * s.h;
@@ -58,6 +64,21 @@ Item {
   }
   readonly property var backdrop: Light.backdrop(p, { live: Boolean(p.live), share: share })
   readonly property var faceCentre: layout.face ? { x: layout.face.x + layout.face.w / 2, y: layout.face.y + layout.face.h / 2 } : null
+  readonly property int seed: Compose.hash(p.id) % 997
+
+  // Her room, when the backdrop is her room and the set has rooms, out of focus behind a close framing. The weather now
+  // holds for a panel from the last few hours; an older one shows a clear sky rather than a guess.
+  readonly property var room: backdrop.kind === "room" && pose ? Scenery.chooseRoom(scenery.rooms, pose.setting, seed) : null
+  readonly property var roomPlace: room && width > 0 && layout.height > 0 ? Scenery.placeRoom(room, width, layout.height, p.side) : null
+  readonly property var weather: sky && sky.condition && Math.abs(now - when) < Light.WEATHER_MS ? sky : null
+  readonly property var scenePlate: room ? Scenery.choosePlate(scenery.plates, Scenery.season(new Date(when)), seed) : null
+  readonly property var sceneProps: {
+    if (!roomPlace) return [];
+    const obstacles = layout.elements.filter(e => e !== null && e !== undefined);
+    if (layout.face) obstacles.push(layout.face);
+    const chosen = Scenery.chooseProps(scenery.props, { date: new Date(when), weather: weather, room: room, seed: seed });
+    return Scenery.placeProps(chosen, room, roomPlace, width, layout.height, obstacles);
+  }
 
   Backdrop {
     anchors.fill: parent
@@ -65,7 +86,20 @@ Item {
     light: panel.light
     tint: Theme.tint(panel.p.id)
     centre: panel.faceCentre
-    seed: Compose.hash(panel.p.id) % 997
+    seed: panel.seed
+  }
+
+  Scenery {
+    anchors.fill: parent
+    visible: panel.roomPlace !== null
+    room: panel.room
+    place: panel.roomPlace
+    plate: panel.scenePlate
+    sky: Light.skyLook(panel.light, panel.weather ? panel.weather.condition : "")
+    props: panel.sceneProps
+    light: panel.light
+    seed: panel.seed
+    blur: Scenery.focusBlur(panel.layout.framing)
   }
 
   // The lamp after dark: a warm pool of light behind her, over the graded room.

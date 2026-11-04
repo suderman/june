@@ -7,7 +7,9 @@ import { activity, applyView, beats, caption, emptyView, markup, panels, readInp
 import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, jagged, liveActivity, metrics, picked, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
-import { CALM_GROUND, LONG_SHARE, PATTERNS, TIMES, backdrop, cutaway, graded, hourOf, look, moment, patternPath, place } from "../overlay/light.mjs";
+import { CALM_GROUND, LONG_SHARE, PATTERNS, TIMES, WEATHER_MS, backdrop, cutaway, fallingPath, graded, hourOf, look, moment, patternPath, place, skyLook, sunFor, sunKeys, sunTimes } from "../overlay/light.mjs";
+import { MAX_PROPS, focusBlur, SEASONS as SCENE_SEASONS, SETTINGS as SCENE_SETTINGS, SPOTS, choosePlate, chooseProps, chooseRoom, mergeScenery, placeProps, placeRoom, readScenery, roomPoint, season } from "../overlay/scenery.mjs";
+import { SEASONS, SETTINGS, SPOTS as AVATAR_SPOTS } from "../src/avatar.ts";
 import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent } from "../overlay/live.mjs";
 
 const user = (id, text = "hi", source = "gui") => ({ kind: "user", id, source, text });
@@ -398,7 +400,7 @@ test("a balloon and its tail are one closed outline from any side, and a burst s
 
 test("the shared modules use only JavaScript that QML's engine runs", async () => {
 	// Each of these loaded under Node but failed in Quickshell, blanking the overlay.
-	for (const file of ["strip.mjs", "compose.mjs", "live.mjs", "scroll.mjs", "light.mjs"]) {
+	for (const file of ["strip.mjs", "compose.mjs", "live.mjs", "scroll.mjs", "light.mjs", "scenery.mjs"]) {
 		const source = (await readFile(new URL(`../overlay/${file}`, import.meta.url), "utf8")).replace(/^\s*(\/\/|\*).*$/gm, "");
 		assert.doesNotMatch(source, /\.at\(/, `${file}: Array.prototype.at`);
 		assert.doesNotMatch(source, /Object\.hasOwn\(/, `${file}: Object.hasOwn`);
@@ -631,4 +633,115 @@ test("abstract patterns fill the panel, and focus lines and a burst centre on he
 	const focus = patternPath("focus", 600, 320, { x: 150, y: 120 });
 	const [, x, y] = /^M (\S+) (\S+)/.exec(focus).map(Number);
 	assert.ok(Math.hypot(x - 150, y - 120) >= 70, "lines start clear of her face");
+});
+
+test("the sun rises and sets on the overlay's clock for home's location, and the day's light follows it", () => {
+	// Calgary, to a tenth of a degree, as the daemon sends it. Published times: 5:20 and 21:58 at midsummer, 8:37 and
+	// 16:32 at midwinter (local clock, daylight time in summer).
+	const hm = (h) => Math.round(h * 60);
+	const sun = (y, m, d) => sunTimes(new Date(y, m, d), 50.9, -114);
+	if (new Date(2026, 5, 21).getTimezoneOffset() === 360 && new Date(2026, 11, 21).getTimezoneOffset() === 420) {
+		assert.ok(Math.abs(hm(sun(2026, 5, 21).rise) - hm(5 + 20 / 60)) <= 6);
+		assert.ok(Math.abs(hm(sun(2026, 5, 21).set) - hm(21 + 58 / 60)) <= 8);
+		assert.ok(Math.abs(hm(sun(2026, 11, 21).rise) - hm(8 + 37 / 60)) <= 6);
+		assert.ok(Math.abs(hm(sun(2026, 11, 21).set) - hm(16 + 32 / 60)) <= 6);
+	}
+	const winter = sun(2026, 11, 21);
+	assert.ok(winter.rise < winter.noon && winter.noon < winter.set);
+	assert.equal(sunTimes(new Date(2026, 5, 21), 80, 0), null, "no sunset under the midnight sun");
+	const keys = sunKeys(winter);
+	assert.ok(keys.every((k, i) => i === 0 || k.hour > keys[i - 1].hour), "keys stay in order");
+	assert.equal(look(winter.set - 0.5, winter).name, "golden", "golden hour is when the sun sets, not at a fixed hour");
+	assert.equal(look(winter.set + 2.5, winter).name, "night");
+	const summer = sun(2026, 5, 21);
+	assert.equal(look(summer.set - 4, summer).name, "afternoon", "four hours before a midsummer sunset is still day");
+	assert.equal(look(summer.set + 3, summer).name, "night", "keys past midnight wrap");
+	assert.equal(sunFor(Date.now(), null), null);
+	assert.equal(sunFor(Date.now(), { latitude: 50.9, longitude: -114 }) !== null, true);
+});
+
+test("the window's sky greys with cloud, drops the sun and stars, and lets rain or snow fall", () => {
+	const night = look(1);
+	assert.deepEqual(skyLook(night, "").stars, night.stars);
+	const cloudy = skyLook(look(13), "cloudy");
+	assert.ok(cloudy.sunOpacity < look(13).sunOpacity, "the sun goes behind cloud");
+	assert.notEqual(cloudy.top, look(13).skyTop);
+	assert.equal(skyLook(look(13), "rainy").falling, "rain");
+	assert.equal(skyLook(look(13), "snowy").falling, "snow");
+	assert.equal(skyLook(look(13), "sunny").falling, null);
+	assert.ok(fallingPath("rain", 300, 200, 4).length > 0);
+	assert.doesNotMatch(fallingPath("snow", 300, 200, 4), /NaN/);
+	assert.equal(fallingPath("hail", 300, 200), "");
+	assert.ok(WEATHER_MS >= 60 * 60 * 1000);
+});
+
+const scenery = readScenery(manifest, "file:///set/");
+
+test("the overlay's settings, seasons, and spots match the daemon's, and the base set's scenery reads whole", () => {
+	assert.deepEqual(SCENE_SETTINGS, [...SETTINGS]);
+	assert.deepEqual(SCENE_SEASONS, [...SEASONS]);
+	assert.deepEqual(SPOTS, [...AVATAR_SPOTS]);
+	assert.equal(scenery.rooms.length, Object.keys(manifest.backgrounds.rooms).length);
+	assert.equal(scenery.plates.length, Object.keys(manifest.backgrounds.plates).length);
+	assert.equal(scenery.props.length, Object.keys(manifest.backgrounds.props).length);
+	assert.equal(pose("laughing-head-back").setting, "couch");
+	assert.equal(pose("idle-attentive").setting, "desk");
+	const leniently = readScenery({ backgrounds: { rooms: { bad: { file: 3 }, ok: { file: "r.svg", size: [10, 10], window: [2, 0, 1, 1] } }, props: { always: { file: "p.svg", size: [1, 1], spots: ["desk"] } } } }, "");
+	assert.deepEqual(leniently.rooms.map((r) => [r.id, r.window, r.settings]), [["ok", null, ["desk"]]], "a bad room skipped, a bad window dropped");
+	assert.equal(leniently.props.length, 0, "a prop with no conditions is room art, not a prop");
+	const merged = mergeScenery([{ rooms: [{ id: "study", url: "mine" }], plates: [], props: [] }, scenery]);
+	assert.equal(merged.rooms.find((r) => r.id === "study").url, "mine", "the first set wins a shared id");
+});
+
+test("a pose's setting picks the room, the season the view, and a panel's seed keeps the choice", () => {
+	assert.ok(chooseRoom(scenery.rooms, "couch").settings.includes("couch"));
+	assert.ok(chooseRoom(scenery.rooms, "kitchen").settings.includes("kitchen"));
+	assert.equal(chooseRoom(scenery.rooms, "desk", 5).id, chooseRoom(scenery.rooms, "desk", 5).id);
+	assert.equal(chooseRoom([], "desk"), null);
+	assert.equal(season(new Date(2026, 0, 10)), "winter");
+	assert.equal(season(new Date(2026, 3, 10)), "spring");
+	assert.equal(season(new Date(2026, 6, 10)), "summer");
+	assert.equal(season(new Date(2026, 9, 10)), "autumn");
+	assert.equal(season(new Date(2026, 11, 1)), "winter");
+	assert.equal(choosePlate(scenery.plates, "autumn").season, "autumn");
+	assert.equal(choosePlate([], "autumn"), null);
+	assert.ok(focusBlur("close-up") > focusBlur("head") && focusBlur("head") > focusBlur("bust") && focusBlur("full") === 0, "the closer the shot, the softer the room");
+});
+
+test("props come out by holiday, weather, and temperature, holidays first, never more than two", () => {
+	const ids = (opts) => chooseProps(scenery.props, opts).map((p) => p.id);
+	assert.deepEqual(ids({ date: new Date(2026, 6, 15) }), [], "an ordinary summer day without weather: none");
+	assert.ok(ids({ date: new Date(2026, 9, 31) }).includes("pumpkin"));
+	assert.ok(!ids({ date: new Date(2026, 10, 1) }).includes("pumpkin"), "pumpkins go with October");
+	const december = ids({ date: new Date(2026, 11, 20), weather: { condition: "snowy", temperature: -18, unit: "°C" } });
+	assert.ok(december.includes("mini-tree") && december.includes("string-lights") && december.includes("space-heater"));
+	assert.ok(december.indexOf("space-heater") > december.indexOf("mini-tree"), "holidays before the weather");
+	assert.ok(ids({ date: new Date(2027, 0, 3) }).includes("string-lights"), "a range can wrap the new year");
+	assert.ok(ids({ date: new Date(2026, 6, 15), weather: { condition: "sunny", temperature: 88, unit: "°F" } }).includes("fan"), "Fahrenheit is converted");
+	assert.ok(ids({ date: new Date(2026, 6, 15), weather: { condition: "rainy", temperature: 18, unit: "°C" } }).includes("umbrella"));
+	assert.ok(!ids({ date: new Date(2026, 6, 15), weather: null }).includes("fan"), "without the weather, no weather props");
+});
+
+test("a room covers the panel with its window on the open side, and props stand at its spots clear of her face and the words", () => {
+	const study = scenery.rooms.find((r) => r.id === "study");
+	for (const side of ["left", "right"]) {
+		const place = placeRoom(study, 820, 300, side);
+		assert.ok(place.x <= 0.01 && place.y <= 0.01 && place.x + place.w >= 820 - 0.01 && place.y + place.h >= 300 - 0.01, `${side}: covers`);
+		const centre = place.window.x + place.window.w / 2;
+		assert.ok(side === "left" ? centre > 410 : centre < 410, `${side}: the window on the open side`);
+		const p = roomPoint(place, study.window.x + study.window.w / 2, study.window.y);
+		assert.ok(Math.abs(p.x - centre) < 1, `${side}: room points follow the mirror`);
+	}
+	const place = placeRoom(study, 820, 420, "left");
+	const tree = scenery.props.filter((p) => p.id === "mini-tree" || p.id === "pumpkin" || p.id === "fan");
+	const face = { x: 60, y: 40, w: 160, h: 180 };
+	const words = [{ x: 300, y: 30, w: 460, h: 120 }];
+	const placed = placeProps(tree, study, place, 820, 420, [face, words[0]]);
+	assert.ok(placed.length <= MAX_PROPS);
+	const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+	for (const p of placed) {
+		assert.ok(p.x >= 0 && p.y >= 0 && p.x + p.w <= 820 && p.y + p.h <= 420, `${p.id} inside`);
+		assert.ok(!overlap(p, face) && !overlap(p, words[0]), `${p.id} clear`);
+	}
+	assert.deepEqual(placeProps(tree, study, place, 820, 420, [{ x: 0, y: 0, w: 820, h: 420 }]), [], "no room, no props");
 });

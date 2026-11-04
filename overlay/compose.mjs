@@ -31,6 +31,8 @@ const USUAL = ["close-up", "head", "bust", "waist"];
 const MARKS = ["sparkle", "heart", "sweat", "vein", "steam", "emphasis"];
 // What a pose can show her doing; a copy of POSE_ACTIVITIES in src/avatar.ts, kept in step by test/overlay.test.mjs.
 export const ACTIVITIES = ["thinking", "working", "watching"];
+/** Where a pose has her: at her desk, on the couch, in the kitchen, or standing. A copy of SETTINGS in src/avatar.ts. */
+export const SETTINGS = ["desk", "couch", "kitchen", "standing"];
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -74,6 +76,7 @@ export function readPoses(manifest, base) {
 			height: p.size[1],
 			expression: p.expression,
 			activity: ACTIVITIES.includes(p.activity) ? p.activity : null,
+			setting: SETTINGS.includes(p.setting) ? p.setting : "desk",
 			face: { x: p.face[0], y: p.face[1], w: p.face[2], h: p.face[3] },
 			mouth: { x: p.mouth[0], y: p.mouth[1] },
 			facing: ["left", "right"].includes(p.facing) ? p.facing : "front",
