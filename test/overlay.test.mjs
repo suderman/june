@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { activity, applyView, beats, caption, emptyView, markup, panels, readInput } from "../overlay/strip.mjs";
-import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, jagged, liveActivity, metrics, picked, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
+import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, jagged, liveActivity, metrics, picked, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
 import { CALM_GROUND, LONG_SHARE, PATTERNS, TIMES, WEATHER_MS, backdrop, cutaway, fallingPath, graded, hourOf, look, moment, patternPath, place, skyLook, sunFor, sunKeys, sunTimes } from "../overlay/light.mjs";
@@ -860,4 +860,30 @@ test("in a stacked panel a tail leaves the top under her mouth, or there is none
 	const balloon = laid.elements[1];
 	assert.equal(laid.clip.y + laid.clip.h, balloon.y + balloon.h, "she runs on behind her balloon, no gap above it");
 	assert.ok(laid.face.y + laid.face.h <= balloon.y, "her face stays clear of it");
+});
+
+test("the strip is composed the same way on every client: sides and poses kept once chosen", () => {
+	const poses = readPoses(manifest, "");
+	const items = [
+		{ kind: "user", id: "u1", text: "hello" },
+		{ kind: "assistant", id: "a1", text: "hi there, how was the walk?", expression: "warm" },
+		{ kind: "user", id: "u2", text: "good" },
+		{ kind: "assistant", id: "a2", text: "glad to hear it." },
+	];
+	const memory = { sides: {}, poseIds: {}, livePoses: {} };
+	const first = composeStrip(panels(items), { running: false }, poses, memory);
+	assert.equal(first.length, 2);
+	assert.ok(first.every((p) => p.pose && ["left", "right"].includes(p.side) && p.live === false));
+	assert.equal(first[0].pose.expression, "warm", "the picked face");
+	const again = composeStrip(panels(items), { running: false }, poses, memory);
+	assert.deepEqual(again.map((p) => [p.side, p.pose.id]), first.map((p) => [p.side, p.pose.id]), "nothing rearranges");
+	// A new reply streaming: the newest panel is live, the earlier one stays as it was.
+	const streaming = items.concat([{ kind: "user", id: "u3", text: "and you?" }, { kind: "assistant", id: "a3", text: "busy", streaming: true }]);
+	const live = composeStrip(panels(streaming), { running: true }, poses, memory);
+	assert.equal(live[2].live, true);
+	assert.equal(live[0].pose.id, first[0].pose.id);
+	// Settled with no face picked yet: within the hold, her talking pose stays; after it, a stand-in.
+	const settled = streaming.slice(0, 5).concat([{ kind: "assistant", id: "a3", text: "busy" }]);
+	assert.equal(composeStrip(panels(settled), { running: false }, poses, memory, true)[2].pose.id, memory.livePoses[live[2].id]);
+	assert.ok(composeStrip(panels(settled), { running: false }, poses, memory, false)[2].pose);
 });

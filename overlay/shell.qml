@@ -84,10 +84,9 @@ ShellRoot {
   readonly property string fonts: Quickshell.env("JUNE_OVERLAY_FONTS") || ""
   readonly property string activity: Strip.activity(view.state, linked)
 
-  // June's poses from every avatar set, the first set winning a shared name, and each panel's side and pose, kept once
-  // chosen so the strip does not rearrange itself as it grows. The wrapper names the local sets, a personal one (when
-  // this machine has it) before the base set from the package; without a local personal set, the daemon's comes first,
-  // loaded over HTTP from the path its hello gives this device.
+  // June's poses from every avatar set, the first set winning a shared name. The wrapper names the local sets, a
+  // personal one (when this machine has it) before the base set from the package; without a local personal set, the
+  // daemon's comes first, loaded over HTTP from the path its hello gives this device.
   readonly property var artDirs: (Quickshell.env("JUNE_OVERLAY_ART") || "").split(":").filter(d => d !== "")
   readonly property bool localPersonal: artDirs.length > 1
   // Each set read, by its place in the order: the daemon's at -1, then the local ones from 0.
@@ -99,8 +98,6 @@ ShellRoot {
   property var chibiArt: ({})
   // Rooms, window views, and props from every set, the first set winning a shared id.
   property var scenery: ({ rooms: [], plates: [], props: [] })
-  property var sides: ({})
-  property var poseIds: ({})
 
   Instantiator {
     model: root.artDirs
@@ -458,7 +455,8 @@ ShellRoot {
   readonly property int faceHoldMs: 6000
   property real faceHoldUntil: 0
   property bool syncWasRunning: false
-  property var livePoses: ({})
+  // Each panel's side and pose once chosen, and the live pose to hold, for composeStrip in compose.mjs.
+  property var composeMemory: ({ sides: {}, poseIds: {}, livePoses: {} })
   Timer { id: faceHold; onTriggered: root.sync() }
 
   function sync() {
@@ -470,29 +468,7 @@ ShellRoot {
       faceHold.restart();
     }
     syncWasRunning = running;
-    let previousSide = undefined;
-    let previousPose = "";
-    const composed = list.map((p, i) => {
-      const live = i === list.length - 1 && (view.state.running || view.state.compacting);
-      // While she works or thinks, a pose showing that; while she writes, her expression; settled, the face the daemon
-      // picked for her reply, or a kept stand-in until it arrives.
-      const doing = live ? Compose.liveActivity(view.state, p) : null;
-      const face = live ? null : Compose.picked(p);
-      const holding = !live && !face && i === list.length - 1 && Date.now() < faceHoldUntil && livePoses[p.id] !== undefined;
-      let pose = live ? Compose.choosePose(poses, doing ? { activity: doing, expression: "curious" } : Compose.standIn(p, true), previousPose, p.id)
-        : face ? Compose.choosePose(poses, face, previousPose, p.id)
-        : holding ? (poses.find(x => x.id === livePoses[p.id]) ?? null)
-        : (poses.find(x => x.id === poseIds[p.id]) ?? null);
-      if (live && pose) livePoses[p.id] = pose.id;
-      if (!pose && !live) {
-        pose = Compose.choosePose(poses, Compose.standIn(p, false), previousPose, p.id);
-        if (pose) poseIds[p.id] = pose.id;
-      }
-      if (!sides[p.id]) sides[p.id] = Compose.chooseSide(previousSide, pose);
-      previousSide = sides[p.id];
-      previousPose = pose ? pose.id : "";
-      return Object.assign({}, p, { side: sides[p.id], pose: pose, live: live });
-    });
+    const composed = Compose.composeStrip(list, view.state, poses, composeMemory, Date.now() < faceHoldUntil);
     const rows = composed.reverse().map(p => ({ pid: p.id, json: JSON.stringify(p) }));
     let same = rows.length === strip.count;
     for (let i = 0; same && i < rows.length; i++) same = strip.get(i).pid === rows[i].pid;

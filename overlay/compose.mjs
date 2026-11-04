@@ -159,6 +159,45 @@ export function standIn(panel, live) {
 }
 
 /**
+ * Each panel's pose and side, oldest first, as every client composes the strip. The side alternates from the panel
+ * before unless her pose says otherwise, and both stay put once chosen, so the strip does not rearrange itself as it
+ * grows: `memory` ({ sides, poseIds, livePoses }, panel id to choice) carries them from one call to the next and is
+ * updated in place. The panel she is answering in shows the pose of the moment; when the run ends, `holding` (the
+ * client's few seconds after a run) keeps her talking pose there until the daemon's picked face arrives, then a
+ * stand-in. Returns the panels with `side`, `pose`, and `live` added.
+ */
+export function composeStrip(panels, state, poses, memory, holding = false) {
+	const running = Boolean(state && (state.running || state.compacting));
+	let previousSide = undefined;
+	let previousPose = "";
+	return panels.map((p, i) => {
+		const live = i === panels.length - 1 && running;
+		// While she works or thinks, a pose showing that; while she writes, her expression; settled, the face the daemon
+		// picked for her reply, or a kept stand-in until it arrives.
+		const doing = live ? liveActivity(state, p) : null;
+		const face = live ? null : picked(p);
+		const hold = !live && !face && i === panels.length - 1 && holding && memory.livePoses[p.id] !== undefined;
+		const find = (id) => poses.find((x) => x.id === id) ?? null;
+		let pose = live
+			? choosePose(poses, doing ? { activity: doing, expression: "curious" } : standIn(p, true), previousPose, p.id)
+			: face
+				? choosePose(poses, face, previousPose, p.id)
+				: hold
+					? find(memory.livePoses[p.id])
+					: find(memory.poseIds[p.id]);
+		if (live && pose) memory.livePoses[p.id] = pose.id;
+		if (!pose && !live) {
+			pose = choosePose(poses, standIn(p, false), previousPose, p.id);
+			if (pose) memory.poseIds[p.id] = pose.id;
+		}
+		if (!memory.sides[p.id]) memory.sides[p.id] = chooseSide(previousSide, pose);
+		previousSide = memory.sides[p.id];
+		previousPose = pose ? pose.id : "";
+		return Object.assign({}, p, { side: memory.sides[p.id], pose, live });
+	});
+}
+
+/**
  * A pose that can fill a tall panel standing in for `pose`: one with a `full` framing and the same expression, or the
  * next in its chain, so a long panel shows the whole of her rather than an inset. Null when the set has none.
  */
