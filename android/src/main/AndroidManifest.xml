@@ -15,6 +15,12 @@
             </intent-filter>
         </activity>
 
+        <!-- June's conversation full screen. From the lock screen it covers it and asks Android to unlock. -->
+        <activity android:name=".ConversationActivity" android:exported="false"
+            android:showWhenLocked="true"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
         <!-- Pairing over ADB; only the shell and the system hold this permission, so no app can re-pair June. -->
         <activity android:name=".PairActivity" android:exported="true"
             android:permission="android.permission.WRITE_SECURE_SETTINGS"

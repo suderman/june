@@ -3,6 +3,7 @@ package net.suderman.june
 import android.app.KeyguardManager
 import android.app.assist.AssistStructure
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.service.voice.VoiceInteractionSession
@@ -49,7 +50,7 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
     override fun onCreateContentView(): View = ComposeView(context).apply {
         setViewTreeLifecycleOwner(this@JuneSession)
         setViewTreeSavedStateRegistryOwner(this@JuneSession)
-        setContent { Conversation(link, locked) { hide() } }
+        setContent { Conversation(link, locked, dismiss = { hide() }, unlock = ::unlock) }
     }
 
     override fun onShow(args: Bundle?, showFlags: Int) {
@@ -62,6 +63,16 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
         record("locked: $locked")
         record("showFlags: ${describeFlags(showFlags)}")
         record("args: ${describe(args)}")
+    }
+
+    /**
+     * Over the lock screen, a tap on the prompt opens June's full conversation screen, which covers the lock screen and
+     * asks for the fingerprint or PIN itself; once unlocked, the conversation is there. A session cannot ask: Android
+     * honours an unlock request only from an opaque activity that covers the lock screen.
+     */
+    private fun unlock() {
+        context.startActivity(Intent(context, ConversationActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        hide()
     }
 
     override fun onHide() {

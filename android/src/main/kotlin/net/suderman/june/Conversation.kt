@@ -45,7 +45,7 @@ import androidx.compose.ui.unit.sp
  * desktop" in docs/interfaces.org. A tap above the sheet puts June away.
  */
 @Composable
-fun Conversation(link: Link, locked: Boolean, dismiss: () -> Unit) {
+fun Conversation(link: Link, locked: Boolean, dismiss: () -> Unit, unlock: () -> Unit) {
     MaterialTheme(colorScheme = darkColorScheme()) {
         Column(Modifier.fillMaxSize()) {
             Spacer(
@@ -56,22 +56,24 @@ fun Conversation(link: Link, locked: Boolean, dismiss: () -> Unit) {
                 Modifier.weight(0.75f).fillMaxWidth(),
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 color = Color(0xFF141418),
+                contentColor = Color(0xFFECE6DA),
             ) {
-                if (locked) Prompt("Unlock to talk to June", dismiss) else Sheet(link)
+                if (locked) Prompt("Unlock to talk to June", unlock) else Sheet(link)
             }
         }
     }
 }
 
 @Composable
-private fun Prompt(text: String, dismiss: () -> Unit) {
-    Box(Modifier.fillMaxSize().clickable(onClick = dismiss), contentAlignment = Alignment.Center) {
+private fun Prompt(text: String, onClick: () -> Unit) {
+    Box(Modifier.fillMaxSize().clickable(onClick = onClick), contentAlignment = Alignment.Center) {
         Text(text, style = MaterialTheme.typography.headlineSmall)
     }
 }
 
+/** The conversation itself: the status line, the items newest last, and the words to send. */
 @Composable
-private fun Sheet(link: Link) {
+fun Sheet(link: Link) {
     var draft by remember { mutableStateOf("") }
     val list = rememberLazyListState()
     val shown = link.items.filter { !it.private }
