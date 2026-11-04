@@ -191,7 +191,8 @@ export function chooseSide(previous, pose) {
 
 /**
  * The panel's proportions at `width`. From 480 px June stands beside the words, with less of the width as it narrows;
- * below that she is stacked: a band across the top of the panel, and the words at full width beneath her.
+ * below that she is stacked: a band across the panel, what comes before her first balloon above it, and her words at
+ * full width beneath it.
  */
 export function metrics(width) {
 	const stacked = width < 480;
@@ -397,15 +398,25 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 	const textLeft = side === "left" && !m.stacked ? m.artZone - m.overlap + m.pad : m.pad;
 	const textRight = textLeft + m.textWidth;
 	const placed = [];
-	let y = m.band + m.pad;
+	// Stacked, everything before her first balloon (the user's note, the tools she ran, her thought) sits above her
+	// band, and her words below it, so the panel reads in order and her balloon is right under her, its tail up to
+	// her mouth.
+	let bandTop = m.stacked && elements.length > 0 && elements[0].kind !== "june" ? -1 : 0;
+	let y = bandTop === 0 ? m.band + m.pad : m.pad;
+	const placeBand = () => {
+		bandTop = Math.round(y - m.gap + m.pad);
+		y = bandTop + m.band + m.pad;
+	};
 	let stagger = 0;
 	for (let i = 0; i < elements.length; i++) {
 		const e = elements[i];
+		if (bandTop < 0 && e.kind === "june") placeBand();
 		const w = Math.min(e.w, m.textWidth);
 		const outer = (width) => (side === "left" ? textRight - width : textLeft);
 		const inner = (width, shift) => (side === "left" ? textLeft + shift : textRight - width - shift);
-		if (e.kind === "card" && elements[i + 1]?.kind === "june" && w + m.gap + Math.min(elements[i + 1].w, m.textWidth) <= m.textWidth) {
-			// A status card and the balloon after it share a row: the card outside, the balloon toward June.
+		if (!m.stacked && e.kind === "card" && elements[i + 1]?.kind === "june" && w + m.gap + Math.min(elements[i + 1].w, m.textWidth) <= m.textWidth) {
+			// A status card and the balloon after it share a row: the card outside, the balloon toward June. Never when
+			// stacked, where the card goes above her band and the balloon under it.
 			const next = elements[i + 1];
 			const nw = Math.min(next.w, m.textWidth);
 			placed.push({ x: outer(w), y, w, h: e.h });
@@ -425,8 +436,11 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 		placed.push({ x, y, w, h: e.h, june: e.kind === "june", thought: e.kind === "thought" });
 		y += e.h + (e.kind === "chip" ? 6 : m.gap);
 	}
-	const contentBottom = placed.length > 0 ? y - m.gap : m.pad;
-	const height = Math.round(Math.max(m.stacked ? m.band + 60 : m.minHeight, contentBottom + m.pad + 6));
+	// No balloon yet (her answer has not begun): the band closes the panel.
+	const bandLast = bandTop < 0;
+	if (bandLast) placeBand();
+	const contentBottom = placed.length > 0 && !bandLast ? y - m.gap : m.pad;
+	const height = Math.round(m.stacked ? (bandLast ? bandTop + m.band : Math.max(bandTop + m.band + 60, contentBottom + m.pad + 6)) : Math.max(m.minHeight, contentBottom + m.pad + 6));
 
 	let art = null;
 	let clip = { x: 0, y: 0, w: width, h: height, inset: false };
@@ -448,8 +462,9 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 		}
 		if (framed === null) {
 			if (m.stacked) {
-				// A band across the top: her face toward the middle, the rest of her running off her side.
-				clip = { x: 0, y: 0, w: width, h: m.band, inset: false };
+				// A band across the panel, under any opening notes: her face toward the middle, the rest of her running off
+				// her side.
+				clip = { x: 0, y: bandTop, w: width, h: m.band, inset: false };
 			} else if (tall) {
 				// Long words and no tall pose: June in an inset at the top of her side, not stretched down the panel.
 				const w = Math.round(side === "left" ? textLeft - m.pad - 6 : width - textRight - m.pad - 6);
