@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { activity, applyView, beats, caption, emptyView, markup, panels, readInput } from "../overlay/strip.mjs";
 import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, jagged, liveActivity, metrics, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
+import { rest, step, wheel } from "../overlay/scroll.mjs";
 import { LIVE_STATES as LIVE, RECENT_MS, excerpt, idleState, liveState, newReply, readLive, readingTime, recent } from "../overlay/live.mjs";
 
 const user = (id, text = "hi", source = "gui") => ({ kind: "user", id, source, text });
@@ -396,7 +397,7 @@ test("a balloon and its tail are one closed outline from any side, and a burst s
 
 test("the shared modules use only JavaScript that QML's engine runs", async () => {
 	// Each of these loaded under Node but failed in Quickshell, blanking the overlay.
-	for (const file of ["strip.mjs", "compose.mjs", "live.mjs"]) {
+	for (const file of ["strip.mjs", "compose.mjs", "live.mjs", "scroll.mjs"]) {
 		const source = (await readFile(new URL(`../overlay/${file}`, import.meta.url), "utf8")).replace(/^\s*(\/\/|\*).*$/gm, "");
 		assert.doesNotMatch(source, /\.at\(/, `${file}: Array.prototype.at`);
 		assert.doesNotMatch(source, /Object\.hasOwn\(/, `${file}: Object.hasOwn`);
@@ -470,5 +471,49 @@ test("a popped-up reply stays as long as it takes to read, and a recent one show
 	assert.equal(recent(now - RECENT_MS, now), true, "ten minutes ago, just");
 	assert.equal(recent(now - RECENT_MS - 1, now), false, "older");
 	assert.equal(recent(0, now), false, "none yet");
+});
+
+// Run frames at `fps` until the motion stops; return the total distance and how long it took.
+const glide = (state, now, fps = 60) => {
+	let moved = 0;
+	let t = now;
+	for (let i = 0; i < 2000; i++) {
+		t += 1000 / fps;
+		const r = step(state, 1 / fps, t);
+		moved += r.dy;
+		state = r.state;
+		if (r.done) return { moved, ms: t - now };
+	}
+	return { moved, ms: Infinity };
+};
+
+test("a wheel notch glides up toward earlier panels and slows to a stop, the same at any frame rate", () => {
+	const up = wheel(rest(), { angleY: 120, now: 0 });
+	assert.equal(up.dy, 0, "a wheel moves nothing at once: it glides");
+	const at60 = glide(up.state, 0, 60);
+	const at144 = glide(up.state, 0, 144);
+	assert.ok(at60.moved < -120 && at60.moved > -220, `one notch glides about 170 px up, not ${Math.round(at60.moved)}`);
+	assert.ok(Math.abs(at60.moved - at144.moved) < 4, "the same glide at 60 and 144 fps");
+	assert.ok(at60.ms < 1200, `and settles in about a second, not ${Math.round(at60.ms)} ms`);
+	const twice = wheel(up.state, { angleY: 120, now: 20 });
+	assert.ok(glide(twice.state, 20).moved < at60.moved, "a second notch goes further");
+	const back = wheel(up.state, { angleY: -120, now: 20 });
+	assert.ok(glide(back.state, 20).moved > 0, "a notch the other way reverses at once");
+});
+
+test("a touchpad follows the fingers, then coasts on when they lift", () => {
+	let state = rest();
+	let moved = 0;
+	for (let t = 0; t <= 160; t += 16) {
+		const r = wheel(state, { pixelY: -12, now: t });
+		state = r.state;
+		moved += r.dy;
+	}
+	assert.equal(moved, 12 * 11, "each event moves exactly as far as the fingers did");
+	const held = step(state, 1 / 60, 170);
+	assert.equal(held.dy, 0, "no coast while the fingers are still on the pad");
+	const coast = glide(state, 160 + 50);
+	assert.ok(coast.moved > 60, `released at about 750 px/s, it coasts on down, ${Math.round(coast.moved)} px`);
+	assert.ok(coast.ms < 2500);
 });
 

@@ -18,6 +18,7 @@ import Quickshell.Hyprland
 import "strip.mjs" as Strip
 import "compose.mjs" as Compose
 import "live.mjs" as Live
+import "scroll.mjs" as Scroll
 
 ShellRoot {
   id: root
@@ -101,8 +102,8 @@ ShellRoot {
     id: unfolding
     target: root
     property: "unfold"
-    duration: 250
-    easing.type: Easing.OutCubic
+    duration: 320
+    easing.type: Easing.OutQuart
     onFinished: {
       if (root.unfold > 0.001) return;
       root.shown = false;
@@ -120,6 +121,40 @@ ShellRoot {
     unfolding.to = target;
     unfolding.start();
   }
+  // Scrolling: momentum from scroll.mjs, and whether to stay on the newest panel.
+  property var scrollState: Scroll.rest()
+  property bool follow: true
+  function scrollBy(dy) {
+    const top = list.originY;
+    const bottom = list.originY + Math.max(0, list.contentHeight - list.height);
+    const next = Math.max(top, Math.min(bottom, list.contentY + dy));
+    if (next === top || next === bottom) scrollState = Scroll.halt();
+    list.contentY = next;
+    follow = list.atYEnd;
+  }
+  function scrollWheel(event) {
+    const r = Scroll.wheel(scrollState, { angleY: event.angleDelta.y, pixelY: event.pixelDelta.y, now: Date.now() });
+    scrollState = r.state;
+    if (r.dy !== 0) scrollBy(r.dy);
+    glider.running = true;
+    event.accepted = true;
+  }
+  function scrollFrame(dt) {
+    const r = Scroll.step(scrollState, dt, Date.now());
+    scrollState = r.state;
+    if (r.dy !== 0) scrollBy(r.dy);
+    if (r.done) glider.running = false;
+  }
+  // Opening lands on the newest panel; panels measure themselves a moment later, so land again once they have.
+  Timer { id: settle; interval: 120; onTriggered: if (root.follow) list.positionViewAtBeginning() }
+  function landOnNewest() {
+    follow = true;
+    scrollState = Scroll.rest();
+    glider.running = false;
+    list.positionViewAtBeginning();
+    settle.restart();
+  }
+
   function show() {
     const fromMini = miniShown;
     targetScreen = fromMini ? miniScreen : focusedScreen();
@@ -129,6 +164,7 @@ ShellRoot {
     hideMini();
     toMiniAfter = false;
     shown = true;
+    landOnNewest();
     unfoldTo(1);
   }
   function hide() {
@@ -396,23 +432,26 @@ ShellRoot {
       anchors.top: parent.top
       anchors.bottom: parent.bottom
       width: Math.min(Theme.stripWidth, parent.width - 32)
-      // The unfold in two overlapping beats: the input grows out of her card, then the paper rises behind it.
-      readonly property real inputPhase: Math.min(1, root.unfold / 0.35)
-      readonly property real stripPhase: Math.max(0, Math.min(1, (root.unfold - 0.3) / 0.7))
+      // The unfold in two overlapping beats: the input grows out of her card, then the strip fades in, rising a little.
+      readonly property real inputPhase: Math.min(1, root.unfold / 0.4)
+      readonly property real stripPhase: Math.max(0, Math.min(1, (root.unfold - 0.2) / 0.8))
       readonly property int dockHeight: 150 + 22
 
-      // The paper rises from behind the input: the newest panel first, earlier ones following, the masthead last.
+      // The paper fades in behind the input, rising the last few dozen pixels into place: a short, soft move rather than
+      // a wipe across the whole screen.
       Rectangle {
         id: paper
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: page.height * page.stripPhase
+        height: page.height
         color: Theme.paper
         clip: true
+        opacity: page.stripPhase
+        transform: Translate { y: (1 - page.stripPhase) * 56 }
         MouseArea { anchors.fill: parent } // clicks on the page stay on it
 
-        // Laid out at full height and revealed by the paper, so the strip does not re-lay itself out as it rises.
+        // Laid out at full height, so the strip does not re-lay itself out as it moves.
         Item {
           anchors.left: parent.left
           anchors.right: parent.right
@@ -469,6 +508,20 @@ ShellRoot {
             clip: true
             opacity: root.linked ? 1 : 0.5
             model: strip
+            // Stay on the newest panel as panels arrive and settle their height, unless the user has scrolled away.
+            onContentHeightChanged: if (root.follow) Qt.callLater(list.positionViewAtBeginning)
+            onCountChanged: if (root.follow) Qt.callLater(list.positionViewAtBeginning)
+            onMovementEnded: root.follow = list.atYEnd
+            // Momentum scrolling (scroll.mjs): a wheel notch glides, a touchpad coasts on when the fingers lift.
+            WheelHandler {
+              target: null
+              onWheel: event => root.scrollWheel(event)
+            }
+            FrameAnimation {
+              id: glider
+              running: false
+              onTriggered: root.scrollFrame(frameTime)
+            }
             delegate: Panel {
               required property int index
               width: list.width
