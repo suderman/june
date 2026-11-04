@@ -118,6 +118,8 @@ export type Manifest = {
 	poses?: Record<string, Pose>;
 	/** Live June's art by state: a still, an animated WebP, or a PNG sprite sheet, as for expressions, SVG allowed. */
 	live?: Partial<Record<LiveState, Asset>>;
+	/** Live June's brief reaction when a reply's face is picked, by expression; a missing one falls back along the chain. */
+	chibi?: Partial<Record<Expression, Asset>>;
 };
 
 const isExpression = (name: string): name is Expression => Object.hasOwn(EXPRESSIONS, name);
@@ -146,6 +148,7 @@ export function parseManifest(data: unknown, options: { base?: boolean } = {}): 
 	if (options.base && expressions.idle === undefined) errors.push("a base set must have idle");
 	errors.push(...poseErrors(m.poses, options));
 	errors.push(...liveErrors(m.live));
+	errors.push(...chibiErrors(m.chibi));
 	if (errors.length > 0) throw new Error(`manifest: ${errors.join("; ")}`);
 	return m as Manifest;
 }
@@ -183,6 +186,21 @@ function poseErrors(data: unknown, options: { base?: boolean }): string[] {
 	}
 	const names = Object.values(poses);
 	if (options.base && names.length > 0 && !names.some((p) => p?.expression === "idle" && p.activity === undefined)) errors.push("a base set with poses must have an idle pose");
+	return errors;
+}
+
+/** Problems with a manifest's optional chibi reactions, one per expression. */
+function chibiErrors(data: unknown): string[] {
+	if (data === undefined) return [];
+	if (typeof data !== "object" || data === null || Array.isArray(data)) return ["chibi must be an object"];
+	const errors: string[] = [];
+	for (const [name, a] of Object.entries(data as Record<string, Partial<Asset>>)) {
+		const at = `chibi ${name}`;
+		if (!isExpression(name)) errors.push(`${at}: not in the vocabulary`);
+		if (typeof a?.file !== "string" || !/^[\w./-]+\.(png|webp|svg)$/i.test(a.file) || a.file.startsWith("/") || a.file.split("/").includes(".."))
+			errors.push(`${at}: file must be a .png, .webp, or .svg path inside the set`);
+		if (!["still", "loop", "once"].includes(a?.play as string)) errors.push(`${at}: play must be still, loop, or once`);
+	}
 	return errors;
 }
 

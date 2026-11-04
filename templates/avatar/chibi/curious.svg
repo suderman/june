@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="1024" height="1024">
+<path d="M 46 150 C 40 96 52 40 100 36 C 148 40 160 96 154 150 Z" fill="#45291c"/>
+<path d="M 62 200 C 62 158 76 144 100 144 C 124 144 138 158 138 200 Z" fill="#ee7fa4" stroke="#1b1a1f" stroke-width="3"/>
+<rect x="92" y="126" width="16" height="20" fill="#f0c3a8" stroke="#1b1a1f" stroke-width="3"/>
+<g transform="rotate(-8 100 82)">
+<ellipse cx="100" cy="84" rx="48" ry="46" fill="#f9d9c4" stroke="#1b1a1f" stroke-width="3"/>
+<path d="M 50 88 C 46 40 86 30 104 34 C 138 38 154 60 150 90 C 138 66 122 58 112 56 C 100 70 80 74 62 70 C 56 76 54 82 50 88 Z" fill="#5b3a29" stroke="#1b1a1f" stroke-width="3"/>
+<path d="M 50 86 A 52 56 0 0 1 150 86" fill="none" stroke="#2b2d33" stroke-width="9"/>
+<rect x="40" y="76" width="16" height="30" rx="7" fill="#2b2d33"/><rect x="144" y="76" width="16" height="30" rx="7" fill="#2b2d33"/>
+<ellipse cx="72" cy="104" rx="9" ry="5" fill="#f39aa6" opacity="0.6"/><ellipse cx="128" cy="104" rx="9" ry="5" fill="#f39aa6" opacity="0.6"/>
+
+<ellipse cx="82" cy="94" rx="10" ry="13" fill="#6e8f4a" stroke="#1b1a1f" stroke-width="2.5"/><ellipse cx="118" cy="94" rx="10" ry="13" fill="#6e8f4a" stroke="#1b1a1f" stroke-width="2.5"/><circle cx="84" cy="89" r="3.5" fill="#fff"/><circle cx="120" cy="89" r="3.5" fill="#fff"/>
+<path d="M 96 114 Q 100 110 104 114 Q 100 118 96 114" fill="none" stroke="#1b1a1f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+
+<text x="100" y="198" font-family="sans-serif" font-size="10" font-weight="700" text-anchor="middle" fill="#3a1f2a" opacity="0.7">chibi curious · placeholder</text>
+</svg>

@@ -55,5 +55,17 @@
     "stretching": {"file": "live/stretching.svg", "play": "loop"},
     "snoozing": {"file": "live/snoozing.svg", "play": "loop"},
     "offline": {"file": "live/offline.svg", "play": "loop"}
+  },
+  "chibi": {
+    "idle": {"file": "chibi/idle.svg", "play": "still"},
+    "warm": {"file": "chibi/warm.svg", "play": "still"},
+    "curious": {"file": "chibi/curious.svg", "play": "still"},
+    "smug": {"file": "chibi/smug.svg", "play": "still"},
+    "exasperated": {"file": "chibi/exasperated.svg", "play": "still"},
+    "surprised": {"file": "chibi/surprised.svg", "play": "still"},
+    "delighted": {"file": "chibi/delighted.svg", "play": "still"},
+    "cheering": {"file": "chibi/cheering.svg", "play": "still"},
+    "bashful": {"file": "chibi/bashful.svg", "play": "still"},
+    "determined": {"file": "chibi/determined.svg", "play": "still"}
   }
 }

@@ -120,3 +120,15 @@ test("live June's art validates by state, and the placeholder set covers every s
 	);
 });
 
+test("chibi reactions validate by expression, and the placeholder set has the ten the art list names", async () => {
+	const manifest = parseManifest(JSON.parse(await readFile(new URL("manifest.json", base), "utf8")), { base: true });
+	assert.deepEqual(Object.keys(manifest.chibi ?? {}).sort(), ["bashful", "cheering", "curious", "delighted", "determined", "exasperated", "idle", "smug", "surprised", "warm"]);
+	for (const [name, asset] of Object.entries(manifest.chibi ?? {})) await readFile(new URL(asset.file, base)).catch(() => assert.fail(`${name}: ${asset.file} missing`));
+	const idle = { idle: { file: "idle.png", play: "still" as const } };
+	assert.doesNotThrow(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, chibi: { smug: { file: "c/smug.webp", play: "still" } } }));
+	assert.throws(
+		() => parseManifest({ version: 1, size: [64, 64], expressions: idle, chibi: { thinking: { file: "t.png", play: "still" }, smug: { file: "/abs.png", play: "spin" } } }),
+		(e: Error) => ["chibi thinking: not in the vocabulary", "chibi smug: file must be", "chibi smug: play must be"].every((s) => e.message.includes(s)),
+	);
+});
+
