@@ -297,14 +297,8 @@ Item {
       height: 100
       scale: modelData.size / 100
       transformOrigin: Item.TopLeft
-      readonly property var look: ({
-        sparkle: { stroke: "#f2b81c", fill: "transparent", path: "M 50 8 L 50 34 M 20 22 L 34 40 M 80 22 L 66 40 M 8 56 L 30 58 M 92 56 L 70 58" },
-        emphasis: { stroke: Theme.ink, fill: "transparent", path: "M 10 30 L 34 44 M 18 8 L 38 34 M 46 2 L 50 30 M 74 8 L 62 34 M 92 30 L 68 44" },
-        heart: { stroke: "#e2557a", fill: "#ffb3c7", path: "M 50 86 C 18 64 6 46 14 28 C 22 12 44 12 50 30 C 56 12 78 12 86 28 C 94 46 82 64 50 86 Z" },
-        sweat: { stroke: "#3a7bc8", fill: "#bfe0ff", path: "M 50 6 C 66 34 78 50 78 66 C 78 82 64 94 50 94 C 36 94 22 82 22 66 C 22 50 34 34 50 6 Z" },
-        vein: { stroke: "#d0342c", fill: "transparent", path: "M 14 38 Q 38 38 38 14 M 62 14 Q 62 38 86 38 M 86 62 Q 62 62 62 86 M 38 86 Q 38 62 14 62" },
-        steam: { stroke: "#7b7f8c", fill: "#ffffff", path: "M 20 70 C 4 70 4 46 22 46 C 22 28 46 24 54 38 C 64 22 92 30 86 52 C 100 58 94 80 76 78 C 70 92 44 92 40 80 C 32 86 20 82 20 70 Z" },
-      })[modelData.kind] ?? { stroke: Theme.ink, fill: "transparent", path: "" }
+      readonly property var shape: Compose.MARK_SHAPES[modelData.kind] ?? { stroke: "ink", fill: "transparent", path: "" }
+      readonly property var look: ({ stroke: shape.stroke === "ink" ? Theme.ink : shape.stroke, fill: shape.fill, path: shape.path })
       ShapePath {
         strokeColor: mark.look.stroke
         fillColor: mark.look.fill

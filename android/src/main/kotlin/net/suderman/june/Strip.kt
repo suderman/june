@@ -242,6 +242,9 @@ private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONO
                 }
             }
         }
+        // Marks that reinforce her pose, beside her face, under the words (compose.mjs MARK_SHAPES).
+        val marks = l.optJSONArray("marks")
+        if (marks != null && marks.length() > 0) MarksView(marks, l.optJSONObject("markShapes"))
         val boxes = l.getJSONArray("elements")
         for (i in measured.indices) {
             val box = boxes.optJSONObject(i) ?: continue
@@ -250,6 +253,29 @@ private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONO
             }
         }
         Box(Modifier.matchParentSize().border(3.dp, Look.ink))
+    }
+}
+
+@Composable
+private fun MarksView(marks: JSONArray, shapes: JSONObject?) {
+    val paths = remember(shapes) { mutableMapOf<String, Path>() }
+    Canvas(Modifier.fillMaxSize()) {
+        for (i in 0 until marks.length()) {
+            val mark = marks.getJSONObject(i)
+            val shape = shapes?.optJSONObject(mark.optString("kind")) ?: continue
+            val d = shape.optString("path")
+            if (d.isEmpty()) continue
+            val outline = paths.getOrPut(d) { path(d) }
+            val stroke = shape.optString("stroke").let { if (it == "ink") Look.ink else Look.color(it) }
+            val fill = shape.optString("fill")
+            val unit = mark.getDouble("size").toFloat() / 100f * density
+            translate(mark.getDouble("x").toFloat() * density, mark.getDouble("y").toFloat() * density) {
+                scale(unit, unit, pivot = Offset.Zero) {
+                    if (fill != "transparent" && fill.isNotEmpty()) drawPath(outline, Look.color(fill))
+                    drawPath(outline, stroke, style = Stroke(width = 7f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                }
+            }
+        }
     }
 }
 

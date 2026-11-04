@@ -53,5 +53,5 @@ export function layout(panel, width, sizes) {
 		if (kind === "burst") return Object.assign({}, e, { path: compose.jagged(e.w, e.h, 9) });
 		return e;
 	});
-	return Object.assign({}, laid.layout, { elements, pose: laid.pose, tint: tint(panel.id) });
+	return Object.assign({}, laid.layout, { elements, pose: laid.pose, tint: tint(panel.id), markShapes: compose.MARK_SHAPES });
 }
