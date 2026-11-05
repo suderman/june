@@ -986,4 +986,7 @@ test("a gesture stays whole in a panel: seen past the words, framed wider, or an
 	const kept = panelLayout({ panel: { ...panel, pose: special[0] }, width: 360, sizes: short, poses: special });
 	assert.equal(kept.pose.id, "gentle-palm");
 	assert.equal(typeof kept.layout.cropped, "boolean");
+	const tall = { ...special[1], id: "generic-tall", framings: ["full"] };
+	const longSpecial = panelLayout({ panel: { ...panel, pose: special[0] }, width: 820, sizes: [{ kind: "june", w: 300, h: 1500 }], poses: [...special, tall] });
+	assert.equal(longSpecial.pose.id, "gentle-palm", "an inset must not replace a special with a generic tall pose");
 });

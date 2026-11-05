@@ -333,7 +333,7 @@ export function panelLayout({ panel, width, sizes, poses }) {
 	const usable = poses.filter((p) => availableAt(p, time));
 	const lay = (pose, framing) => {
 		const first = plan({ width, side: panel.side, pose, elements: sizes, framing: framing ?? panel.framing });
-		const tall = first.clip.inset ? tallFor(usable, pose) : null;
+		const tall = first.clip.inset && !pose?.special ? tallFor(usable, pose) : null;
 		if (!tall) return { layout: first, pose };
 		return { layout: plan({ width, side: panel.side, pose: tall, elements: sizes, framing: framing ?? panel.framing }), pose: tall };
 	};

@@ -1,5 +1,6 @@
 // The strip's masthead: June's name, the connection or what she is doing, and a "meanwhile" card while briefs run.
 import QtQuick
+import QtQuick.Controls
 
 Row {
   id: masthead
@@ -35,18 +36,22 @@ Row {
       onClicked: masthead.detailOpen = !masthead.detailOpen
     }
     // What she follows: each task and where it stands, a click on the line away.
-    Rectangle {
+    Popup {
       visible: masthead.detailOpen && masthead.linked && masthead.detail.length > 0
-      y: parent.height + 8
+      y: said.height + 8
       width: Math.max(260, follows.implicitWidth + 24)
       height: follows.implicitHeight + 16
-      radius: 6
-      color: Theme.cardFill
-      border.color: Theme.cardLine
-      border.width: 1.5
-      Column {
+      horizontalPadding: 12
+      verticalPadding: 8
+      onClosed: masthead.detailOpen = false
+      background: Rectangle {
+        radius: 6
+        color: Theme.cardFill
+        border.color: Theme.cardLine
+        border.width: 1.5
+      }
+      contentItem: Column {
         id: follows
-        x: 12; y: 8
         spacing: 4
         Repeater {
           model: masthead.detail
@@ -54,7 +59,7 @@ Row {
             required property var modelData
             text: modelData.title + "  ·  " + modelData.state + (modelData.needsYou ? "   dismiss" : "")
             font.family: Theme.caption; font.pixelSize: 12; font.weight: modelData.needsYou ? Font.Bold : Font.Normal
-            color: modelData.needsYou ? Theme.accent : Theme.pageInk
+            color: modelData.needsYou ? Theme.cardFail : Theme.cardInk
             MouseArea {
               anchors.fill: parent
               enabled: parent.modelData.needsYou
