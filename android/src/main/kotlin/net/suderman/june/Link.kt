@@ -41,6 +41,9 @@ class Link(private val context: Context) {
     /** The daemon's host as the address names it, `kit` for wss://june.kit/, as the desktop's masthead says it. */
     val host: String
         get() = Pairing.load(context)?.url?.let { Regex("^wss?://(?:june\\.)?([^/:.]+)").find(it)?.groupValues?.get(1) } ?: "June"
+    /** Where the daemon serves June's art to this device (the hello's `avatar`), when it has a set. */
+    var avatarPath: String? by mutableStateOf(null)
+        private set
     /** A command's reply or an error, shown briefly. */
     var notice: String by mutableStateOf("")
         private set
@@ -103,6 +106,7 @@ class Link(private val context: Context) {
                             helloSeen = true
                             refusals = 0
                             status = LinkStatus.Linked(reply.optString("device"))
+                            avatarPath = reply.optString("avatar").takeIf { it.isNotEmpty() }
                             webSocket.send(JSONObject().put("op", "attach").put("requestId", requestId()).toString())
                         }
                         "view" -> {

@@ -19,12 +19,27 @@ let rooms = { rooms: [], plates: [], props: [] };
 let liveArt = {};
 let chibiArt = {};
 
-/** Read an avatar set's manifest: its poses, rooms, views, and props, their urls its files as the app's assets name them. */
-export function setArt(manifest) {
-	poses = compose.readPoses(manifest, "");
-	rooms = scenery.mergeScenery([scenery.readScenery(manifest, "")]);
-	liveArt = live.readLive(manifest, "");
-	chibiArt = live.readChibi(manifest, "");
+/**
+ * Read the avatar sets: the app's base set, and the daemon's (Jon's art) when it has one, which wins where both name a
+ * piece, as the overlay merges its sets. Base urls are paths in the app's assets; the daemon's start with `daemon:`.
+ */
+export function setArt(manifest, daemon) {
+	const sets = (daemon ? [[daemon, "daemon:"], [manifest, ""]] : [[manifest, ""]]).map(([m, prefix]) => ({
+		poses: compose.readPoses(m, prefix),
+		live: live.readLive(m, prefix),
+		chibi: live.readChibi(m, prefix),
+		scenery: scenery.readScenery(m, prefix),
+	}));
+	const seen = {};
+	poses = [];
+	for (const set of sets) for (const pose of set.poses) if (!seen[pose.id]) { seen[pose.id] = true; poses.push(pose); }
+	rooms = scenery.mergeScenery(sets.map((s) => s.scenery));
+	liveArt = {};
+	chibiArt = {};
+	for (let i = sets.length - 1; i >= 0; i--) {
+		Object.assign(liveArt, sets[i].live);
+		Object.assign(chibiArt, sets[i].chibi);
+	}
 	return poses.length;
 }
 

@@ -73,17 +73,62 @@ import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 
-/** The base avatar set in the app's assets (built by Nix from templates/avatar), and its pictures, decoded on demand. */
+/**
+ * June's art: the base set in the app's assets (built by Nix from templates/avatar), and the daemon's set when it has
+ * one (Jon's real art, served on the listener's port under the path the hello gives this device). Pictures decode on
+ * demand; the daemon's are kept on disk and revalidated with their ETag, so the strip draws offline from what it saw.
+ */
 class Avatar(private val context: Context) {
     val manifest: JSONObject = JSONObject(context.assets.open("avatar/manifest.json").bufferedReader().use { it.readText() })
     private val cache = LruCache<String, ImageBitmap>(12)
+    private val client = okhttp3.OkHttpClient()
+    private val disk = java.io.File(context.cacheDir, "avatar")
+    @Volatile private var remote: String? = null
 
-    suspend fun image(file: String): ImageBitmap? = cache.get(file) ?: withContext(Dispatchers.IO) {
+    /** The daemon's manifest, at the hello's `path` on the paired host; null without a set (404) or out of reach with none kept. */
+    suspend fun daemonManifest(path: String): JSONObject? = withContext(Dispatchers.IO) {
+        val origin = Pairing.load(context)?.url?.let { Regex("^(wss?)://([^/]+)").find(it) } ?: return@withContext null
+        remote = (if (origin.groupValues[1] == "wss") "https://" else "http://") + origin.groupValues[2] + path
+        fetch("manifest.json")?.let { runCatching { JSONObject(String(it)) }.getOrNull() }
+    }
+
+    /** A file of the daemon's set: fresh, unchanged from the copy kept (304), or the kept copy when the daemon is out of reach. */
+    private fun fetch(file: String): ByteArray? {
+        if (!Regex("^[\\w./-]+$").matches(file) || file.split('/').any { it == ".." || it == "." || it.isEmpty() }) return null
+        val kept = java.io.File(disk, file)
+        val tag = java.io.File(disk, "$file.etag")
+        val base = remote ?: return kept.takeIf { it.exists() }?.readBytes()
+        val request = okhttp3.Request.Builder().url(base + file).apply { if (kept.exists() && tag.exists()) header("If-None-Match", tag.readText()) }.build()
+        return runCatching {
+            client.newCall(request).execute().use { response ->
+                when {
+                    response.code == 304 -> kept.readBytes()
+                    response.isSuccessful -> response.body.bytes().also { bytes ->
+                        kept.parentFile?.mkdirs()
+                        kept.writeBytes(bytes)
+                        response.header("ETag")?.let { tag.writeText(it) } ?: tag.delete()
+                    }
+                    response.code == 404 -> null.also { kept.delete(); tag.delete() }
+                    else -> kept.takeIf { it.exists() }?.readBytes()
+                }
+            }
+        }.getOrElse { kept.takeIf { it.exists() }?.readBytes() }
+    }
+
+    /** A picture by its url as the decisions name it: `daemon:` and a path in the daemon's set, else a path in the assets. */
+    suspend fun image(url: String): ImageBitmap? = cache.get(url) ?: withContext(Dispatchers.IO) {
         runCatching {
             // Half size is still sharper than any panel draws her on a phone, at a quarter of the memory.
-            context.assets.open("avatar/$file").use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = 2 }) }?.asImageBitmap()
-        }.getOrNull()
-    }?.also { cache.put(file, it) }
+            val half = BitmapFactory.Options().apply { inSampleSize = 2 }
+            if (url.startsWith(DAEMON)) fetch(url.removePrefix(DAEMON))?.let { BitmapFactory.decodeByteArray(it, 0, it.size, half) }
+            else context.assets.open("avatar/$url").use { BitmapFactory.decodeStream(it, null, half) }
+        }.getOrNull()?.asImageBitmap()
+    }?.also { cache.put(url, it) }
+
+    companion object {
+        /** The prefix the decisions give the daemon's pictures (june.mjs setArt). */
+        const val DAEMON = "daemon:"
+    }
 }
 
 /**
@@ -93,12 +138,9 @@ class Avatar(private val context: Context) {
  */
 @Composable
 fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier = Modifier) {
-    var ready by remember { mutableStateOf(false) }
-    LaunchedEffect(decisions) {
-        decisions.call("setArt", avatar.manifest)
-        ready = true
-    }
-    val panels by produceState(JSONArray(), ready, link.items, link.state) {
+    val art = rememberArt(link, decisions, avatar)
+    val ready = art > 0
+    val panels by produceState(JSONArray(), art, link.items, link.state) {
         if (ready) value = JSONArray(decisions.call("panels", JSONArray(link.items.map { it.raw }), link.state.raw, false))
     }
     // The clock, for panels lit by the hour now (a reply still streaming), ticking each minute; the daemon's sky.
@@ -531,11 +573,8 @@ private fun ConsoleLine(line: JSONObject, palette: Look.Palette) {
  */
 @Composable
 fun LiveBadge(link: Link, decisions: Decisions, avatar: Avatar) {
-    var ready by remember { mutableStateOf(false) }
-    LaunchedEffect(decisions) {
-        decisions.call("setArt", avatar.manifest)
-        ready = true
-    }
+    val art = rememberArt(link, decisions, avatar)
+    val ready = art > 0
     // When her last run ended, for her idle moods; she settles from busy to idle as runs finish.
     var idleSince by remember { mutableStateOf(System.currentTimeMillis()) }
     var wasRunning by remember { mutableStateOf(false) }
@@ -546,7 +585,7 @@ fun LiveBadge(link: Link, decisions: Decisions, avatar: Avatar) {
     }
     val minute by produceState(System.currentTimeMillis()) { while (true) { kotlinx.coroutines.delay(30_000); value = System.currentTimeMillis() } }
     val linked = link.status is LinkStatus.Linked
-    val now by produceState(JSONObject(), ready, link.items, link.state, linked, idleSince, minute) {
+    val now by produceState(JSONObject(), art, link.items, link.state, linked, idleSince, minute) {
         if (ready) value = runCatching { JSONObject(decisions.call("liveNow", JSONArray(link.items.map { it.raw }), link.state.raw, linked, idleSince.toDouble(), minute.toDouble())) }.getOrDefault(value)
     }
     // Her reaction to a newly picked face: none for faces already there when she opened.
@@ -645,4 +684,19 @@ private fun followNewest(newest: String?): androidx.compose.foundation.lazy.Lazy
     val list = rememberLazyListState()
     LaunchedEffect(newest) { if (newest != null && list.firstVisibleItemIndex <= 1) list.scrollToItem(0) }
     return list
+}
+
+/**
+ * Give the decisions June's art, and say which load they hold (0 until the first): the daemon's set over the base set
+ * once the hello names where it is, the base set alone until then or without one.
+ */
+@Composable
+private fun rememberArt(link: Link, decisions: Decisions, avatar: Avatar): Int {
+    var art by remember { mutableStateOf(0) }
+    LaunchedEffect(decisions, link.avatarPath) {
+        val daemon = link.avatarPath?.let { avatar.daemonManifest(it) }
+        decisions.call("setArt", avatar.manifest, daemon)
+        art++
+    }
+    return art
 }
