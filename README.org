@@ -237,4 +237,6 @@ systemctl --user is-active june-overlay.service
 june-overlay refresh
 #+end_src
 
+Run desktop IPC commands such as =june-overlay refresh= in the graphical session. Over SSH, use the running desktop service's =WAYLAND_DISPLAY=; Quickshell filters instances by display and an SSH shell usually has none.
+
 Run relevant checks before publishing and deploying an increment. Changes to dependencies may require =npm ci= in the daemon checkout. Nix wrapper or Qt/runtime dependency changes require updating the consuming June input and activating the configuration again. Android always uses its APK's bundled JavaScript, so shared behavior changes need a fresh =nix run .#android-install= on an attached phone.
