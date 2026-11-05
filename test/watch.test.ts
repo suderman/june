@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { rmSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxProvider, type TranscriptContext } from "@earendil-works/pi-ai";
 import { createFollowTask, follow } from "../src/tools/follow.ts";
-import { message } from "../src/watch.ts";
+import { createWatch, message } from "../src/watch.ts";
+import { createLogger } from "../src/runtime.ts";
 import { openTestDaemon, tempDir, until } from "./helpers.ts";
 
 const task = (state: string, title: string, id: string, report?: { line: string; state?: string; at?: number }) =>
@@ -225,6 +226,107 @@ test("a delayed watch report keeps its old state news but drops a headline after
 		assert.ok(!heard[0]!.includes(line));
 		const entry = (await daemon.root.context(BG)).entries.find((entry) => entry.kind === "june.input" && (entry.data as { source?: string })?.source === "watch")!;
 		assert.ok(!("watch" in (entry.data as object)), "no structured headline survives either");
+	});
+});
+
+test("daemon close waits for the watch before closing the harness or removing its files", async (t) => {
+	const tmp = await tempDir();
+	let enter!: () => void;
+	let release!: () => void;
+	const entered = new Promise<void>((resolve) => { enter = resolve; });
+	const released = new Promise<void>((resolve) => { release = resolve; });
+	let polls = 0;
+	const daemon = await openTestDaemon({
+		...tmp, faux: fauxProvider(),
+		config: { dispatch: { hosts: ["cog"] }, watch: { enabled: true, gapMinutes: 1 } },
+		watchClock: { now: () => new Date(2026, 10, 5, 23), tickMs: 20, home: tmp.dir, run: async () => {
+			polls++;
+			enter();
+			await released;
+			return "";
+		} },
+	});
+	t.after(async () => {
+		release();
+		await daemon.close();
+		await until(() => existsSync(join(tmp.paths.state, "watch.json")));
+		await tmp.cleanup();
+	});
+	await entered;
+	const closeHarness = daemon.harness.close.bind(daemon.harness);
+	const harnessClose = t.mock.method(daemon.harness, "close", (context: Parameters<typeof closeHarness>[0]) => closeHarness(context));
+	const closing = daemon.close();
+	assert.equal(daemon.close(), closing, "concurrent closes share the same shutdown");
+	// Let socket close and the synchronous stoppers run, without releasing the poll's I/O.
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	assert.equal(harnessClose.mock.callCount(), 0, "the harness stays open for the held poll");
+	release();
+	await closing;
+	assert.ok(existsSync(join(tmp.paths.state, "watch.json")), "the poll saves its ledger before shutdown returns");
+	assert.equal(harnessClose.mock.callCount(), 1);
+	assert.equal(polls, 1);
+});
+
+test("stopping the watch drains an in-flight poll before its files can be removed", async (t) => {
+	for (const fails of [false, true]) await t.test(fails ? "failed poll" : "ledger save", async (t) => {
+		const tmp = await tempDir();
+		const home = join(tmp.dir, "home");
+		const records = join(home, ".local/state/org-dispatch");
+		await mkdir(records, { recursive: true });
+		await writeFile(join(records, "task-drain-0001.json"), JSON.stringify({ id: "task-drain-0001", started: 100 }));
+		const daemon = await openTestDaemon({ ...tmp, faux: fauxProvider() });
+		let enter!: () => void;
+		let release!: () => void;
+		const entered = new Promise<void>((resolve) => { enter = resolve; });
+		const released = new Promise<void>((resolve) => { release = resolve; });
+		const errors: string[] = [];
+		let reads = 0;
+		t.mock.timers.enable({ apis: ["setInterval"] });
+		const stop = createWatch({
+			config: { enabled: true, gapMinutes: 1 }, hosts: ["kit"], host: "kit", ssh: {},
+			window: { start: "05:00", end: "22:00" }, home, state: tmp.paths.state,
+			org: { byId: async () => {
+				reads++;
+				enter();
+				await released;
+				if (fails) throw new Error("fixture Org read failed");
+				return undefined;
+			} },
+			registry: { snapshot: () => { throw new Error("unused"); } },
+			herdr: { json: async () => undefined }, run: async () => "",
+			log: createLogger({ sink: (_level, line) => errors.push(line) }), tickMs: 20,
+		}).start(daemon.harness, daemon.root);
+		t.after(async () => {
+			release();
+			await stop();
+			if (existsSync(tmp.dir)) await until(() => fails ? errors.some((line) => line.includes("watch_failed")) : existsSync(join(tmp.paths.state, "watch.json")));
+			t.mock.timers.reset();
+			await daemon.close();
+			await tmp.cleanup();
+		});
+		t.mock.timers.tick(20);
+		await entered;
+		t.mock.timers.tick(100);
+		assert.equal(reads, 1, "polls do not overlap while I/O is held");
+		let stopped = false;
+		const closing = Promise.resolve(stop()).then(() => { stopped = true; });
+		const closingAgain = Promise.resolve(stop());
+		await Promise.resolve();
+		assert.equal(stopped, false, "stop must not return while the poll can still save its ledger");
+		release();
+		await Promise.all([closing, closingAgain]);
+		if (fails) {
+			assert.equal(errors.filter((line) => line.includes("watch_failed")).length, 1);
+			assert.match(errors[0]!, /fixture Org read failed/);
+		} else assert.ok(existsSync(join(tmp.paths.state, "watch.json")), "the ledger save is complete when stop returns");
+		t.mock.timers.tick(100);
+		await stop();
+		assert.equal(reads, 1, "no poll starts after stop, including repeated stop calls");
+		t.mock.timers.reset();
+		await daemon.close();
+		await tmp.cleanup();
+		await stop();
+		assert.equal(existsSync(tmp.dir), false, "no late writer recreates the removed fixture");
 	});
 });
 

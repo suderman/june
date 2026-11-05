@@ -49,7 +49,7 @@ export function createWatch(options: {
 	now?: () => Date;
 	tickMs?: number;
 	home?: string;
-}): { start(harness: Harness, root: Conversation): () => void } {
+}): { start(harness: Harness, root: Conversation): () => Promise<void> } {
 	const { config, log } = options;
 	const now = options.now ?? (() => new Date());
 	const file = join(options.state, "watch.json");
@@ -109,10 +109,10 @@ export function createWatch(options: {
 		};
 	};
 
-	let busy = false;
 	const start = (harness: Harness, root: Conversation) => {
+		let busy = false;
+		let inFlight: Promise<void> | undefined;
 		const tick = async () => {
-			if (busy) return;
 			busy = true;
 			try {
 				const at = now();
@@ -193,8 +193,15 @@ export function createWatch(options: {
 				busy = false;
 			}
 		};
-		const timer = setInterval(() => void tick().catch((error) => log.warn("watch_failed", { error: (error as Error).message })), options.tickMs ?? 60_000);
-		return () => clearInterval(timer);
+		const timer = setInterval(() => {
+			if (busy) return;
+			inFlight = tick().catch((error) => log.warn("watch_failed", { error: (error as Error).message }));
+		}, options.tickMs ?? 60_000);
+		return async () => {
+			clearInterval(timer);
+			// A poll can still save its ledger or admit a notice after an awaited read.
+			await inFlight;
+		};
 	};
 	return { start };
 }

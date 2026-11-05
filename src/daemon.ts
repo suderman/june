@@ -319,7 +319,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				follows.stop();
 				stopHeartbeat?.();
 				stopLooseEnds?.();
-				stopWatch?.();
+				await stopWatch?.();
 				stopInbox();
 				await harness.close(BG);
 				rmSync(paths.socket, { force: true });
