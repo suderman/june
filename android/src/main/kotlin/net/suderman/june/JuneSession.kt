@@ -36,6 +36,9 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
 
     private val link = Link(context)
     private var locked by mutableStateOf(false)
+    // What was on screen at the summon, offered with the next message; the app is named from the show's arguments.
+    private var screen by mutableStateOf<Screen?>(null)
+    private var app: String? = null
     private val lines = mutableListOf<String>()
 
     override fun onCreate() {
@@ -48,7 +51,7 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
     override fun onCreateContentView(): View = ComposeView(context).apply {
         setViewTreeLifecycleOwner(this@JuneSession)
         setViewTreeSavedStateRegistryOwner(this@JuneSession)
-        setContent { Conversation(link, locked, dismiss = { hide() }, unlock = ::unlock) }
+        setContent { Conversation(link, locked, screen, dismiss = { hide() }, unlock = ::unlock) }
     }
 
     override fun onShow(args: Bundle?, showFlags: Int) {
@@ -63,6 +66,12 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
             override fun onReceive(c: Context, intent: Intent) = hide()
         }.also { context.registerReceiver(it, android.content.IntentFilter(Hands.DISMISS), Context.RECEIVER_NOT_EXPORTED) }
         lines.clear()
+        screen = null
+        app = runCatching {
+            @Suppress("DEPRECATION")
+            val front = args?.getParcelableArrayList<android.content.ComponentName>("android.service.voice.FOREGROUND_ACTIVITIES")?.firstOrNull()
+            front?.let { context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(it.packageName, 0)).toString() }
+        }.getOrNull()
         // Whether the phone wants the user's credentials, not merely whether the lock screen shows.
         locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
         if (locked) watchUnlock() else link.open()
@@ -143,6 +152,8 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
     }
 
     override fun onHandleScreenshot(screenshot: Bitmap?) {
+        // Never over the lock screen: only a prompt shows there.
+        if (screenshot != null && !locked) screen = Screen(screenshot, app ?: "the screen")
         record("screenshot: ${screenshot?.let { "${it.width}x${it.height}" } ?: "null"}")
     }
 

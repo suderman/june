@@ -63,14 +63,15 @@ class Link(private val context: Context) {
         socket = null
     }
 
-    /** Send the user's words; `followUp` queues them behind a busy run rather than steering it. */
-    fun submit(text: String, followUp: Boolean = false): Boolean {
+    /** Send the user's words, with `images` as base64 JPEG; `followUp` queues them behind a busy run rather than steering it. */
+    fun submit(text: String, followUp: Boolean = false, images: List<String> = emptyList()): Boolean {
         if (text.isBlank()) return true
         val ws = socket ?: return false
         if (status !is LinkStatus.Linked) return false
         val request = JSONObject()
             .put("op", "submit").put("requestId", requestId()).put("text", text).put("source", "apk")
             .put("whenBusy", if (followUp) "followUp" else "steer")
+        if (images.isNotEmpty()) request.put("images", org.json.JSONArray(images.map { JSONObject().put("type", "image").put("data", it).put("mimeType", "image/jpeg") }))
         return ws.send(request.toString())
     }
 
