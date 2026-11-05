@@ -59,6 +59,7 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         // Opening June lets her hands act again after Jon stopped them.
         Hands.resume()
+        showing = this
         lines.clear()
         // Whether the phone wants the user's credentials, not merely whether the lock screen shows.
         locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
@@ -105,6 +106,7 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
 
     override fun onHide() {
         super.onHide()
+        if (showing === this) showing = null
         stopWatchingUnlock()
         link.close()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
@@ -170,6 +172,14 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
             SHOW_SOURCE_AUTOMOTIVE_SYSTEM_UI to "SOURCE_AUTOMOTIVE_SYSTEM_UI",
         ).filter { flags and it.first != 0 }.map { it.second }
         return "$flags ${names.joinToString("|")}"
+    }
+
+    companion object {
+        /** The session on screen, which June's hands close before acting: it sits above the apps and even the power menu. */
+        private var showing: JuneSession? = null
+
+        /** Close the session if it shows; whether it did. */
+        fun dismiss(): Boolean = showing?.let { it.hide(); true } ?: false
     }
 
     // The system's args include invocation_type (1 gesture, 5 home long press, 6 power long press, 7 handle long press).

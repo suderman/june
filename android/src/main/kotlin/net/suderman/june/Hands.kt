@@ -109,10 +109,18 @@ class Hands : AccessibilityService() {
     private fun act(message: JSONObject, answer: (Boolean, String) -> Unit) {
         val action = message.optString("action")
         if (System.currentTimeMillis() < stoppedUntil) return answer(false, "Jon stopped you from the phone; wait until he asks again")
+        // June's own sheet covers the apps and the power menu; it closes before she acts, so Jon sees what she does.
+        if (action != "screen" && JuneSession.dismiss()) {
+            main.postDelayed({ act(message, answer) }, 400)
+            return
+        }
+        Log.i(TAG, "hands: $action ${if (action == "type") "" else message.optString("target").ifBlank { message.optString("text").take(40) }}")
         showBar()
         val done = { ok: Boolean, said: String ->
             main.removeCallbacks(hideBar)
             main.postDelayed(hideBar, 1_500)
+            // Never the screen's words in the log: they may be private.
+            Log.i(TAG, "hands: ${if (ok) "done" else "failed"}: ${if (action == "screen") "${said.length} characters" else said.take(120)}")
             answer(ok, said)
         }
         val settled = { ok: Boolean, said: String ->
