@@ -198,7 +198,7 @@ class Hands : AccessibilityService() {
         val shown = words != null || node.isEditable || (node.isClickable && id != null)
         if (shown) {
             val box = Rect().also { node.getBoundsInScreen(it) }
-            out.append("  ".repeat(depth)).append(words?.replace("\n", " ")?.take(160) ?: "(${node.className?.toString()?.substringAfterLast('.')})")
+            out.append("  ".repeat(depth)).append(words?.replace("\n", " ")?.take(if (node.isClickable || node.isEditable) 160 else 4_000) ?: "(${node.className?.toString()?.substringAfterLast('.')})")
             if (id != null) out.append(" [").append(id).append("]")
             if (visible) out.append(" @").append(box.centerX()).append(",").append(box.centerY()) else out.append(" (off screen)")
             if (does.isNotEmpty()) out.append(" {").append(does.joinToString(" ")).append("}")
