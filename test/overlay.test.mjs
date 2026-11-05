@@ -368,7 +368,8 @@ test("narrow strips give the words more of the width, and a phone-narrow one sta
 	assert.equal(out.clip.w, 360, "a band across the panel");
 	const lead = elements.findIndex((e) => e.kind === "june");
 	assert.ok(lead > 1, "the report set opens with the user's note and a status card");
-	assert.ok(out.elements.slice(0, lead).every((e) => e.y + e.h <= out.clip.y), "the note and the tools above her band");
+	assert.ok(out.elements.slice(0, lead).every((e) => e.y + e.h <= out.band.y), "the note and the tools above her band");
+	assert.equal(out.clip.y, 0, "her art runs up behind them to the panel's top, so her hair is not cut flat at the band");
 	assert.ok(out.elements.slice(lead).every((e) => e.y >= out.clip.y + out.metrics.band), "her words below her band");
 	assert.equal(out.elements[lead].tail?.edge, "top", "her first balloon right under her, its tail up to her mouth");
 	const bare = plan({ width: 360, side: "right", pose: pose("idle-attentive"), elements: elements.slice(lead) });
@@ -883,7 +884,8 @@ test("in a stacked panel a tail leaves the top under her mouth, or there is none
 	const pose = { width: 1000, height: 1300, face: { x: 0.35, y: 0.196, w: 0.3, h: 0.269 }, mouth: { x: 0.5, y: 0.412 }, facing: "front", mirror: true, framings: ["close-up", "head", "bust", "waist"], marks: [] };
 	const laid = plan({ width: 411, side: "left", pose, elements: [{ kind: "user", w: 380, h: 60 }, { kind: "june", w: 380, h: 110 }] });
 	assert.ok(laid.metrics.stacked);
-	assert.ok(laid.elements[0].y + laid.elements[0].h <= laid.clip.y, "the note above her band");
+	assert.ok(laid.elements[0].y + laid.elements[0].h <= laid.band.y, "the note above her band");
+	assert.equal(laid.clip.y, 0, "and her hair behind it, cut only by the panel");
 	assert.equal(laid.elements[1].tail?.edge, "top", "her balloon right under her, its tail up to her mouth");
 	const balloon = laid.elements[1];
 	assert.equal(laid.clip.y + laid.clip.h, balloon.y + balloon.h, "she runs on behind her balloon, no gap above it");

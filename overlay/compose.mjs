@@ -630,6 +630,8 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 
 	let art = null;
 	let clip = { x: 0, y: 0, w: width, h: height, inset: false };
+	// In a stacked panel, the band she is framed in; her clip reaches past it, up to the top and down behind her first balloon.
+	let band = null;
 	let face = null;
 	let mouth = null;
 	let framing = null;
@@ -651,6 +653,7 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 				// A band across the panel, under any opening notes: her face toward the middle, the rest of her running off
 				// her side.
 				clip = { x: 0, y: bandTop, w: width, h: m.band, inset: false };
+				band = { y: bandTop, h: m.band };
 			} else if (tall) {
 				// Long words and no tall pose: June in an inset at the top of her side, not stretched down the panel.
 				const w = Math.round(side === "left" ? textLeft - m.pad - 6 : width - textRight - m.pad - 6);
@@ -660,10 +663,12 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 			framing = chooseFraming(width, clip.h, Object.assign({}, pose, { framings: kept.length > 0 ? kept : USUAL }), m.stacked ? (hint ?? "close-up") : hint);
 			framed = frame(pose, clip, side, edgeOf(clip), framing, mirror);
 			// Framed in her band, but seen on down behind her first balloon under it, so her body runs on behind the words
-			// rather than stopping at a gap above them.
+			// rather than stopping at a gap above them, and up to the panel's top behind any notes over the band, so her hair
+			// is cut only where the panel ends, never flat along the band's edge.
 			if (m.stacked) {
 				const under = placed.find((e) => e.y >= bandTop + m.band);
-				if (under) clip = Object.assign({}, clip, { h: Math.min(height, under.y + under.h) - bandTop });
+				const bottom = under ? Math.min(height, under.y + under.h) : bandTop + m.band;
+				clip = Object.assign({}, clip, { y: 0, h: bottom });
 			}
 		}
 		art = framed.image;
@@ -703,7 +708,7 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 		}
 	}
 
-	return { width, height, side, framing, mirror, clip, art, face, mouth, elements: out, marks, metrics: m };
+	return { width, height, side, framing, mirror, clip, band, art, face, mouth, elements: out, marks, metrics: m };
 }
 
 /**
