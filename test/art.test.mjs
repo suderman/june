@@ -1,8 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CANVAS, FACE, MARGIN, kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "../art/layout.mjs";
 
 const close = (a, b, tolerance = 0.002) => assert.ok(Math.abs(a - b) <= tolerance, `${a} is not within ${tolerance} of ${b}`);
+
+for (const legacy of [false, true]) test(`re-ingest preserves ${legacy ? "a legacy pose's missing added date" : "a pose's original added date over incoming metadata"}`, (t) => {
+	const set = mkdtempSync(join(tmpdir(), "june-art-date-"));
+	t.after(() => rmSync(set, { recursive: true, force: true }));
+	mkdirSync(join(set, "incoming"));
+	const source = join(set, "synthetic.png");
+	// Oversized synthetic face means downscaling only. This never invokes the GPU upscaler or touches real artwork.
+	execFileSync("magick", ["-size", "1600x2500", "xc:none", "-fill", "#cc9966", "-draw", "rectangle 100,100 1500,2480", source]);
+	const metadata = { section: "poses", expression: "warm", facing: "front", framings: ["head", "bust"] };
+	const ingest = (details) => {
+		writeFileSync(join(set, "incoming", "synthetic.json"), JSON.stringify(details));
+		execFileSync(process.execPath, [new URL("../art/june-art.mjs", import.meta.url).pathname, "ingest", set, "synthetic", "--file", source, "--face", "600,200,400,800"], { stdio: "pipe" });
+		return JSON.parse(readFileSync(join(set, "manifest.json"), "utf8"));
+	};
+	const manifest = ingest(metadata);
+	const first = manifest.poses.synthetic.added;
+	assert.ok(Number.isFinite(Date.parse(first)), "first ingest stamps the new pose");
+	if (legacy) {
+		delete manifest.poses.synthetic.added;
+		writeFileSync(join(set, "manifest.json"), JSON.stringify(manifest));
+	}
+	const after = ingest({ ...metadata, ...(legacy ? {} : { added: "2099-01-01T00:00:00.000Z" }) });
+	assert.equal(after.poses.synthetic.added, legacy ? undefined : first);
+});
 
 test("a pose's face lands at its kind's size and height, centred across", () => {
 	// A 500 × 650 source, the figure inside a margin, the face 150 × 175 at (175, 127).

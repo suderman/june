@@ -178,7 +178,12 @@ function ingest(set, name, options) {
 			}
 		}
 		// When it entered the set, never changed after: a panel only falls back to poses that existed when it happened.
-		if (section === "poses") finished.added ??= new Date().toISOString();
+		if (section === "poses") {
+			const existing = entries(manifest, section)[key];
+			if (existing?.added !== undefined) finished.added = existing.added;
+			else if (existing) delete finished.added; // Legacy entries were always available, not newly added today.
+			else finished.added ??= new Date().toISOString();
+		}
 		if (section === "rooms") {
 			const hole = alphaBox(out, true);
 			if (!hole) throw new Error(`${name}: the finished room has no window`);

@@ -12,6 +12,7 @@
   jq,
   tzdata,
   qt6,
+  imagemagick,
 }: let
   # Node 22: Node 24 aborts when GC collects node:sqlite objects (nodejs/node#65446), and Pi Durable uses node:sqlite.
   nodejs = nodejs_22;
@@ -57,7 +58,7 @@ in
       pname = "june-tests";
       inherit (finalAttrs) version npmDepsHash nodejs;
       src = testSrc;
-      nativeBuildInputs = [ripgrep emacs-nox git jq];
+      nativeBuildInputs = [ripgrep emacs-nox git jq imagemagick];
       dontNpmInstall = true;
       buildPhase = ''
         runHook preBuild
