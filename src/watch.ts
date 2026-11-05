@@ -11,7 +11,7 @@ import type { Conversation, Harness, RegistrySnapshot, TaskId } from "@earendil-
 import type { Logger } from "./runtime.ts";
 import type { Config } from "./config.ts";
 import { within } from "./heartbeat.ts";
-import { admitNotice, type Notice } from "./notify.ts";
+import { admitNotice, type Notice, type WorkerHeadline } from "./notify.ts";
 import { Follows } from "./tools/follow.ts";
 import type { Herdr, Run } from "./tools/herdr.ts";
 import type { Org } from "./tools/org.ts";
@@ -20,7 +20,7 @@ import { user } from "./user.ts";
 /** One run as org-dispatch records it in ~/.local/state/org-dispatch/<id>.json. */
 export type DispatchRun = { id: string; heading?: string; file?: string; status?: string; started?: number; pane?: string };
 
-type Seen = { signal: string; title: string; host: string; file?: string };
+type Seen = { signal: string; title: string; host: string; file?: string; headlineAt?: number; report?: WorkerHeadline };
 /** `hosts` have had a first look, which only learns what is there. */
 type Ledger = { runs: Record<string, Seen>; pending: Record<string, Seen>; notified: number; hosts: string[] };
 
@@ -86,16 +86,27 @@ export function createWatch(options: {
 	};
 
 	/** Where the run stands now: its Org state, or "blocked" while its agent waits for a person. */
-	const observe = async (host: string, run: DispatchRun): Promise<{ signal: string; title: string; file?: string }> => {
+	const observe = async (host: string, run: DispatchRun, last?: Seen): Promise<Omit<Seen, "host">> => {
 		const task = await options.org.byId(run.id);
 		const title = task?.title ?? run.heading ?? run.id;
-		if (task === undefined) return { signal: "missing", title };
+		// Remember consumed stamps even if the property is cleared or a task temporarily disappears.
+		const headlineAt = Math.max(task?.headlineAt ?? 0, last?.headlineAt ?? 0);
+		if (task === undefined) return { signal: "missing", title, ...(headlineAt > 0 ? { headlineAt } : {}) };
 		let signal = task.state ?? "none";
 		if (signal === "PROG" && run.status !== "finished" && run.pane) {
 			const got = await options.herdr.json(host, ["agent", "get", run.pane]).catch(() => undefined);
 			if (got?.result?.agent?.agent_status === "blocked") signal = "blocked";
 		}
-		return { signal, title, file: task.file };
+		// A state-bound stamp must belong to this run and be newer than the last observation.
+		const fresh = task.headline !== undefined && task.headlineAt !== undefined && run.started !== undefined
+			&& task.headlineAt >= run.started && task.headlineAt > (last?.headlineAt ?? 0)
+			&& ["EVAL", "HOLD", "DONE"].includes(signal);
+		const worker = task.herdrSessions.filter((session) => session.host === host).at(-1);
+		return {
+			signal, title, file: task.file,
+			...(headlineAt > 0 ? { headlineAt } : {}),
+			...(fresh ? { report: { title, signal, headline: task.headline!, ...(worker ? { agent: worker.agent, session: worker.session } : {}) } } : {}),
+		};
 	};
 
 	let busy = false;
@@ -131,7 +142,7 @@ export function createWatch(options: {
 						live.add(key);
 						const last = ledger.runs[key];
 						if (last !== undefined && run.status === "finished" && SETTLED.has(last.signal)) continue;
-						const seen = { ...(await observe(host, run)), host };
+						const seen = { ...(await observe(host, run, last)), host };
 						ledger.runs[key] = seen;
 						if (seen.signal === last?.signal) continue;
 						// The first look at a host only learns what is there; it raises nothing.
@@ -143,9 +154,9 @@ export function createWatch(options: {
 					// record is gone gets one last look at its Org state before it is forgotten.
 					for (const [key, last] of Object.entries(ledger.runs)) {
 						if (first || live.has(key) || !key.startsWith(`${host}:`) || SETTLED.has(last.signal)) continue;
-						const id = key.split(":")[1]!;
-						if (followed.has(id)) continue;
-						const seen = { ...(await observe(host, { id, heading: last.title, status: "finished" })), host };
+						const [, id, started] = key.split(":");
+						if (followed.has(id!)) continue;
+						const seen = { ...(await observe(host, { id: id!, heading: last.title, status: "finished", started: Number(started) }, last)), host };
 						if (seen.signal !== last.signal && NEWS.has(seen.signal)) ledger.pending[key] = seen;
 					}
 					if (first) ledger.hosts.push(host);
@@ -155,7 +166,25 @@ export function createWatch(options: {
 				const pending = Object.values(ledger.pending);
 				const due = pending.length > 0 && within(at, options.window) && at.getTime() - ledger.notified >= config.gapMinutes * 60_000;
 				if (!due) return save(ledger);
-				const notice: Notice = { requestId: `watch:${at.getTime()}`, content: `[watch] ${message(pending)}`, source: "watch", label: `${pending.length} dispatched task${pending.length === 1 ? "" : "s"} changed` };
+				// A queued state report stays as before. Its optional quote must still be current at admission.
+				const ready = await Promise.all(Object.entries(ledger.pending).map(async ([key, seen]): Promise<Seen> => {
+					if (!seen.report) return seen;
+					const id = key.split(":")[1]!;
+					const task = await options.org.byId(id).catch(() => undefined);
+					const restarted = Object.keys(ledger.runs).some((key) => {
+						const [, taskId, started] = key.split(":");
+						return taskId === id && Number(started) > (seen.headlineAt ?? 0);
+					});
+					if (!restarted && task?.headline === seen.report.headline && task?.headlineAt === seen.headlineAt && task?.state === seen.signal) return seen;
+					const { report: _report, ...plain } = seen;
+					return plain;
+				}));
+				const headlines = ready.flatMap((seen) => seen.report ? [seen.report] : []);
+				const notice: Notice = {
+					requestId: `watch:${at.getTime()}`, content: `[watch] ${message(ready)}`, source: "watch",
+					label: `${pending.length} dispatched task${pending.length === 1 ? "" : "s"} changed`,
+					...(headlines.length ? { watch: headlines } : {}),
+				};
 				// The ledger first: a crash after it loses one notice; one before it would repeat it.
 				save({ ...ledger, pending: {}, notified: at.getTime() });
 				await root.commit((tx) => admitNotice(tx, root, root.id, notice), BG);
@@ -189,7 +218,8 @@ const SAY: Record<string, string> = {
 };
 
 export function message(pending: readonly Seen[]): string {
-	const lines = pending.map((p) => `- «${p.title}»${p.file ? ` (${p.file})` : ""} on ${p.host} ${SAY[p.signal] ?? `is ${p.signal}`}.`);
+	const lines = pending.map((p) => `- «${p.title}»${p.file ? ` (${p.file})` : ""} on ${p.host} ${SAY[p.signal] ?? `is ${p.signal}`}.` +
+		(p.report ? `\n  Worker headline${p.report.agent ? ` (${p.report.agent})` : ""}: ${p.report.headline}` : ""));
 	return [
 		`Dispatched tasks you did not queue changed since you last heard:`,
 		...lines,

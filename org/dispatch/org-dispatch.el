@@ -899,6 +899,16 @@ replaying the same key and spec; missing prerequisites block partial plans."
 
 ;;; Launching
 
+(defun org-dispatch--headline (headline signal)
+  "Bind HEADLINE to SIGNAL and this write, or clear the previous report."
+  (if headline
+      (progn
+        (org-entry-put nil "DISPATCH_HEADLINE" headline)
+        (org-entry-put nil "DISPATCH_HEADLINE_STATE" signal)
+        (org-entry-put nil "DISPATCH_HEADLINE_AT" (number-to-string (float-time))))
+    (dolist (property '("DISPATCH_HEADLINE" "DISPATCH_HEADLINE_STATE" "DISPATCH_HEADLINE_AT"))
+      (org-entry-delete nil property))))
+
 (defun org-dispatch--claim (task pane session)
   "Mark TASK in progress and link SESSION when available, in one edit."
   (let* ((agent (plist-get task :agent))
@@ -916,7 +926,7 @@ replaying the same key and spec; missing prerequisites block partial plans."
          (org-entry-put nil "REPEAT_TO_STATE" "AUTO")
          (org-dispatch--trim-log (plist-get task :id)))
        (org-entry-delete nil "DISPATCH_FINISH")
-       (org-entry-delete nil "DISPATCH_HEADLINE")
+       (org-dispatch--headline nil nil)
        (org-todo "PROG")
        (org-toggle-tag "auto" 'on)
        (when session
@@ -1236,9 +1246,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                  (org-dispatch--log-run id "DONE" (plist-get task :todo) note)))
                (unless (string-empty-p note)
                  (org-entry-put nil "DISPATCH_FINISH" (replace-regexp-in-string "[\n\r]+" " " note)))
-               (if headline
-                   (org-entry-put nil "DISPATCH_HEADLINE" headline)
-                 (org-entry-delete nil "DISPATCH_HEADLINE"))
+               (org-dispatch--headline headline todo)
                (org-todo todo)
                (org-get-todo-state)))))
     (when state

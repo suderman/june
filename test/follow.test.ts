@@ -52,7 +52,7 @@ test("follow carries only the worker's own headline, verbatim in the model input
 			const root = join(tmp.dir, "org");
 			await mkdir(root);
 			const links = agent ? `** Sessions\n- [[herdr:kit/pi:${session}@p1][old pane]]\n- [[herdr:kit/${agent}:${session}][current, no pane]]\n- [[herdr:cog/pi:${session}@p2][other host]]\n` : "";
-			await writeFile(join(root, "todo.org"), `* ${state} Check docs\nCLOSED: [2026-11-05 Thu 14:00]\n:PROPERTIES:\n${byHeading ? "" : `:ID: ${input.id}\n`}${headline ? `:DISPATCH_HEADLINE: ${headline}\n` : ""}:END:\n:LOGBOOK:\n- Old run\n  :DISPATCH_HEADLINE: Not this old line.\n:END:\n\n${links}** Outcome\nThe report's evidence.\n*** Child task\n:PROPERTIES:\n:DISPATCH_HEADLINE: Not this child's line.\n:END:\n`);
+			await writeFile(join(root, "todo.org"), `* ${state} Check docs\nCLOSED: [2026-11-05 Thu 14:00]\n:PROPERTIES:\n${byHeading ? "" : `:ID: ${input.id}\n`}${headline ? `:DISPATCH_HEADLINE: ${headline}\n:DISPATCH_HEADLINE_STATE: ${state}\n:DISPATCH_HEADLINE_AT: 101\n` : ""}:END:\n:LOGBOOK:\n- Old run\n  :DISPATCH_HEADLINE: Not this old line.\n:END:\n\n${links}** Outcome\nThe report's evidence.\n*** Child task\n:PROPERTIES:\n:DISPATCH_HEADLINE: Not this child's line.\n:END:\n`);
 			const task = createFollowTask(new Org(root), new Herdr(testConfig(tmp.dir).herdr, async () => JSON.stringify({ result: { agent: { agent_status: "blocked" } } })), { intervalMs: 40, launchMs: 60_000, maxMs: 3_600_000 });
 			const adopted = { ...input, queuedAt: Date.now(), ...(byHeading ? { file: "todo.org" } : {}) };
 			const signal = state === "PROG" ? "blocked" : state;
@@ -397,8 +397,8 @@ test("resuming after EVAL and HOLD follows each new run without duplicate report
 	for (const [index, state] of ["EVAL", "HOLD", "DONE"].entries()) {
 		if (index > 0) await ask(tmp.paths.socket, "resume it");
 		const headline = ["First pass checked, ready for review.", "I need a decision on the second pass.", "Third pass fixed it, checks pass!"][index]!;
-		const current = (await readFile(file, "utf8")).replace(/^:DISPATCH_HEADLINE:.*\n/gm, "");
-		await replaceFile(file, current.replace("* AUTO Check docs", `* ${state} Check docs`).replace(":END:", `:DISPATCH_HEADLINE: ${headline}\n:END:`));
+		const current = (await readFile(file, "utf8")).replace(/^:DISPATCH_HEADLINE(?:_STATE|_AT)?:.*\n/gm, "");
+		await replaceFile(file, current.replace("* AUTO Check docs", `* ${state} Check docs`).replace(":END:", `:DISPATCH_HEADLINE: ${headline}\n:DISPATCH_HEADLINE_STATE: ${state}\n:DISPATCH_HEADLINE_AT: ${Date.now() / 1000}\n:END:`));
 		await until(async () => (await reports()).length === index + 1 && !(await daemon.status()).busy && faux.state.callCount === (index + 1) * 3);
 		const data = (await reports()).at(-1)!.data as { text: string; follow: unknown };
 		assert.deepEqual(data.follow, { title: "Check docs", signal: state, headline });
