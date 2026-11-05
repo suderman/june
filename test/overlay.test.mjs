@@ -859,9 +859,13 @@ test("live June watches while the daemon says she follows tasks, after anything 
 	assert.equal(status({ running: false, background: 0, follows: [stuck] }, "kit").text, "«Fix the bridge» needs you", "a task that waits on him is always said");
 	assert.equal(status({ running: true, background: 0, follows: [stuck, art] }, "kit").text, "working on a reply · «Fix the bridge» needs you · following 1 more");
 	assert.deepEqual(status({ running: false, background: 0, follows: [stuck, art] }, "kit").detail, [
-		{ title: "Fix the bridge", state: "its agent needs you", needsYou: true },
-		{ title: art.title, state: "in progress", needsYou: false },
+		{ title: "Fix the bridge", state: "its agent needs you", needsYou: true, key: "Fix the bridge|blocked" },
+		{ title: art.title, state: "in progress", needsYou: false, key: `${art.title}|PROG` },
 	]);
+	const dismissed = status({ running: false, background: 0, follows: [stuck] }, "kit", ["Fix the bridge|blocked"]);
+	assert.equal(dismissed.text, "keeping an eye on «Fix the bridge»", "dismissed, it goes calm");
+	assert.equal(dismissed.detail[0].needsYou, false);
+	assert.equal(status({ running: false, background: 0, follows: [{ title: "Fix the bridge", signal: "HOLD" }] }, "kit", ["Fix the bridge|blocked"]).text, "«Fix the bridge» needs you", "until its signal changes");
 });
 
 test("in a stacked panel a tail leaves the top under her mouth, or there is none", () => {

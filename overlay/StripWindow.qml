@@ -47,6 +47,7 @@ FloatingWindow {
       background: win.shell.view.state.background ?? 0
       status: win.shell.status.text
       detail: win.shell.status.detail
+      onDismissed: (key) => win.shell.dismiss(key)
       quiet: win.shell.quiet
     }
 

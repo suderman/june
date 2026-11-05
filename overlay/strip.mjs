@@ -182,15 +182,17 @@ const clipTitle = (title) => (title.length > 36 ? `${title.slice(0, 35).replace(
 
 /**
  * What June is doing, in one plain phrase for the masthead and the phone's status line, with the tasks she follows as
- * `detail` for a tap. Busy first (tidying, a reply, workers), then what she keeps an eye on, then where she is. A
+ * `detail` for a tap. `seen` are followKeys the user dismissed. Busy first (tidying, a reply, workers), then what she keeps an eye on, then where she is. A
  * followed task that needs the user is always said. Clients say their own connection state; this is for a live link.
  */
-export function status(state, host) {
+export function status(state, host, seen = []) {
 	// A daemon older than the names sends only the count.
 	const named = state.follows !== undefined;
 	const follows = state.follows ?? Array.from({ length: state.following ?? 0 }, () => ({ title: "", signal: "PROG" }));
-	const needs = follows.filter((f) => NEEDS_YOU.includes(f.signal));
-	const detail = (named ? follows : []).map((f) => ({ title: f.title, state: SIGNALS[f.signal] ?? String(f.signal).toLowerCase(), needsYou: NEEDS_YOU.includes(f.signal) }));
+	// Dismissed by the user, a task that needs them is calm until its signal changes (a new HOLD, a newly blocked agent).
+	const asks = (f) => NEEDS_YOU.includes(f.signal) && !seen.includes(followKey(f));
+	const needs = follows.filter(asks);
+	const detail = (named ? follows : []).map((f) => ({ title: f.title, state: SIGNALS[f.signal] ?? String(f.signal).toLowerCase(), needsYou: asks(f), key: followKey(f) }));
 	const busy = state.compacting ? "tidying her notes" : state.running ? "working on a reply" : state.background > 0 ? (state.background === 1 ? "has a worker on it" : `has ${state.background} workers out`) : "";
 	const parts = [];
 	if (busy) parts.push(busy);
@@ -198,11 +200,16 @@ export function status(state, host) {
 	const calm = follows.length - needs.length;
 	if (calm > 0 && (busy || needs.length > 0)) parts.push(calm === 1 && needs.length === 0 ? "following 1 task" : `following ${calm} more`);
 	else if (calm > 0) {
-		const title = follows.find((f) => !NEEDS_YOU.includes(f.signal)).title;
+		const title = follows.find((f) => !asks(f)).title;
 		parts.push(calm === 1 ? (title ? `keeping an eye on «${clipTitle(title)}»` : "keeping an eye on 1 task") : `keeping an eye on ${calm} tasks`);
 	}
 	if (parts.length === 0) parts.push(`on ${host}`);
 	return { text: parts.join(" · "), detail };
+}
+
+/** A followed task at its signal, as a dismissal names it: the same task at a later signal is news again. */
+export function followKey(f) {
+	return `${f.title}|${f.signal}`;
 }
 
 /**

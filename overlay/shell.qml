@@ -84,7 +84,13 @@ ShellRoot {
   readonly property string fonts: Quickshell.env("JUNE_OVERLAY_FONTS") || ""
   readonly property string activity: Strip.activity(view.state, linked)
   // The masthead's plain phrase and the tasks she follows.
-  readonly property var status: Strip.status(view.state, host)
+  // Tasks the user dismissed at their signal, for this run of the overlay.
+  property var seen: []
+  readonly property var status: Strip.status(view.state, host, seen)
+  function dismiss(key) {
+    const live = (view.state.follows ?? []).map(f => Strip.followKey(f));
+    seen = seen.filter(k => live.includes(k)).concat([key]);
+  }
 
   // June's poses from every avatar set, the first set winning a shared name. The wrapper names the local sets, a
   // personal one (when this machine has it) before the base set from the package; without a local personal set, the
@@ -575,6 +581,7 @@ ShellRoot {
             background: root.view.state.background ?? 0
             status: root.status.text
             detail: root.status.detail
+            onDismissed: (key) => root.dismiss(key)
             quiet: root.quiet
           }
 

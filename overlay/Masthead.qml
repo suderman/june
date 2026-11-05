@@ -12,6 +12,8 @@ Row {
   property string status: ""
   property var detail: []
   property bool detailOpen: false
+  // A click on a task that needs the user dismisses it until its signal changes (strip.mjs status).
+  signal dismissed(string key)
   // Do not disturb: she stays down until summoned.
   property bool quiet: false
 
@@ -50,9 +52,15 @@ Row {
           model: masthead.detail
           delegate: Text {
             required property var modelData
-            text: modelData.title + "  ·  " + modelData.state
+            text: modelData.title + "  ·  " + modelData.state + (modelData.needsYou ? "   dismiss" : "")
             font.family: Theme.caption; font.pixelSize: 12; font.weight: modelData.needsYou ? Font.Bold : Font.Normal
             color: modelData.needsYou ? Theme.accent : Theme.pageInk
+            MouseArea {
+              anchors.fill: parent
+              enabled: parent.modelData.needsYou
+              cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+              onClicked: masthead.dismissed(parent.modelData.key)
+            }
           }
         }
       }

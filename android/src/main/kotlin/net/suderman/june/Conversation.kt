@@ -171,10 +171,13 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null) {
 
     val palette = pagePalette()
     var showFollows by remember { mutableStateOf(false) }
+    // Tasks Jon dismissed at the signal they had, kept on the phone: calm until the signal changes.
+    val prefs = remember { context.getSharedPreferences("status", android.content.Context.MODE_PRIVATE) }
+    var seen by remember { mutableStateOf(prefs.getStringSet("seen", emptySet())!!.toSet()) }
     // What she is doing in plain words (strip.mjs status), the tasks she follows a tap away.
-    val said by produceState<org.json.JSONObject?>(null, decisions, link.state, link.status) {
+    val said by produceState<org.json.JSONObject?>(null, decisions, link.state, link.status, seen) {
         val d = decisions
-        value = if (d != null && link.status is LinkStatus.Linked) runCatching { org.json.JSONObject(d.call("strip.status", link.state.raw, link.host)) }.getOrNull() else null
+        value = if (d != null && link.status is LinkStatus.Linked) runCatching { org.json.JSONObject(d.call("strip.status", link.state.raw, link.host, org.json.JSONArray(seen.toList()))) }.getOrNull() else null
     }
     val detail = said?.optJSONArray("detail")
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
@@ -206,7 +209,18 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null) {
             Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).background(palette.field, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (i in 0 until followed.length()) {
                     val f = followed.getJSONObject(i)
-                    Text(f.optString("title") + "  ·  " + f.optString("state"), fontSize = 13.sp, color = if (f.optBoolean("needsYou")) palette.accent else palette.pageInk, fontWeight = if (f.optBoolean("needsYou")) androidx.compose.ui.text.font.FontWeight.Bold else null)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(f.optString("title") + "  ·  " + f.optString("state"), fontSize = 13.sp, color = if (f.optBoolean("needsYou")) palette.accent else palette.pageInk, fontWeight = if (f.optBoolean("needsYou")) androidx.compose.ui.text.font.FontWeight.Bold else null, modifier = Modifier.weight(1f))
+                        if (f.optBoolean("needsYou")) Text(
+                            "dismiss", fontSize = 12.sp, color = palette.muted,
+                            modifier = Modifier.clickable {
+                                // Keep only keys of tasks still followed, so the set never grows past what shows.
+                                val live = (0 until followed.length()).map { followed.getJSONObject(it).optString("key") }.toSet()
+                                seen = (seen.intersect(live) + f.optString("key"))
+                                prefs.edit().putStringSet("seen", seen).apply()
+                            }.padding(start = 10.dp, top = 4.dp, bottom = 4.dp),
+                        )
+                    }
                 }
             }
         }
