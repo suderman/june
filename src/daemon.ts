@@ -40,7 +40,7 @@ import { type DeviceInfo, readLines, type Reply, type Request, SOURCES, type Sta
 import { Devices } from "./devices.ts";
 import { type Remote, type Session, startRemote } from "./remote.ts";
 import { createCodingExtension } from "./tools/coding.ts";
-import { countFollowing } from "./tools/follow.ts";
+import { type Followed, listFollowing } from "./tools/follow.ts";
 import { createHerdrExtension, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
 import { createWorkExtension, FocusDoc, WorkDoc } from "./tools/work.ts";
@@ -283,7 +283,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		let remote: Remote | undefined;
 		let remoteError: string | undefined;
 		const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
-		const follows = pollFollowing(() => harness.commit((tx) => countFollowing(tx), BG), options.followingMs ?? 15_000, log);
+		const follows = pollFollowing(() => harness.commit((tx) => listFollowing(tx), BG), options.followingMs ?? 15_000, log);
 		const scope: Scope = { harness, root, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows };
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
@@ -349,15 +349,15 @@ type Scope = CommandScope & { log: Logger; inbox: string; devices: Devices; phon
 /** The sky a view sends with its state, and how it learns of a change. */
 type SkySource = Pick<Situation, "sky" | "onSky">;
 /** How many followed tasks are still going, and how a view learns of a change. */
-export type FollowSource = { following(): number; onFollowing(listener: () => void): () => void };
+export type FollowSource = { following(): number; follows(): Followed[]; onFollowing(listener: () => void): () => void };
 
 /**
- * Count June's followed tasks every `everyMs`, telling listeners when the count changes. The follows live in a
+ * Read June's followed tasks every `everyMs`, telling listeners when they or their signals change. The follows live in a
  * session document rather than the conversation a view watches, and a task ends without touching that document, so
  * this polls; a check fails quietly and keeps the last count.
  */
-export function pollFollowing(read: () => Promise<number>, everyMs: number, log: Logger): FollowSource & { stop(): void } {
-	let count = 0;
+export function pollFollowing(read: () => Promise<Followed[]>, everyMs: number, log: Logger): FollowSource & { stop(): void } {
+	let follows: Followed[] = [];
 	const listeners = new Set<() => void>();
 	let busy = false;
 	const check = async () => {
@@ -365,8 +365,8 @@ export function pollFollowing(read: () => Promise<number>, everyMs: number, log:
 		busy = true;
 		try {
 			const next = await read();
-			if (next !== count) {
-				count = next;
+			if (JSON.stringify(next) !== JSON.stringify(follows)) {
+				follows = next;
 				for (const listener of listeners) listener();
 			}
 		} catch (error) {
@@ -378,7 +378,8 @@ export function pollFollowing(read: () => Promise<number>, everyMs: number, log:
 	void check();
 	const timer = setInterval(() => void check(), everyMs);
 	return {
-		following: () => count,
+		following: () => follows.length,
+		follows: () => follows,
 		onFollowing(listener) {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
@@ -557,7 +558,7 @@ export async function attachView(
 	const fold = (value: Parameters<typeof foldView>[0]) => {
 		const folded = foldView(value, { detail });
 		const sky = options.sky?.sky();
-		const state: ViewState = { ...folded.state, ...(sky ? { sky } : {}), ...(options.follows ? { following: options.follows.following() } : {}) };
+		const state: ViewState = { ...folded.state, ...(sky ? { sky } : {}), ...(options.follows ? { following: options.follows.following(), ...(options.follows.following() > 0 ? { follows: options.follows.follows() } : {}) } : {}) };
 		const activity = activityOf(state);
 		return { ...folded, state: activity ? { ...state, activity } : state };
 	};

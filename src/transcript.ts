@@ -52,6 +52,8 @@ export type ViewState = {
 	sky?: Sky;
 	/** How many dispatched tasks June is following and that are still going; added by the daemon, not the fold. */
 	following?: number;
+	/** Those tasks by title, with each follow's last signal (see listFollowing); present while any is. */
+	follows?: { title: string; signal: string }[];
 	/**
 	 * What June is doing, the first that holds: thinking (a run is busy or compacting), working (briefs in the
 	 * background), watching (following tasks). Absent when none does. Clients add their own offline and voice states

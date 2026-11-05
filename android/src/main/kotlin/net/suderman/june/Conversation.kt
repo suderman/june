@@ -167,6 +167,13 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null) {
     val avatar = remember { runCatching { Avatar(context) }.onFailure { Log.w(TAG, "avatar set did not load: $it") }.getOrNull() }
 
     val palette = pagePalette()
+    var showFollows by remember { mutableStateOf(false) }
+    // What she is doing in plain words (strip.mjs status), the tasks she follows a tap away.
+    val said by produceState<org.json.JSONObject?>(null, decisions, link.state, link.status) {
+        val d = decisions
+        value = if (d != null && link.status is LinkStatus.Linked) runCatching { org.json.JSONObject(d.call("strip.status", link.state.raw, link.host)) }.getOrNull() else null
+    }
+    val detail = said?.optJSONArray("detail")
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             val ready = decisions
@@ -174,7 +181,13 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null) {
                 LiveBadge(link, ready, avatar)
                 Spacer(Modifier.width(8.dp))
             }
-            Text(statusLine(link), color = palette.muted, fontSize = 13.sp, fontFamily = if (LookChoice.console) FontFamily.Monospace else null, modifier = Modifier.weight(1f))
+            val needsYou = detail != null && (0 until detail.length()).any { detail.getJSONObject(it).optBoolean("needsYou") }
+            Text(
+                (said?.optString("text") ?: statusLine(link)).let { if (detail != null && detail.length() > 0) it + if (showFollows) "  ▴" else "  ▾" else it },
+                color = if (needsYou) palette.accent else palette.muted, fontSize = 13.sp, fontFamily = if (LookChoice.console) FontFamily.Monospace else null,
+                maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).clickable(enabled = detail != null && detail.length() > 0) { showFollows = !showFollows },
+            )
             // The look, toggled as the desktop's window toggles it: outlined when off, filled when on.
             val on = LookChoice.console
             Text(
@@ -183,6 +196,16 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null) {
                     .border(1.5.dp, palette.pageInk, RoundedCornerShape(50)).clickable { LookChoice.set(context, !on) }.padding(horizontal = 10.dp, vertical = 3.dp),
             )
             if (settings != null) Text("settings", color = palette.muted, fontSize = 13.sp, modifier = Modifier.clickable(onClick = settings).padding(start = 12.dp))
+        }
+        // The tasks she follows, each with where it stands, under the status line while it is open.
+        val followed = detail
+        if (showFollows && followed != null && followed.length() > 0) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).background(palette.field, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (i in 0 until followed.length()) {
+                    val f = followed.getJSONObject(i)
+                    Text(f.optString("title") + "  ·  " + f.optString("state"), fontSize = 13.sp, color = if (f.optBoolean("needsYou")) palette.accent else palette.pageInk, fontWeight = if (f.optBoolean("needsYou")) androidx.compose.ui.text.font.FontWeight.Bold else null)
+                }
+            }
         }
         val ready = decisions
         if (ready != null && LookChoice.console) {

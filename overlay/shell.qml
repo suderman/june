@@ -83,6 +83,8 @@ ShellRoot {
   readonly property string host: (/^wss?:\/\/(?:june\.)?([^/:.]+)/.exec(url) ?? [null, "the server"])[1]
   readonly property string fonts: Quickshell.env("JUNE_OVERLAY_FONTS") || ""
   readonly property string activity: Strip.activity(view.state, linked)
+  // The masthead's plain phrase and the tasks she follows.
+  readonly property var status: Strip.status(view.state, host)
 
   // June's poses from every avatar set, the first set winning a shared name. The wrapper names the local sets, a
   // personal one (when this machine has it) before the base set from the package; without a local personal set, the
@@ -562,10 +564,9 @@ ShellRoot {
             linked: root.linked
             refusals: root.refusals
             host: root.host
-            busy: Boolean(root.view.state.running || root.view.state.compacting)
-            activity: root.activity
             background: root.view.state.background ?? 0
-            following: root.view.state.following ?? 0
+            status: root.status.text
+            detail: root.status.detail
             quiet: root.quiet
           }
 

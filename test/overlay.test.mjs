@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { activity, applyView, beats, caption, emptyView, markup, panels, readInput } from "../overlay/strip.mjs";
+import { activity, applyView, beats, caption, emptyView, markup, panels, readInput, status } from "../overlay/strip.mjs";
 import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, panelLayout, jagged, liveActivity, metrics, picked, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
@@ -842,6 +842,20 @@ test("live June watches while the daemon says she follows tasks, after anything 
 	assert.equal(activity({ running: false, background: 0, following: 1 }, true), "following 1 task");
 	assert.equal(activity({ running: false, background: 0, following: 3 }, true), "following 3 tasks");
 	assert.equal(activity({ running: false, background: 0 }, true), "");
+
+	const art = { title: "Generate June's standard poses and chibi stills", signal: "PROG" };
+	assert.equal(status({ running: false, background: 0 }, "kit").text, "on kit", "idle: where she is");
+	assert.equal(status({ running: false, background: 0, following: 1 }, "kit").text, "keeping an eye on 1 task", "an older daemon's count alone");
+	assert.equal(status({ running: false, background: 0, follows: [art] }, "kit").text, "keeping an eye on «Generate June's standard poses and…»", "one task, named");
+	assert.equal(status({ running: true, background: 0, follows: [art] }, "kit").text, "working on a reply · following 1 task");
+	assert.equal(status({ running: false, background: 1, follows: [art, { title: "Tidy", signal: "AUTO" }] }, "kit").text, "has a worker on it · following 2 more");
+	const stuck = { title: "Fix the bridge", signal: "blocked" };
+	assert.equal(status({ running: false, background: 0, follows: [stuck] }, "kit").text, "«Fix the bridge» needs you", "a task that waits on him is always said");
+	assert.equal(status({ running: true, background: 0, follows: [stuck, art] }, "kit").text, "working on a reply · «Fix the bridge» needs you · following 1 more");
+	assert.deepEqual(status({ running: false, background: 0, follows: [stuck, art] }, "kit").detail, [
+		{ title: "Fix the bridge", state: "its agent needs you", needsYou: true },
+		{ title: art.title, state: "in progress", needsYou: false },
+	]);
 });
 
 test("in a stacked panel a tail leaves the top under her mouth, or there is none", () => {

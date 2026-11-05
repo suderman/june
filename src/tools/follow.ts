@@ -36,14 +36,21 @@ export const Follows = defineDoc<{ ids: Record<string, number> }>({
 	initial: () => ({ ids: {} }),
 });
 
-/** How many of the tasks June follows are still going: the "watching" activity clients show. */
-export async function countFollowing(tx: Tx): Promise<number> {
-	let count = 0;
+/** A task June follows that is still going, for clients: its title and the last signal her check saw. */
+export type Followed = { title: string; signal: string };
+
+/**
+ * The tasks June follows that are still going: the "watching" activity clients show, and what they name. `signal` is
+ * the follow's last: AUTO, waiting (on a prerequisite), stalled (not launched), PROG, blocked (its agent waits for a
+ * person), HOLD, or another Org state.
+ */
+export async function listFollowing(tx: Tx): Promise<Followed[]> {
+	const out: Followed[] = [];
 	for (const task of Object.values((await tx.doc(Follows)).ids)) {
-		const record = await tx.task(task as never);
-		if (record !== undefined && record.state.status !== "terminal") count++;
+		const record = (await tx.task(task as never)) as { input: FollowInput; state: { status: string; checkpoint?: FollowState } } | undefined;
+		if (record !== undefined && record.state.status !== "terminal") out.push({ title: record.input.title, signal: record.state.checkpoint?.last ?? "AUTO" });
 	}
-	return count;
+	return out;
 }
 
 export type Observation = {

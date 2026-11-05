@@ -222,9 +222,9 @@ test("the view says what June is doing, following tasks included, and updates wh
 	assert.equal(activityOf({ running: false, compacting: false, background: 0, following: 1 }), "watching");
 	assert.equal(activityOf({ running: false, compacting: false, background: 0 }), undefined);
 
-	let count = 2;
+	let followed = [{ title: "Generate the art", signal: "PROG" }, { title: "Tidy the docs", signal: "AUTO" }];
 	const log = { info() {}, warn() {}, error() {} } as never;
-	const follows = pollFollowing(async () => count, 20, log);
+	const follows = pollFollowing(async () => followed, 20, log);
 	await until(() => follows.following() === 2);
 	const root = {
 		watch: async () => ({ value: { conversation: {}, docs: {}, entries: [] }, start: () => {}, stop: async () => ({ kind: "stopped" }) }),
@@ -235,10 +235,16 @@ test("the view says what June is doing, following tasks included, and updates wh
 	const first = sent[0] as Extract<Reply, { type: "view" }>;
 	assert.equal(first.state?.following, 2);
 	assert.equal(first.state?.activity, "watching");
-	count = 0;
+	assert.deepEqual(first.state?.follows?.map((f) => f.title), ["Generate the art", "Tidy the docs"], "named, not only counted");
+	followed = [{ title: "Generate the art", signal: "blocked" }, { title: "Tidy the docs", signal: "AUTO" }];
 	await until(() => sent.length === 2);
-	const next = sent[1] as Extract<Reply, { type: "view" }> & { state: { following?: number; activity?: string } };
+	const blocked = sent[1] as Extract<Reply, { type: "view" }>;
+	assert.equal(blocked.state?.follows?.[0]?.signal, "blocked", "a changed signal is a state change too");
+	followed = [];
+	await until(() => sent.length === 3);
+	const next = sent[2] as Extract<Reply, { type: "view" }> & { state: { following?: number; activity?: string; follows?: unknown } };
 	assert.equal(next.state.following, 0);
+	assert.equal(next.state.follows, undefined);
 	assert.equal(next.state.activity, undefined, "no activity while none holds");
 	await view.stop();
 	follows.stop();

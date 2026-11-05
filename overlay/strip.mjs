@@ -173,6 +173,37 @@ export function readInput(text) {
 	return { kind: "submit", text };
 }
 
+/** A followed task's last signal (the daemon's state.follows) in plain words. */
+const SIGNALS = { AUTO: "queued", waiting: "waiting on another task", stalled: "not launched yet", PROG: "in progress", blocked: "its agent needs you", HOLD: "on hold for you" };
+/** Signals that wait on the user, which the status line always says. */
+export const NEEDS_YOU = ["blocked", "HOLD"];
+const clipTitle = (title) => (title.length > 36 ? `${title.slice(0, 35).replace(/\s+$/, "")}…` : title);
+
+/**
+ * What June is doing, in one plain phrase for the masthead and the phone's status line, with the tasks she follows as
+ * `detail` for a tap. Busy first (tidying, a reply, workers), then what she keeps an eye on, then where she is. A
+ * followed task that needs the user is always said. Clients say their own connection state; this is for a live link.
+ */
+export function status(state, host) {
+	// A daemon older than the names sends only the count.
+	const named = state.follows !== undefined;
+	const follows = state.follows ?? Array.from({ length: state.following ?? 0 }, () => ({ title: "", signal: "PROG" }));
+	const needs = follows.filter((f) => NEEDS_YOU.includes(f.signal));
+	const detail = (named ? follows : []).map((f) => ({ title: f.title, state: SIGNALS[f.signal] ?? String(f.signal).toLowerCase(), needsYou: NEEDS_YOU.includes(f.signal) }));
+	const busy = state.compacting ? "tidying her notes" : state.running ? "working on a reply" : state.background > 0 ? (state.background === 1 ? "has a worker on it" : `has ${state.background} workers out`) : "";
+	const parts = [];
+	if (busy) parts.push(busy);
+	if (needs.length > 0) parts.push(needs.length === 1 ? `«${clipTitle(needs[0].title)}» needs you` : `${needs.length} tasks need you`);
+	const calm = follows.length - needs.length;
+	if (calm > 0 && (busy || needs.length > 0)) parts.push(calm === 1 && needs.length === 0 ? "following 1 task" : `following ${calm} more`);
+	else if (calm > 0) {
+		const title = follows.find((f) => !NEEDS_YOU.includes(f.signal)).title;
+		parts.push(calm === 1 ? (title ? `keeping an eye on «${clipTitle(title)}»` : "keeping an eye on 1 task") : `keeping an eye on ${calm} tasks`);
+	}
+	if (parts.length === 0) parts.push(`on ${host}`);
+	return { text: parts.join(" · "), detail };
+}
+
 /** The small badge for June's state, or "" when she is idle. */
 export function activity(state, linked) {
 	if (!linked) return "offline";
