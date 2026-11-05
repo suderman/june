@@ -39,12 +39,12 @@ Preferred alpha: saved `June - Production alpha ToonOut.json`. Preserve RGB, nat
 - Read the named art-list description and keep the fixed 18-expression vocabulary. Canonical skirt outfit overrides obsolete jeans wording.
 - Use a bounded candidate count authorized by Jon. Compare identity, expression, anatomy, outfit, framing and rendering. Report rejects and uncertainty.
 - Obtain review before promotion. Use a new staging set first; inspect the destination manifest and files before production writes. Never overwrite unrelated art.
-- Keep the original canonical sheet highest authority. Palette is approved; turnaround is a working reference with marked angle/pose limits. Outfit-and-props sheet remains pending review as of 2026-11-04. Check the project for later decisions.
+- Keep the original canonical sheet highest authority. Palette is approved; turnaround is a working reference with marked angle/pose limits. Outfit-and-props sheet and five props are approved working references; its mug handle protrusion and illustrative keyboard layout are not canon. Check the project for later decisions.
 - No automatic LoRA training, model changes, renderer fixes, pose library, chibis or animation. Reference sheets are production aids, not runtime poses.
 
 ## Read-only helpers and cold start
 
-`examples/inspect-png.py` checks PNG CRCs and reports embedded executed prompt/workflow. `examples/preview-panel.py` prepares an isolated proof using the checkout's actual QML components and an existing avatar manifest. `examples/preflight-pose.mjs` imports the actual ingester geometry and reports source-edge contact, normalization overflow, experimental gesture bounds and an optional proposed-width projection. Run it before accepting gesturing sources, then inspect real panel crops separately. None submits ComfyUI jobs or ingests artwork. Read their help and `references/ingestion.org` before use.
+`examples/inspect-png.py` checks PNG CRCs and reports embedded executed prompt/workflow. `examples/preview-panel.py` prepares an isolated proof using the checkout's actual QML components and an existing avatar manifest. `examples/preflight-pose.mjs` imports the actual ingester geometry and reports source-edge contact, normalization overflow, gesture bounds and actual variable-width placement or refusal. Run it before accepting gesturing sources, then inspect real panel crops separately. None submits ComfyUI jobs or ingests artwork. Read their help and `references/ingestion.org` before use.
 
 A cold-start audit must locate canon, the seed-4002 generation/alpha workflows, source/settings/mask, production WebP, a new named expression's inventory entry and its approval/staging route. Check the limitations too. Do not regenerate merely to prove documentation works.
 

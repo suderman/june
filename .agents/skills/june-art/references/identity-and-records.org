@@ -23,7 +23,7 @@ Her costume is a dusty-rose collared blouse, neckline casually open, sleeves rol
 
 Authority order:
 1. Original =june-agent-character-sheet.png= for identity, proportions, appearance and rendering. SHA256 =ec3c8cf42ffa5bf1096ae9c502a89e3af30bf1f1513381466b8f954868d70057=.
-2. Approved palette/material references and accepted working views, only within their documented limits. =production-references/sheet-palette.png= is finished/approved. =sheet-turnaround.png= is accepted as a working reference: shallow three-quarter angle, folded side forearm, narrower new chins and boot/necklace drift remain marked. =production-outfit-props/sheet-outfit-props.png= and its isolated prop designs await review at this writing.
+2. Approved palette/material references and accepted working views, only within their documented limits. =production-references/sheet-palette.png= is finished/approved. =sheet-turnaround.png= is accepted as a working reference: shallow three-quarter angle, folded side forearm, narrower new chins and boot/necklace drift remain marked. =production-outfit-props/sheet-outfit-props.png= and its five isolated props are approved working references. Mug handle protrusion and keyboard layout remain marked study limits. The final expression sheet is approved; the hand sheet is a working aid, with chin rest and open palm still provisional.
 3. Approved production assets as implementation examples. =idle-attentive= seed 4002 is approved and promoted. Its uncropped lower garment is ambiguous and blue/navy-biased; never use it as a full-body costume or skirt-color reference.
 4. Experiments as technical evidence, not automatic design changes. Pretty newer faces do not supersede canon.
 5. Prompts for the requested scene/acting and explicit amendments. Approved above-knee skirt wording overrides older inventory jeans/generic-shirt wording. Do not silently treat any new prompt as permission to redesign June.
@@ -56,7 +56,7 @@ All paths in this table are beneath =$ART= unless prefixed =$STATE=.
 | conversational-pilot/technical-summary.org | Twelve expression studies; selections, clipped crowns, hand/headset failures |
 | production-idle/ | Three RGB candidates, original seed-4002 source, native alpha, sidecars, final PNG/WebP, four-background tests and actual panel preview |
 | production-references/ | Approved palette, working turnaround, promotion evidence, all ten view studies, source crops, masks and workflows |
-| production-outfit-props/ | Pending-review construction sheet, five isolated prop proposals, exact source-index.csv, native alpha and workflows |
+| production-outfit-props/ | Approved working construction sheet and five props, exact source-index.csv, native alpha and workflows |
 | $STATE/production-idle/ | Five API histories, ToonOut conversion/provenance, pixel checks and original panel harness |
 | $STATE/production-references/ | View histories, deterministic palette/turnaround builders, alignment geometry and preservation checks |
 | $STATE/production-outfit-props/ | Prop histories, deterministic sheet builder, status investigation and preservation checks |
