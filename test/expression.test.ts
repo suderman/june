@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Manifest } from "../src/avatar.ts";
-import { EXPRESSION, expressionRules, parsePick, pickRequest, replyToPick, startExpressions } from "../src/expression.ts";
+import { EXPRESSION, expressionRules, loadManifest, parsePick, pickRequest, replyToPick, resolvePick, startExpressions } from "../src/expression.ts";
 import type { Reply } from "../src/protocol.ts";
 import { silentLogger } from "../src/runtime.ts";
 import { fold, type ViewItem, type ViewState } from "../src/transcript.ts";
 
-const manifest = {
+const manifest: Manifest = {
 	version: 1,
 	size: [256, 256],
 	expressions: { idle: { file: "idle.png", play: "still" } },
@@ -14,7 +17,7 @@ const manifest = {
 		"smug-chin-on-hand": { file: "p/s.svg", size: [10, 10], expression: "smug", description: "chin on hand", face: [0.3, 0.1, 0.4, 0.3], mouth: [0.5, 0.35], facing: "right" },
 		"working-typing-laptop": { file: "p/w.svg", size: [10, 10], expression: "determined", activity: "working", description: "typing", face: [0.3, 0.1, 0.4, 0.3], mouth: [0.5, 0.35], facing: "right" },
 	},
-} as unknown as Manifest;
+};
 
 const say = (id: string, text: string, extra: Partial<Extract<ViewItem, { kind: "assistant" }>> = {}): ViewItem => ({ kind: "assistant", id, text, streaming: false, answers: "gui", ...extra });
 const ask = (id: string, text: string): ViewItem => ({ kind: "user", id, source: "gui", text });
@@ -84,7 +87,7 @@ test("the fold puts a pick on its reply and the newest on the state, and keeps i
 	const { items, state } = fold(entries, {});
 	assert.deepEqual(items, [
 		{ kind: "user", id: "1", source: "gui", text: "you win." },
-		{ kind: "assistant", id: "2", text: "a hollow victory.", streaming: false, answers: "gui", alert: "gui", expression: "wry", pose: "smug-chin-on-hand" },
+		{ kind: "assistant", id: "2", text: "a hollow victory.", streaming: false, answers: "gui", alert: "gui", expression: "wry", pose: "smug-chin-on-hand", artVersion: "3" },
 	]);
 	assert.equal(state.expression, "wry");
 	assert.equal(fold(entries.slice(0, 2), {}).state.expression, "idle", "none yet");
@@ -126,11 +129,132 @@ test("the pass picks once for each reply that settles after it starts, and never
 
 	send({ type: "view", changes: [{ op: "put", item: say("4", "a hollow victory, but i'll take it."), after: "3" }], state: state(false) });
 	await new Promise((r) => setTimeout(r, 10));
-	assert.deepEqual(written, [{ kind: EXPRESSION, data: { for: "4", expression: "wry", pose: "smug-chin-on-hand" } }]);
+	const saved = written[0] as { kind: string; data: Record<string, unknown> };
+	assert.equal(saved.kind, EXPRESSION);
+	assert.equal(saved.data.for, "4");
+	assert.equal(saved.data.expression, "wry");
+	assert.equal(saved.data.pose, "smug-chin-on-hand");
+	assert.equal(saved.data.side, "left");
+	assert.equal(saved.data.take, 0);
+	assert.equal(typeof saved.data.selectedAt, "number");
+	assert.equal(typeof saved.data.revision, "string");
 	assert.match(asked[0]!, /you win\.[\s\S]*a hollow victory, but i'll take it\./);
 
 	send({ type: "view", changes: [], state: state(false) });
 	await new Promise((r) => setTimeout(r, 10));
 	assert.equal(written.length, 1, "once per reply");
 	await pass.stop();
+});
+
+test("the daemon merges both inventories and resolves a concrete pose once at millisecond precision", () => {
+	const dir = mkdtempSync(join(tmpdir(), "june-picks-"));
+	try {
+		const personal = { ...manifest, poses: { "smug-chin-on-hand": { ...manifest.poses!["smug-chin-on-hand"]!, description: "personal" } } };
+		writeFileSync(join(dir, "personal.json"), JSON.stringify(personal));
+		writeFileSync(join(dir, "base.json"), JSON.stringify(manifest));
+		const merged = loadManifest([join(dir, "personal.json"), join(dir, "base.json")], silentLogger)!;
+		assert.equal(Object.keys(merged.poses!).length, 2);
+		assert.equal(merged.poses!["smug-chin-on-hand"]!.description, "personal");
+		const at = 1793880000123;
+		const poses = { ...manifest.poses, second: { ...manifest.poses!["smug-chin-on-hand"]!, added: new Date(at).toISOString() }, future: { ...manifest.poses!["smug-chin-on-hand"]!, added: new Date(at + 1).toISOString() } };
+		const pick = resolvePick({ expression: "smug" }, { ...manifest, poses }, say("x", "", { pose: "smug-chin-on-hand", side: "left" }) as Extract<ViewItem, { kind: "assistant" }>, at, () => 0.99);
+		assert.deepEqual(pick, { expression: "smug", pose: "second", side: "right", selectedAt: at });
+	} finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+function director(entries: Parameters<typeof fold>[0][number][] = [
+	{ id: 1, kind: "june.input", data: { source: "gui", text: "you win" }, model: [{ role: "user", content: "you win", timestamp: 1793800000000 }] },
+	{ id: 2, kind: "pi.assistant", model: [{ role: "assistant", content: [{ type: "text", text: "a hollow victory" }], timestamp: 1793800000123 }] },
+	{ id: 3, kind: EXPRESSION, data: { for: "2", expression: "smug", pose: "smug-chin-on-hand", side: "left", selectedAt: 1793800000456, take: 0, revision: "original", context: { said: "you win", earlier: [{ said: "an old joke", replied: "a dry answer" }] } } },
+]) {
+	let receive: (reply: Reply) => void = () => {};
+	const asked: string[] = [];
+	let gate: Promise<void> | undefined;
+	let answer = '{"expression":"smug","pose":"smug-chin-on-hand"}';
+	const reset = () => receive({ type: "view", reset: true, ...fold(entries, {}) });
+	const pass = startExpressions({
+		root: { submit: async (input: { entry: { kind: string; data: unknown } }) => { entries.push({ id: entries.length + 1, ...input.entry }); reset(); } } as never,
+		models: { getModel: () => ({}), completeSimple: async (_model: unknown, request: { messages: { content: string }[] }) => { asked.push(request.messages[1]!.content); await gate; return { stopReason: "stop", content: [{ type: "text", text: answer }] }; } } as never,
+		model: { provider: "p", modelId: "m", thinkingLevel: "off" }, files: () => ({}) as never, manifest: () => manifest,
+		attach: async (send) => { receive = send; reset(); return { stop: async () => {} }; }, log: silentLogger,
+	});
+	return { pass, entries, asked, reset, item: () => fold(entries, {}).items.find((i): i is Extract<ViewItem, { kind: "assistant" }> => i.kind === "assistant" && i.id === "2")!, hold: (wait: Promise<void> | undefined) => { gate = wait; }, answer: (text: string) => { answer = text; } };
+}
+
+test("retakes preserve context, are replay safe, reject overlap, and Back restores the exact take after restart", async () => {
+	const d = director();
+	let release!: () => void;
+	d.hold(new Promise((r) => { release = r; }));
+	const first = d.pass.change("retake", "2", "original", "first");
+	assert.equal(d.pass.change("retake", "2", "original", "first"), first, "duplicate in-flight request shares one model call");
+	await assert.rejects(d.pass.change("restore", "2", "original", "overlap"), /already choosing/);
+	release(); await first;
+	assert.equal(d.asked.length, 1);
+	assert.match(d.asked[0]!, /an old joke/);
+	assert.match(d.asked[0]!, /Earlier takes were not right/);
+	assert.equal(d.item().take, 1);
+	await assert.rejects(d.pass.change("retake", "2", "original", "stale"), /panel changed/);
+	const length = d.entries.length;
+	await d.pass.change("retake", "2", "original", "first");
+	assert.equal(d.entries.length, length, "completed request does not append again");
+	await d.pass.stop();
+	const resumed = director(d.entries);
+	await resumed.pass.change("restore", "2", resumed.item().artVersion!, "back");
+	assert.equal(resumed.asked.length, 0, "Back makes no model call");
+	assert.equal(resumed.item().take, 0);
+	assert.equal(resumed.item().pose, "smug-chin-on-hand");
+	assert.equal(resumed.item().side, "left");
+	assert.equal(resumed.item().expressionAt, 1793800000456, "Back restores the original availability cutoff, not the retake time");
+	assert.equal(resumed.item().at, 1793800000123, "lighting stays at the reply time");
+	await assert.rejects(resumed.pass.change("restore", "2", resumed.item().artVersion!, "too-far"), /No earlier take/);
+	await resumed.pass.change("retake", "2", resumed.item().artVersion!, "second");
+	assert.equal(resumed.item().take, 2, "retaking after Back does not reuse an ordinal");
+	assert.equal(resumed.item().takes!.at(-1)!.previous, 0);
+	await resumed.pass.stop();
+});
+
+test("Back restores an unpicked legacy reply without guessing its stand-in in the daemon", async () => {
+	const d = director();
+	d.entries.pop(); d.reset();
+	await d.pass.change("retake", "2", "", "legacy-take");
+	assert.equal(d.item().take, 1);
+	await d.pass.change("restore", "2", d.item().artVersion!, "legacy-back");
+	assert.equal(d.item().expression, undefined);
+	assert.equal(d.item().pose, undefined);
+	assert.equal(d.item().side, undefined);
+	assert.equal(d.item().take, 0);
+	assert.equal(d.item().at, 1793800000123);
+	await d.pass.stop();
+});
+
+test("retaking an older panel never puts its expression on live June", () => {
+	const entries = [
+		{ id: 1, kind: "pi.assistant", model: [{ role: "assistant", content: [{ type: "text", text: "older" }] }] },
+		{ id: 2, kind: "pi.assistant", model: [{ role: "assistant", content: [{ type: "text", text: "newer" }] }] },
+		{ id: 3, kind: EXPRESSION, data: { for: "2", expression: "wry" } },
+		{ id: 4, kind: EXPRESSION, data: { for: "1", expression: "warm", take: 1 } },
+	];
+	assert.equal(fold(entries, {}).state.expression, "wry");
+});
+
+test("failed and stale retakes leave the art and conversation alone; a later pick clears an omitted pose", async () => {
+	const d = director();
+	d.answer("not JSON");
+	await assert.rejects(d.pass.change("retake", "2", "original", "bad"), /could not choose/);
+	assert.equal(d.entries.length, 3);
+	d.answer('{"expression":"smug"}');
+	let release!: () => void;
+	d.hold(new Promise((r) => { release = r; }));
+	const request = d.pass.change("retake", "2", "original", "gone");
+	d.entries.splice(0); d.reset(); release();
+	await assert.rejects(request, /panel changed/);
+	assert.equal(d.entries.length, 0);
+	await d.pass.stop();
+	const other = director();
+	other.entries.push({ id: 4, kind: EXPRESSION, data: { for: "2", expression: "wry", selectedAt: 1793880000999 } });
+	const item = other.item();
+	assert.equal(item.pose, undefined, "a later unnamed pick must not retain the old pose");
+	assert.equal(item.side, undefined);
+	assert.equal(item.expressionAt, 1793880000999);
+	await other.pass.stop();
 });

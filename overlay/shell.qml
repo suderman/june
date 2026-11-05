@@ -72,6 +72,8 @@ ShellRoot {
   property var targetScreen: Quickshell.screens[0]
   property var view: Strip.emptyView()
   property alias linked: connection.linked
+  property var taking: ({})
+  onLinkedChanged: if (!linked) taking = ({})
   // Closed before hello twice running: the token is wrong or revoked, so stop hammering and say so.
   property alias refusals: connection.refusals
   property string toast: ""
@@ -416,6 +418,15 @@ ShellRoot {
   function rid() { seq += 1; return "gui-" + Date.now() + "-" + seq; }
   function send(request) { return connection.send(request); }
   function refresh() { connection.refresh(); }
+  function take(action) {
+    if (!linked || taking[action.reply]) return;
+    const requestId = rid();
+    if (!send({ op: action.op, requestId: requestId, reply: action.reply, revision: action.revision })) return;
+    const pending = Object.assign({}, taking);
+    pending[action.reply] = requestId;
+    taking = pending;
+    say(action.op === "retake" ? "choosing another take…" : "restoring the previous take…");
+  }
   function say(text) { toast = text; toastTimer.restart(); }
 
   function receive(reply) {
@@ -430,19 +441,24 @@ ShellRoot {
       watchLive();
       return;
     }
+    if (reply.type === "reply" || reply.type === "error") {
+      const pending = Object.assign({}, taking);
+      for (const id of Object.keys(pending)) if (pending[id] === reply.requestId) delete pending[id];
+      taking = pending;
+    }
     if (reply.type === "reply") say(reply.text);
     else if (reply.type === "error") say(reply.message);
   }
 
   // Bring the list model in step with the view, touching only panels that changed, so streaming redraws one panel.
-  // Each panel gets June's pose and side here, oldest first: the side alternates from the panel before unless her pose
-  // says otherwise, and both stay put once chosen. The panel she is answering in shows the pose of the moment instead.
+  // Each panel gets its recorded pose and side; legacy choices derive from its id and the art available then.
+  // The panel she is answering in shows the pose of the moment instead.
   // When a run ends, the panel she answered in keeps her talking pose until her real face arrives (expression.ts picks
   // it a few seconds later), so no guessed face shows in between; after this long, a stand-in.
   readonly property int faceHoldMs: 6000
   property real faceHoldUntil: 0
   property bool syncWasRunning: false
-  // Each panel's side and pose once chosen, and the live pose to hold, for composeStrip in compose.mjs.
+  // Per-screen presentation state, including the live pose to hold, for composeStrip in compose.mjs.
   property var composeMemory: ({ sides: {}, poseIds: {}, livePoses: {} })
   Timer { id: faceHold; onTriggered: root.sync() }
 
@@ -575,6 +591,8 @@ ShellRoot {
             scenery: root.scenery
             sky: root.view.state.sky ?? null
             linked: root.linked
+            taking: root.taking
+            onTake: action => root.take(action)
             attached: root.attached
           }
 

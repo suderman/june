@@ -4,6 +4,7 @@
 // reply's item and as `state.expression`. The trial behind this is "Test patter choosing June's expressions" in the
 // project's Org record: a separate pass beat a tool in June's own turn, which would carry her whole context each reply.
 import { existsSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import type { Context as ModelContext, Message, Models } from "@earendil-works/pi-ai";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import type { Conversation } from "@earendil-works/pi-durable";
@@ -11,7 +12,7 @@ import { EXPRESSIONS, type Manifest, parseManifest } from "./avatar.ts";
 import type { ModelChoice, PromptFiles } from "./config.ts";
 import type { Reply } from "./protocol.ts";
 import type { Logger } from "./runtime.ts";
-import type { ViewItem, ViewState } from "./transcript.ts";
+import { applyArt, type ArtTake, type ArtContext, type ViewItem, type ViewState } from "./transcript.ts";
 import { user } from "./user.ts";
 
 export const EXPRESSION = "june.expression";
@@ -112,17 +113,33 @@ export function pickRequest(said: string, reply: string, earlier: readonly Excha
 	return `${before ? `Earlier, for context only:\n${before}\n\nNow, the reply to choose for.\n` : ""}${user()} wrote:\n${said || "(nothing: June spoke first)"}\n\nJune replied:\n${reply}`;
 }
 
-/** The avatar set whose poses June may name: the user's own in the data directory, else the base set. */
+/** The same merged inventory the clients see: the personal set wins names and the base fills the rest. */
 export function loadManifest(paths: readonly string[], log: Logger): Manifest | undefined {
+	const sets: Manifest[] = [];
 	for (const path of paths) {
 		if (!existsSync(path)) continue;
-		try {
-			return parseManifest(JSON.parse(readFileSync(path, "utf8")));
-		} catch (error) {
-			log.warn("expression_manifest", { path, error: (error as Error).message });
-		}
+		try { sets.push(parseManifest(JSON.parse(readFileSync(path, "utf8")))); }
+		catch (error) { log.warn("expression_manifest", { path, error: (error as Error).message }); }
 	}
-	return undefined;
+	if (!sets.length) return undefined;
+	return { ...sets[0]!, poses: Object.assign({}, ...sets.toReversed().map((s) => s.poses ?? {})) };
+}
+
+/** Resolve variety once, when a choice is written, never while rendering. Explicit valid poses win. */
+export function resolvePick(pick: FacePick, manifest: Manifest | undefined, previous?: Assistant, selectedAt = Date.now(), random = Math.random): FacePick & { side: "left" | "right"; selectedAt: number } {
+	const poses = Object.entries(manifest?.poses ?? {}).filter(([, p]) => !p.activity && (p.added === undefined || Date.parse(p.added) <= selectedAt));
+	let named = poses.find(([id]) => id === pick.pose);
+	let expression: string | undefined = pick.expression;
+	while (!named && expression) {
+		const fitting = poses.filter(([, p]) => p.expression === expression);
+		const fresh = fitting.filter(([id]) => id !== previous?.pose);
+		const pool = fresh.length ? fresh : fitting;
+		if (pool.length) named = pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
+		expression = (EXPRESSIONS[expression as keyof typeof EXPRESSIONS] as { fallback?: string }).fallback;
+	}
+	let side: "left" | "right" = previous?.side === "left" ? "right" : "left";
+	if (named?.[1].mirror === false && named[1].facing !== "front") side = named[1].facing === "right" ? "left" : "right";
+	return { expression: pick.expression, ...(named ? { pose: named[0] } : {}), side, selectedAt };
 }
 
 type Attach = (send: (reply: Reply) => void) => Promise<{ stop(): Promise<unknown> }>;
@@ -140,15 +157,29 @@ export function startExpressions(options: {
 	attach: Attach;
 	log: Logger;
 	timeoutMs?: number;
-}): { stop(): Promise<void> } {
+}): { stop(): Promise<void>; change(op: "retake" | "restore", reply: string, revision: string, requestId: string): Promise<void> } {
 	const { models, log } = options;
 	const done = new Set<string>();
 	let items: ViewItem[] = [];
 	let state: ViewState | undefined;
 	let asking = false;
 	let stopped = false;
+	const busy = new Set<string>();
+	const pending = new Map<string, Promise<void>>();
+	const target = (id: string) => items.find((i): i is Assistant => i.kind === "assistant" && i.id === id && !i.private && !i.streaming && !i.error && Boolean(i.text.trim()));
+	const contextFor = (reply: Assistant): ArtContext => {
+		if (reply.artContext) return reply.artContext;
+		let j = items.indexOf(reply) - 1;
+		for (; j >= 0; j--) { const item = items[j]!; if (item.kind === "user" && !item.private) break; }
+		return { said: j >= 0 ? (items[j] as Extract<ViewItem, { kind: "user" }>).text : "", earlier: exchangesBefore(items, j, EARLIER) };
+	};
+	const write = async (reply: Assistant, choice: ArtTake, context: ArtContext, requestId?: string) => {
+		const data = { for: reply.id, ...choice, context, revision: randomUUID(), ...(requestId ? { requestId } : {}) };
+		await options.root.submit({ type: "write", ...(requestId ? { requestId: `art:${reply.id}:${requestId}` } : {}), entry: { kind: EXPRESSION, data } }, BG);
+		applyArt(reply, data, data.revision);
+	};
 
-	const pick = async (said: string, reply: string, earlier: readonly Exchange[]): Promise<FacePick | null> => {
+	const pick = async (said: string, reply: string, earlier: readonly Exchange[], prior: readonly ArtTake[] = []): Promise<FacePick | null> => {
 		const model = models.getModel(options.model.provider, options.model.modelId);
 		if (model === undefined) throw new Error(`Unknown expression model ${options.model.provider}/${options.model.modelId}`);
 		const soul = options.files().soulFile;
@@ -157,7 +188,7 @@ export function startExpressions(options: {
 		const request: ModelContext = {
 			messages: [
 				{ role: "system", content: `${soul && existsSync(soul) ? readFileSync(soul, "utf8") : ""}\n\n${expressionRules(manifest)}`, timestamp: now } as Message,
-				{ role: "user", content: pickRequest(said, reply, earlier), timestamp: now } as Message,
+				{ role: "user", content: pickRequest(said, reply, earlier) + (prior.length ? `\n\nEarlier takes were not right. Read the reply again and choose a better performance, rather than rerolling blindly:\n${JSON.stringify(prior.map(({ expression, pose }) => ({ expression, pose })))}` : ""), timestamp: now } as Message,
 			],
 		};
 		const thinking = options.model.thinkingLevel === "off" ? {} : { reasoning: options.model.thinkingLevel as never };
@@ -171,21 +202,24 @@ export function startExpressions(options: {
 	const consider = async () => {
 		if (asking || stopped || state === undefined) return;
 		const next = replyToPick(items, state, done);
-		if (next === null) return;
+		if (next === null || busy.has(next.reply.id)) return;
 		asking = true;
+		busy.add(next.reply.id);
 		done.add(next.reply.id);
 		const started = Date.now();
 		try {
 			const chosen = await pick(next.said, next.reply.text, next.earlier);
 			if (chosen === null) log.warn("expression_unparsed", { reply: next.reply.id });
-			else if (!stopped) {
-				await options.root.submit({ type: "write", entry: { kind: EXPRESSION, data: { for: next.reply.id, ...chosen } } }, BG);
+			else if (!stopped && target(next.reply.id)?.artVersion === next.reply.artVersion && target(next.reply.id)?.text === next.reply.text) {
+				const previous = items.slice(0, items.indexOf(next.reply)).findLast((i): i is Assistant => i.kind === "assistant" && !!i.pose);
+				await write(target(next.reply.id)!, { ...resolvePick(chosen, options.manifest(), previous), take: 0 }, { said: next.said, earlier: next.earlier });
 				log.info("expression", { reply: next.reply.id, expression: chosen.expression, ...(chosen.pose ? { pose: chosen.pose } : {}), ms: Date.now() - started });
 			}
 		} catch (error) {
 			log.warn("expression_failed", { reply: next.reply.id, error: (error as Error).message });
 		} finally {
 			asking = false;
+			busy.delete(next.reply.id);
 			// Another reply may have settled while this one was picked.
 			void consider();
 		}
@@ -214,6 +248,42 @@ export function startExpressions(options: {
 	});
 
 	return {
+		change(op, id, revision, requestId) {
+			const key = `${op}:${id}:${requestId}`;
+			if (pending.has(key)) return pending.get(key)!;
+			const reply = target(id);
+			if (reply?.artRequests?.includes(requestId)) return Promise.resolve();
+			if (!reply || stopped) return Promise.reject(new Error("That panel is no longer available"));
+			if (typeof revision !== "string" || revision !== (reply.artVersion ?? "")) return Promise.reject(new Error("The panel changed; try again"));
+			if (busy.has(id)) return Promise.reject(new Error("June is already choosing that face"));
+			busy.add(id);
+			const run = (async () => {
+				const context = contextFor(reply);
+				let original: ArtTake | undefined;
+				if (!reply.takes?.length) {
+					// Preserve an unpicked legacy reply as unpicked: Back restores the shared renderer's exact stand-in.
+					original = { take: 0, ...(reply.expression ? { expression: reply.expression } : {}), ...(reply.pose ? { pose: reply.pose } : {}), ...(reply.side ? { side: reply.side } : {}), ...(reply.expressionAt !== undefined || reply.at !== undefined ? { selectedAt: reply.expressionAt ?? reply.at } : {}) };
+				}
+				const takes = reply.takes ?? [original!];
+				const current = takes.find((t) => t.take === (reply.take ?? 0))!;
+				let choice: ArtTake;
+				if (op === "restore") {
+					const previous = takes.find((t) => t.take === current.previous);
+					if (!previous) throw new Error("No earlier take for this panel");
+					choice = previous;
+				} else {
+					const picked = await pick(context.said, reply.text, context.earlier, takes);
+					if (!picked) throw new Error("June could not choose another face");
+					choice = { ...resolvePick(picked, options.manifest(), reply), take: Math.max(...takes.map((t) => t.take)) + 1, previous: current.take };
+				}
+				const live = target(id);
+				if (stopped || !live || (live.artVersion ?? "") !== revision || live.text !== reply.text) throw new Error("That panel changed while June chose its face");
+				if (original) await write(live, original, context);
+				await write(live, choice, context, requestId);
+			})().finally(() => { busy.delete(id); pending.delete(key); void consider(); });
+			pending.set(key, run);
+			return run;
+		},
 		async stop() {
 			stopped = true;
 			await (await view).stop();

@@ -1,9 +1,9 @@
-// Exercise the real Qt WebSocket client, offscreen, against a daemon that can go silent without closing TCP.
+// Exercise Qt's actual connection and panel menu offscreen, without opening a window on the user's desktop.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { once } from "node:events";
 import { test } from "node:test";
 import { WebSocketServer } from "ws";
@@ -105,4 +105,74 @@ Item {
 	const closed = once(child, "close");
 	t.after(async () => { child.kill(); await closed; });
 	await Promise.race([retried, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error("hello never timed out")), 4000); retried.finally(() => clearTimeout(timer)); })]);
+});
+
+test("Qt's right-click take menu preserves left selection, targets the reply, and disables overlapping requests", { skip: !qml, timeout: 15000 }, async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "june-menu-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	await mkdir(join(dir, "ui"));
+	for (const file of ["TakeMenu.qml", "compose.mjs"]) await copyFile(new URL(`../overlay/${file}`, import.meta.url), join(dir, "ui", file));
+	// Only Quickshell's singleton wrapper is replaced; use the actual palette and menu with Qt Quick Test.
+	const theme = (await readFile(new URL("../overlay/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
+	await writeFile(join(dir, "ui", "Theme.qml"), theme);
+	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\n");
+	await writeFile(join(dir, "tst_take.qml"), `
+import QtQuick
+import QtTest
+import "ui"
+Item {
+  id: root
+  width: 500; height: 240
+  property var chosen: null
+  TextEdit { id: words; width: 500; height: 100; text: "June's words remain selectable with the left button"; selectByMouse: true; readOnly: true; font.pixelSize: 18 }
+  TakeMenu { id: area; anchors.fill: parent; panel: ({ elements: [] }); onChosen: choice => root.chosen = choice }
+  TestCase {
+    name: "PanelTakeMenu"
+    when: windowShown
+    function popup() { return findChild(area, "takeMenu"); }
+    function init() {
+      area.panel = { elements: [{ kind: "june", replyId: "42", artVersion: "version-one", canRestore: true }] };
+      area.linked = true; area.taking = ({}); root.chosen = null;
+    }
+    function cleanup() { popup().close(); }
+    function open() { mouseClick(area, 260, 50, Qt.RightButton); tryCompare(popup(), "opened", true); waitForRendering(popup().contentItem); }
+    function test_select_and_retake() {
+      mousePress(words, 2, 10, Qt.LeftButton);
+      mouseMove(words, 220, 10, 100);
+      mouseRelease(words, 220, 10, Qt.LeftButton);
+      verify(words.selectedText.length > 0, "left-button selection passes through");
+      const selected = words.selectedText;
+      open();
+      compare(words.selectedText, selected);
+      compare(popup().itemAt(0).text, "Another take");
+      const item = popup().itemAt(0);
+      mouseClick(item, item.width / 2, item.height / 2);
+      tryVerify(() => root.chosen !== null);
+      compare(root.chosen.op, "retake"); compare(root.chosen.reply, "42"); compare(root.chosen.revision, "version-one");
+    }
+    function test_back() {
+      open(); compare(popup().itemAt(1).text, "Back");
+      const item = popup().itemAt(1);
+      mouseClick(item, item.width / 2, item.height / 2); tryVerify(() => root.chosen !== null); compare(root.chosen.op, "restore");
+    }
+    function test_busy_and_offline() {
+      area.taking = { "42": "request" }; open();
+      compare(popup().itemAt(0).enabled, false); compare(popup().itemAt(1).enabled, false);
+      popup().close(); area.taking = ({}); area.linked = false; open(); compare(popup().itemAt(0).enabled, false);
+    }
+    function test_no_back_before_a_retake_and_no_menu_while_live() {
+      area.panel = { elements: [{ kind: "june", replyId: "42" }] }; open(); compare(popup().itemAt(1).visible, false);
+      popup().close(); area.panel = { live: true, elements: [] }; compare(area.enabled, false);
+    }
+  }
+}
+`);
+	const child = spawn(join(dirname(qml), "qmltestrunner"), ["-input", dir], { env: { ...process.env, QT_QPA_PLATFORM: "offscreen", QT_QUICK_BACKEND: "software", QT_QUICK_CONTROLS_STYLE: "Basic", QT_STYLE_OVERRIDE: "", QT_QPA_PLATFORMTHEME: "", QT_FORCE_STDERR_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+	let output = "";
+	for (const stream of [child.stdout, child.stderr]) stream.on("data", (data) => { output += data; });
+	const closed = once(child, "close");
+	t.after(() => child.kill());
+	const [code] = await closed;
+	assert.equal(code, 0, output);
+	assert.match(output, /test_select_and_retake.*PASS|PASS.*test_select_and_retake/);
 });

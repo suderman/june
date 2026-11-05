@@ -12,7 +12,7 @@ import * as strip from "../../overlay/strip.mjs";
 
 export { compose, light, live, looks, scenery, strip };
 
-// Each panel's side and pose once chosen, kept for as long as the screen lives (composeStrip).
+// Per-screen live presentation state; settled choices come from the recorded take or stable legacy derivation.
 const memory = { sides: {}, poseIds: {}, livePoses: {} };
 let poses = [];
 let rooms = { rooms: [], plates: [], props: [] };
@@ -47,8 +47,10 @@ export function setArt(manifest, daemon) {
 export function panels(items, state, holding) {
 	const composed = compose.composeStrip(strip.panels(items), state, poses, memory, holding === true);
 	// Tool calls carry their caption line, as the overlay's chips and cards show them.
-	for (const panel of composed)
+	for (const panel of composed) {
+		panel.takeMenu = compose.takeMenu(panel);
 		for (const e of panel.elements) if (e.kind === "tools") e.items = e.items.map((item) => Object.assign({}, item, { caption: strip.caption(item) }));
+	}
 	return composed;
 }
 
@@ -116,7 +118,7 @@ function scene(panel, laid, pose, sizes, width, now, hourOverride, sky) {
 
 /** The strip in the console look: each panel's lines (console.mjs), and whether she is still working in it. */
 export function consoleStrip(items, state, holding) {
-	return panels(items, state, holding).map((panel) => ({ id: panel.id, live: panel.live === true, lines: looks.lines(panel) }));
+	return panels(items, state, holding).map((panel) => ({ id: panel.id, live: panel.live === true, lines: looks.lines(panel), takeMenu: compose.takeMenu(panel) }));
 }
 
 /**

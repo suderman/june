@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { activity, applyView, beats, caption, emptyView, markup, panels, readInput, status, noteText } from "../overlay/strip.mjs";
-import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, panelLayout, jagged, liveActivity, metrics, picked, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
+import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, panelLayout, jagged, liveActivity, metrics, picked, plan, readPoses, selectionMoment, standIn, takeMenu, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
 import { CALM_GROUND, LONG_SHARE, PATTERNS, TIMES, WEATHER_MS, backdrop, cutaway, fallingPath, graded, hourOf, look, moment, patternPath, place, skyLook, sunFor, sunKeys, sunTimes } from "../overlay/light.mjs";
@@ -918,6 +918,40 @@ test("the strip is composed the same way on every client: sides and poses kept o
 	assert.ok(composeStrip(panels(settled), { running: false }, poses, memory, false)[2].pose);
 });
 
+test("recorded art and legacy stand-ins survive view-window changes, inventory order, and later additions", () => {
+	const at = Date.UTC(2026, 10, 5, 12);
+	const warm = POSES.find((p) => p.expression === "warm" && !p.activity);
+	const choices = POSES.map((p) => ({ ...p, added: at - 1000 }));
+	const items = [
+		{ ...user("first"), at }, { ...june("named"), expression: "warm", pose: warm.id, side: "right", expressionAt: at, at },
+		{ ...user("second"), at }, { ...june("legacy"), expression: "warm", at },
+		{ ...user("third"), at }, { ...june("unpicked"), at },
+	];
+	const render = (rows, art = choices, memory = { sides: {}, poseIds: {}, livePoses: {} }) => composeStrip(panels(rows), {}, art, memory).map((p) => [p.id, p.pose?.id, p.side]);
+	const original = render(items);
+	assert.equal(original[0][1], warm.id, "the recorded name wins");
+	assert.equal(original[0][2], "right", "the recorded side wins");
+	const enlarged = [{ ...warm, id: "a-future-warm", added: at + 1000 }, ...choices.slice().reverse()];
+	assert.deepEqual(render(items, enlarged), original, "later poses and manifest order cannot reshuffle history");
+	for (let i = 0; i < 3; i++) assert.deepEqual(render(items.slice(i * 2, i * 2 + 2), enlarged), [original[i]], "the previous panel is not part of a settled choice");
+	assert.deepEqual(render(items, enlarged, { sides: { first: "left" }, poseIds: { first: "missing" }, livePoses: {} }), original, "a client's discarded memory changes nothing");
+	const missing = choices.filter((p) => p.id !== warm.id);
+	assert.equal(render(items.slice(0, 2), missing)[0][1], choosePose(missing, { expression: "warm" }, "", "first").id, "a missing recorded file follows its expression chain");
+});
+
+test("both native menus use the settled reply's revision and expose Back only for an earlier take", () => {
+	const at = 1234;
+	const item = { ...june("answer", "one paragraph.\\n\\nAnother paragraph."), expression: "warm", expressionAt: at, side: "left", artVersion: "revision", take: 1, takes: [{ take: 0 }, { take: 1, previous: 0 }] };
+	const [panel] = panels([user("question"), item]);
+	assert.deepEqual(takeMenu(panel), [{ op: "retake", label: "Another take", reply: "answer", revision: "revision", enabled: true }, { op: "restore", label: "Back", reply: "answer", revision: "revision", enabled: true }]);
+	assert.equal(selectionMoment(panel), at);
+	assert.equal(picked(panel).side, "left");
+	assert.ok(takeMenu(panel, true).every((a) => !a.enabled));
+	assert.deepEqual(takeMenu({ ...panel, live: true }), []);
+	assert.equal(takeMenu(panels([user("q"), { ...june("a"), streaming: true }])[0]).length, 0);
+	assert.equal(takeMenu(panels([user("q"), june("a")])[0]).length, 1);
+});
+
 test("a panel's scene is decided once for every client: the hour's light, her room, its window, and what is behind her", () => {
 	const poses = readPoses(manifest, "");
 	const sceneryAll = readScenery(manifest, "");
@@ -980,6 +1014,9 @@ test("a gesture stays whole in a panel: seen past the words, framed wider, or an
 	assert.equal(panelLayout({ panel, width: 360, sizes: short, poses: later }).pose.id, "gentle-plain", "the newer open palm is not offered to an older panel");
 	const newer = composeStrip(panels(items.map((i) => ({ ...i, at: at + 5000 }))), { running: false }, later, { sides: {}, poseIds: {}, livePoses: {} });
 	assert.equal(panelLayout({ panel: newer[0], width: 360, sizes: short, poses: later }).pose.id, "gentle-palm-high", "a newer panel may use it");
+	const retaken = composeStrip(panels(items.map((i) => i.kind === "assistant" ? { ...i, expressionAt: at + 5000 } : i)), {}, later, { sides: {}, poseIds: {}, livePoses: {} });
+	assert.equal(panelLayout({ panel: retaken[0], width: 360, sizes: short, poses: later }).pose.id, "gentle-palm-high", "a retake may use art added after the words were written");
+	assert.equal(moment(retaken[0]), at, "choosing newer art never relights the words");
 
 	// A drawn special is never swapped: framed wider when that shows it, else kept and marked cropped.
 	const special = readPoses({ poses: { ...manifest.poses, "gentle-palm": { ...manifest.poses["gentle-palm"], special: true } } }, "");

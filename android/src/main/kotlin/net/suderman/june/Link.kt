@@ -51,6 +51,10 @@ class Link(private val context: Context) {
     var notice: String by mutableStateOf("")
         private set
 
+    /** Pending art requests, by reply, so repeated long presses cannot queue duplicate model calls. */
+    var taking: Map<String, String> by mutableStateOf(emptyMap())
+        private set
+
     private val main = Handler(Looper.getMainLooper())
     private val client = OkHttpClient.Builder().build()
     private var socket: WebSocket? = null
@@ -64,6 +68,7 @@ class Link(private val context: Context) {
 
     fun close() {
         active = false
+        taking = emptyMap()
         main.removeCallbacksAndMessages(null)
         socket?.close(1000, "session hidden")
         socket = null
@@ -85,6 +90,18 @@ class Link(private val context: Context) {
         socket?.send(JSONObject().put("op", "command").put("requestId", requestId()).put("name", "stop").toString())
     }
 
+    fun take(action: JSONObject) {
+        val reply = action.optString("reply")
+        val op = action.optString("op")
+        val ws = socket ?: return
+        if (status !is LinkStatus.Linked || reply in taking || op !in listOf("retake", "restore")) return
+        val id = requestId()
+        if (ws.send(JSONObject().put("op", op).put("requestId", id).put("reply", reply).put("revision", action.optString("revision")).toString())) {
+            taking = taking + (reply to id)
+            notice = if (op == "retake") "choosing another take…" else "restoring the previous take…"
+        }
+    }
+
     private fun requestId() = "apk-${UUID.randomUUID()}"
 
     private fun connect() {
@@ -104,6 +121,7 @@ class Link(private val context: Context) {
                 val reply = try { JSONObject(text) } catch (e: Exception) { return }
                 main.post {
                     if (webSocket !== socket) return@post
+                    if (reply.optString("type") in listOf("reply", "error")) taking = taking.filterValues { it != reply.optString("requestId") }
                     when (reply.optString("type")) {
                         "hello" -> {
                             helloSeen = true
@@ -132,6 +150,7 @@ class Link(private val context: Context) {
                     if (webSocket !== socket) return@post
                     Log.i(TAG, "link ended: ${code ?: "failure"} $reason")
                     socket = null
+                    taking = emptyMap()
                     // 4401 is a refused token; a close before any hello twice running means the same.
                     if (code == 4401 || (!helloSeen && ++refusals >= 2 && code != null)) {
                         status = LinkStatus.Refused

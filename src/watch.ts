@@ -112,6 +112,7 @@ export function createWatch(options: {
 					const ids = (await tx.doc(Follows)).ids;
 					const mine = new Set<string>();
 					for (const [id, task] of Object.entries(ids)) {
+						// SAFETY: Follows stores numeric task creation IDs; this restores their erased TaskId brand.
 						const record = await tx.task(task as unknown as TaskId);
 						if (record !== undefined && record.state.status !== "terminal") mine.add(id);
 					}

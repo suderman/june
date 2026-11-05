@@ -15,6 +15,8 @@ ListView {
   // Where the pictures the user's messages brought are served, for their polaroids.
   property string attached: ""
   property bool linked: true
+  property var taking: ({})
+  signal take(var action)
   // The console look instead of the comic strip.
   property bool consoleLook: Theme.consoleLook
 
@@ -96,6 +98,14 @@ ListView {
     required property string json
     width: list.width
     sourceComponent: list.consoleLook ? consoleCell : comicCell
+    TakeMenu {
+      anchors.fill: parent
+      z: 10
+      panel: JSON.parse(cell.json)
+      linked: list.linked
+      taking: list.taking
+      onChosen: action => list.take(action)
+    }
     Component {
       id: comicCell
       Panel {

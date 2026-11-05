@@ -137,6 +137,8 @@ FloatingWindow {
       scenery: win.shell.scenery
       sky: win.shell.view.state.sky ?? null
       linked: win.shell.linked
+      taking: win.shell.taking
+      onTake: action => win.shell.take(action)
       attached: win.shell.attached
     }
 

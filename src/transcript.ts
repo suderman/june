@@ -22,6 +22,10 @@ export type Surface = "gui" | "apk" | "telegram";
 /** A client source as stored: the terminal client was `kitty` before it was `tui`. */
 export const sourceName = (source: string) => (source === "kitty" ? "tui" : source);
 
+/** An absent expression restores a legacy panel's original, deterministic stand-in. */
+export type ArtTake = { take: number; previous?: number; expression?: string; pose?: string; side?: "left" | "right"; selectedAt?: number };
+export type ArtContext = { said: string; earlier: { said: string; replied: string }[] };
+
 export type ViewItem =
 	/** `private` marks June's own look, shown only in detail. */
 	/** `files` are those the message brought to June's inbox, with where they were saved. */
@@ -32,7 +36,7 @@ export type ViewItem =
 	 * the source of the input the reply follows, empty when that input is before the transcript. `alert` names the client
 	 * kind that should interrupt the user, on a finished reply only.
 	 */
-	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: Surface; error?: string; thinking?: string; private?: true; expression?: string; pose?: string; at?: number }
+	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: Surface; error?: string; thinking?: string; private?: true; expression?: string; pose?: string; side?: "left" | "right"; expressionAt?: number; artVersion?: string; take?: number; takes?: ArtTake[]; artRequests?: string[]; artContext?: ArtContext; at?: number }
 	/** `error` is the first line of a failed call's output; `output`, in detail only, is all of what the call kept. */
 	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; error?: string; output?: string; private?: true }
 	| { kind: "note"; id: string; text: string }
@@ -64,6 +68,26 @@ export type ViewState = {
 
 export type Change = { op: "put"; item: ViewItem; after: string | null } | { op: "drop"; id: string };
 
+/** Apply a display-only choice. Back reuses an existing take; new takes keep their parent for an exact undo chain. */
+export function applyArt(reply: Extract<ViewItem, { kind: "assistant" }>, data: Partial<ArtTake> & { revision?: string; requestId?: string; context?: ArtContext }, id: string): void {
+	delete reply.expression;
+	if (typeof data.expression === "string") reply.expression = data.expression;
+	delete reply.pose;
+	delete reply.side;
+	delete reply.expressionAt;
+	if (typeof data.pose === "string") reply.pose = data.pose;
+	if (data.side === "left" || data.side === "right") reply.side = data.side;
+	if (typeof data.selectedAt === "number" && Number.isFinite(data.selectedAt)) reply.expressionAt = data.selectedAt;
+	reply.artVersion = data.revision ?? id;
+	if (data.context) reply.artContext = data.context;
+	if (Number.isInteger(data.take)) {
+		const take: ArtTake = { take: data.take!, expression: data.expression, ...(data.pose ? { pose: data.pose } : {}), ...(data.side ? { side: data.side } : {}), ...(data.selectedAt !== undefined ? { selectedAt: data.selectedAt } : {}), ...(data.previous !== undefined ? { previous: data.previous } : {}) };
+		if (!reply.takes?.some((t) => t.take === take.take)) reply.takes = [...(reply.takes ?? []), take];
+		reply.take = take.take;
+	}
+	if (data.requestId) reply.artRequests = [...(reply.artRequests ?? []), data.requestId];
+}
+
 /** One value of the view as a client sees it: the transcript the client holds, then the conversation's documents. */
 export type Folded = { items: ViewItem[]; state: ViewState; earlier: boolean };
 
@@ -84,8 +108,6 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 	const tools = new Map<string, Extract<ViewItem, { kind: "tool" }>>();
 	const background = new Set<string>();
 	let hidden = false;
-	/** The face of her newest reply that has one. */
-	let expression = "idle";
 	/** The reply follows a Telegram message, already Markdown; anything else June answers in Org. */
 	let markdown = false;
 	/** The source of the input being answered, and where a notice was routed. */
@@ -143,11 +165,7 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 			case "june.expression": {
 				// The face picked for a reply, after it settled; it rides on the reply's item.
 				const reply = items.findLast((item) => item.kind === "assistant" && item.id === String(entry.data?.for));
-				if (reply?.kind === "assistant" && typeof entry.data?.expression === "string") {
-					reply.expression = entry.data.expression;
-					if (typeof entry.data.pose === "string") reply.pose = entry.data.pose;
-					expression = entry.data.expression;
-				}
+				if (reply?.kind === "assistant" && (typeof entry.data?.expression === "string" || Number.isInteger(entry.data?.take))) applyArt(reply, entry.data, id);
 				break;
 			}
 			case "june.work":
@@ -244,13 +262,15 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 
 	const agent = docs["pi.agent"] as { model?: { modelId?: string }; thinkingLevel?: string } | undefined;
 	const retry = live.generation?.retry;
+	// Retaking an older panel must not put its face on live June instead of the newest reply's.
+	const face = items.findLast((item): item is Extract<ViewItem, { kind: "assistant" }> => item.kind === "assistant" && !item.private && !!item.expression);
 	const state: ViewState = {
 		running,
 		background: background.size,
 		queued: ((docs["pi.inbox"] as { items?: unknown[] } | undefined)?.items ?? []).length,
 		model: agent?.model?.modelId ? `${agent.model.modelId}${agent.thinkingLevel ? `:${agent.thinkingLevel}` : ""}` : "",
 		compacting: (live.compactions?.length ?? 0) > 0,
-		expression,
+		expression: face?.expression ?? "idle",
 		...(retry ? { notice: `retrying: ${retry.error}` } : live.compactionFailure ? { notice: `compaction failed: ${live.compactionFailure.error}` } : {}),
 	};
 	return { items, state, earlier };

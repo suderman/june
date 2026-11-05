@@ -263,7 +263,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				pid: process.pid,
 				startedAt,
 				version: VERSION,
-				conversation: root.id as unknown as number,
+				conversation: root.id,
 				model: `${resolvedAgent.model?.provider}/${resolvedAgent.model?.modelId}`,
 				thinkingLevel: String(resolvedAgent.thinkingLevel),
 				busy: mine.some((s) => s.status === "placed"),
@@ -284,7 +284,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		let remoteError: string | undefined;
 		const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
 		const follows = pollFollowing(() => harness.commit((tx) => listFollowing(tx), BG), options.followingMs ?? 15_000, log);
-		const scope: Scope = { harness, root, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows };
+		const scope: Scope = { harness, root, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, ...(expressions ? { expressions } : {}) };
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
@@ -345,7 +345,7 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 	});
 }
 
-type Scope = CommandScope & { log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource };
+type Scope = CommandScope & { log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; expressions?: ReturnType<typeof startExpressions> };
 /** The sky a view sends with its state, and how it learns of a change. */
 type SkySource = Pick<Situation, "sky" | "onSky">;
 /** How many followed tasks are still going, and how a view learns of a change. */
@@ -471,7 +471,7 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 					},
 					context,
 				);
-				send({ type: "accepted", requestId: request.requestId, submissionId: submission.id as unknown as number });
+				send({ type: "accepted", requestId: request.requestId, submissionId: submission.id });
 				if (!request.wait) return;
 				const settled = await submission.wait(context);
 				const text =
@@ -485,6 +485,14 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 					...(text !== undefined ? { text } : {}),
 					...(settled.status === "unanswered" ? { reason: settled.reason } : {}),
 				});
+			}
+			case "retake":
+			case "restore": {
+				if (!scope.expressions) throw new Error("The comic director is not configured");
+				if (!view?.contains(request.reply)) throw new Error("That panel is not in this view");
+				if (typeof request.reply !== "string" || typeof request.requestId !== "string" || !request.requestId || typeof request.revision !== "string") throw new Error("Invalid art request");
+				await scope.expressions.change(request.op, request.reply, request.revision, request.requestId);
+				return send({ type: "reply", requestId: request.requestId, text: "" });
 			}
 			case "command": {
 				const text = await runCommand(scope, request.name, request.args ?? "", request.requestId, context);
@@ -540,7 +548,7 @@ export function assistantText(message: unknown): string {
 }
 
 /** A connection's view: `detail` switches between the simple and complete view with a reset, `stop` ends it. */
-export type View = { detail(on: boolean, requestId: string): void; stop(): Promise<unknown> };
+export type View = { contains(reply: string): boolean; detail(on: boolean, requestId: string): void; stop(): Promise<unknown> };
 
 /**
  * Attach a connection to the folded view: a watch of the root conversation, a `ConversationTranscript` that keeps entries
@@ -612,6 +620,7 @@ export async function attachView(
 		timer ??= setTimeout(flush, Math.max(0, flushed + FLUSH_MS - Date.now()));
 	});
 	return {
+		contains(id) { return shown?.items.some((i) => i.kind === "assistant" && i.id === id && !i.private) ?? false; },
 		// The reset holds everything a pending flush would send.
 		detail(on, id) {
 			detail = on;

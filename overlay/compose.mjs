@@ -132,7 +132,7 @@ export function choosePose(poses, request = {}, avoid = "", seed = "") {
 	}
 	const pick = (fits) => {
 		const fresh = fits.filter((p) => p.id !== avoid);
-		const pool = fresh.length > 0 ? fresh : fits;
+		const pool = (fresh.length > 0 ? fresh : fits).slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 		return pool[hash(seed) % pool.length];
 	};
 	if (request.activity) {
@@ -175,7 +175,11 @@ const STAND_IN = ["idle", "warm", "wry", "curious", "smug", "laughing", "serious
 export function picked(panel) {
 	for (let i = panel.elements.length - 1; i >= 0; i--) {
 		const e = panel.elements[i];
-		if (e.kind === "june" && e.expression) return e.pose ? { pose: e.pose, expression: e.expression } : { expression: e.expression };
+		if (e.kind === "june" && e.expression) {
+			const request = e.pose ? { pose: e.pose, expression: e.expression } : { expression: e.expression };
+			if (e.side) request.side = e.side;
+			return request;
+		}
 	}
 	return null;
 }
@@ -189,16 +193,15 @@ export function standIn(panel, live) {
 }
 
 /**
- * Each panel's pose and side, oldest first, as every client composes the strip. The side alternates from the panel
- * before unless her pose says otherwise, and both stay put once chosen, so the strip does not rearrange itself as it
- * grows: `memory` ({ sides, poseIds, livePoses }, panel id to choice) carries them from one call to the next and is
- * updated in place. The panel she is answering in shows the pose of the moment; when the run ends, `holding` (the
- * client's few seconds after a run) keeps her talking pose there until the daemon's picked face arrives, then a
+ * Each panel's pose and side, oldest first, as every client composes the strip. Recorded choices win. Older panels
+ * derive both from their id and the art available at selection time, never from the previous panel or client memory.
+ * `memory` ({ sides, poseIds, livePoses }) keeps live presentation state between calls. The panel she is answering in
+ * shows the pose of the moment; when the run ends, `holding` (the client's few seconds after a run) keeps her talking
+ * pose there until the daemon's picked face arrives, then a
  * stand-in. Returns the panels with `side`, `pose`, and `live` added.
  */
 export function composeStrip(panels, state, poses, memory, holding = false) {
 	const running = Boolean(state && (state.running || state.compacting));
-	let previousSide = undefined;
 	let previousPose = "";
 	return panels.map((p, i) => {
 		const live = i === panels.length - 1 && running;
@@ -209,22 +212,22 @@ export function composeStrip(panels, state, poses, memory, holding = false) {
 		const hold = !live && !face && i === panels.length - 1 && holding && memory.livePoses[p.id] !== undefined;
 		const find = (id) => poses.find((x) => x.id === id) ?? null;
 		// A settled panel chooses only among poses in the set when it happened, so adding art never changes it.
-		const time = moment(p);
+		const time = selectionMoment(p);
 		const pool = poses.filter((x) => availableAt(x, time));
 		let pose = live
 			? choosePose(poses, doing ? { activity: doing, expression: "curious" } : standIn(p, true), previousPose, p.id)
 			: face
-				? (face.pose ? find(face.pose) : null) ?? choosePose(pool, face, previousPose, p.id)
+				? (face.pose ? find(face.pose) : null) ?? choosePose(pool, face, "", p.id)
 				: hold
 					? find(memory.livePoses[p.id])
-					: find(memory.poseIds[p.id]);
+					: choosePose(pool, standIn(p, false), "", p.id);
 		if (live && pose) memory.livePoses[p.id] = pose.id;
 		if (!pose && !live) {
-			pose = choosePose(pool, standIn(p, false), previousPose, p.id);
+			pose = choosePose(pool, standIn(p, false), "", p.id);
 			if (pose) memory.poseIds[p.id] = pose.id;
 		}
-		if (!memory.sides[p.id]) memory.sides[p.id] = chooseSide(previousSide, pose);
-		previousSide = memory.sides[p.id];
+		const preferred = face?.side ?? (hash(p.id) % 2 === 0 ? "left" : "right");
+		memory.sides[p.id] = chooseSide(preferred === "left" ? "right" : "left", pose);
 		previousPose = pose ? pose.id : "";
 		return Object.assign({}, p, { side: memory.sides[p.id], pose, live });
 	});
@@ -258,6 +261,26 @@ export function moment(panel) {
 		if (typeof t === "number" && (at === null || t > at)) at = t;
 	}
 	return at;
+}
+
+/** The last picked reply's selection time, separate from the words' time used for lighting. */
+export function selectionMoment(panel) {
+	for (let i = panel.elements.length - 1; i >= 0; i--) {
+		const e = panel.elements[i];
+		if (e.kind === "june" && e.expression) return typeof e.expressionAt === "number" ? e.expressionAt : e.at ?? moment(panel);
+	}
+	return moment(panel);
+}
+
+/** Shared native-menu decisions; input gestures and menu drawing belong to each client. */
+export function takeMenu(panel, busy = false) {
+	if (panel.live) return [];
+	const reply = panel.elements.slice().reverse().find((e) => e.kind === "june" && e.replyId);
+	if (!reply || reply.streaming) return [];
+	const action = (op, label) => ({ op, label, reply: reply.replyId, revision: reply.artVersion ?? "", enabled: !busy });
+	const menu = [action("retake", "Another take")];
+	if (reply.canRestore) menu.push(action("restore", "Back"));
+	return menu;
 }
 
 /** Whether `pose` was in the set when a panel at `time` was composed: poses added later never change an old panel. */
@@ -329,7 +352,7 @@ function stableOrder(list, seed) {
  * layout and the pose it framed.
  */
 export function panelLayout({ panel, width, sizes, poses }) {
-	const time = moment(panel);
+	const time = selectionMoment(panel);
 	const usable = poses.filter((p) => availableAt(p, time));
 	const lay = (pose, framing) => {
 		const first = plan({ width, side: panel.side, pose, elements: sizes, framing: framing ?? panel.framing });

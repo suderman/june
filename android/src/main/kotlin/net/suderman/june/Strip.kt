@@ -7,13 +7,16 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
@@ -22,6 +25,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -187,7 +192,7 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
         androidx.compose.runtime.CompositionLocalProvider(LocalPictures provides Pictures(avatar, link.attachedPath) { viewing = it }) {
             LazyColumn(Modifier.fillMaxSize(), state = followNewest(if (count > 0) shown.getJSONObject(count - 1).getString("id") else null), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 items(count, key = { shown.getJSONObject(count - 1 - it).getString("id") }) { i ->
-                    PanelView(shown.getJSONObject(count - 1 - i), newest = i == 0, width.value, m, decisions, avatar, now, sky)
+                    PanelView(shown.getJSONObject(count - 1 - i), newest = i == 0, width.value, m, decisions, avatar, now, sky, link)
                 }
             }
         }
@@ -226,6 +231,24 @@ private fun Polaroids(item: JSONObject, count: Int, noteW: Float) {
                     drawPath(path("M 4 26 L 4 6 A 4 4 0 0 1 12 6 L 12 30 A 6 6 0 0 1 0 30 L 0 10"), Color(0xFF8D929C), style = Stroke(2.5f, cap = androidx.compose.ui.graphics.StrokeCap.Round))
                 }
             }
+        }
+    }
+}
+
+/** Native long-press menus use the shared action list. combinedClickable cancels a long press when scrolling wins. */
+@Composable
+private fun PanelActions(panel: JSONObject, link: Link, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+    val raw = panel.optJSONArray("takeMenu")
+    val actions = if (raw == null) emptyList() else List(raw.length()) { raw.getJSONObject(it) }
+    var open by remember(panel.optString("id")) { mutableStateOf(false) }
+    Box(modifier.combinedClickable(enabled = actions.isNotEmpty(), onClick = {}, onLongClickLabel = "Change June's take", onLongClick = { open = true })) {
+        content()
+        DropdownMenu(expanded = open && actions.isNotEmpty(), onDismissRequest = { open = false }) {
+            for (action in actions) DropdownMenuItem(
+                text = { Text(action.getString("label")) },
+                enabled = action.optBoolean("enabled") && link.status is LinkStatus.Linked && action.optString("reply") !in link.taking,
+                onClick = { open = false; link.take(action) },
+            )
         }
     }
 }
@@ -328,7 +351,7 @@ private fun path(d: String): Path = PathParser().parsePathString(d).toPath()
 
 /** One panel: its ground, June framed into her clip, the words where the layout put them, and the frame over all. */
 @Composable
-private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONObject, decisions: Decisions, avatar: Avatar, now: Long, sky: JSONObject?) {
+private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONObject, decisions: Decisions, avatar: Avatar, now: Long, sky: JSONObject?, link: Link) {
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val textWidth = m.getDouble("textWidth").toFloat()
@@ -351,7 +374,7 @@ private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONO
     val pose = l.optJSONObject("pose")
     val image by produceState<ImageBitmap?>(null, pose?.optString("url")) { value = pose?.optString("url")?.takeIf { it.isNotEmpty() }?.let { avatar.image(it) } }
     val scene = l.optJSONObject("scene")
-    Box(Modifier.width(width.dp).height(l.getDouble("height").dp).clipToBounds().background(Look.color(scene?.optString("ground") ?: l.optString("tint")))) {
+    PanelActions(panel, link, Modifier.width(width.dp).height(l.getDouble("height").dp).clipToBounds().background(Look.color(scene?.optString("ground") ?: l.optString("tint")))) {
         if (scene != null) SceneView(scene, avatar, panel.optInt("seed"))
         scene?.optJSONObject("cutaway")?.let { CutawayView(it) }
         val art = l.optJSONObject("art")
@@ -605,9 +628,11 @@ fun ConsoleStrip(link: Link, decisions: Decisions, palette: Look.Palette, modifi
         items(count, key = { shown.getJSONObject(count - 1 - it).getString("id") }) { i ->
             val panel = shown.getJSONObject(count - 1 - i)
             val lines = panel.getJSONArray("lines")
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (j in 0 until lines.length()) ConsoleLine(lines.getJSONObject(j), palette)
-                if (panel.optBoolean("live") && link.state.activity.isNotEmpty()) Text("… " + link.state.activity, color = palette.busy, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+            PanelActions(panel, link, Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (j in 0 until lines.length()) ConsoleLine(lines.getJSONObject(j), palette)
+                    if (panel.optBoolean("live") && link.state.activity.isNotEmpty()) Text("… " + link.state.activity, color = palette.busy, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                }
             }
         }
     }
