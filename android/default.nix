@@ -115,6 +115,18 @@
       adb install -r "$@" "$out/june.apk"
       # GrapheneOS makes network access a permission an ADB install leaves off; elsewhere it cannot be changed.
       adb shell pm grant net.suderman.june android.permission.INTERNET 2>/dev/null || true
+      # June's hands (Hands.kt), on by Jon's choice: added to the enabled accessibility services if missing. Settings
+      # would refuse it for an app from outside a store (restricted settings); the shell may set it.
+      hands="net.suderman.june/net.suderman.june.Hands"
+      enabled=$(adb shell settings get secure enabled_accessibility_services | tr -d '\r')
+      case ":$enabled:" in
+        *":$hands:"* | *":net.suderman.june/.Hands:"*) ;;
+        *)
+          if [ -z "$enabled" ] || [ "$enabled" = null ]; then enabled="$hands"; else enabled="$enabled:$hands"; fi
+          adb shell settings put secure enabled_accessibility_services "$enabled"
+          adb shell settings put secure accessibility_enabled 1
+          ;;
+      esac
       # The under-display fingerprint sensor, as SystemUI reports it (udfpsBounds=Rect(441, 1666 - 639, 1864)), so June's
       # lock-screen prompt can show where to touch; an app cannot ask Android for it.
       bounds=$(adb shell dumpsys activity service SystemUI 2>/dev/null | sed -n 's/.*udfpsBounds=Rect(\([0-9]*\), \([0-9]*\) - \([0-9]*\), \([0-9]*\)).*/\1 \2 \3 \4/p' | head -n 1) || true

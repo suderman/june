@@ -57,6 +57,8 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
         // in view. Set before the window is up, Android puts it back to pan, which pushed the status line off the top.
         window.window?.decorView?.post { window.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING) }
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        // Opening June lets her hands act again after Jon stopped them.
+        Hands.resume()
         lines.clear()
         // Whether the phone wants the user's credentials, not merely whether the lock screen shows.
         locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked

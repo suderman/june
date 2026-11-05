@@ -89,6 +89,7 @@ class ConversationActivity : ComponentActivity() {
             link.close()
         } else {
             link.open()
+            Hands.resume()
         }
     }
 
