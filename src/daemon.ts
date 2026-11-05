@@ -487,7 +487,8 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 				});
 			}
 			case "retake":
-			case "restore": {
+			case "restore":
+			case "advance": {
 				if (!scope.expressions) throw new Error("The comic director is not configured");
 				if (!view?.contains(request.reply)) throw new Error("That panel is not in this view");
 				if (typeof request.reply !== "string" || typeof request.requestId !== "string" || !request.requestId || typeof request.revision !== "string") throw new Error("Invalid art request");

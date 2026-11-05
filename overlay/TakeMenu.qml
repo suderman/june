@@ -40,5 +40,13 @@ MouseArea {
       enabled: Boolean(choice && choice.enabled && area.linked && !area.taking[choice.reply])
       onTriggered: area.chosen(choice)
     }
+    MenuItem {
+      readonly property var choice: area.actions[2] ?? null
+      text: choice ? choice.label : ""
+      visible: choice !== null
+      height: visible ? implicitHeight : 0
+      enabled: Boolean(choice && choice.enabled && area.linked && !area.taking[choice.reply])
+      onTriggered: area.chosen(choice)
+    }
   }
 }

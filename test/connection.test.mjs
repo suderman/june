@@ -131,7 +131,7 @@ Item {
     when: windowShown
     function popup() { return findChild(area, "takeMenu"); }
     function init() {
-      area.panel = { elements: [{ kind: "june", replyId: "42", artVersion: "version-one", canRestore: true }] };
+      area.panel = { elements: [{ kind: "june", replyId: "42", artVersion: "version-one", canRestore: true, canAdvance: true }] };
       area.linked = true; area.taking = ({}); root.chosen = null;
     }
     function cleanup() { popup().close(); }
@@ -155,13 +155,26 @@ Item {
       const item = popup().itemAt(1);
       mouseClick(item, item.width / 2, item.height / 2); tryVerify(() => root.chosen !== null); compare(root.chosen.op, "restore");
     }
+    function test_forward() {
+      open(); compare(popup().itemAt(2).text, "Forward");
+      const item = popup().itemAt(2);
+      mouseClick(item, item.width / 2, item.height / 2); tryVerify(() => root.chosen !== null);
+      compare(root.chosen.op, "advance"); compare(root.chosen.reply, "42"); compare(root.chosen.revision, "version-one");
+    }
+    function test_forward_without_back() {
+      area.panel = { elements: [{ kind: "june", replyId: "42", canAdvance: true }] };
+      open(); compare(popup().itemAt(1).text, "Forward"); compare(popup().itemAt(2).visible, false);
+      const item = popup().itemAt(1);
+      mouseClick(item, item.width / 2, item.height / 2); tryVerify(() => root.chosen !== null); compare(root.chosen.op, "advance");
+    }
     function test_busy_and_offline() {
       area.taking = { "42": "request" }; open();
-      compare(popup().itemAt(0).enabled, false); compare(popup().itemAt(1).enabled, false);
-      popup().close(); area.taking = ({}); area.linked = false; open(); compare(popup().itemAt(0).enabled, false);
+      for (let i = 0; i < 3; i++) compare(popup().itemAt(i).enabled, false);
+      popup().close(); area.taking = ({}); area.linked = false; open();
+      for (let i = 0; i < 3; i++) compare(popup().itemAt(i).enabled, false);
     }
     function test_no_back_before_a_retake_and_no_menu_while_live() {
-      area.panel = { elements: [{ kind: "june", replyId: "42" }] }; open(); compare(popup().itemAt(1).visible, false);
+      area.panel = { elements: [{ kind: "june", replyId: "42" }] }; open(); compare(popup().itemAt(1).visible, false); compare(popup().itemAt(2).visible, false);
       popup().close(); area.panel = { live: true, elements: [] }; compare(area.enabled, false);
     }
   }

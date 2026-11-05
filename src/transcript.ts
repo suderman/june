@@ -68,7 +68,7 @@ export type ViewState = {
 
 export type Change = { op: "put"; item: ViewItem; after: string | null } | { op: "drop"; id: string };
 
-/** Apply a display-only choice. Back reuses an existing take; new takes keep their parent for an exact undo chain. */
+/** Apply a display-only choice. Navigation reuses saved takes; new takes keep their creation provenance. */
 export function applyArt(reply: Extract<ViewItem, { kind: "assistant" }>, data: Partial<ArtTake> & { revision?: string; requestId?: string; context?: ArtContext }, id: string): void {
 	delete reply.expression;
 	if (typeof data.expression === "string") reply.expression = data.expression;

@@ -157,7 +157,7 @@ export function startExpressions(options: {
 	attach: Attach;
 	log: Logger;
 	timeoutMs?: number;
-}): { stop(): Promise<void>; change(op: "retake" | "restore", reply: string, revision: string, requestId: string): Promise<void> } {
+}): { stop(): Promise<void>; change(op: "retake" | "restore" | "advance", reply: string, revision: string, requestId: string): Promise<void> } {
 	const { models, log } = options;
 	const done = new Set<string>();
 	let items: ViewItem[] = [];
@@ -267,10 +267,11 @@ export function startExpressions(options: {
 				const takes = reply.takes ?? [original!];
 				const current = takes.find((t) => t.take === (reply.take ?? 0))!;
 				let choice: ArtTake;
-				if (op === "restore") {
-					const previous = takes.find((t) => t.take === current.previous);
-					if (!previous) throw new Error("No earlier take for this panel");
-					choice = previous;
+				if (op === "restore" || op === "advance") {
+					const ordered = takes.toSorted((a, b) => a.take - b.take);
+					const adjacent = op === "restore" ? ordered.findLast((t) => t.take < current.take) : ordered.find((t) => t.take > current.take);
+					if (!adjacent) throw new Error(op === "restore" ? "No earlier take for this panel" : "No later take for this panel");
+					choice = adjacent;
 				} else {
 					const picked = await pick(context.said, reply.text, context.earlier, takes);
 					if (!picked) throw new Error("June could not choose another face");

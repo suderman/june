@@ -94,11 +94,15 @@ class Link(private val context: Context) {
         val reply = action.optString("reply")
         val op = action.optString("op")
         val ws = socket ?: return
-        if (status !is LinkStatus.Linked || reply in taking || op !in listOf("retake", "restore")) return
+        if (status !is LinkStatus.Linked || reply in taking || op !in listOf("retake", "restore", "advance")) return
         val id = requestId()
         if (ws.send(JSONObject().put("op", op).put("requestId", id).put("reply", reply).put("revision", action.optString("revision")).toString())) {
             taking = taking + (reply to id)
-            notice = if (op == "retake") "choosing another take…" else "restoring the previous take…"
+            notice = when (op) {
+                "retake" -> "choosing another take…"
+                "restore" -> "restoring the previous take…"
+                else -> "restoring the next take…"
+            }
         }
     }
 

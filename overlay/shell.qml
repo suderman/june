@@ -425,7 +425,7 @@ ShellRoot {
     const pending = Object.assign({}, taking);
     pending[action.reply] = requestId;
     taking = pending;
-    say(action.op === "retake" ? "choosing another take…" : "restoring the previous take…");
+    say(action.op === "retake" ? "choosing another take…" : action.op === "restore" ? "restoring the previous take…" : "restoring the next take…");
   }
   function say(text) { toast = text; toastTimer.restart(); }
 

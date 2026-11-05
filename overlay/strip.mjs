@@ -98,7 +98,8 @@ export function panels(items) {
 				if (item.pose) beat.pose = item.pose;
 				beat.replyId = item.id;
 				beat.artVersion = item.artVersion ?? "";
-				beat.canRestore = (item.takes ?? []).some(t => t.take === item.take && t.previous !== undefined);
+				beat.canRestore = (item.takes ?? []).some(t => t.take < item.take);
+				beat.canAdvance = (item.takes ?? []).some(t => t.take > item.take);
 				if (item.side) beat.side = item.side;
 				if (typeof item.expressionAt === "number") beat.expressionAt = item.expressionAt;
 				// When she wrote it, for the panel's light (light.mjs).

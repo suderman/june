@@ -43,7 +43,7 @@ export type Request =
 	| { op: "submit"; requestId: string; text: string; images?: ImageContent[]; files?: FileAttachment[]; source: Source; whenBusy?: "steer" | "followUp"; wait?: boolean }
 	| { op: "command"; requestId: string; name: string; args?: string }
 	/** Display-only art changes, conditional on the revision shown by the client. */
-	| { op: "retake" | "restore"; requestId: string; reply: string; revision: string }
+	| { op: "retake" | "restore" | "advance"; requestId: string; reply: string; revision: string }
 	/** The first frame on the WebSocket, and only there. */
 	| { op: "hello"; requestId: string; token: string; protocol: number }
 	/** Devices allowed on the WebSocket: Unix socket only. `add` answers with the new token, once. */

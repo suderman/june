@@ -308,7 +308,7 @@ test("a paired device loads the picture a message brought, and only a user's own
 	assert.equal((await fetch(`http://127.0.0.1:${port}/attached/not-a-key/${sent.id}/0`)).status, 404, "an unknown key");
 });
 
-test("a WebSocket retake and another client's Back change only art, survive restart, and replay once", async (t) => {
+test("WebSocket retake, Back and Forward change only art, survive restart, and replay once", async (t) => {
 	const tmp = await tempDir(); t.after(tmp.cleanup);
 	const faux = fauxProvider();
 	faux.setResponses([fauxAssistantMessage("the words stay put")]);
@@ -337,6 +337,7 @@ test("a WebSocket retake and another client's Back change only art, survive rest
 	assert.notEqual(current().pose, original.pose);
 	assert.equal(current().at, original.at, "retake changes selection time, never the panel's lighting time");
 	assert.deepEqual(lines(desktop.items()), dialogue);
+	const retaken = { ...current() };
 	phone.send({ op: "retake", requestId: "take", reply: original.id, revision: original.artVersion });
 	await until(() => phone.replies.filter((r) => r.type === "reply" && r.requestId === "take").length === 2);
 	assert.equal(face.state.callCount, 2, "same request replays without a third model call");
@@ -364,4 +365,19 @@ test("a WebSocket retake and another client's Back change only art, survive rest
 	phoneItems = [];
 	for (const reply of phone.replies) if (reply.type === "view") phoneItems = "reset" in reply ? reply.items : applyChanges(phoneItems, reply.changes);
 	assert.deepEqual(phoneItems, desktop.items(), "both clients see the same art and take history");
+	phone.send({ op: "advance", requestId: "forward", reply: original.id, revision: restored.artVersion });
+	assert.equal((await phone.reply("forward")).type, "reply");
+	await until(() => current().take === 1);
+	assert.deepEqual([current().expression, current().pose, current().side, current().expressionAt, current().at], [retaken.expression, retaken.pose, retaken.side, retaken.expressionAt, retaken.at]);
+	phone.send({ op: "advance", requestId: "forward", reply: original.id, revision: restored.artVersion });
+	await until(() => phone.replies.filter((r) => r.type === "reply" && r.requestId === "forward").length === 2);
+	assert.equal((await client.request({ op: "advance", requestId: "stale-forward", reply: original.id, revision: restored.artVersion! })).type, "error");
+	assert.equal((await client.request({ op: "advance", requestId: "no-later", reply: original.id, revision: current().artVersion! })).type, "error");
+	assert.equal(current().takes!.length, 2);
+	assert.equal(face.state.callCount, 2, "Forward and its replay never call the model");
+	assert.deepEqual(lines(desktop.items()), dialogue);
+	await until(() => phone.replies.some((r) => r.type === "view" && "changes" in r && r.changes.some((c) => c.op === "put" && c.item.kind === "assistant" && c.item.take === 1)));
+	phoneItems = [];
+	for (const reply of phone.replies) if (reply.type === "view") phoneItems = "reset" in reply ? reply.items : applyChanges(phoneItems, reply.changes);
+	assert.deepEqual(phoneItems, desktop.items(), "Forward reaches both clients too");
 });

@@ -939,7 +939,7 @@ test("recorded art and legacy stand-ins survive view-window changes, inventory o
 	assert.equal(render(items.slice(0, 2), missing)[0][1], choosePose(missing, { expression: "warm" }, "", "first").id, "a missing recorded file follows its expression chain");
 });
 
-test("both native menus use the settled reply's revision and expose Back only for an earlier take", () => {
+test("both native menus use the settled reply's revision and expose saved takes in both directions", () => {
 	const at = 1234;
 	const item = { ...june("answer", "one paragraph.\\n\\nAnother paragraph."), expression: "warm", expressionAt: at, side: "left", artVersion: "revision", take: 1, takes: [{ take: 0 }, { take: 1, previous: 0 }] };
 	const [panel] = panels([user("question"), item]);
@@ -950,6 +950,12 @@ test("both native menus use the settled reply's revision and expose Back only fo
 	assert.deepEqual(takeMenu({ ...panel, live: true }), []);
 	assert.equal(takeMenu(panels([user("q"), { ...june("a"), streaming: true }])[0]).length, 0);
 	assert.equal(takeMenu(panels([user("q"), june("a")])[0]).length, 1);
+	const takes = [{ take: 2, previous: 0 }, { take: 0 }, { take: 1, previous: 0 }];
+	const menuAt = (take) => takeMenu(panels([user("q"), { ...item, take, takes }])[0]);
+	assert.deepEqual(menuAt(0).map((a) => [a.op, a.label]), [["retake", "Another take"], ["advance", "Forward"]]);
+	assert.deepEqual(menuAt(1).map((a) => a.op), ["retake", "restore", "advance"]);
+	assert.deepEqual(menuAt(2).map((a) => a.op), ["retake", "restore"]);
+	assert.ok(menuAt(1).every((a) => a.reply === "answer" && a.revision === "revision"));
 });
 
 test("a panel's scene is decided once for every client: the hour's light, her room, its window, and what is behind her", () => {

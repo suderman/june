@@ -280,6 +280,7 @@ export function takeMenu(panel, busy = false) {
 	const action = (op, label) => ({ op, label, reply: reply.replyId, revision: reply.artVersion ?? "", enabled: !busy });
 	const menu = [action("retake", "Another take")];
 	if (reply.canRestore) menu.push(action("restore", "Back"));
+	if (reply.canAdvance) menu.push(action("advance", "Forward"));
 	return menu;
 }
 

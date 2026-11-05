@@ -213,6 +213,42 @@ test("retakes preserve context, are replay safe, reject overlap, and Back restor
 	await resumed.pass.stop();
 });
 
+test("Back and Forward browse every saved take in creation order, survive restart, and never call the model", async (t) => {
+	const d = director(); t.after(() => d.pass.stop());
+	const art = (item: ReturnType<typeof d.item>) => [item.expression, item.pose, item.side, item.expressionAt, item.at];
+	const original = art(d.item());
+	await assert.rejects(d.pass.change("advance", "2", "original", "no-next"), /No later take/);
+	assert.equal(d.asked.length, 0);
+	await d.pass.change("retake", "2", "original", "first");
+	const first = art(d.item());
+	await d.pass.change("restore", "2", d.item().artVersion!, "back");
+	await d.pass.change("retake", "2", d.item().artVersion!, "branch");
+	const second = art(d.item());
+	assert.equal(d.item().take, 2);
+	assert.equal(d.item().takes!.at(-1)!.previous, 0, "creation provenance is kept, not used to skip saved takes");
+	await d.pass.change("restore", "2", d.item().artVersion!, "back-to-first");
+	assert.equal(d.item().take, 1, "Back visits the preceding saved take, including an earlier branch");
+	assert.deepEqual(art(d.item()), first);
+	await d.pass.change("restore", "2", d.item().artVersion!, "back-to-original");
+	assert.deepEqual(art(d.item()), original);
+	assert.equal(d.asked.length, 2, "only Another take uses the model");
+	await d.pass.stop();
+	const resumed = director(d.entries); t.after(() => resumed.pass.stop());
+	const revision = resumed.item().artVersion!;
+	await resumed.pass.change("advance", "2", revision, "forward");
+	assert.equal(resumed.item().take, 1);
+	assert.deepEqual(art(resumed.item()), first);
+	const length = resumed.entries.length;
+	await resumed.pass.change("advance", "2", revision, "forward");
+	assert.equal(resumed.entries.length, length, "Forward replay appends nothing");
+	await assert.rejects(resumed.pass.change("advance", "2", revision, "stale-forward"), /panel changed/);
+	await resumed.pass.change("advance", "2", resumed.item().artVersion!, "forward-to-second");
+	assert.deepEqual(art(resumed.item()), second);
+	await assert.rejects(resumed.pass.change("advance", "2", resumed.item().artVersion!, "past-end"), /No later take/);
+	assert.equal(resumed.item().takes!.length, 3, "navigation never adds or deletes a saved choice");
+	assert.equal(resumed.asked.length, 0);
+});
+
 test("Back restores an unpicked legacy reply without guessing its stand-in in the daemon", async () => {
 	const d = director();
 	d.entries.pop(); d.reset();
@@ -224,6 +260,13 @@ test("Back restores an unpicked legacy reply without guessing its stand-in in th
 	assert.equal(d.item().side, undefined);
 	assert.equal(d.item().take, 0);
 	assert.equal(d.item().at, 1793800000123);
+	const saved = d.item().takes!.find((t) => t.take === 1)!;
+	await d.pass.change("advance", "2", d.item().artVersion!, "legacy-forward");
+	assert.equal(d.item().take, 1);
+	assert.equal(d.item().pose, saved.pose);
+	assert.equal(d.item().side, saved.side);
+	assert.equal(d.item().expressionAt, saved.selectedAt);
+	assert.equal(d.asked.length, 1, "Forward reuses the saved choice even for a legacy reply");
 	await d.pass.stop();
 });
 
