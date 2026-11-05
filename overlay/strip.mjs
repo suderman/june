@@ -50,7 +50,7 @@ export function beats(text) {
 // About how much a panel holds before an exchange continues in the next panel, in characters of words. The user's
 // message counts, and a tool card or a thought counts as a short line, so a panel keeps a fair share of art to words.
 const PANEL_BUDGET = 480;
-const weightOf = (e) => (e.kind === "user" ? e.item.text.length : e.kind === "june" ? e.text.length : e.kind === "burst" ? 60 : 80);
+const weightOf = (e) => (e.kind === "user" ? e.text.length : e.kind === "june" ? e.text.length : e.kind === "burst" ? 60 : 80);
 
 /**
  * The strip's panels, oldest first. Each of the user's messages opens a panel; what June does after it follows in the
@@ -75,7 +75,7 @@ export function panels(items) {
 		if (item.kind === "user") {
 			open(item.id);
 			current.user = item;
-			current.elements.push({ kind: "user", id: item.id, item });
+			current.elements.push({ kind: "user", id: item.id, item, text: noteText(item) });
 			continue;
 		}
 		if (current === null) open(item.id);
@@ -202,6 +202,19 @@ export function status(state, host) {
 	}
 	if (parts.length === 0) parts.push(`on ${host}`);
 	return { text: parts.join(" · "), detail };
+}
+
+/**
+ * What the user's note says: their words, and what came with them, a line each, so a picture sent with a word or with
+ * none ("look") still shows in the strip.
+ */
+export function noteText(item) {
+	const lines = [];
+	const words = (item.text ?? "").trim();
+	if (words) lines.push(words);
+	if (item.imageCount) lines.push(item.imageCount === 1 ? "+ picture" : `+ ${item.imageCount} pictures`);
+	for (const file of item.files ?? []) lines.push(`+ ${file.name}`);
+	return lines.join("\n");
 }
 
 /** The small badge for June's state, or "" when she is idle. */

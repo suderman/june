@@ -361,7 +361,7 @@ Item {
         selectByMouse: true
         wrapMode: TextEdit.Wrap
         textFormat: TextEdit.PlainText
-        text: noteBox.item ? noteBox.item.text : ""
+        text: noteBox.element ? (noteBox.element.text ?? noteBox.item.text) : ""
         font.family: Theme.caption
         font.weight: Font.Medium
         font.pixelSize: 16

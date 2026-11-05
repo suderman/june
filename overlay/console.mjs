@@ -59,7 +59,7 @@ export function lines(panel) {
 	for (const e of panel.elements) {
 		if (e.kind === "user") {
 			const source = e.item.source && e.item.source !== "gui" ? `${SOURCES[e.item.source] ?? e.item.source} ` : "";
-			out.push({ kind: "user", prefix: `${source}›`, text: e.item.text });
+			out.push({ kind: "user", prefix: `${source}›`, text: e.text ?? e.item.text });
 			reply = "";
 		} else if (e.kind === "june") {
 			const item = e.id.split("#")[0];

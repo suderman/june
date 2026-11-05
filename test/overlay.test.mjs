@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { activity, applyView, beats, caption, emptyView, markup, panels, readInput, status } from "../overlay/strip.mjs";
+import { activity, applyView, beats, caption, emptyView, markup, panels, readInput, status, noteText } from "../overlay/strip.mjs";
 import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, panelLayout, jagged, liveActivity, metrics, picked, plan, readPoses, standIn, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
@@ -843,6 +843,10 @@ test("live June watches while the daemon says she follows tasks, after anything 
 	assert.equal(activity({ running: false, background: 0, following: 3 }, true), "following 3 tasks");
 	assert.equal(activity({ running: false, background: 0 }, true), "");
 
+	assert.equal(noteText({ text: "what's this?", imageCount: 1 }), "what's this?\n+ picture", "a picture sent with words");
+	assert.equal(noteText({ text: "", imageCount: 2 }), "+ 2 pictures", "or with none");
+	assert.equal(noteText({ text: "look", files: [{ name: "invoice.pdf", size: 1, path: "/x" }] }), "look\n+ invoice.pdf");
+	assert.equal(panels([{ kind: "user", id: "u1", source: "apk", text: "", imageCount: 1 }])[0].elements[0].text, "+ picture", "the note carries it to every client");
 	const art = { title: "Generate June's standard poses and chibi stills", signal: "PROG" };
 	assert.equal(status({ running: false, background: 0 }, "kit").text, "on kit", "idle: where she is");
 	assert.equal(status({ running: false, background: 0, following: 1 }, "kit").text, "keeping an eye on 1 task", "an older daemon's count alone");

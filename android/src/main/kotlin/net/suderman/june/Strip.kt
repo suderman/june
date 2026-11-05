@@ -214,7 +214,7 @@ private fun measure(e: JSONObject, newest: Boolean, textWidth: Float, measurer: 
         "user" -> {
             val item = e.getJSONObject("item")
             val marker = natural(AnnotatedString(noteMarkerText(item)), noteMarker)
-            val body = AnnotatedString(item.optString("text"))
+            val body = AnnotatedString(e.optString("text", item.optString("text")))
             val bodyW = min(natural(body, noteBody) + 2, textWidth - 28 - marker - 8)
             val h = max(height(body, noteBody, bodyW), height(AnnotatedString("›"), noteMarker, marker))
             Measured(kind, ceil(min(marker + 8 + bodyW + 28, textWidth)), ceil(h + 20), e, bodyW, marker)
@@ -470,7 +470,7 @@ private fun ElementView(e: Measured, box: JSONObject, newest: Boolean) {
             val item = el.getJSONObject("item")
             Box(Modifier.fillMaxSize().background(Look.noteFill, RoundedCornerShape(14.dp)).border(2.dp, Look.noteLine, RoundedCornerShape(14.dp)))
             Text(noteMarkerText(item), style = noteMarker, modifier = Modifier.offset(14.dp, 10.dp))
-            Text(item.optString("text"), style = noteBody, modifier = Modifier.offset((14 + e.markerW + 8).dp, 10.dp).width(e.textW.dp))
+            Text(el.optString("text", item.optString("text")), style = noteBody, modifier = Modifier.offset((14 + e.markerW + 8).dp, 10.dp).width(e.textW.dp))
         }
         "chip" -> {
             val call = calls(el)[0]

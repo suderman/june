@@ -243,7 +243,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null) {
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(draft, { draft = it }, Modifier.weight(1f), placeholder = { Text(if (showing != null) "about this screen…" else "to june…") }, maxLines = 5)
             if (link.state.running || link.state.compacting) OutlinedButton(onClick = link::stop) { Text("Stop") }
-            Button(onClick = { if (link.submit(draft, images = listOfNotNull(showing?.jpeg()))) { draft = ""; if (showing != null) used = true } }, enabled = link.status is LinkStatus.Linked && draft.isNotBlank()) { Text("Send") }
+            Button(onClick = { if (link.submit(draft, images = listOfNotNull(showing?.jpeg()))) { draft = ""; if (showing != null) used = true } }, enabled = link.status is LinkStatus.Linked && (draft.isNotBlank() || showing != null)) { Text("Send") }
         }
     }
 }

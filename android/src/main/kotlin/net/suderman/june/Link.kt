@@ -68,7 +68,7 @@ class Link(private val context: Context) {
 
     /** Send the user's words, with `images` as base64 JPEG; `followUp` queues them behind a busy run rather than steering it. */
     fun submit(text: String, followUp: Boolean = false, images: List<String> = emptyList()): Boolean {
-        if (text.isBlank()) return true
+        if (text.isBlank() && images.isEmpty()) return true
         val ws = socket ?: return false
         if (status !is LinkStatus.Linked) return false
         val request = JSONObject()
