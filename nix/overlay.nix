@@ -47,14 +47,14 @@ in
       export JUNE_OVERLAY_ART="''${JUNE_OVERLAY_ART:+$JUNE_OVERLAY_ART:}${art}"
       case "''${1:-}" in
         "") exec qs -p ${config} ;;
-        cycle | toggle | open | close | mini | window) exec qs -p ${config} ipc call june "$1" ;;
+        cycle | toggle | open | close | mini | window | refresh) exec qs -p ${config} ipc call june "$1" ;;
         light) exec qs -p ${config} ipc call june light "''${2:-now}" ;;
         live) exec qs -p ${config} ipc call june live "''${2:-flip}" ;;
         look) exec qs -p ${config} ipc call june look "''${2:-flip}" ;;
         quiet) exec qs -p ${config} ipc call june quiet "''${2:-flip}" ;;
         scheme) exec qs -p ${config} ipc call june scheme "''${2:-system}" ;;
         *)
-          echo "usage: june-overlay [cycle|toggle|open|close|mini|window|light HOUR|live on/off|look comic/console|quiet on/off|scheme system/dark/light]" >&2
+          echo "usage: june-overlay [cycle|toggle|open|close|mini|window|refresh|light HOUR|live on/off|look comic/console|quiet on/off|scheme system/dark/light]" >&2
           exit 2
           ;;
       esac

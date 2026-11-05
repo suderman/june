@@ -11,6 +11,7 @@
   git,
   jq,
   tzdata,
+  qt6,
 }: let
   # Node 22: Node 24 aborts when GC collects node:sqlite objects (nodejs/node#65446), and Pi Durable uses node:sqlite.
   nodejs = nodejs_22;
@@ -62,10 +63,12 @@ in
         runHook preBuild
         export HOME=$TMPDIR TZDIR=${tzdata}/share/zoneinfo
         export ICU_TIMEZONE_FILES_DIR=${timezoneData}
+        export JUNE_TEST_QML=${qt6.qtdeclarative}/bin/qml
+        export QML2_IMPORT_PATH=${qt6.qtdeclarative}/lib/qt-6/qml:${qt6.qtwebsockets}/lib/qt-6/qml
         patchShebangs org
         org/tests/test-org-dispatch
         org/tests/test-org-edit
-        node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/follow.test.ts test/heartbeat.test.ts test/history.test.ts test/mail.test.ts test/memory.test.ts test/patter.test.ts test/people.test.ts test/situation.test.ts test/watch.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts test/view.test.ts test/detail.test.ts test/telegram.test.ts test/timezone.test.ts test/remote.test.ts test/expression.test.ts test/avatar.test.ts test/overlay.test.mjs test/art.test.mjs
+        node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/follow.test.ts test/heartbeat.test.ts test/history.test.ts test/mail.test.ts test/memory.test.ts test/patter.test.ts test/people.test.ts test/situation.test.ts test/watch.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts test/view.test.ts test/detail.test.ts test/telegram.test.ts test/timezone.test.ts test/remote.test.ts test/expression.test.ts test/avatar.test.ts test/overlay.test.mjs test/connection.test.mjs test/art.test.mjs
         runHook postBuild
       '';
       installPhase = "touch $out";

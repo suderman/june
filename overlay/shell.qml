@@ -10,7 +10,6 @@
 // `window` opens the same strip in an ordinary window with this device's toggles (StripWindow.qml).
 import QtQuick
 import QtQml.Models
-import QtWebSockets
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -72,10 +71,9 @@ ShellRoot {
   property alias stripModel: strip
   property var targetScreen: Quickshell.screens[0]
   property var view: Strip.emptyView()
-  property bool linked: false
+  property alias linked: connection.linked
   // Closed before hello twice running: the token is wrong or revoked, so stop hammering and say so.
-  property int refusals: 0
-  property bool helloSeen: false
+  property alias refusals: connection.refusals
   property string toast: ""
   property int seq: 0
 
@@ -358,6 +356,7 @@ ShellRoot {
     target: "june"
     function toggle(): void { root.shown ? root.hide() : root.show(); }
     function open(): void { root.show(); }
+    function refresh(): void { root.refresh(); }
     function close(): void { root.hide(); }
     function mini(): void { root.miniShown ? root.hideMini() : root.showMini(); }
     // Lights every panel as if at this hour (0 to 24, fractional), to preview the day's light; a negative hour or
@@ -406,51 +405,23 @@ ShellRoot {
 
   FileView { id: tokenFile; path: Quickshell.env("JUNE_OVERLAY_TOKEN_FILE") || ""; blockLoading: true }
 
-  WebSocket {
-    id: ws
+  Connection {
+    id: connection
     url: root.url
-    active: true
-    onTextMessageReceived: message => {
-      let reply;
-      try { reply = JSON.parse(message); } catch (e) { return; }
-      root.receive(reply);
-    }
-    onStatusChanged: () => {
-      const status = ws.status;
-      if (status === WebSocket.Open) {
-        root.helloSeen = false;
-        tokenFile.reload();
-        ws.sendTextMessage(JSON.stringify({ op: "hello", requestId: root.rid(), token: tokenFile.text().trim(), protocol: 1 }));
-      } else if (status === WebSocket.Closed || status === WebSocket.Error) {
-        if (status === WebSocket.Error) console.warn("june overlay:", ws.errorString);
-        if (root.linked || root.helloSeen) root.refusals = 0;
-        else if (status === WebSocket.Closed) root.refusals += 1;
-        root.linked = false;
-        ws.active = false;
-        reconnect.interval = root.refusals >= 2 ? 60000 : 2000;
-        reconnect.restart();
-      }
-    }
+    token: () => { tokenFile.reload(); return tokenFile.text().trim(); }
+    onReceived: reply => root.receive(reply)
   }
-  Timer { id: reconnect; interval: 2000; onTriggered: ws.active = true }
   Timer { id: toastTimer; interval: 6000; onTriggered: root.toast = "" }
 
   function rid() { seq += 1; return "gui-" + Date.now() + "-" + seq; }
-  function send(request) {
-    if (!linked) return false;
-    ws.sendTextMessage(JSON.stringify(request));
-    return true;
-  }
+  function send(request) { return connection.send(request); }
+  function refresh() { connection.refresh(); }
   function say(text) { toast = text; toastTimer.restart(); }
 
   function receive(reply) {
     if (reply.type === "hello") {
-      helloSeen = true;
-      linked = true;
-      refusals = 0;
       fetchArt(reply.avatar);
       root.attached = attachedUrl(reply.attached);
-      send({ op: "attach", requestId: rid() });
       return;
     }
     if (reply.type === "view") {
@@ -532,6 +503,7 @@ ShellRoot {
     // Page through the strip: Ctrl+N toward newer panels, Ctrl+P toward earlier ones.
     Shortcut { sequence: "Ctrl+N"; onActivated: list.page(1) }
     Shortcut { sequence: "Ctrl+P"; onActivated: list.page(-1) }
+    Shortcut { sequence: "Ctrl+R"; onActivated: root.refresh() }
 
     // The backdrop dims as the strip unfolds; a click on it puts everything away.
     Rectangle { anchors.fill: parent; color: Theme.backdrop; opacity: root.unfold }
