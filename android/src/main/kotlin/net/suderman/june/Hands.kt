@@ -37,6 +37,14 @@ class Hands : AccessibilityService() {
     private var connected = false
     private var backoff = 2_000L
     private var bar: TextView? = null
+    // Her words while she drives: the conversation's view, attached at her first action, and the card that shows them.
+    private var attached = false
+    private var items: List<Item> = emptyList()
+    private val seen = mutableSetOf<String>()
+    private var drivingUntil = 0L
+    private var said: TextView? = null
+    private var saying: String? = null
+    private val hideSaid = Runnable { said?.let { runCatching { windowManager().removeView(it) } }; said = null; saying = null }
     private val resumed = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context, intent: Intent) {
             stoppedUntil = 0L
@@ -63,6 +71,7 @@ class Hands : AccessibilityService() {
         socket?.close(1000, "hands withdrawn")
         socket = null
         hideBar.run()
+        hideSaid.run()
         super.onDestroy()
     }
 
@@ -81,10 +90,12 @@ class Hands : AccessibilityService() {
                     when (message.optString("type")) {
                         "hello" -> {
                             backoff = 2_000L
+                            attached = false
                             webSocket.send(JSONObject().put("op", "hands").put("requestId", "hands-${UUID.randomUUID()}").toString())
                             Log.i(TAG, "hands: offered to ${message.optString("device")}")
                         }
                         "act" -> act(message) { ok, said -> webSocket.send(JSONObject().put("op", "acted").put("requestId", message.optString("requestId")).put("ok", ok).put("text", said).toString()) }
+                        "view" -> view(message)
                         "error" -> Log.w(TAG, "hands: ${message.optString("message")}")
                     }
                 }
@@ -122,6 +133,8 @@ class Hands : AccessibilityService() {
             main.postDelayed({ act(message, answer) }, 400)
             return
         }
+        drivingUntil = System.currentTimeMillis() + DRIVING_MS
+        if (!attached) socket?.send(JSONObject().put("op", "attach").put("requestId", "hands-${UUID.randomUUID()}").toString())?.also { attached = it }
         Log.i(TAG, "hands: $action ${if (action == "type") "" else message.optString("target").ifBlank { message.optString("text").take(40) }}")
         showBar()
         val done = { ok: Boolean, said: String ->
@@ -287,6 +300,51 @@ class Hands : AccessibilityService() {
         answer(ok, if (ok) "did $name" else "the phone refused $name")
     }
 
+    // Her words while she drives. The sheet is closed so Jon can watch, so what she says (her replies and patter) shows
+    // in a small card at the top as it streams, and goes a few seconds after she finishes; a tap closes it sooner.
+
+    private fun view(message: JSONObject) {
+        if (message.optBoolean("reset")) {
+            items = parseItems(message.getJSONArray("items"))
+            // What she said before this drive is not news.
+            seen.addAll(items.map { it.id })
+            return
+        }
+        items = applyChanges(items, message.optJSONArray("changes") ?: org.json.JSONArray())
+        if (System.currentTimeMillis() > drivingUntil) {
+            seen.addAll(items.map { it.id })
+            return
+        }
+        val words = items.lastOrNull { (it.kind == "assistant" || it.kind == "patter") && !it.private && it.text.isNotBlank() } ?: return
+        if (words.id in seen && words.id != saying) return
+        if (!words.streaming || words.kind == "patter") seen.add(words.id)
+        say(words)
+    }
+
+    private fun say(words: Item) {
+        main.removeCallbacks(hideSaid)
+        val text = words.text.replace(Regex("[*_`#]+"), "").trim().let { if (it.length > 400) "…" + it.takeLast(400) else it }
+        val card = said ?: TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            setPadding(36, 24, 36, 24)
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(Color.argb(240, 33, 30, 46)); cornerRadius = 36f; setStroke(3, Color.argb(255, 106, 76, 168)) }
+            maxLines = 8
+            setOnClickListener { hideSaid.run() }
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT,
+            ).apply { gravity = Gravity.TOP; y = 190; horizontalMargin = 0.04f }
+            runCatching { windowManager().addView(this, params); said = this }.onFailure { Log.w(TAG, "hands: no card: $it") }
+        }
+        card.text = if (words.kind == "patter") text else "June: $text"
+        card.setTypeface(null, if (words.kind == "patter") android.graphics.Typeface.ITALIC else android.graphics.Typeface.NORMAL)
+        saying = words.id
+        if (!words.streaming) main.postDelayed(hideSaid, (4_000L + text.length * 45L).coerceAtMost(15_000L))
+    }
+
     // The bar that says June is driving. A tap stops her until Jon next opens June.
 
     private fun windowManager() = getSystemService(WindowManager::class.java)
@@ -318,6 +376,8 @@ class Hands : AccessibilityService() {
 
     companion object {
         private const val LIMIT = 24_000
+        /** How long after her last action her words still show in the card: long enough for her reply. */
+        private const val DRIVING_MS = 120_000L
 
         /** Broadcasts within the app, across the hands' process: June's sheet closes; her hands may act again. */
         const val DISMISS = "net.suderman.june.DISMISS"
