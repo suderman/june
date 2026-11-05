@@ -899,14 +899,22 @@ replaying the same key and spec; missing prerequisites block partial plans."
 
 ;;; Launching
 
+(defun org-dispatch--validate-headline (headline)
+  "Return HEADLINE unchanged, or reject text that is not one plain line."
+  (unless (and (not (string-empty-p headline))
+               (equal headline (string-trim headline))
+               (not (string-match-p "[\n\r]" headline)))
+    (error "--headline needs one non-empty line without surrounding whitespace"))
+  headline)
+
 (defun org-dispatch--headline (headline signal)
   "Bind HEADLINE to SIGNAL and this write, or clear the previous report."
   (if headline
       (progn
-        (org-entry-put nil "DISPATCH_HEADLINE" headline)
-        (org-entry-put nil "DISPATCH_HEADLINE_STATE" signal)
-        (org-entry-put nil "DISPATCH_HEADLINE_AT" (number-to-string (float-time))))
-    (dolist (property '("DISPATCH_HEADLINE" "DISPATCH_HEADLINE_STATE" "DISPATCH_HEADLINE_AT"))
+        (org-entry-put nil "HEADLINE" headline)
+        (org-entry-put nil "HEADLINE_STATE" signal)
+        (org-entry-put nil "HEADLINE_AT" (number-to-string (float-time))))
+    (dolist (property '("HEADLINE" "HEADLINE_STATE" "HEADLINE_AT"))
       (org-entry-delete nil property))))
 
 (defun org-dispatch--claim (task pane session)
@@ -1211,12 +1219,9 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
          (todo (upcase (or (pop command-line-args-left) "")))
          (flag (member "--headline" command-line-args-left))
          (headline (when flag
-                     (unless (and (= (length flag) 2)
-                                  (not (string-empty-p (cadr flag)))
-                                  (equal (cadr flag) (string-trim (cadr flag)))
-                                  (not (string-match-p "[\n\r]" (cadr flag))))
-                       (error "--headline needs one non-empty line without surrounding whitespace, after the note"))
-                     (cadr flag)))
+                     (unless (= (length flag) 2)
+                       (error "--headline needs one non-empty line after the note"))
+                     (org-dispatch--validate-headline (cadr flag))))
          (note (string-trim (string-join
                              (if flag (butlast command-line-args-left 2) command-line-args-left) " ")))
          (file (or (org-dispatch--find id) (error "no heading with ID %s" id)))

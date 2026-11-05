@@ -59,7 +59,7 @@ export type Observation = {
 	/** The agent's Herdr status, when the heading links a session on its host. */
 	agent?: string;
 	file?: string;
-	/** The worker's exact line from the task's own DISPATCH_HEADLINE property. */
+	/** The worker's exact line from the task's own HEADLINE property. */
 	headline?: string;
 	worker?: { agent: string; session: string };
 	/** Still AUTO behind a prerequisite that is not DONE. */

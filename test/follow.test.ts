@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -52,7 +53,7 @@ test("follow carries only the worker's own headline, verbatim in the model input
 			const root = join(tmp.dir, "org");
 			await mkdir(root);
 			const links = agent ? `** Sessions\n- [[herdr:kit/pi:${session}@p1][old pane]]\n- [[herdr:kit/${agent}:${session}][current, no pane]]\n- [[herdr:cog/pi:${session}@p2][other host]]\n` : "";
-			await writeFile(join(root, "todo.org"), `* ${state} Check docs\nCLOSED: [2026-11-05 Thu 14:00]\n:PROPERTIES:\n${byHeading ? "" : `:ID: ${input.id}\n`}${headline ? `:DISPATCH_HEADLINE: ${headline}\n:DISPATCH_HEADLINE_STATE: ${state}\n:DISPATCH_HEADLINE_AT: 101\n` : ""}:END:\n:LOGBOOK:\n- Old run\n  :DISPATCH_HEADLINE: Not this old line.\n:END:\n\n${links}** Outcome\nThe report's evidence.\n*** Child task\n:PROPERTIES:\n:DISPATCH_HEADLINE: Not this child's line.\n:END:\n`);
+			await writeFile(join(root, "todo.org"), `* ${state} Check docs\nCLOSED: [2026-11-05 Thu 14:00]\n:PROPERTIES:\n${byHeading ? "" : `:ID: ${input.id}\n`}${headline ? `:HEADLINE: ${headline}\n:HEADLINE_STATE: ${state}\n:HEADLINE_AT: 101\n` : ""}:END:\n:LOGBOOK:\n- Old run\n  :HEADLINE: Not this old line.\n:END:\n\n${links}** Outcome\nThe report's evidence.\n*** Child task\n:PROPERTIES:\n:HEADLINE: Not this child's line.\n:END:\n`);
 			const task = createFollowTask(new Org(root), new Herdr(testConfig(tmp.dir).herdr, async () => JSON.stringify({ result: { agent: { agent_status: "blocked" } } })), { intervalMs: 40, launchMs: 60_000, maxMs: 3_600_000 });
 			const adopted = { ...input, queuedAt: Date.now(), ...(byHeading ? { file: "todo.org" } : {}) };
 			const signal = state === "PROG" ? "blocked" : state;
@@ -75,6 +76,39 @@ test("follow carries only the worker's own headline, verbatim in the model input
 			assert.deepEqual((await reports())[0]!.data, { source: "follow", text: label, surface: "gui", ...(news ? { follow: news } : {}) });
 		});
 	}
+});
+
+test("a manually started worker finishes through org-edit and June hears its exact headline", async (t) => {
+	const tmp = await tempDir();
+	const root = join(tmp.dir, "org");
+	await mkdir(root);
+	const file = join(root, "manual.org");
+	const id = "manual-task-0001";
+	const session = "01234567-89ab-cdef-0123-456789abcdef";
+	const headline = "I checked it.  Docs match!";
+	await writeFile(file, `* PROG Manual check\n:PROPERTIES:\n:ID: ${id}\n:REVIEW: yes\n:DEPLOY: no\n:END:\n\n** Outcome\nChecked the docs against the source. They match.\n\n** Sessions\n- [[herdr:kit/claude:${session}][worker Jon started]]\n`);
+	const org = new Org(root);
+	const task = createFollowTask(org, new Herdr(testConfig(tmp.dir).herdr, async () => { throw new Error("No pane needed to report a completed worker"); }), { intervalMs: 40, launchMs: 60_000, maxMs: 3_600_000 });
+	let heard = "";
+	const faux = fauxProvider();
+	faux.setResponses([(ctx) => { heard = JSON.stringify(ctx.messages.at(-1)); return fauxAssistantMessage("The docs match."); }]);
+	const daemon = await openTestDaemon({ ...tmp, faux, extensions: [defineExtension({ name: "manual-headline-test", tasks: [task] })] });
+	t.after(async () => { await daemon.close(); await tmp.cleanup(); });
+	await daemon.harness.commit((tx) => follow(tx, task, { id, title: "Manual check", host: "kit", queuedAt: Date.now() }, Number(daemon.root.id)), BG);
+	const at = Date.now() / 1000;
+	const script = join(import.meta.dirname, "../org/edit/org-edit");
+	const output = execFileSync("bash", [script, "todo", file, `id:${id}`, "EVAL", "--expect", "PROG", "--headline", headline], {
+		encoding: "utf8",
+		env: { ...process.env, ORG_EDIT_EL: join(import.meta.dirname, "../org/edit/org-edit.el"), ORG_DISPATCH_EL: join(import.meta.dirname, "../org/dispatch/org-dispatch.el") },
+	});
+	assert.match(output, /EVAL Manual check/);
+	const finished = await org.byId(id);
+	assert.equal(finished?.headline, headline);
+	assert.ok(finished!.headlineAt! >= at);
+	await until(async () => heard.includes(headline) && !(await daemon.status()).busy);
+	const report = (await daemon.root.context(BG)).entries.find((entry) => entry.kind === "june.input" && (entry.data as { source?: string })?.source === "follow")!;
+	assert.deepEqual((report.data as { follow: unknown }).follow, { title: "Manual check", signal: "EVAL", headline, agent: "claude", session });
+	assert.match(await readFile(file, "utf8"), /:REVIEW: yes\n:DEPLOY: no/);
 });
 
 test("a task waiting on a prerequisite is silent, and its launch clock starts once it is ready", () => {
@@ -397,8 +431,8 @@ test("resuming after EVAL and HOLD follows each new run without duplicate report
 	for (const [index, state] of ["EVAL", "HOLD", "DONE"].entries()) {
 		if (index > 0) await ask(tmp.paths.socket, "resume it");
 		const headline = ["First pass checked, ready for review.", "I need a decision on the second pass.", "Third pass fixed it, checks pass!"][index]!;
-		const current = (await readFile(file, "utf8")).replace(/^:DISPATCH_HEADLINE(?:_STATE|_AT)?:.*\n/gm, "");
-		await replaceFile(file, current.replace("* AUTO Check docs", `* ${state} Check docs`).replace(":END:", `:DISPATCH_HEADLINE: ${headline}\n:DISPATCH_HEADLINE_STATE: ${state}\n:DISPATCH_HEADLINE_AT: ${Date.now() / 1000}\n:END:`));
+		const current = (await readFile(file, "utf8")).replace(/^:HEADLINE(?:_STATE|_AT)?:.*\n/gm, "");
+		await replaceFile(file, current.replace("* AUTO Check docs", `* ${state} Check docs`).replace(":END:", `:HEADLINE: ${headline}\n:HEADLINE_STATE: ${state}\n:HEADLINE_AT: ${Date.now() / 1000}\n:END:`));
 		await until(async () => (await reports()).length === index + 1 && !(await daemon.status()).busy && faux.state.callCount === (index + 1) * 3);
 		const data = (await reports()).at(-1)!.data as { text: string; follow: unknown };
 		assert.deepEqual(data.follow, { title: "Check docs", signal: state, headline });

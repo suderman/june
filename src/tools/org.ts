@@ -280,13 +280,13 @@ export class Org {
 		const report: Record<string, string> = {};
 		if (lines[at]?.trim() === ":PROPERTIES:") {
 			for (at++; at < end && lines[at]?.trim() !== ":END:"; at++) {
-				const value = /^[ \t]*:(DISPATCH_HEADLINE(?:_STATE|_AT)?):[ \t]+(\S(?:[^\r\n]*\S)?)[ \t]*$/i.exec(lines[at]!);
+				const value = /^[ \t]*:(HEADLINE(?:_STATE|_AT)?):[ \t]+(\S(?:[^\r\n]*\S)?)[ \t]*$/i.exec(lines[at]!);
 				if (value) report[value[1]!.toUpperCase()] = value[2]!;
 			}
 		}
-		const stamp = Number(report.DISPATCH_HEADLINE_AT);
+		const stamp = Number(report.HEADLINE_AT);
 		const headlineAt = Number.isFinite(stamp) && stamp > 0 ? stamp : undefined;
-		const headline = headlineAt !== undefined && report.DISPATCH_HEADLINE_STATE === heading.state ? report.DISPATCH_HEADLINE : undefined;
+		const headline = headlineAt !== undefined && report.HEADLINE_STATE === heading.state ? report.HEADLINE : undefined;
 		return {
 			file: this.rel(path), line: start, state: heading.state, title: heading.title, herdrSessions: herdrLinks(text),
 			...(headline !== undefined ? { headline } : {}),

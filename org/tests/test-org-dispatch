@@ -203,32 +203,32 @@ check "finish logs the run with its session" line "$repeat_file" "\[\[herdr:kit/
 check "finish keeps ORG_DISPATCH_LOG_KEEP entries" bash -c "[[ \$(grep -c '^- State \"DONE\"' '$repeat_file') -eq 2 ]]"
 check "finish archives the oldest entry" line "$ORG_DISPATCH_ROOT/archive.org" "^  First run.$"
 check "the archive names the task" line "$ORG_DISPATCH_ROOT/archive.org" "^:ARCHIVE_ID: 00000000-0000-0000-0000-000000000005$"
-check "a repeat keeps only this run's headline in its drawer" line "$repeat_file" '^:DISPATCH_HEADLINE: *Checked again\. Nothing changed!$'
-check "a repeat binds its headline to DONE, not its next AUTO" line "$repeat_file" '^:DISPATCH_HEADLINE_STATE: *DONE$'
-check "finish stamps the report in Unix seconds" line "$repeat_file" '^:DISPATCH_HEADLINE_AT: *[0-9][0-9]*\.[0-9][0-9]*$'
+check "a repeat keeps only this run's headline in its drawer" line "$repeat_file" '^:HEADLINE: *Checked again\. Nothing changed!$'
+check "a repeat binds its headline to DONE, not its next AUTO" line "$repeat_file" '^:HEADLINE_STATE: *DONE$'
+check "finish stamps the report in Unix seconds" line "$repeat_file" '^:HEADLINE_AT: *[0-9][0-9]*\.[0-9][0-9]*$'
 emacs -Q --batch -l "$org/dispatch/org-dispatch.el" --eval "
   (with-current-buffer (find-file-noselect \"$repeat_file\")
     (goto-char (point-min))
     (org-dispatch--claim (org-dispatch--task) \"p1\" \"new-session\"))" >/dev/null 2>&1
-check "claiming the next repeat clears its headline and stamp" bash -c "! grep -q '^:DISPATCH_HEADLINE' '$repeat_file'"
+check "claiming the next repeat clears its headline and stamp" bash -c "! grep -q '^:HEADLINE' '$repeat_file'"
 run finish 00000000-0000-0000-0000-000000000005 DONE "Still no change." --headline "Fresh check. Still no change!" >/dev/null
-check "the next repeat replaces the headline" line "$repeat_file" '^:DISPATCH_HEADLINE: *Fresh check\. Still no change!$'
+check "the next repeat replaces the headline" line "$repeat_file" '^:HEADLINE: *Fresh check\. Still no change!$'
 out=$(run finish 00000000-0000-0000-0000-000000000006 DONE "Done." --headline "Done, checks pass!")
 check "finish turns DONE into EVAL when Jon reviews" has "$out" "is now EVAL"
-check "finish records the worker's exact headline even when DONE becomes EVAL" line "$repeat_file" '^:DISPATCH_HEADLINE: *Done, checks pass!$'
+check "finish records the worker's exact headline even when DONE becomes EVAL" line "$repeat_file" '^:HEADLINE: *Done, checks pass!$'
 check "finish leaves the note separate from the headline" line "$repeat_file" '^:DISPATCH_FINISH: *Done\.$'
-check "review coercion binds the headline to EVAL" line "$repeat_file" '^:DISPATCH_HEADLINE_STATE: *EVAL$'
+check "review coercion binds the headline to EVAL" line "$repeat_file" '^:HEADLINE_STATE: *EVAL$'
 run finish 00000000-0000-0000-0000-000000000006 HOLD "Which copy should I keep?" --headline "I'm stuck. Which copy do I keep?" >/dev/null
-check "HOLD records a fresh headline" line "$repeat_file" "^:DISPATCH_HEADLINE: *I'm stuck\. Which copy do I keep?$"
+check "HOLD records a fresh headline" line "$repeat_file" "^:HEADLINE: *I'm stuck\. Which copy do I keep?$"
 check "HOLD keeps its question in Dialog" line "$repeat_file" '^- Agent .*: Which copy should I keep?$'
-check "HOLD replaces the previous headline state" line "$repeat_file" '^:DISPATCH_HEADLINE_STATE: *HOLD$'
+check "HOLD replaces the previous headline state" line "$repeat_file" '^:HEADLINE_STATE: *HOLD$'
 check "finish refuses a multiline headline" has "$(run finish 00000000-0000-0000-0000-000000000006 EVAL note --headline $'two\nlines')" '--headline needs one non-empty line'
 check "finish refuses an empty headline" has "$(run finish 00000000-0000-0000-0000-000000000006 EVAL note --headline '')" '--headline needs one non-empty line'
 check "finish refuses a headline it would have to trim" has "$(run finish 00000000-0000-0000-0000-000000000006 EVAL note --headline ' padded ')" '--headline needs one non-empty line'
 check "finish refuses a missing headline argument" has "$(run finish 00000000-0000-0000-0000-000000000006 EVAL note --headline)" '--headline needs one non-empty line'
 run finish 00000000-0000-0000-0000-000000000006 EVAL "Legacy finish, no headline." >/dev/null
-check "a legacy finish removes a previous headline" lacks "$(grep '^:DISPATCH_HEADLINE:' "$repeat_file")" "I'm stuck"
-check "a legacy finish also clears the freshness binding" bash -c "! grep -Eq '^:DISPATCH_HEADLINE_STATE: *(EVAL|HOLD)$' '$repeat_file'"
+check "a legacy finish removes a previous headline" lacks "$(grep '^:HEADLINE:' "$repeat_file")" "I'm stuck"
+check "a legacy finish also clears the freshness binding" bash -c "! grep -Eq '^:HEADLINE_STATE: *(EVAL|HOLD)$' '$repeat_file'"
 check "finish drops :auto:" line "$repeat_file" "^\* EVAL Reviewed one-off :kit:$"
 check "finish refuses HOLD without a question" has "$(run finish 00000000-0000-0000-0000-000000000006 HOLD)" "HOLD needs a question for Jon"
 check "finish refuses AUTO" has "$(run finish 00000000-0000-0000-0000-000000000006 AUTO note)" "STATE must be EVAL, HOLD, or DONE"
@@ -252,7 +252,7 @@ check "the prompt passes the headline on EVAL and HOLD" bash -c '[[ $(grep -c --
 
 # Claiming writes the resolved HOST and AGENT into the drawer once, beside ID.
 claim_file="$ORG_DISPATCH_ROOT/claim.org"
-printf '* AUTO Claim me :pi:cog:\n:PROPERTIES:\n:DISPATCH_HEADLINE: Old result.\n:END:\n* AUTO Keep my drawer :kit:\n:PROPERTIES:\n:HOST: cog\n:DISPATCH_HEADLINE: Old question.\n:END:\n' >"$claim_file"
+printf '* AUTO Claim me :pi:cog:\n:PROPERTIES:\n:HEADLINE: Old result.\n:END:\n* AUTO Keep my drawer :kit:\n:PROPERTIES:\n:HOST: cog\n:HEADLINE: Old question.\n:END:\n' >"$claim_file"
 claim() {
   emacs -Q --batch -l "$org/dispatch/org-dispatch.el" --eval "
     (with-current-buffer (find-file-noselect \"$claim_file\")
@@ -269,7 +269,7 @@ check "a claim writes the tagged agent" line "$claim_file" '^:AGENT: *pi$'
 check "a claim keeps the ID beside them" line "$claim_file" '^:ID: *00000000-0000-0000-0000-0000000000c1$'
 check "a claim leaves an existing HOST and the tags, adding only :auto:" bash -c "[[ \$(grep -c '^:HOST:' '$claim_file') -eq 2 ]] && ! grep -q '^:HOST: *kit' '$claim_file' && grep -q '^\* PROG Keep my drawer :kit:auto:$' '$claim_file'"
 check "a claim fills the default agent" bash -c "[[ \$(grep -c '^:AGENT: *pi$' '$claim_file') -eq 2 ]]"
-check "resumed claims clear old results and questions" bash -c "! grep -q '^:DISPATCH_HEADLINE' '$claim_file'"
+check "resumed claims clear old results and questions" bash -c "! grep -q '^:HEADLINE' '$claim_file'"
 rm "$claim_file"
 
 # Workspaces: a run opens in the workspace named for its Org file, never a shared "auto" one.

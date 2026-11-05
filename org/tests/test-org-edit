@@ -69,6 +69,50 @@ out=$(run todo "$tasks" "Plan" WAIT)
 check "an unknown state is refused" has "$out" 'STATE is one of'
 check "refusals leave the file" line "$tasks" '^\* HOLD Plan$'
 
+headlines="$HOME/org/headlines.org"
+cat >"$headlines" <<'EOF'
+* PROG Manual work
+:PROPERTIES:
+:REVIEW: yes
+:DEPLOY: no
+:END:
+
+** Outcome
+Checked the docs against the source. They match.
+EOF
+for state in EVAL DONE HOLD; do
+  out=$(run todo "$headlines" "Manual work" "$state" --headline "I checked it.  Docs match!")
+  check "manual $state saves the state and exact headline" line "$headlines" '^:HEADLINE: *I checked it\.  Docs match!$'
+  check "manual $state binds its headline to that state" line "$headlines" "^:HEADLINE_STATE: *$state$"
+  check "manual $state stamps the report" line "$headlines" '^:HEADLINE_AT: *[0-9][0-9]*\.[0-9][0-9]*$'
+  check "manual $state prints the resulting heading" has "$out" "^\* $state Manual work$"
+done
+check "manual headlines leave review policy alone" line "$headlines" '^:REVIEW: *yes$'
+check "manual headlines leave deploy policy alone" line "$headlines" '^:DEPLOY: *no$'
+check "manual headlines need no dispatch metadata or ID" lacks_line "$headlines" '^:\(DISPATCH_[^:]*\|JUNE_REQUEST\|HOST\|ID\):'
+before=$(<"$headlines")
+out=$(run todo "$headlines" "Manual work" EVAL --expect PROG --headline "New line.")
+check "a stale finish refuses before replacing the headline" has "$out" 'expected PROG, found HOLD'
+check "a stale finish leaves the entire task alone" test "$before" = "$(<"$headlines")"
+for bad in '' ' padded' 'padded ' $'two\nlines' $'two\rlines'; do
+  out=$(run todo "$headlines" "Manual work" EVAL --headline "$bad")
+  check "manual finish rejects an invalid headline" has "$out" 'headline'
+  check "invalid headline changes neither task nor report" test "$before" = "$(<"$headlines")"
+done
+out=$(run todo "$headlines" "Manual work" EVAL --headline)
+check "manual finish rejects a missing headline value" has "$out" 'missing value for --headline'
+out=$(run todo "$headlines" "Manual work" AUTO --headline "Not a finish.")
+check "headlines cannot accompany AUTO or grant autonomy" has "$out" '--headline is only for EVAL, DONE, or HOLD'
+check "a refused headline leaves the task unchanged" test "$before" = "$(<"$headlines")"
+run todo "$headlines" "Manual work" HOLD >/dev/null
+check "a trivial same-state finish without a headline clears old report data" lacks_line "$headlines" '^:HEADLINE'
+
+repeat_headline="$HOME/org/repeat-headline.org"
+printf '* PROG Recheck\nSCHEDULED: <2026-10-14 Wed +1d>\n:PROPERTIES:\n:REPEAT_TO_STATE: AUTO\n:END:\n' >"$repeat_headline"
+run todo "$repeat_headline" Recheck DONE --headline "Checked again. Nothing changed!" >/dev/null
+check "manual repeat keeps Org's AUTO behavior" line "$repeat_headline" '^\* AUTO Recheck$'
+check "manual repeat binds the headline to DONE, never AUTO" line "$repeat_headline" '^:HEADLINE_STATE: *DONE$'
+
 resume="$HOME/org/resume.org"
 cat >"$resume" <<'EOF'
 #+FILETAGS: :cog:
@@ -79,6 +123,9 @@ SCHEDULED: <2026-11-03 Tue>
 :DIR:      /keep/this
 :REVIEW:   no
 :DEPLOY:   yes
+:HEADLINE: Old question.
+:HEADLINE_STATE: HOLD
+:HEADLINE_AT: 1
 :END:
 Original scope.
 
@@ -99,7 +146,8 @@ check "resume records Jon answer through June" line "$resume" '^- June .*Jon cho
 check "resume enables review" line "$resume" '^:REVIEW: *yes$'
 check "resume disables deploy" line "$resume" '^:DEPLOY: *no$'
 check "resume marks the request for immediate dispatch" line "$resume" '^:JUNE_REQUEST: *inst:1$'
-run todo "$resume" 'id:12345678-abcd-abcd-abcd-123456789abc' EVAL >/dev/null
+check "resume clears the previous report" lacks_line "$resume" '^:HEADLINE'
+run todo "$resume" 'id:12345678-abcd-abcd-abcd-123456789abc' EVAL --headline "New pass checked, ready for review!" >/dev/null
 before=$(<"$resume")
 out=$(run todo "$resume" 'id:12345678-abcd-abcd-abcd-123456789abc' AUTO --expect HOLD --request inst:1 --host kit --note 'Jon chose option A. Resume.')
 check "replay reports no write after completion" has "$out" '"written":false'

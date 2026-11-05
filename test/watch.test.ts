@@ -10,7 +10,7 @@ import { message } from "../src/watch.ts";
 import { openTestDaemon, tempDir, until } from "./helpers.ts";
 
 const task = (state: string, title: string, id: string, report?: { line: string; state?: string; at?: number }) =>
-	`* ${state} ${title} :kit:\n:PROPERTIES:\n:ID: ${id}\n${report ? `:DISPATCH_HEADLINE: ${report.line}\n${report.state ? `:DISPATCH_HEADLINE_STATE: ${report.state}\n` : ""}${report.at ? `:DISPATCH_HEADLINE_AT: ${report.at}\n` : ""}` : ""}:END:\nBody.\n`;
+	`* ${state} ${title} :kit:\n:PROPERTIES:\n:ID: ${id}\n${report ? `:HEADLINE: ${report.line}\n${report.state ? `:HEADLINE_STATE: ${report.state}\n` : ""}${report.at ? `:HEADLINE_AT: ${report.at}\n` : ""}` : ""}:END:\nBody.\n`;
 const lastInput = (ctx: TranscriptContext) => JSON.stringify(ctx.messages.filter((m) => m.role === "user").at(-1));
 
 test("the watch learns what is there, then gathers dispatched news into one notice, in waking hours, at most every gap", async (t) => {
@@ -163,7 +163,7 @@ test("the watch carries fresh headlines in a batch, but not missing, unbound or 
 	assert.deepEqual((await reports())[0]!.data, { source: "watch", text: "5 dispatched tasks changed", surface: "gui", watch: [{ title: "Fresh", signal: "EVAL", headline: fresh.line, agent: "pi", session }] });
 
 	// Clearing and restoring an old line does not make it new on the next state change.
-	writeFileSync(file, text("PROG").replace(/^:DISPATCH_HEADLINE(?:_STATE|_AT)?:.*\n/gm, ""));
+	writeFileSync(file, text("PROG").replace(/^:HEADLINE(?:_STATE|_AT)?:.*\n/gm, ""));
 	await until(async () => JSON.parse(await readFile(ledger, "utf8")).runs[`kit:${ids[0]}:100`]?.signal === "PROG");
 	writeFileSync(file, text("EVAL"));
 	clock += 2 * 60_000;

@@ -291,10 +291,16 @@ Before reporting completion:
    supplied material that defines acceptance.
 2. Check only items backed by completed work or verification, and record the
    evidence: tests, builds, manual checks.
-3. Set `DONE`, `EVAL`, or `HOLD` according to the actual state.
+3. Set `DONE`, `EVAL`, or `HOLD` according to the actual state, with the headline rule below.
 4. Add a first-level `TODO` for independent residual work.
 5. Remove stale statements such as "pending commit" once the event happens, and
    record commit or pull request identifiers after success.
+
+When setting EVAL, DONE, or HOLD after substantive work, record a fresh one-line headline in your own voice, stating only what your Outcome or Dialog says. Pass it as `--headline "your line"` on the state-changing command, which stores it in `HEADLINE` with freshness data. Use `org-dispatch finish` for dispatched work and `org-edit todo` otherwise. Never reuse an earlier headline or write as June. Skip headlines for trivial state changes.
+
+For manual work, use `org-edit todo FILE HEADING EVAL --headline "your line"`, choosing the state by the rules above. Both commands save `HEADLINE`, `HEADLINE_STATE`, and `HEADLINE_AT` with the state change. Omitting the flag clears an old report; a dispatcher claim clears it too. Do not edit these properties by hand. For a repeating dispatched task, the headline states only the result in that run's finish note instead of a new Outcome.
+
+This needs the headline-capable Org commands deployed on the working host. Until that host is updated, finish without the flag and record the limitation. Do not message a running worker to enroll it; sessions already running may finish without a headline, and June reports as usual.
 
 Do not claim the record is synchronized until this pass is done.
 
@@ -365,7 +371,6 @@ reaches 0 the agent must use `HOLD`.
   exception. Under her `AGENTS.md` (from `~/.agents/june`), she may queue new `AUTO` tasks, starting each one's body with a line saying she queued it and why. When Jon explicitly asks, she may also resume an existing TODO, EVAL, or HOLD task through `org_resume_task`, which uses the shared `org-edit` command and records his instruction in Dialog. `org-edit` accepting AUTO does not give coding workers permission to set it.
 - In a dispatched session, follow the dispatch prompt where it differs from
   this skill, and change the TODO state only with `org-dispatch finish`.
-- With the headline-capable dispatcher deployed, a worker finishing or stopping at EVAL, DONE, or HOLD adds `--headline "your line"` after its finish note. Write one line in your own voice, true to the Outcome or Dialog you recorded, never as June. For a repeat, use only the result in that run's finish note. The command stores your exact words in the task's `DISPATCH_HEADLINE` property. Claiming clears it; finishing replaces it or removes it when omitted, so do not reuse an old line. June's existing follow check carries it with the state change. A worker on a task June follows but did not dispatch may use the same finish command with its Org ID, without changing the task's review policy. Older workers and tasks without a headline keep working as before.
 - `** Dialog` is the conversation between agents and Jon on a task. It stays
   last in the heading and holds `- Agent [ts]:`, `- Jon [ts]:`, and
   `- Dispatcher [ts]:` and `- June [ts]:` entries with inactive timestamps. Append only; never

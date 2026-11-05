@@ -1,7 +1,8 @@
 ;;; org-edit.el --- Let Org make agents' state and date changes  -*- lexical-binding: t; -*-
 
 ;; Batch entry points, run through the org-edit wrapper:
-;;   org-edit-todo      FILE HEADING STATE [--expect STATE] [--request KEY --host HOST [--agent AGENT] --note TEXT]
+;;   org-edit-todo      FILE HEADING STATE [--expect STATE] [--headline LINE]
+;;                      [--request KEY --host HOST [--agent AGENT] --note TEXT]
 ;;   org-edit-schedule  FILE HEADING WHEN
 ;;   org-edit-deadline  FILE HEADING WHEN
 ;;   org-edit-date      WHEN
@@ -135,15 +136,16 @@ Print the heading unless QUIET is non-nil."
 
 (defun org-edit-todo ()
   "Set FILE HEADING to STATE, optionally checking --expect STATE.
+For EVAL, DONE or HOLD, --headline LINE binds a fresh worker report to this write.
 June uses --request KEY --host HOST --note TEXT to resume a task once, and --agent
 AGENT to change who runs it.
 Coding workers must not set AUTO; that permission lives in instructions."
   (let* ((args command-line-args-left)
          (file (pop args)) (heading (pop args)) (state (upcase (or (pop args) "")))
-         expected request host agent note result)
+         expected request host agent note headline result)
     (setq command-line-args-left nil)
     (unless (and file heading (not (string-empty-p state)))
-      (error "usage: org-edit todo FILE HEADING STATE [--expect STATE] [--request KEY --host HOST [--agent AGENT] --note TEXT]"))
+      (error "usage: org-edit todo FILE HEADING STATE [--expect STATE] [--headline LINE] [--request KEY --host HOST [--agent AGENT] --note TEXT]"))
     (while args
       (let ((flag (pop args)) (value (pop args)))
         (unless (and value (not (string-empty-p value))) (error "missing value for %s" flag))
@@ -153,7 +155,10 @@ Coding workers must not set AUTO; that permission lives in instructions."
           ("--host" (setq host value))
           ("--agent" (setq agent value))
           ("--note" (setq note value))
+          ("--headline" (setq headline (org-dispatch--validate-headline value)))
           (_ (error "unknown option %s" flag)))))
+    (when (and headline (not (member state '("EVAL" "DONE" "HOLD"))))
+      (error "--headline is only for EVAL, DONE, or HOLD"))
     (when (or request host agent note)
       (unless (and (equal state "AUTO") request host note (member expected '("TODO" "EVAL" "HOLD")))
         (error "resuming needs AUTO, --expect TODO|EVAL|HOLD, --request, --host, and --note"))
@@ -184,6 +189,7 @@ Coding workers must not set AUTO; that permission lives in instructions."
              (org-entry-put nil "REVIEW" "yes")
              (org-entry-put nil "DEPLOY" "no")
              (org-dispatch--append "Dialog" (org-dispatch--entry "June" note)))
+           (org-dispatch--headline headline state)
            (org-todo state))
          (when request
            (setq result `((id . ,(org-entry-get nil "ID"))
