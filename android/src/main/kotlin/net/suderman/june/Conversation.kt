@@ -221,22 +221,29 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null) {
             }
         }
         if (link.notice.isNotEmpty()) Text(link.notice, color = Color(0xFFFFD36B), fontSize = 13.sp, modifier = Modifier.padding(vertical = 4.dp))
-        // The screen she was summoned over, offered with the next message: on unless Jon drops it, gone once sent.
-        var attach by remember(screen) { mutableStateOf(screen != null) }
-        val showing = screen?.takeIf { attach }
-        if (showing != null) Row(
-            Modifier.padding(top = 8.dp).background(palette.field, RoundedCornerShape(8.dp)).padding(6.dp),
+        // The screen she was summoned over, offered for the next message: off until Jon adds it, since most messages do
+        // not need the picture's tokens; gone once sent.
+        var attach by remember(screen) { mutableStateOf(false) }
+        var used by remember(screen) { mutableStateOf(false) }
+        val offered = screen?.takeUnless { used }
+        val showing = offered?.takeIf { attach }
+        if (offered != null) Row(
+            Modifier.padding(top = 8.dp)
+                .then(if (attach) Modifier.background(palette.field, RoundedCornerShape(8.dp)) else Modifier.border(1.dp, palette.muted, RoundedCornerShape(8.dp)))
+                .clickable { attach = !attach }.padding(6.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            val thumb = remember(showing) { showing.picture.asImageBitmap() }
-            androidx.compose.foundation.Image(thumb, null, Modifier.size(width = 22.dp, height = 44.dp).clip(RoundedCornerShape(3.dp)))
-            Text("screen from ${showing.app}", fontSize = 13.sp, color = palette.pageInk)
-            Text("✕", fontSize = 15.sp, color = palette.muted, modifier = Modifier.clickable { attach = false }.padding(horizontal = 8.dp))
+            if (attach) {
+                val thumb = remember(offered) { offered.picture.asImageBitmap() }
+                androidx.compose.foundation.Image(thumb, null, Modifier.size(width = 22.dp, height = 44.dp).clip(RoundedCornerShape(3.dp)))
+                Text("screen from ${offered.app}", fontSize = 13.sp, color = palette.pageInk)
+                Text("✕", fontSize = 15.sp, color = palette.muted, modifier = Modifier.padding(horizontal = 8.dp))
+            } else Text("+ add screen from ${offered.app}", fontSize = 13.sp, color = palette.muted, modifier = Modifier.padding(horizontal = 4.dp))
         }
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(draft, { draft = it }, Modifier.weight(1f), placeholder = { Text(if (showing != null) "about this screen…" else "to june…") }, maxLines = 5)
             if (link.state.running || link.state.compacting) OutlinedButton(onClick = link::stop) { Text("Stop") }
-            Button(onClick = { if (link.submit(draft, images = listOfNotNull(showing?.jpeg()))) { draft = ""; attach = false } }, enabled = link.status is LinkStatus.Linked && draft.isNotBlank()) { Text("Send") }
+            Button(onClick = { if (link.submit(draft, images = listOfNotNull(showing?.jpeg()))) { draft = ""; if (showing != null) used = true } }, enabled = link.status is LinkStatus.Linked && draft.isNotBlank()) { Text("Send") }
         }
     }
 }
