@@ -96,7 +96,8 @@ test("a paired device attaches, sends, and a repeated submit is one message", as
 	t.after(() => c.ws.terminate());
 	c.send({ op: "hello", requestId: "h1", token, protocol: 1 });
 	const hello = (await c.reply("h1")) as Extract<Reply, { type: "hello" }>;
-	assert.deepEqual({ ...hello, avatar: undefined }, { type: "hello", requestId: "h1", device: "cog", protocol: 1, avatar: undefined });
+	assert.deepEqual({ ...hello, avatar: undefined, attached: undefined }, { type: "hello", requestId: "h1", device: "cog", protocol: 1, avatar: undefined, attached: undefined });
+	assert.match(hello.attached ?? "", /^\/attached\/[\w-]{24}\/$/, "a path to the pictures messages brought, with the same key");
 	assert.match(hello.avatar ?? "", /^\/avatar\/[\w-]{24}\/$/, "a path to the avatar set, with this device's key");
 
 	let items: ViewItem[] = [];
@@ -278,4 +279,31 @@ test("a paired device loads the avatar set over HTTP under its key, and nothing 
 
 	await device(tmp.paths.socket, "revoke", "cog");
 	assert.equal((await fetch(`${base}manifest.json`)).status, 404, "a revoked device's key stops working");
+});
+
+test("a paired device loads the picture a message brought, and only a user's own", async (t) => {
+	const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGP4z8DAAMIM/4EAAB/uBfsL2WiLAAAAAElFTkSuQmCC";
+	const { tmp, port } = await remoteDaemon(t, [fauxAssistantMessage("a tiny square")]);
+	const token = ((await device(tmp.paths.socket, "add", "gem")) as Extract<Reply, { type: "devices" }>).token!;
+	const c = await connect(port);
+	t.after(() => c.ws.terminate());
+	c.send({ op: "hello", requestId: "h", token, protocol: 1 });
+	const base = `http://127.0.0.1:${port}${((await c.reply("h")) as Extract<Reply, { type: "hello" }>).attached}`;
+	c.send({ op: "submit", requestId: "s", text: "", images: [{ type: "image", mimeType: "image/png", data: PNG }], source: "apk", wait: true });
+	await c.reply("s", "settled");
+	c.send({ op: "attach", requestId: "a" });
+	const view = (await c.reply("a", "view")) as Extract<Reply, { type: "view"; reset: true }>;
+	const sent = view.items.find((i) => i.kind === "user" && i.imageCount === 1)!;
+	assert.ok(sent, "the message is in the view, with its picture counted");
+
+	const picture = await fetch(`${base}${sent.id}/0`);
+	assert.equal(picture.status, 200);
+	assert.equal(picture.headers.get("content-type"), "image/png");
+	assert.match(picture.headers.get("cache-control") ?? "", /immutable/, "a message never changes");
+	assert.equal(Buffer.from(await picture.arrayBuffer()).toString("base64"), PNG);
+	assert.equal((await fetch(`${base}${sent.id}/1`)).status, 404, "only the pictures it brought");
+	const reply = view.items.find((i) => i.kind === "assistant")!;
+	assert.equal((await fetch(`${base}${reply.id.split("#")[0]}/0`)).status, 404, "nothing June said");
+	assert.equal((await fetch(`${base}999999/0`)).status, 404, "no such message");
+	assert.equal((await fetch(`http://127.0.0.1:${port}/attached/not-a-key/${sent.id}/0`)).status, 404, "an unknown key");
 });

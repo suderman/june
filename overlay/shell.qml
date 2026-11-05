@@ -113,6 +113,13 @@ ShellRoot {
 
   // The daemon's set, when this machine has no personal set of its own: its manifest from the hello's path, on the
   // listener's host. A daemon without a set answers 404 and the local sets stand alone.
+  // The pictures the user's messages brought, on the listener's host under the hello's path; "" without one.
+  property string attached: ""
+  function attachedUrl(path) {
+    const origin = /^(wss?):\/\/([^/]+)/.exec(url);
+    return origin && typeof path === "string" && path !== "" ? (origin[1] === "wss" ? "https://" : "http://") + origin[2] + path : "";
+  }
+
   function fetchArt(path) {
     if (localPersonal || typeof path !== "string" || path === "") return;
     const origin = /^(wss?):\/\/([^/]+)/.exec(url);
@@ -436,6 +443,7 @@ ShellRoot {
       linked = true;
       refusals = 0;
       fetchArt(reply.avatar);
+      root.attached = attachedUrl(reply.attached);
       send({ op: "attach", requestId: rid() });
       return;
     }
@@ -588,6 +596,7 @@ ShellRoot {
             scenery: root.scenery
             sky: root.view.state.sky ?? null
             linked: root.linked
+            attached: root.attached
           }
 
           Toast {

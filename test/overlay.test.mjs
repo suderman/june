@@ -846,7 +846,9 @@ test("live June watches while the daemon says she follows tasks, after anything 
 	assert.equal(noteText({ text: "what's this?", imageCount: 1 }), "what's this?\n+ picture", "a picture sent with words");
 	assert.equal(noteText({ text: "", imageCount: 2 }), "+ 2 pictures", "or with none");
 	assert.equal(noteText({ text: "look", files: [{ name: "invoice.pdf", size: 1, path: "/x" }] }), "look\n+ invoice.pdf");
-	assert.equal(panels([{ kind: "user", id: "u1", source: "apk", text: "", imageCount: 1 }])[0].elements[0].text, "+ picture", "the note carries it to every client");
+	const note = panels([{ kind: "user", id: "u1", source: "apk", text: "", imageCount: 1 }])[0].elements[0];
+	assert.deepEqual([note.text, note.pictures], ["", 1], "the comic draws the picture itself");
+	assert.equal(consoleLines(panels([{ kind: "user", id: "u1", source: "apk", text: "look", imageCount: 1 }])[0])[0].text, "look\n+ picture", "the console says it in words");
 	const art = { title: "Generate June's standard poses and chibi stills", signal: "PROG" };
 	assert.equal(status({ running: false, background: 0 }, "kit").text, "on kit", "idle: where she is");
 	assert.equal(status({ running: false, background: 0, following: 1 }, "kit").text, "keeping an eye on 1 task", "an older daemon's count alone");

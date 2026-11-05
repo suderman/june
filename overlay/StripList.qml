@@ -12,6 +12,8 @@ ListView {
   property real hourOverride: -1
   property var scenery: ({ rooms: [], plates: [], props: [] })
   property var sky: null
+  // Where the pictures the user's messages brought are served, for their polaroids.
+  property string attached: ""
   property bool linked: true
   // The console look instead of the comic strip.
   property bool consoleLook: Theme.consoleLook
@@ -106,6 +108,7 @@ ListView {
         hourOverride: list.hourOverride
         scenery: list.scenery
         sky: list.sky
+        attached: list.attached
       }
     }
     Component {

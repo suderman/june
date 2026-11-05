@@ -22,7 +22,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { type CommandScope, runCommand } from "./commands.ts";
 import { type Config, expandHome, type Paths } from "./config.ts";
 import { acquireDataDirLock, createLogger, createSettings, type Logger } from "./runtime.ts";
-import { diff, type Folded, foldView, sourceName, type ViewState } from "./transcript.ts";
+import { diff, type Folded, foldView, PRIVATE, sourceName, type ViewState } from "./transcript.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { createHeartbeat } from "./heartbeat.ts";
 import { entryTimes } from "./history.ts";
@@ -294,7 +294,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		// The listener is a convenience beside the socket: a port already taken is logged and shown in status, not fatal.
 		if (config.remote) {
 			try {
-				remote = await startRemote({ port: config.remote.port, devices, log, session: (send, device) => session(send, scope, device), avatar: `${paths.data}/avatar`, ...options.remoteTiming });
+				remote = await startRemote({ port: config.remote.port, devices, log, session: (send, device) => session(send, scope, device), avatar: `${paths.data}/avatar`, attachment: (id, n) => attachment(root, id, n), ...options.remoteTiming });
 			} catch (error) {
 				remoteError = (error as Error).message;
 				log.error("remote_listen_failed", { port: config.remote.port, error: remoteError });
@@ -633,6 +633,18 @@ export async function attachView(
  * The newest `limit` entries since `since` (epoch ms), oldest first, paged back from the newest with `Conversation.entries()`
  * until enough are found. An entry without its own time, such as patter, takes the time of the entry before it.
  */
+/**
+ * The `n`th picture the user's message `id` brought, as the model received it, for clients to show with the message.
+ * Only the user's own messages from a surface they see: never a private source's, never anything June or a tool made.
+ */
+export async function attachment(root: Conversation, id: string, n: number): Promise<{ data: string; mimeType: string } | undefined> {
+	const entry = await root.commit((tx) => tx.entry(Number(id) as never), BG);
+	if (entry?.kind !== "june.input" || PRIVATE.has(sourceName(String((entry.data as { source?: unknown } | undefined)?.source ?? "")))) return undefined;
+	const content = (entry.model?.[0] as { content?: unknown } | undefined)?.content;
+	const image = Array.isArray(content) ? content.filter((b) => b?.type === "image")[n] : undefined;
+	return image && typeof image.data === "string" && typeof image.mimeType === "string" ? { data: image.data, mimeType: image.mimeType } : undefined;
+}
+
 async function history(root: Conversation, since: number | undefined, limit: number, context: Context): Promise<{ entries: EntryRecord[]; earlier: boolean }> {
 	const newest: EntryRecord[] = [];
 	let cursor: Cursor | undefined;

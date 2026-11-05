@@ -75,7 +75,8 @@ export function panels(items) {
 		if (item.kind === "user") {
 			open(item.id);
 			current.user = item;
-			current.elements.push({ kind: "user", id: item.id, item, text: noteText(item) });
+			// The comic draws the pictures themselves (polaroids clipped to the note); the console says them in words.
+			current.elements.push({ kind: "user", id: item.id, item, text: noteText(item, false), pictures: item.imageCount ?? 0 });
 			continue;
 		}
 		if (current === null) open(item.id);
@@ -206,13 +207,13 @@ export function status(state, host) {
 
 /**
  * What the user's note says: their words, and what came with them, a line each, so a picture sent with a word or with
- * none ("look") still shows in the strip.
+ * none ("look") still shows. `pictures` false leaves the pictures out, for a client that draws them.
  */
-export function noteText(item) {
+export function noteText(item, pictures = true) {
 	const lines = [];
 	const words = (item.text ?? "").trim();
 	if (words) lines.push(words);
-	if (item.imageCount) lines.push(item.imageCount === 1 ? "+ picture" : `+ ${item.imageCount} pictures`);
+	if (pictures && item.imageCount) lines.push(item.imageCount === 1 ? "+ picture" : `+ ${item.imageCount} pictures`);
 	for (const file of item.files ?? []) lines.push(`+ ${file.name}`);
 	return lines.join("\n");
 }

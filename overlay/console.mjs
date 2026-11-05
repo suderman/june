@@ -4,7 +4,7 @@
 // test/overlay.test.mjs runs it under Node, so it is plain JavaScript as QML's engine knows it: no
 // Array.prototype.at, Object.hasOwn, or object spread. See "The console look" in docs/interfaces.org.
 import { chain } from "./compose.mjs";
-import { caption } from "./strip.mjs";
+import { caption, noteText } from "./strip.mjs";
 
 /** The two looks a device can choose between. */
 export const LOOKS = ["comic", "console"];
@@ -59,7 +59,7 @@ export function lines(panel) {
 	for (const e of panel.elements) {
 		if (e.kind === "user") {
 			const source = e.item.source && e.item.source !== "gui" ? `${SOURCES[e.item.source] ?? e.item.source} ` : "";
-			out.push({ kind: "user", prefix: `${source}›`, text: e.text ?? e.item.text });
+			out.push({ kind: "user", prefix: `${source}›`, text: noteText(e.item) });
 			reply = "";
 		} else if (e.kind === "june") {
 			const item = e.id.split("#")[0];

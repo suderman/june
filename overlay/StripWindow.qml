@@ -135,6 +135,7 @@ FloatingWindow {
       scenery: win.shell.scenery
       sky: win.shell.view.state.sky ?? null
       linked: win.shell.linked
+      attached: win.shell.attached
     }
 
     Toast {

@@ -44,6 +44,9 @@ class Link(private val context: Context) {
     /** Where the daemon serves June's art to this device (the hello's `avatar`), when it has a set. */
     var avatarPath: String? by mutableStateOf(null)
         private set
+    /** Where the daemon serves the pictures the user's messages brought (the hello's `attached`). */
+    var attachedPath: String? by mutableStateOf(null)
+        private set
     /** A command's reply or an error, shown briefly. */
     var notice: String by mutableStateOf("")
         private set
@@ -107,6 +110,7 @@ class Link(private val context: Context) {
                             refusals = 0
                             status = LinkStatus.Linked(reply.optString("device"))
                             avatarPath = reply.optString("avatar").takeIf { it.isNotEmpty() }
+                            attachedPath = reply.optString("attached").takeIf { it.isNotEmpty() }
                             webSocket.send(JSONObject().put("op", "attach").put("requestId", requestId()).toString())
                         }
                         "view" -> {

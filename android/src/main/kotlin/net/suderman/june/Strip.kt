@@ -33,6 +33,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -115,6 +118,28 @@ class Avatar(private val context: Context) {
         }.getOrElse { kept.takeIf { it.exists() }?.readBytes() }
     }
 
+    /**
+     * A picture the user's message brought, at `path` (`<message id>/<n>`) under the hello's `attached` on the paired
+     * host. A message never changes, so a picture fetched once is kept and never asked for again.
+     */
+    suspend fun attachment(path: String): ImageBitmap? = cache.get("attached:$path") ?: withContext(Dispatchers.IO) {
+        if (!Regex("^\\d+/\\d$").matches(path)) return@withContext null
+        val kept = java.io.File(context.cacheDir, "attached/$path")
+        val bytes = kept.takeIf { it.exists() }?.readBytes() ?: run {
+            val origin = Pairing.load(context)?.url?.let { Regex("^(wss?)://([^/]+)").find(it) } ?: return@withContext null
+            val base = attachedPath ?: return@withContext null
+            runCatching {
+                client.newCall(okhttp3.Request.Builder().url((if (origin.groupValues[1] == "wss") "https://" else "http://") + origin.groupValues[2] + base + path).build()).execute().use { r ->
+                    if (r.isSuccessful) r.body.bytes().also { kept.parentFile?.mkdirs(); kept.writeBytes(it) } else null
+                }
+            }.getOrNull()
+        } ?: return@withContext null
+        runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }.getOrNull()
+    }?.also { cache.put("attached:$path", it) }
+
+    /** Where the daemon serves the pictures messages brought (the hello's `attached`), set by the strip. */
+    @Volatile var attachedPath: String? = null
+
     /** A picture by its url as the decisions name it: `daemon:` and a path in the daemon's set, else a path in the assets. */
     suspend fun image(url: String): ImageBitmap? = cache.get(url) ?: withContext(Dispatchers.IO) {
         runCatching {
@@ -156,9 +181,50 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
         val count = shown.length()
         // Built from the bottom, newest first, as the overlay's list is: the newest panel stays in view as it settles
         // its height, with no scrolling after it.
-        LazyColumn(Modifier.fillMaxSize(), state = followNewest(if (count > 0) shown.getJSONObject(count - 1).getString("id") else null), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            items(count, key = { shown.getJSONObject(count - 1 - it).getString("id") }) { i ->
-                PanelView(shown.getJSONObject(count - 1 - i), newest = i == 0, width.value, m, decisions, avatar, now, sky)
+        // A picture the user sent, full size over the strip while open; a tap closes it.
+        var viewing by remember { mutableStateOf<String?>(null) }
+        avatar.attachedPath = link.attachedPath
+        androidx.compose.runtime.CompositionLocalProvider(LocalPictures provides Pictures(avatar, link.attachedPath) { viewing = it }) {
+            LazyColumn(Modifier.fillMaxSize(), state = followNewest(if (count > 0) shown.getJSONObject(count - 1).getString("id") else null), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                items(count, key = { shown.getJSONObject(count - 1 - it).getString("id") }) { i ->
+                    PanelView(shown.getJSONObject(count - 1 - i), newest = i == 0, width.value, m, decisions, avatar, now, sky)
+                }
+            }
+        }
+        viewing?.let { path ->
+            val picture by produceState<ImageBitmap?>(null, path) { value = avatar.attachment(path) }
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)).clickable { viewing = null }, contentAlignment = androidx.compose.ui.Alignment.Center) {
+                picture?.let { androidx.compose.foundation.Image(it, "the picture sent", Modifier.fillMaxSize().padding(12.dp), contentScale = androidx.compose.ui.layout.ContentScale.Fit) }
+            }
+        }
+    }
+}
+
+/** The pictures the user's messages brought: where they are served (the hello's `attached`), and how to open one. */
+class Pictures(val avatar: Avatar, val path: String?, val open: (String) -> Unit)
+
+val LocalPictures = androidx.compose.runtime.staticCompositionLocalOf<Pictures?> { null }
+
+/** The polaroids clipped to a note: its pictures after the words, fanned when there are several, the front one clipped on. */
+@Composable
+private fun Polaroids(item: JSONObject, count: Int, noteW: Float) {
+    val pictures = LocalPictures.current
+    for (index in 0 until count) {
+        val path = pictures?.path?.let { "${item.optString("id")}/$index" }
+        val image by produceState<ImageBitmap?>(null, path) { value = path?.let { pictures.avatar.attachment(it) } }
+        Box(
+            Modifier.offset((noteW - 14 - 62 - (count - 1 - index) * 16).dp, (12 + index * 3).dp).zIndex((count - index).toFloat())
+                .size(62.dp, 74.dp).rotate(listOf(-6f, 5f, -2f)[index])
+                .clickable(enabled = path != null) { path?.let { pictures.open(it) } },
+        ) {
+            Box(Modifier.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(2.dp)).border(1.5.dp, Look.ink, RoundedCornerShape(2.dp)))
+            Box(Modifier.offset(5.dp, 5.dp).size(52.dp).background(Color(0xFFCFD6E3)).clipToBounds()) {
+                image?.let { androidx.compose.foundation.Image(it, null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop) }
+            }
+            if (index == 0) Canvas(Modifier.offset(34.dp, (-12).dp).size(14.dp, 38.dp)) {
+                scale(density, density, pivot = Offset.Zero) {
+                    drawPath(path("M 4 26 L 4 6 A 4 4 0 0 1 12 6 L 12 30 A 6 6 0 0 1 0 30 L 0 10"), Color(0xFF8D929C), style = Stroke(2.5f, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                }
             }
         }
     }
@@ -215,9 +281,13 @@ private fun measure(e: JSONObject, newest: Boolean, textWidth: Float, measurer: 
             val item = e.getJSONObject("item")
             val marker = natural(AnnotatedString(noteMarkerText(item)), noteMarker)
             val body = AnnotatedString(e.optString("text", item.optString("text")))
-            val bodyW = min(natural(body, noteBody) + 2, textWidth - 28 - marker - 8)
-            val h = max(height(body, noteBody, bodyW), height(AnnotatedString("›"), noteMarker, marker))
-            Measured(kind, ceil(min(marker + 8 + bodyW + 28, textWidth)), ceil(h + 20), e, bodyW, marker)
+            // Room for the polaroids after the words, as the overlay's note keeps it.
+            val pictures = min(e.optInt("pictures"), 3)
+            val said = body.isNotEmpty()
+            val photos = if (pictures > 0) 62f + (pictures - 1) * 16f + (if (said) 12f else 0f) else 0f
+            val bodyW = min(natural(body, noteBody) + 2, textWidth - 28 - marker - 8 - photos)
+            val h = max(max(height(body, noteBody, bodyW), height(AnnotatedString("›"), noteMarker, marker)), if (pictures > 0) 78f else 0f)
+            Measured(kind, ceil(min(marker + 8 + (if (said || pictures == 0) bodyW else 0f) + photos + 28, textWidth)), ceil(h + 20), e, bodyW, marker)
         }
         "chip" -> {
             val call = calls(e)[0]
@@ -471,6 +541,7 @@ private fun ElementView(e: Measured, box: JSONObject, newest: Boolean) {
             Box(Modifier.fillMaxSize().background(Look.noteFill, RoundedCornerShape(14.dp)).border(2.dp, Look.noteLine, RoundedCornerShape(14.dp)))
             Text(noteMarkerText(item), style = noteMarker, modifier = Modifier.offset(14.dp, 10.dp))
             Text(el.optString("text", item.optString("text")), style = noteBody, modifier = Modifier.offset((14 + e.markerW + 8).dp, 10.dp).width(e.textW.dp))
+            Polaroids(item, min(el.optInt("pictures"), 3), e.w)
         }
         "chip" -> {
             val call = calls(el)[0]

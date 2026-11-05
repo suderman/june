@@ -1,6 +1,6 @@
 // The WebSocket listener for graphical clients: the socket's JSON objects, one per text frame, on 127.0.0.1 only, behind
 // Traefik as wss://june.kit/. The first frame must be a hello with a device token (see "Client protocol for graphical
-// clients" in docs/architecture.org). The same port serves the user's avatar set over HTTP under a path the hello gives
+// clients" in docs/architecture.org). The same port serves the user's avatar set, and the pictures their messages brought, over HTTP under paths the hello gives
 // each device, so a client loads June's art from the daemon rather than a synced folder.
 import { randomBytes } from "node:crypto";
 import { createReadStream, realpathSync, statSync } from "node:fs";
@@ -26,6 +26,8 @@ export type RemoteOptions = {
 	readonly session: (send: (reply: Reply) => void, device: string) => Session;
 	/** The user's avatar set, served read-only to paired devices; none without it. */
 	readonly avatar?: string;
+	/** The `n`th picture the user's message `id` brought, for a client to show with it; none without the callback. */
+	readonly attachment?: (id: string, n: number) => Promise<{ data: string; mimeType: string } | undefined>;
 	/** Tests shorten these. */
 	readonly helloMs?: number;
 	readonly pingMs?: number;
@@ -92,7 +94,24 @@ export async function startRemote(options: RemoteOptions): Promise<Remote> {
 			response.writeHead(404, { "content-type": "text/plain" });
 			response.end("not found\n");
 		};
-		const m = /^\/avatar\/([\w-]+)\/(.+)$/.exec((request.url ?? "").split("?")[0]);
+		const url = (request.url ?? "").split("?")[0];
+		const picture = /^\/attached\/([\w-]+)\/(\d{1,12})\/(\d)$/.exec(url);
+		if (picture && (request.method === "GET" || request.method === "HEAD") && options.attachment !== undefined) {
+			const owner = keys.get(picture[1]);
+			if (owner === undefined || !listed(owner)) return notFound();
+			// A message never changes, so a client keeps its picture for good.
+			void options.attachment(picture[2]!, Number(picture[3])).then(
+				(found) => {
+					if (found === undefined) return notFound();
+					const bytes = Buffer.from(found.data, "base64");
+					response.writeHead(200, { "content-type": found.mimeType, "cache-control": "private, max-age=31536000, immutable", "content-length": String(bytes.length) });
+					response.end(request.method === "HEAD" ? undefined : bytes);
+				},
+				() => notFound(),
+			);
+			return;
+		}
+		const m = /^\/avatar\/([\w-]+)\/(.+)$/.exec(url);
 		if (!m || (request.method !== "GET" && request.method !== "HEAD") || options.avatar === undefined) return notFound();
 		const device = keys.get(m[1]);
 		if (device === undefined || !listed(device)) return notFound();
@@ -198,7 +217,7 @@ export async function startRemote(options: RemoteOptions): Promise<Remote> {
 				clearTimeout(hello);
 				device = entry.device = name;
 				log.info("remote_hello", { device });
-				send({ type: "hello", requestId: String(request.requestId ?? ""), device, protocol: PROTOCOL, ...(options.avatar !== undefined ? { avatar: `/avatar/${keyFor(name)}/` } : {}) });
+				send({ type: "hello", requestId: String(request.requestId ?? ""), device, protocol: PROTOCOL, ...(options.avatar !== undefined ? { avatar: `/avatar/${keyFor(name)}/` } : {}), ...(options.attachment !== undefined ? { attached: `/attached/${keyFor(name)}/` } : {}) });
 				session = options.session(send, device);
 				return;
 			}

@@ -39,6 +39,8 @@ Item {
   implicitHeight: layout.height
   clip: true
 
+  // Where the pictures the user's messages brought are served (the hello's `attached` on the daemon's host), or "".
+  property string attached: ""
   readonly property var sources: ({ tui: "terminal", kitty: "terminal", apk: "phone", telegram: "telegram", cli: "command line" })
 
   function kindOf(e) { return e.kind === "tools" ? (e.items.length > 1 ? "card" : "chip") : e.kind; }
@@ -334,8 +336,12 @@ Item {
       property var element
       property var box
       readonly property var item: element ? element.item : null
-      readonly property real w: Math.ceil(Math.min(marker.implicitWidth + 8 + body.width + 28, panel.m.textWidth))
-      readonly property real h: Math.ceil(Math.max(body.height, marker.height) + 20)
+      // Pictures it brought, as polaroids clipped to the note after the words, fanned when there are several.
+      readonly property int pictures: element ? Math.min(element.pictures ?? 0, 3) : 0
+      readonly property bool said: body.text.length > 0
+      readonly property real photos: pictures > 0 ? 62 + (pictures - 1) * 16 + (said ? 12 : 0) : 0
+      readonly property real w: Math.ceil(Math.min(marker.implicitWidth + 8 + (said || pictures === 0 ? body.width : 0) + photos + 28, panel.m.textWidth))
+      readonly property real h: Math.ceil(Math.max(body.height, marker.height, pictures > 0 ? 78 : 0) + 20)
       width: w
       height: h
       radius: 14
@@ -356,7 +362,7 @@ Item {
         id: body
         x: marker.x + marker.implicitWidth + 8
         y: 10
-        width: Math.min(natural.implicitWidth + 2, panel.m.textWidth - 28 - marker.implicitWidth - 8)
+        width: Math.min(natural.implicitWidth + 2, panel.m.textWidth - 28 - marker.implicitWidth - 8 - noteBox.photos)
         readOnly: true
         selectByMouse: true
         wrapMode: TextEdit.Wrap
@@ -367,6 +373,42 @@ Item {
         font.pixelSize: 16
         color: Theme.noteInk
         selectionColor: Theme.highlight
+      }
+      Repeater {
+        model: noteBox.pictures
+        delegate: Item {
+          id: polaroid
+          required property int index
+          readonly property string url: panel.attached && noteBox.item ? panel.attached + noteBox.item.id + "/" + index : ""
+          x: noteBox.w - 14 - 62 - (noteBox.pictures - 1 - index) * 16
+          y: 12 + index * 3
+          width: 62; height: 74
+          rotation: [-6, 5, -2][index]
+          z: noteBox.pictures - index
+          Rectangle { anchors.fill: parent; color: "#fbf8f1"; border.color: Theme.ink; border.width: 1.5; radius: 2 }
+          Rectangle {
+            x: 5; y: 5; width: 52; height: 52
+            color: "#cfd6e3"
+            clip: true
+            Image { anchors.fill: parent; source: polaroid.url; fillMode: Image.PreserveAspectCrop; asynchronous: true; sourceSize.width: 160 }
+          }
+          MouseArea {
+            anchors.fill: parent
+            enabled: polaroid.url !== ""
+            cursorShape: Qt.PointingHandCursor
+            onClicked: Qt.openUrlExternally(polaroid.url)
+          }
+          // The paperclip over the frame's top edge, on the front picture only.
+          Shape {
+            visible: polaroid.index === 0
+            x: 34; y: -12
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+              strokeColor: "#8d929c"; strokeWidth: 2.5; fillColor: "transparent"; capStyle: ShapePath.RoundCap
+              PathSvg { path: "M 4 26 L 4 6 A 4 4 0 0 1 12 6 L 12 30 A 6 6 0 0 1 0 30 L 0 10" }
+            }
+          }
+        }
       }
     }
   }
