@@ -7,10 +7,13 @@
 //   june-art sheet SET NAME [OUT] a contact sheet: the piece, its face box and mouth, and its crop at every framing
 //
 // ingest options: --file PATH (instead of incoming/NAME.png), --face X,Y,W,H and --mouth X,Y in source pixels,
-// --key COLOUR to make a flat colour see-through (a room's window, a view's sky), --fuzz PERCENT (default 12).
+// --gesture NAME,X,Y,W,H (repeatable, the first primary) for a gesture away from her face, --max-width PX for how wide
+// a pose's canvas may grow to keep a wide gesture (default 3072), --key COLOUR to make a flat colour see-through (a
+// room's window, a view's sky), --fuzz PERCENT (default 12).
 //
 // An entry's details (expression, description, facing, setting, ...) come from incoming/NAME.json, a flat manifest
-// entry with "section" (poses, chibi, rooms, plates, props) and optionally "faceBox" [x, y, w, h] in source pixels;
+// entry with "section" (poses, chibi, rooms, plates, props) and optionally "faceBox" [x, y, w, h] and "gestureBoxes"
+// [{name, box: [x, y, w, h], primary}] in source pixels;
 // else from the entry already in manifest.json; else from planned.json, a manifest-shaped catalogue of what is still
 // to be made. Needs magick and realesrgan-ncnn-vulkan on PATH; the Nix package provides both.
 import { execFileSync } from "node:child_process";
@@ -18,7 +21,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseManifest } from "../src/avatar.ts";
-import { FRAMINGS, frame, readPoses } from "../overlay/compose.mjs";
+import { FRAMINGS, frame, framingsShowing, readPoses } from "../overlay/compose.mjs";
 import { kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "./layout.mjs";
 
 const SECTIONS = ["poses", "chibi", "rooms", "plates", "props"];
@@ -59,9 +62,9 @@ function findEntry(set, name, manifest, planned) {
 	const sidecar = readJson(join(set, "incoming", `${name}.json`), null);
 	if (sidecar) {
 		if (!SECTIONS.includes(sidecar.section)) throw new Error(`incoming/${name}.json: section must be one of ${SECTIONS.join(", ")}`);
-		const { section, faceBox, ...entry } = sidecar;
+		const { section, faceBox, gestureBoxes, ...entry } = sidecar;
 		const existing = entries(manifest, section)[keyFor(section, name)] ?? entries(planned, section)[keyFor(section, name)] ?? {};
-		return { section, entry: { ...existing, ...entry }, faceBox, from: `incoming/${name}.json` };
+		return { section, entry: { ...existing, ...entry }, faceBox, gestureBoxes, from: `incoming/${name}.json` };
 	}
 	for (const [source, label] of [
 		[manifest, "manifest.json"],
@@ -91,7 +94,7 @@ function ingest(set, name, options) {
 	const manifestPath = join(set, "manifest.json");
 	const manifest = readJson(manifestPath, { version: 1, size: [256, 256], expressions: {} });
 	const planned = readJson(join(set, "planned.json"), {});
-	const { section, entry, faceBox, from } = findEntry(set, name, manifest, planned);
+	const { section, entry, faceBox, gestureBoxes, from } = findEntry(set, name, manifest, planned);
 	const key = keyFor(section, name);
 	const kind = kindOf(section, entry);
 	const source = options.file ?? join(set, "incoming", `${name}.png`);
@@ -121,7 +124,8 @@ function ingest(set, name, options) {
 			const box = options.face ?? faceBox;
 			if (!box) throw new Error(`${name}: a pose needs its face box in source pixels: --face X,Y,W,H`);
 			face = { x: box[0], y: box[1], w: box[2], h: box[3] };
-			place = placePose(kind, figure, face);
+			place = placePose(kind, figure, face, { maxWidth: options.maxWidth });
+			if (place.refused) throw new Error(`${name}: ${place.refused}; compose the gesture closer, or give --max-width`);
 		} else if (kind === "chibi") place = placeChibi(figure);
 		else if (kind === "room" || kind === "plate") place = placeCover(kind, whole);
 		else {
@@ -154,7 +158,27 @@ function ingest(set, name, options) {
 			finished.face = place.face;
 			const at = (px, py) => [Math.round(((place.x + px * fromSource) / W) * 1000) / 1000, Math.round(((place.y + py * fromSource) / H) * 1000) / 1000];
 			finished.mouth = options.mouth ? at(options.mouth[0], options.mouth[1]) : mouthOf(place.face);
+			// Its gestures in the finished image, the primary first, and only the framings that keep that one in view.
+			const gestures = options.gestures?.length ? options.gestures : gestureBoxes;
+			if (Array.isArray(gestures) && gestures.length > 0) {
+				const clamp = (n) => Math.min(1, Math.max(0, Math.round(n * 1000) / 1000));
+				finished.gestures = gestures.map((g, i) => {
+					const [gx, gy, gw, gh] = g.box;
+					const x0 = clamp((place.x + gx * fromSource) / W);
+					const y0 = clamp((place.y + gy * fromSource) / H);
+					const box = [x0, y0, Math.min(Math.floor((1 - x0) * 1000) / 1000, clamp((gw * fromSource) / W)), Math.min(Math.floor((1 - y0) * 1000) / 1000, clamp((gh * fromSource) / H))];
+					return { name: g.name, box, ...((g.primary ?? i === 0) ? { primary: true } : {}) };
+				});
+				const primaries = finished.gestures.filter((g) => g.primary);
+				if (primaries.length !== 1) throw new Error(`${name}: exactly one gesture must be primary`);
+				const [shown] = readPoses({ poses: { [key]: { ...finished, expression: entry.expression ?? "idle", facing: entry.facing ?? "front" } } }, "");
+				const allowed = (entry.framings ?? ["close-up", "head", "bust", "waist"]).filter((f) => f === "full" || framingsShowing(shown).includes(f));
+				if (allowed.length > 0) finished.framings = allowed;
+				else place.problems.push("no framing shows its primary gesture; its framings are left as they were");
+			}
 		}
+		// When it entered the set, never changed after: a panel only falls back to poses that existed when it happened.
+		if (section === "poses") finished.added ??= new Date().toISOString();
 		if (section === "rooms") {
 			const hole = alphaBox(out, true);
 			if (!hole) throw new Error(`${name}: the finished room has no window`);
@@ -221,6 +245,8 @@ function sheet(set, name, outPath) {
 			"-fill", "none", "-stroke", "#d33", "-strokewidth", "3",
 			"-draw", `rectangle ${f.x * pose.width * S},${f.y * 600} ${(f.x + f.w) * pose.width * S},${(f.y + f.h) * 600}`,
 			"-fill", "#d33", "-draw", `circle ${pose.mouth.x * pose.width * S},${pose.mouth.y * 600} ${pose.mouth.x * pose.width * S + 5},${pose.mouth.y * 600}`,
+			// Its gestures: the primary in green, others in amber.
+			...pose.gestures.flatMap((g, i) => ["-fill", "none", "-stroke", i === 0 ? "#2a9d4b" : "#d99a1e", "-strokewidth", "3", "-draw", `rectangle ${g.box.x * pose.width * S},${g.box.y * 600} ${(g.box.x + g.box.w) * pose.width * S},${(g.box.y + g.box.h) * 600}`]),
 			")",
 		]);
 		for (const framing of FRAMINGS.filter((fr) => pose.framings.includes(fr))) {
@@ -268,6 +294,11 @@ function main(argv) {
 		if (arg === "--file") options.file = rest[++i];
 		else if (arg === "--face") options.face = parseNumbers(rest[++i], 4);
 		else if (arg === "--mouth") options.mouth = parseNumbers(rest[++i], 2);
+		else if (arg === "--gesture") {
+			const [gname, ...parts] = String(rest[++i]).split(",");
+			if (!gname || parts.length !== 4) throw new Error("--gesture takes NAME,X,Y,W,H in source pixels");
+			(options.gestures ??= []).push({ name: gname, box: parseNumbers(parts.join(","), 4) });
+		} else if (arg === "--max-width") options.maxWidth = Number(rest[++i]);
 		else if (arg === "--key") options.key = rest[++i];
 		else if (arg === "--fuzz") options.fuzz = Number(rest[++i]);
 		else positional.push(arg);
@@ -275,7 +306,7 @@ function main(argv) {
 	if (command === "status" && set) return status(set);
 	if (command === "ingest" && set && name) return ingest(set, name, options);
 	if (command === "sheet" && set && name) return sheet(set, name, positional[0]);
-	console.error("usage: june-art status SET | ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--key COLOUR] [--fuzz PERCENT] | sheet SET NAME [OUT]");
+	console.error("usage: june-art status SET | ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--gesture NAME,X,Y,W,H]... [--max-width PX] [--key COLOUR] [--fuzz PERCENT] | sheet SET NAME [OUT]");
 	process.exit(2);
 }
 

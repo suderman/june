@@ -29,7 +29,24 @@ test("a pose is moved in from a side, and too wide a figure is reported", () => 
 	assert.ok(left >= CANVAS.pose[0] * MARGIN - 0.5 && right <= CANVAS.pose[0] * (1 - MARGIN) + 0.5);
 	assert.ok(shifted.face[0] + shifted.face[2] / 2 < 0.5, "her face moves off centre rather than the figure leaving the canvas");
 	const wide = placePose("pose", { x: 0, y: 100, w: 1000, h: 550 }, { x: 450, y: 130, w: 100, h: 120 });
-	assert.match(wide.problems.join(), /wide/);
+	assert.match(wide.refused, /past the 3072 px limit/, "a figure eight faces wide is refused, not cut");
+	assert.equal(placePose("pose", { x: 0, y: 100, w: 1000, h: 550 }, { x: 450, y: 130, w: 100, h: 120 }, { maxWidth: 20000 }).refused, undefined, "the limit can be raised");
+});
+
+test("a wide gesture widens the canvas at the same height and face size, keeping every finger (Pi's wave 10002)", () => {
+	// The original wave: face 442,120,226,267 in a 1152 x 1344 source, its solid figure 2280 px wide at the 27% face.
+	const face = { x: 442, y: 120, w: 226, h: 267 };
+	const figure = { x: 120, y: 60, w: 847, h: 1284 };
+	const place = placePose("pose", figure, face);
+	assert.equal(place.refused, undefined);
+	assert.deepEqual(place.size, [2560, CANVAS.pose[1]], "the next 128 px step past the 2479 px it needs");
+	assert.equal(place.face[3], 0.27, "her face keeps its height");
+	const left = place.x + figure.x * place.scale;
+	const right = place.x + (figure.x + figure.w) * place.scale;
+	assert.ok(left >= 2560 * MARGIN - 0.5 && right <= 2560 * (1 - MARGIN) + 0.5, "the whole figure inside the margins");
+	assert.match(place.problems.join(), /widened to 2560 px/);
+	const fits = placePose("pose", { x: 58, y: 104, w: 384, h: 546 }, { x: 175, y: 127, w: 150, h: 175 });
+	assert.deepEqual(fits.size, CANVAS.pose, "a pose that fits keeps the standard canvas");
 });
 
 test("a pose whose hair would touch the top sits lower, and says so", () => {

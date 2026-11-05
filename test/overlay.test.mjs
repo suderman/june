@@ -937,3 +937,51 @@ test("a panel's scene is decided once for every client: the hour's light, her ro
 	const noon = panelScene({ panel, layout, pose, sizes, width: 700, now: at, hourOverride: 12, sky: null, scenery: sceneryAll });
 	assert.equal(noon.light.lampOn, 0, "a previewed noon turns the lamp off");
 });
+
+test("a gesture stays whole in a panel: seen past the words, framed wider, or another pose with the same performance", async () => {
+	const { readPoses, panelLayout, gestureShown, framingsShowing, composeStrip, availableAt } = await import("../overlay/compose.mjs");
+	const pose = (expression, gestures, extra = {}) => ({ file: "x.webp", size: [2560, 2662], expression, face: [0.4, 0.195, 0.23, 0.27], mouth: [0.51, 0.4], facing: "front", gestures, ...extra });
+	const at = Date.UTC(2026, 10, 5, 12);
+	const manifest = {
+		poses: {
+			"gentle-palm": pose("gentle", [{ name: "open-palm", box: [0.02, 0.6, 0.24, 0.12], primary: true }, { name: "lower-hand", box: [0.1, 0.8, 0.2, 0.1] }], { framings: ["bust", "waist"], added: new Date(at - 1000).toISOString() }),
+			"gentle-palm-high": pose("gentle", [{ name: "open-palm", box: [0.7, 0.3, 0.2, 0.15], primary: true }], { added: new Date(at - 1000).toISOString() }),
+			"gentle-plain": pose("gentle", undefined),
+		},
+	};
+	const poses = readPoses(manifest, "");
+	assert.equal(poses[0].gestures[0].name, "open-palm", "the primary gesture first");
+	assert.deepEqual(framingsShowing(poses[0]), ["bust", "waist"], "a low palm needs her shown to the bust at least");
+	assert.deepEqual(framingsShowing(poses[2]), ["close-up", "head", "bust", "waist"], "no gesture, every framing");
+
+	// Visibility counts the words, not only the crop, and follows a mirrored pose.
+	const box = { art: { x: 0, y: 0, w: 100, h: 100 }, clip: { x: 0, y: 0, w: 100, h: 100 }, elements: [{ x: 0, y: 50, w: 100, h: 50 }] };
+	assert.equal(gestureShown(box, { gestures: [] }), 1, "a pose without a gesture has nothing to hide");
+	assert.equal(gestureShown(box, { gestures: [{ box: { x: 0.1, y: 0.6, w: 0.3, h: 0.3 } }] }), 0, "behind a balloon is not seen");
+	assert.equal(gestureShown(box, { gestures: [{ box: { x: 0.1, y: 0.1, w: 0.3, h: 0.3 } }] }), 1);
+	assert.equal(gestureShown({ ...box, clip: { x: 50, y: 0, w: 50, h: 50 }, mirror: true }, { gestures: [{ box: { x: 0.1, y: 0.1, w: 0.3, h: 0.3 } }] }), 1, "mirrored, it is on the other side");
+
+	const items = [{ kind: "user", id: "u1", text: "hm", at }, { kind: "assistant", id: "a1", text: "it's ok.", expression: "gentle", pose: "gentle-palm", at }];
+	const [panel] = composeStrip(panels(items), { running: false }, poses, { sides: {}, poseIds: {}, livePoses: {} });
+	assert.equal(panel.pose.id, "gentle-palm", "the director's pose is the intent");
+	const short = [{ kind: "user", w: 120, h: 44 }, { kind: "june", w: 300, h: 70 }];
+	const long = [{ kind: "user", w: 120, h: 44 }, { kind: "june", w: 300, h: 160 }, { kind: "june", w: 300, h: 160 }];
+	const narrow = panelLayout({ panel, width: 360, sizes: short, poses });
+	assert.equal(narrow.pose.id, "gentle-palm-high", "on a phone, another pose with the same performance before any other");
+	assert.ok(gestureShown(narrow.layout, narrow.pose) >= 0.7);
+	assert.equal(panelLayout({ panel, width: 360, sizes: short, poses }).pose.id, narrow.pose.id, "the same choice every time");
+	assert.equal(panelLayout({ panel, width: 820, sizes: long, poses }).pose.id, "gentle-palm", "where the panel shows her to the waist, the palm itself");
+
+	// History stays put: a pose added after the panel is never its fallback.
+	const later = readPoses({ poses: { ...manifest.poses, "gentle-palm-high": { ...manifest.poses["gentle-palm-high"], added: new Date(at + 1000).toISOString() } } }, "");
+	assert.equal(availableAt(later[1], at), false);
+	assert.equal(panelLayout({ panel, width: 360, sizes: short, poses: later }).pose.id, "gentle-plain", "the newer open palm is not offered to an older panel");
+	const newer = composeStrip(panels(items.map((i) => ({ ...i, at: at + 5000 }))), { running: false }, later, { sides: {}, poseIds: {}, livePoses: {} });
+	assert.equal(panelLayout({ panel: newer[0], width: 360, sizes: short, poses: later }).pose.id, "gentle-palm-high", "a newer panel may use it");
+
+	// A drawn special is never swapped: framed wider when that shows it, else kept and marked cropped.
+	const special = readPoses({ poses: { ...manifest.poses, "gentle-palm": { ...manifest.poses["gentle-palm"], special: true } } }, "");
+	const kept = panelLayout({ panel: { ...panel, pose: special[0] }, width: 360, sizes: short, poses: special });
+	assert.equal(kept.pose.id, "gentle-palm");
+	assert.equal(typeof kept.layout.cropped, "boolean");
+});

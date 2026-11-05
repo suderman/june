@@ -18,6 +18,9 @@ export const FACE = {
 
 /** The least clear space around a figure, as a share of the canvas side. */
 export const MARGIN = 0.04;
+/** How wide a pose's canvas may grow for a wide gesture (Jon, 2026-11-05: a starting limit, not a contract), and the step. */
+export const MAX_WIDTH = 3072;
+export const WIDTH_STEP = 128;
 
 const round = (n, places = 3) => Math.round(n * 10 ** places) / 10 ** places;
 
@@ -37,18 +40,27 @@ export function kindOf(section, entry) {
  * figure may run off the bottom, where a waist-up or knee-length pose is cut. Returns the scale, where the source's
  * corner lands, the face as canvas fractions, and any problem a person should look at.
  */
-export function placePose(kind, figure, face) {
-	const [W, H] = CANVAS[kind];
+export function placePose(kind, figure, face, { maxWidth = MAX_WIDTH } = {}) {
+	let [W, H] = CANVAS[kind];
 	const target = FACE[kind];
 	const scale = (target.h * H) / face.h;
 	const problems = [];
+	const m = MARGIN;
+	// A gesture wider than the canvas widens it, at the same height and face size, rather than losing her fingers; past
+	// the limit the drawing itself is too spread out for a panel.
+	const needed = (figure.w * scale) / (1 - 2 * m);
+	if (needed > W) {
+		const wider = Math.ceil(needed / WIDTH_STEP) * WIDTH_STEP;
+		const ratio = Math.round((figure.w / face.h) * 100) / 100;
+		if (wider > maxWidth) return { refused: `the figure is ${ratio} times her face height wide; at this face size it needs ${wider} px, past the ${maxWidth} px limit` };
+		problems.push(`widened to ${wider} px (${ratio} times her face height) so the gesture keeps every finger`);
+		W = wider;
+	}
 	let x = W / 2 - (face.x + face.w / 2) * scale;
 	let y = target.cy * H - (face.y + face.h / 2) * scale;
-	const m = MARGIN;
 	const left = () => x + figure.x * scale;
 	const right = () => x + (figure.x + figure.w) * scale;
-	if (figure.w * scale > W * (1 - 2 * m)) problems.push(`the figure is ${Math.round(figure.w * scale)} px wide at this face size, more than the canvas allows; she is cut at the sides`);
-	else if (left() < W * m) x += W * m - left();
+	if (left() < W * m) x += W * m - left();
 	else if (right() > W * (1 - m)) x -= right() - W * (1 - m);
 	const top = y + figure.y * scale;
 	if (top < H * m) {

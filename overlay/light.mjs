@@ -173,15 +173,8 @@ export function graded(colour, light) {
 	return hex(rgb(colour).map((v, i) => v * (1 - light.gradeAmount + (light.gradeAmount * g[i]) / 255)));
 }
 
-/** When a panel's words were written: its latest message's time, or null for a panel with none (a live one). */
-export function moment(panel) {
-	let at = null;
-	for (const e of panel.elements) {
-		const t = e.kind === "user" ? e.item.at : e.kind === "june" ? e.at : undefined;
-		if (typeof t === "number" && (at === null || t > at)) at = t;
-	}
-	return at;
-}
+// When a panel happened: kept in compose.mjs, beside the poses it decides between; re-exported for light's callers.
+export { moment } from "./compose.mjs";
 
 // The procedural backgrounds by picked face: only occasional and rare ones, so they stay special. Common faces keep the
 // room; serious and gentle replies get the calm ground, never an effect.

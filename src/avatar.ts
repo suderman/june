@@ -92,6 +92,12 @@ export type Pose = {
 	framings?: Framing[];
 	marks?: Mark[];
 	props?: string[];
+	/** Gestures away from her face, as fractions of the image, the primary one marked: the strip keeps it in view. */
+	gestures?: { name: string; box: [number, number, number, number]; primary?: boolean }[];
+	/** When the pose entered the set (ISO 8601), set once at ingest: a panel falls back only to poses older than itself. */
+	added?: string;
+	/** A drawing made for one moment: the strip never swaps it for another pose. */
+	special?: boolean;
 };
 /**
  * Live June's states: what the overlay's minimised form shows her doing right now, chosen from runtime state and the
@@ -220,6 +226,14 @@ function poseErrors(data: unknown, options: { base?: boolean }): string[] {
 		if (p?.marks !== undefined && !listOf(p.marks, MARKS)) errors.push(`${at}: marks must list some of ${MARKS.join(", ")}`);
 		if (p?.props !== undefined && !(Array.isArray(p.props) && p.props.every((v) => typeof v === "string"))) errors.push(`${at}: props must be words`);
 		if (p?.description !== undefined && typeof p.description !== "string") errors.push(`${at}: description must be text`);
+		if (p?.gestures !== undefined) {
+			const ok = (g: { name?: unknown; box?: unknown; primary?: unknown }) =>
+				typeof g?.name === "string" && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(g.name) && Array.isArray(g.box) && g.box.length === 4 && g.box.every(fraction) && g.box[2]! > 0 && g.box[3]! > 0 && g.box[0]! + g.box[2]! <= 1 && g.box[1]! + g.box[3]! <= 1 && (g.primary === undefined || typeof g.primary === "boolean");
+			if (!Array.isArray(p.gestures) || p.gestures.length === 0 || !p.gestures.every(ok)) errors.push(`${at}: gestures must list {name, box: [x, y, width, height] inside the image as fractions, primary}`);
+			else if (p.gestures.filter((g) => g.primary).length > 1) errors.push(`${at}: at most one gesture is primary`);
+		}
+		if (p?.added !== undefined && (typeof p.added !== "string" || Number.isNaN(Date.parse(p.added)))) errors.push(`${at}: added must be an ISO 8601 time`);
+		if (p?.special !== undefined && typeof p.special !== "boolean") errors.push(`${at}: special must be true or false`);
 	}
 	const names = Object.values(poses);
 	if (options.base && names.length > 0 && !names.some((p) => p?.expression === "idle" && p.activity === undefined)) errors.push("a base set with poses must have an idle pose");

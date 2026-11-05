@@ -100,6 +100,11 @@ test("a bad pose names each problem, and a base set's poses need an idle one", (
 			].every((s) => e.message.includes(s)),
 	);
 	assert.throws(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { "mouth-out": { ...good, mouth: [0.9, 0.9] } } }), /mouth must be inside the face/);
+	const gestures = [{ name: "open-palm", box: [0.02, 0.6, 0.24, 0.12], primary: true }, { name: "lower-hand", box: [0.1, 0.8, 0.2, 0.1] }];
+	assert.doesNotThrow(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { waving: { ...good, gestures, added: "2026-11-05T12:00:00.000Z", special: false } } }), "gestures, when it was added, and a special flag");
+	assert.throws(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { waving: { ...good, gestures: [{ name: "Palm", box: [0.9, 0.6, 0.24, 0.12] }] } } } as never), /gestures must list/);
+	assert.throws(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { waving: { ...good, gestures: gestures.map((g) => ({ ...g, primary: true })) } } }), /at most one gesture is primary/);
+	assert.throws(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { waving: { ...good, added: "yesterday" } } }), /added must be an ISO 8601 time/);
 	assert.deepEqual(POSE_ACTIVITIES, ["thinking", "working", "watching"]);
 	assert.throws(
 		() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { "idle-working": { ...good, expression: "idle", activity: "working" } } }, { base: true }),

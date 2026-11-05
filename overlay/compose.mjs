@@ -71,6 +71,20 @@ export function chain(expression) {
 const fraction = (n) => typeof n === "number" && n >= 0 && n <= 1;
 
 /**
+ * A pose's gestures (its manifest =gestures=): each a name and a box in fractions of the image, the primary one first.
+ * A pose whose defining gesture lies away from her face lists one; the strip checks the primary one is seen.
+ */
+function readGestures(list) {
+	if (!Array.isArray(list)) return [];
+	const out = list
+		.filter((g) => g && typeof g.name === "string" && Array.isArray(g.box) && g.box.length === 4 && g.box.every(fraction) && g.box[2] > 0 && g.box[3] > 0)
+		.map((g) => ({ name: g.name, box: { x: g.box[0], y: g.box[1], w: g.box[2], h: g.box[3] }, primary: g.primary === true }));
+	const primary = out.findIndex((g) => g.primary);
+	if (primary > 0) out.unshift(...out.splice(primary, 1));
+	return out;
+}
+
+/**
  * The usable poses of one avatar set, with image URLs under `base`. Lenient where src/avatar.ts is strict: a pose the
  * overlay cannot place is skipped, so one bad entry never blanks the strip.
  */
@@ -96,6 +110,9 @@ export function readPoses(manifest, base) {
 			mirror: p.mirror !== false,
 			framings: framings.length > 0 ? framings : [...USUAL],
 			marks: Array.isArray(p.marks) ? p.marks.filter((m) => MARKS.includes(m)) : [],
+			gestures: readGestures(p.gestures),
+			added: typeof p.added === "string" && !Number.isNaN(Date.parse(p.added)) ? Date.parse(p.added) : null,
+			special: p.special === true,
 		});
 	}
 	return out;
@@ -191,16 +208,19 @@ export function composeStrip(panels, state, poses, memory, holding = false) {
 		const face = live ? null : picked(p);
 		const hold = !live && !face && i === panels.length - 1 && holding && memory.livePoses[p.id] !== undefined;
 		const find = (id) => poses.find((x) => x.id === id) ?? null;
+		// A settled panel chooses only among poses in the set when it happened, so adding art never changes it.
+		const time = moment(p);
+		const pool = poses.filter((x) => availableAt(x, time));
 		let pose = live
 			? choosePose(poses, doing ? { activity: doing, expression: "curious" } : standIn(p, true), previousPose, p.id)
 			: face
-				? choosePose(poses, face, previousPose, p.id)
+				? (face.pose ? find(face.pose) : null) ?? choosePose(pool, face, previousPose, p.id)
 				: hold
 					? find(memory.livePoses[p.id])
 					: find(memory.poseIds[p.id]);
 		if (live && pose) memory.livePoses[p.id] = pose.id;
 		if (!pose && !live) {
-			pose = choosePose(poses, standIn(p, false), previousPose, p.id);
+			pose = choosePose(pool, standIn(p, false), previousPose, p.id);
 			if (pose) memory.poseIds[p.id] = pose.id;
 		}
 		if (!memory.sides[p.id]) memory.sides[p.id] = chooseSide(previousSide, pose);
@@ -230,16 +250,118 @@ export function tallFor(poses, pose) {
 	return null;
 }
 
+/** When a panel happened, in epoch milliseconds: the latest time on its words; null when none carries one. */
+export function moment(panel) {
+	let at = null;
+	for (const e of panel.elements ?? []) {
+		const t = e.kind === "user" ? e.item?.at : e.kind === "june" ? e.at : undefined;
+		if (typeof t === "number" && (at === null || t > at)) at = t;
+	}
+	return at;
+}
+
+/** Whether `pose` was in the set when a panel at `time` was composed: poses added later never change an old panel. */
+export function availableAt(pose, time) {
+	return pose.added === null || pose.added === undefined || time === null || time === undefined || pose.added <= time;
+}
+
+/** How much of a pose's primary gesture must be seen, and how small her face may grow to show it, as shares. */
+export const GESTURE_SHOWN = 0.7;
+export const GESTURE_FACE = 0.75;
+
+/**
+ * How much of the primary gesture of `pose`, as framed by `layout`, is seen: inside the art's clip and under none of
+ * the panel's elements (balloons, notes, chips, cards), sampled on a grid. 1 for a pose without a gesture.
+ */
+export function gestureShown(layout, pose) {
+	const g = pose?.gestures?.[0];
+	if (!g || !layout?.art) return 1;
+	const art = layout.art;
+	const bx = layout.mirror ? 1 - g.box.x - g.box.w : g.box.x;
+	const box = { x: art.x + bx * art.w, y: art.y + g.box.y * art.h, w: g.box.w * art.w, h: g.box.h * art.h };
+	const clip = layout.clip;
+	const covers = (layout.elements ?? []).filter(Boolean);
+	const inside = (r, x, y) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+	const N = 12;
+	let seen = 0;
+	for (let i = 0; i < N; i++)
+		for (let j = 0; j < N; j++) {
+			const x = box.x + ((i + 0.5) / N) * box.w;
+			const y = box.y + ((j + 0.5) / N) * box.h;
+			if (inside(clip, x, y) && !covers.some((r) => inside(r, x, y))) seen++;
+		}
+	return seen / (N * N);
+}
+
+/**
+ * The framings of `pose` (face and gesture boxes as fractions) that keep its primary gesture in view, judged by height
+ * alone as =frame= crops around her face. Ingest writes them, so a pose never offers a crop that loses its gesture; the
+ * panel's own check, after the words are placed, has the last word.
+ */
+export function framingsShowing(pose) {
+	const g = pose.gestures?.[0];
+	if (!g) return [...USUAL];
+	const cy = pose.face.y + pose.face.h / 2;
+	return USUAL.filter((framing) => {
+		const area = pose.face.h / FACE_SHARE[framing];
+		const top = cy - FACE_Y[framing] * area;
+		const seen = Math.max(0, Math.min(g.box.y + g.box.h, top + area) - Math.max(g.box.y, top));
+		return seen / g.box.h >= GESTURE_SHOWN;
+	});
+}
+
+/** A stable order for `list` by panel: sorted by id, starting where the panel's id lands, so a panel keeps its choice. */
+function stableOrder(list, seed) {
+	const sorted = [...list].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+	if (sorted.length === 0) return sorted;
+	const start = hash(seed) % sorted.length;
+	return [...sorted.slice(start), ...sorted.slice(0, start)];
+}
+
 /**
  * Lay out a composed panel (composeStrip): planned with its pose first, and if the words run long enough to need an
- * inset, a pose of the same expression drawn tall takes over and she fills the panel instead. Returns the layout and
- * the pose it framed.
+ * inset, a pose of the same expression drawn tall takes over and she fills the panel instead. A pose with a gesture
+ * must show it, not crop it or hide it behind the words; failing that, in order: the same pose framed wider while her
+ * face keeps most of its size; another pose with the same expression and gesture; another with the same expression;
+ * and else the pose as first framed. Only poses in the set when the panel happened count, and every choice follows
+ * from the panel, its pose, the layout, and the set, so a panel keeps its art. A drawn special (=special=) is never
+ * replaced: framed wider if that shows it, else kept, with =cropped= set so a client can offer it whole. Returns the
+ * layout and the pose it framed.
  */
 export function panelLayout({ panel, width, sizes, poses }) {
-	const first = plan({ width, side: panel.side, pose: panel.pose, elements: sizes, framing: panel.framing });
-	const tall = first.clip.inset ? tallFor(poses, panel.pose) : null;
-	if (!tall) return { layout: first, pose: panel.pose };
-	return { layout: plan({ width, side: panel.side, pose: tall, elements: sizes, framing: panel.framing }), pose: tall };
+	const time = moment(panel);
+	const usable = poses.filter((p) => availableAt(p, time));
+	const lay = (pose, framing) => {
+		const first = plan({ width, side: panel.side, pose, elements: sizes, framing: framing ?? panel.framing });
+		const tall = first.clip.inset ? tallFor(usable, pose) : null;
+		if (!tall) return { layout: first, pose };
+		return { layout: plan({ width, side: panel.side, pose: tall, elements: sizes, framing: framing ?? panel.framing }), pose: tall };
+	};
+	const first = lay(panel.pose);
+	const pose = first.pose;
+	if (!pose?.gestures?.length) return first;
+	// Her face's size and the crop this panel would give any pose: the yardstick for how far out she may be framed.
+	const natural = plan({ width, side: panel.side, pose: Object.assign({}, pose, { framings: [...new Set([...USUAL, ...pose.framings])] }), elements: sizes, framing: panel.framing });
+	const faceH = natural.face?.h ?? 0;
+	const fits = (l) => (l.layout.face?.h ?? 0) >= faceH * GESTURE_FACE && gestureShown(l.layout, l.pose) >= GESTURE_SHOWN;
+	if (fits(first)) return first;
+	// The same pose framed wider, as long as her face keeps most of its size.
+	const from = Math.max(0, USUAL.indexOf(natural.framing));
+	for (const framing of USUAL.slice(from).filter((f) => pose.framings.includes(f) && f !== first.layout.framing)) {
+		const wider = lay(pose, framing);
+		if (wider.pose === pose && fits(wider)) return wider;
+	}
+	if (pose.special) return { layout: Object.assign({}, first.layout, { cropped: gestureShown(first.layout, pose) < GESTURE_SHOWN }), pose };
+	const others = usable.filter((p) => p.id !== pose.id && !p.activity && !p.special && p.expression === pose.expression);
+	const gesture = pose.gestures[0].name;
+	const alike = others.filter((p) => p.gestures?.[0]?.name === gesture);
+	const rest = others.filter((p) => p.gestures?.[0]?.name !== gesture);
+	for (const group of [alike, rest])
+		for (const candidate of stableOrder(group, panel.id)) {
+			const tried = lay(candidate);
+			if (fits(tried)) return tried;
+		}
+	return first;
 }
 
 /**
