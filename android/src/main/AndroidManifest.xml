@@ -52,8 +52,10 @@
             android:permission="android.permission.BIND_VOICE_INTERACTION"
             android:exported="true" />
 
-        <!-- June's hands on the phone (Hands.kt), on by Jon's choice; the install app turns it on over ADB. -->
-        <service android:name=".Hands" android:label="June's hands"
+        <!-- June's hands on the phone (Hands.kt), on by Jon's choice; the install app turns it on over ADB. Its own
+             process, so a crash in the conversation never takes it down: Android leaves a crashed accessibility service
+             off until it is turned on again. -->
+        <service android:name=".Hands" android:label="June's hands" android:process=":hands"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>

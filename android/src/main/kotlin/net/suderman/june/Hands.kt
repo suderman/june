@@ -37,12 +37,18 @@ class Hands : AccessibilityService() {
     private var connected = false
     private var backoff = 2_000L
     private var bar: TextView? = null
+    private val resumed = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context, intent: Intent) {
+            stoppedUntil = 0L
+        }
+    }
     private val hideBar = Runnable { bar?.let { runCatching { windowManager().removeView(it) } }; bar = null }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         Log.i(TAG, "hands: service connected")
         connected = true
+        registerReceiver(resumed, android.content.IntentFilter(RESUME), RECEIVER_NOT_EXPORTED)
         connect()
     }
 
@@ -52,6 +58,7 @@ class Hands : AccessibilityService() {
 
     override fun onDestroy() {
         connected = false
+        runCatching { unregisterReceiver(resumed) }
         main.removeCallbacksAndMessages(null)
         socket?.close(1000, "hands withdrawn")
         socket = null
@@ -110,7 +117,8 @@ class Hands : AccessibilityService() {
         val action = message.optString("action")
         if (System.currentTimeMillis() < stoppedUntil) return answer(false, "Jon stopped you from the phone; wait until he asks again")
         // June's own sheet covers the apps and the power menu; it closes before she acts, so Jon sees what she does.
-        if (action != "screen" && JuneSession.dismiss()) {
+        if (action != "screen" && sheetShowing()) {
+            sendBroadcast(Intent(DISMISS).setPackage(packageName))
             main.postDelayed({ act(message, answer) }, 400)
             return
         }
@@ -142,6 +150,9 @@ class Hands : AccessibilityService() {
             done(false, "$action failed: ${e.message ?: e}")
         }
     }
+
+    /** Whether June's own sheet is on screen: a window of this app that is not the driving bar. */
+    private fun sheetShowing(): Boolean = windows.any { it.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY && it.root?.packageName == packageName }
 
     private fun front(): String = rootInActiveWindow?.packageName?.toString() ?: "unknown"
 
@@ -308,11 +319,13 @@ class Hands : AccessibilityService() {
     companion object {
         private const val LIMIT = 24_000
 
+        /** Broadcasts within the app, across the hands' process: June's sheet closes; her hands may act again. */
+        const val DISMISS = "net.suderman.june.DISMISS"
+        const val RESUME = "net.suderman.june.RESUME"
+
         /** While now is before this, every action is refused: Jon tapped the bar. Opening June clears it. */
         @Volatile var stoppedUntil = 0L
 
-        fun resume() {
-            stoppedUntil = 0L
-        }
+        fun resume(context: android.content.Context) = context.sendBroadcast(Intent(RESUME).setPackage(context.packageName))
     }
 }
