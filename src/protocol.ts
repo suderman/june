@@ -1,5 +1,6 @@
 // Client/daemon protocol: one JSON object per line over a Unix socket, or per text frame over the WebSocket (remote.ts). After `attach` the daemon sends the folded view:
 // a reset with every item, then the changes to it (see "Attaching to the folded view" in docs/architecture.org).
+import type { Act } from "./tools/phone.ts";
 import { connect, type Socket } from "node:net";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { EntryRecord } from "@earendil-works/pi-durable";
@@ -44,7 +45,11 @@ export type Request =
 	/** The first frame on the WebSocket, and only there. */
 	| { op: "hello"; requestId: string; token: string; protocol: number }
 	/** Devices allowed on the WebSocket: Unix socket only. `add` answers with the new token, once. */
-	| { op: "device"; requestId: string; action: "add" | "list" | "revoke"; name?: string };
+	| { op: "device"; requestId: string; action: "add" | "list" | "revoke"; name?: string }
+	/** A device's offer to act on itself for June's `phone` tool, until the connection closes: WebSocket only. */
+	| { op: "hands"; requestId: string }
+	/** A device's answer to an `act`: what it saw or did, or why it could not. */
+	| { op: "acted"; requestId: string; ok: boolean; text?: string };
 
 export type DeviceInfo = { name: string; createdAt: string; connections: number };
 
@@ -82,7 +87,9 @@ export type Reply =
 	/** `avatar` is this device's path to the user's avatar set on the same host, when the daemon serves one. */
 	| { type: "hello"; requestId: string; device: string; protocol: number; avatar?: string }
 	/** `token` after add; `closed` after revoke, the connections it closed. */
-	| { type: "devices"; requestId: string; devices: DeviceInfo[]; token?: string; closed?: number };
+	| { type: "devices"; requestId: string; devices: DeviceInfo[]; token?: string; closed?: number }
+	/** One action for a device that offered its hands; answered with `acted` and the same requestId. */
+	| ({ type: "act"; requestId: string } & Act);
 
 /** Split a stream into JSON lines; malformed lines go to `onBad`. */
 export function readLines(socket: Socket, onMessage: (value: unknown) => void, onBad?: (line: string) => void): void {
