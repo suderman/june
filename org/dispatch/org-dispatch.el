@@ -4,7 +4,7 @@
 ;;   org-dispatch-run      watch running tasks, then launch eligible ones
 ;;   org-dispatch-scan     print the tasks this host would launch
 ;;   org-dispatch-plan     SPEC.json, queue a requested plan without starting agents
-;;   org-dispatch-finish   ID STATE [NOTE], used by the agent to end its task
+;;   org-dispatch-finish   ID STATE [NOTE] [--headline LINE], used by the agent to end its task
 ;;   org-dispatch-retry    ID WHEN NOTE, used by the agent to try again later
 ;;
 ;; A task is an AUTO heading in Jon's Org agenda files whose HOST is this host.
@@ -916,6 +916,7 @@ replaying the same key and spec; missing prerequisites block partial plans."
          (org-entry-put nil "REPEAT_TO_STATE" "AUTO")
          (org-dispatch--trim-log (plist-get task :id)))
        (org-entry-delete nil "DISPATCH_FINISH")
+       (org-entry-delete nil "DISPATCH_HEADLINE")
        (org-todo "PROG")
        (org-toggle-tag "auto" 'on)
        (when session
@@ -1195,10 +1196,19 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                          (t "new"))))))
 
 (defun org-dispatch-finish ()
-  "Finish a task: ID STATE [NOTE] from the command line."
+  "Finish a task: ID STATE [NOTE] [--headline LINE] from the command line."
   (let* ((id (pop command-line-args-left))
          (todo (upcase (or (pop command-line-args-left) "")))
-         (note (string-trim (string-join command-line-args-left " ")))
+         (flag (member "--headline" command-line-args-left))
+         (headline (when flag
+                     (unless (and (= (length flag) 2)
+                                  (not (string-empty-p (cadr flag)))
+                                  (equal (cadr flag) (string-trim (cadr flag)))
+                                  (not (string-match-p "[\n\r]" (cadr flag))))
+                       (error "--headline needs one non-empty line without surrounding whitespace, after the note"))
+                     (cadr flag)))
+         (note (string-trim (string-join
+                             (if flag (butlast command-line-args-left 2) command-line-args-left) " ")))
          (file (or (org-dispatch--find id) (error "no heading with ID %s" id)))
          (state-file (org-dispatch--state-file id))
          (state (and (file-exists-p state-file)
@@ -1226,6 +1236,9 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                  (org-dispatch--log-run id "DONE" (plist-get task :todo) note)))
                (unless (string-empty-p note)
                  (org-entry-put nil "DISPATCH_FINISH" (replace-regexp-in-string "[\n\r]+" " " note)))
+               (if headline
+                   (org-entry-put nil "DISPATCH_HEADLINE" headline)
+                 (org-entry-delete nil "DISPATCH_HEADLINE"))
                (org-todo todo)
                (org-get-todo-state)))))
     (when state

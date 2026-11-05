@@ -12,6 +12,8 @@ export type Notice = {
 	/** For the terminal: the june.input source and the short line it shows. */
 	readonly source: string;
 	readonly label: string;
+	/** Worker-authored news for a task state change; absent on legacy notices. */
+	readonly follow?: { title: string; signal: string; headline: string; agent?: string; session?: string };
 };
 
 /** Sources of the user's own messages; everything else in june.input is June's own. */
@@ -67,6 +69,6 @@ export async function admitNotice(tx: Tx, conversation: Pick<ConversationHandle,
 		requestId: notice.requestId,
 		content: notice.content,
 		whenBusy: "followUp",
-		entry: { kind: "june.input", data: { source: notice.source, text: notice.label, surface } },
+		entry: { kind: "june.input", data: { source: notice.source, text: notice.label, surface, ...(notice.follow ? { follow: notice.follow } : {}) } },
 	});
 }

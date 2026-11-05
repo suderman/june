@@ -274,7 +274,17 @@ export class Org {
 		if (heading === undefined) return undefined;
 		const { start, end } = subtree(lines, heading.line);
 		const text = lines.slice(start - 1, end).join("\n");
-		return { file: this.rel(path), line: start, state: heading.state, title: heading.title, herdrSessions: herdrLinks(text) };
+		// Only the task's own property drawer, never a child task or an old run in LOGBOOK.
+		let at = start;
+		if (/^[ \t]*(SCHEDULED|DEADLINE|CLOSED):/.test(lines[at] ?? "")) at++;
+		let headline: string | undefined;
+		if (lines[at]?.trim() === ":PROPERTIES:") {
+			for (at++; at < end && lines[at]?.trim() !== ":END:"; at++) {
+				const value = /^[ \t]*:DISPATCH_HEADLINE:[ \t]+(\S(?:[^\r\n]*\S)?)[ \t]*$/i.exec(lines[at]!)?.[1];
+				if (value !== undefined) headline = value;
+			}
+		}
+		return { file: this.rel(path), line: start, state: heading.state, title: heading.title, herdrSessions: herdrLinks(text), ...(headline !== undefined ? { headline } : {}) };
 	}
 
 	/** Org headings that link a Herdr session id. */

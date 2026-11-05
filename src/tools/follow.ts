@@ -59,6 +59,9 @@ export type Observation = {
 	/** The agent's Herdr status, when the heading links a session on its host. */
 	agent?: string;
 	file?: string;
+	/** The worker's exact line from the task's own DISPATCH_HEADLINE property. */
+	headline?: string;
+	worker?: { agent: string; session: string };
 	/** Still AUTO behind a prerequisite that is not DONE. */
 	waiting?: boolean;
 };
@@ -151,7 +154,13 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 				if (prerequisite !== undefined && prerequisite.state !== "DONE") waiting = true;
 			}
 		}
-		return { state: task.state, missing: false, file: task.file, ...(agent ? { agent } : {}), ...(waiting ? { waiting } : {}) };
+		const worker = task.herdrSessions.filter((s) => s.host === input.host).at(-1);
+		return {
+			state: task.state, missing: false, file: task.file,
+			...(agent ? { agent } : {}), ...(waiting ? { waiting } : {}),
+			...(task.headline !== undefined ? { headline: task.headline } : {}),
+			...(worker ? { worker: { agent: worker.agent, session: worker.session } } : {}),
+		};
 	};
 
 	return defineTask<FollowInput, FollowState, null>({
@@ -183,13 +192,18 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 				const changed = next?.say !== undefined && next.signal !== last;
 				const update = !changed && next !== undefined && progressDue(task.input, next.signal, reported, now);
 				const say = changed ? next.say : update ? progress(task.input, seen?.file) : undefined;
+				const news = changed && ["DONE", "EVAL", "HOLD"].includes(next!.signal) && seen?.headline !== undefined
+					? { title: task.input.title, signal: next!.signal, headline: seen.headline, ...seen.worker }
+					: undefined;
+				const workerLine = news ? `\nWorker headline${news.agent ? ` (${news.agent})` : ""}: ${news.headline}` : "";
 				const notice: Notice | undefined =
 					say !== undefined
 						? {
 								requestId: `follow:${task.input.request ?? task.input.id}:${update ? "progress" : next!.signal}:${checks}`,
-								content: `[follow] ${say}`,
+								content: `[follow] ${say}${workerLine}`,
 								source: "follow",
-								label: say,
+								label: `${say}${workerLine}`,
+								...(news ? { follow: news } : {}),
 							}
 						: undefined;
 				// Wake for the next update on time rather than up to a check late.

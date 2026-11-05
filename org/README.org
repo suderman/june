@@ -53,9 +53,15 @@ Both agents run unattended: pi with =--no-approve=, Claude Code with =--dangerou
 Agents end each turn with one of:
 
 #+begin_src sh
-org-dispatch finish ID EVAL|HOLD|DONE "note"   # HOLD needs a question
+org-dispatch finish ID EVAL|HOLD|DONE "note" --headline "your line" # HOLD needs a question
 org-dispatch retry ID WHEN "what it waits for" # only when RETRY > 0
 #+end_src
+
+=--headline= is optional for older workers. New worker prompts request one line in the worker's own voice, saying only what its Outcome or Dialog records (the finish note for a repeating run). It must be non-empty plain text, without surrounding whitespace or line breaks. =finish= writes it verbatim to the task's =DISPATCH_HEADLINE= property in the same save as the state change, replaces any old value, and removes it when omitted. Claiming a new run clears the property. Nothing in the daemon authors a headline.
+
+On an EVAL, DONE, or HOLD state-change notice, June's existing follow check adds the exact headline to the text she reads and to =june.input.data.follow= as ={title, signal, headline, agent?, session?}=. Agent and session come from the task's latest Herdr link on its followed host, even without a live pane. No headline means unchanged notice text and data. Progress, blocked-agent, and stalled notices do not reuse a headline. A repeating DONE still returns to AUTO through Org and does not create a new terminal follow event. No extra monitor or comic presentation is added.
+
+The dispatcher and prompt are pinned packages: update the June input and activate each launching host to use the new finish option and prompt. Pull the checkout and restart an idle June daemon to use headline-aware follow notices. Checkout-linked skills apply at once, so their new finish instructions are conditional on dispatcher deployment.
 
 The user grants AUTO. June may queue new AUTO tasks and, when the user explicitly asks, resume existing TODO, EVAL, or HOLD tasks under her =AGENTS.md=. They use the same =org-edit= command; instructions define who may grant AUTO. Workers may create new tasks through =plan= only for a plan the user explicitly requested. For an existing task, =retry= is the one worker exception: it returns a task the user allowed to retry to AUTO, lowers =RETRY=, and schedules it for =WHEN=, at least 15 minutes away.
 

@@ -42,14 +42,11 @@ Jon, or June acting for him, queued this heading as AUTO. That state is his requ
 - DONE prerequisites unlock dependent tasks; EVAL does not. When review is required, give the reviewer enough evidence to accept the task through agent checks when possible. Name any remaining check that genuinely needs Jon's judgment, human eyes, or physical hardware. Do not leave generic "Jon should test it" steps when an agent can test the requirement. Follow the review policy above; passing tests does not waive required review.
 
 ** Ending a turn
+Before finishing at EVAL, DONE, or HOLD, record the result in Outcome or the question in Dialog. Also write a one-line headline in your own voice, stating only what that record says, and pass it as =--headline "your line"= after the finish note. Use plain text without surrounding whitespace or line breaks. June may quote this exact line as yours; never write as June. For a repeating task, the finish note is the run's result instead of a new Outcome section. Do not reuse a previous run's headline.
 
 End every turn in exactly one of these ways:
 
-- The work is complete and verified: run
-  =org-dispatch finish {{ID}} EVAL "one-line result"=, or =DONE= when the
-  rules above allow it.
-- You need Jon: run =org-dispatch finish {{ID}} HOLD "question"=. Number
-  separate questions, keep it readable on a phone, and say what you will do
-  if Jon resumes the task without answering.
+- The work is complete and verified: run =org-dispatch finish {{ID}} EVAL "one-line result" --headline "your line"=, or =DONE= when the rules above allow it.
+- You need Jon: run =org-dispatch finish {{ID}} HOLD "question" --headline "your line"=. Number separate questions, keep it readable on a phone, and say what you will do if Jon resumes the task without answering.
 {{RETRY}}- Otherwise keep working. A turn that ends without one of these commands is
   treated as stalled and you will be nudged.

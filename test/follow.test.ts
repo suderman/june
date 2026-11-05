@@ -37,6 +37,46 @@ test("follow reports each transition once and stays quiet otherwise", () => {
 	assert.equal(decide(input, { state: "PROG", missing: false }, "PROG", 8 * 24 * 60 * min, FOLLOW_DEFAULTS).done, true, "follows expire");
 });
 
+test("follow carries only the worker's own headline, verbatim in the model input and notice data", async (t) => {
+	const session = "01234567-89ab-cdef-0123-456789abcdef";
+	for (const [state, headline, agent, byHeading] of [
+		["EVAL", "I checked it. Docs match!", "pi", false],
+		["HOLD", "I'm stuck. Which copy do I keep?", "claude", false],
+		["DONE", "Fixed it, checks pass. Your turn!", undefined, true],
+		["EVAL", undefined, "pi", false],
+		["PROG", "Old line, not a blocked-agent report.", "pi", false],
+	] as const) {
+		await t.test(`${state}, ${headline ? "headline" : "legacy"}${byHeading ? ", by heading" : ""}`, async (t) => {
+			const tmp = await tempDir();
+			t.after(tmp.cleanup);
+			const root = join(tmp.dir, "org");
+			await mkdir(root);
+			const links = agent ? `** Sessions\n- [[herdr:kit/pi:${session}@p1][old pane]]\n- [[herdr:kit/${agent}:${session}][current, no pane]]\n- [[herdr:cog/pi:${session}@p2][other host]]\n` : "";
+			await writeFile(join(root, "todo.org"), `* ${state} Check docs\nCLOSED: [2026-11-05 Thu 14:00]\n:PROPERTIES:\n${byHeading ? "" : `:ID: ${input.id}\n`}${headline ? `:DISPATCH_HEADLINE: ${headline}\n` : ""}:END:\n:LOGBOOK:\n- Old run\n  :DISPATCH_HEADLINE: Not this old line.\n:END:\n\n${links}** Outcome\nThe report's evidence.\n*** Child task\n:PROPERTIES:\n:DISPATCH_HEADLINE: Not this child's line.\n:END:\n`);
+			const task = createFollowTask(new Org(root), new Herdr(testConfig(tmp.dir).herdr, async () => JSON.stringify({ result: { agent: { agent_status: "blocked" } } })), { intervalMs: 40, launchMs: 60_000, maxMs: 3_600_000 });
+			const adopted = { ...input, queuedAt: Date.now(), ...(byHeading ? { file: "todo.org" } : {}) };
+			const signal = state === "PROG" ? "blocked" : state;
+			const news = headline && state !== "PROG" ? { title: input.title, signal, headline, ...(agent ? { agent, session } : {}) } : undefined;
+			let heard: string | undefined;
+			const faux = fauxProvider();
+			faux.setResponses([(ctx) => {
+				const last = ctx.messages.findLast((message) => message.role === "user")!;
+				heard = typeof last.content === "string" ? last.content : last.content.filter((block) => block.type === "text").map((block) => block.text).join("");
+				return fauxAssistantMessage("Heard the worker.");
+			}]);
+			const daemon = await openTestDaemon({ ...tmp, faux, extensions: [defineExtension({ name: "follow-headline-test", tasks: [task] })] });
+			t.after(() => daemon.close());
+			const say = decide(adopted, { state, missing: false, file: "todo.org", agent: "blocked" }, "AUTO", Date.now(), FOLLOW_DEFAULTS).say!;
+			const label = say + (news ? `\nWorker headline${agent ? ` (${agent})` : ""}: ${headline}` : "");
+			await daemon.harness.commit((tx) => follow(tx, task, adopted, Number(daemon.root.id)), BG);
+			const reports = async () => (await daemon.root.context(BG)).entries.filter((entry) => entry.kind === "june.input" && (entry.data as { source?: string })?.source === "follow");
+			await until(async () => (await reports()).length === 1 && faux.state.callCount === 1 && !(await daemon.status()).busy);
+			assert.equal(heard, `[follow] ${label}`);
+			assert.deepEqual((await reports())[0]!.data, { source: "follow", text: label, surface: "gui", ...(news ? { follow: news } : {}) });
+		});
+	}
+});
+
 test("a task waiting on a prerequisite is silent, and its launch clock starts once it is ready", () => {
 	const planned = { ...input, depends: ["pre12345"] };
 	const seen = (waiting: boolean) => ({ state: "AUTO", missing: false, ...(waiting ? { waiting } : {}) });
@@ -356,9 +396,13 @@ test("resuming after EVAL and HOLD follows each new run without duplicate report
 	const originalId = /^:ID: (.+)$/m.exec(await readFile(file, "utf8"))![1];
 	for (const [index, state] of ["EVAL", "HOLD", "DONE"].entries()) {
 		if (index > 0) await ask(tmp.paths.socket, "resume it");
-		await replaceFile(file, (await readFile(file, "utf8")).replace("* AUTO Check docs", `* ${state} Check docs`));
+		const headline = ["First pass checked, ready for review.", "I need a decision on the second pass.", "Third pass fixed it, checks pass!"][index]!;
+		const current = (await readFile(file, "utf8")).replace(/^:DISPATCH_HEADLINE:.*\n/gm, "");
+		await replaceFile(file, current.replace("* AUTO Check docs", `* ${state} Check docs`).replace(":END:", `:DISPATCH_HEADLINE: ${headline}\n:END:`));
 		await until(async () => (await reports()).length === index + 1 && !(await daemon.status()).busy && faux.state.callCount === (index + 1) * 3);
-		assert.match(JSON.stringify((await reports()).at(-1)!.data), new RegExp(state));
+		const data = (await reports()).at(-1)!.data as { text: string; follow: unknown };
+		assert.deepEqual(data.follow, { title: "Check docs", signal: state, headline });
+		assert.ok(data.text.endsWith(`\nWorker headline: ${headline}`), "each run reports its fresh line, never the prior run's");
 	}
 	await new Promise((resolve) => setTimeout(resolve, 150));
 	assert.equal((await reports()).length, 3);
