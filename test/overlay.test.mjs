@@ -958,6 +958,28 @@ test("both native menus use the settled reply's revision and expose saved takes 
 	assert.ok(menuAt(1).every((a) => a.reply === "answer" && a.revision === "revision"));
 });
 
+test("new replies cannot replace an older performance's art or saved-take menu", () => {
+	const at = Date.UTC(2026, 10, 5, 12);
+	const art = POSES.find((p) => p.expression === "warm" && !p.activity);
+	const takes = [{ take: 0 }, { take: 1 }, { take: 2 }];
+	const render = (items, state = {}) => composeStrip(panels(items), state, POSES, { sides: {}, poseIds: {}, livePoses: {} });
+	for (const text of ["a short reply", `${"first ".repeat(60)}\n\n${"second ".repeat(60)}`]) {
+		for (const take of [0, 1, 2]) {
+			const items = [user("question"), { ...june("answer", text), expression: "warm", pose: art.id, side: "left", expressionAt: at, at, artVersion: "saved", take, takes }];
+			const before = render(items);
+			for (const streaming of [true, false]) {
+				const after = render([...items, tool("later-tool"), patter("later-thought"), { ...june("notice", "a later update", streaming), ...(streaming ? {} : { expression: "serious", artVersion: "new" }) }], { running: streaming });
+				assert.deepEqual(after.slice(0, before.length), before, "new words keep every earlier panel's art, side, time, and reply");
+				assert.deepEqual(after.slice(0, before.length).map((p) => takeMenu(p)), before.map((p) => takeMenu(p)), "Back and Forward still target the saved reply");
+				assert.deepEqual(after.at(-1).elements.map((e) => e.kind), ["tools", "thought", "june"], "the newer reply keeps its own tools and thought");
+				assert.deepEqual(takeMenu(after.at(-1)).map((a) => a.reply), streaming ? [] : ["notice"]);
+			}
+		}
+	}
+	const short = panels([user("q"), june("first"), june("second")]);
+	assert.equal(short.length, 2, "distinct short replies get distinct panels even before faces arrive");
+});
+
 test("a panel's scene is decided once for every client: the hour's light, her room, its window, and what is behind her", () => {
 	const poses = readPoses(manifest, "");
 	const sceneryAll = readScenery(manifest, "");

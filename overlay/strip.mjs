@@ -54,9 +54,9 @@ const weightOf = (e) => (e.kind === "user" ? e.text.length : e.kind === "june" ?
 
 /**
  * The strip's panels, oldest first. Each of the user's messages opens a panel; what June does after it follows in the
- * same panel until it holds about a panel's worth, then continues in the next panel at one of her balloons, taking the
- * tool calls and thought that lead into that balloon with it. Items before the first message share a panel. Private
- * items (detail only) are left out.
+ * same panel until a different reply starts or it holds about a panel's worth, then continues in the next panel at one
+ * of her balloons, taking the tool calls and thought that lead into that balloon with it. Each panel has one reply's
+ * performance and take menu. Private items (detail only) are left out.
  *
  * A panel's elements, in reading order: `user` (their message), `june` (one beat of a reply, `streaming` on the last
  * while she writes), `tools` (consecutive tool calls, drawn as a chip or a status card), `thought` (patter; a panel keeps
@@ -87,7 +87,7 @@ export function panels(items) {
 			if (parts.length === 0) parts.push("");
 			for (const [i, text] of parts.entries()) {
 				const lastJune = current.elements.map((e) => e.kind).lastIndexOf("june");
-				if (lastJune >= 0 && weight() > PANEL_BUDGET) {
+				if (lastJune >= 0 && (current.elements[lastJune].replyId !== item.id || weight() > PANEL_BUDGET)) {
 					// The next panel starts with what leads into this balloon: the tools and thought since her last one.
 					const carried = current.elements.splice(lastJune + 1);
 					open(`${item.id}#${i}`, carried);

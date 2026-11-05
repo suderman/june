@@ -111,7 +111,7 @@ test("Qt's right-click take menu preserves left selection, targets the reply, an
 	const dir = await mkdtemp(join(tmpdir(), "june-menu-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await mkdir(join(dir, "ui"));
-	for (const file of ["TakeMenu.qml", "compose.mjs"]) await copyFile(new URL(`../overlay/${file}`, import.meta.url), join(dir, "ui", file));
+	for (const file of ["TakeMenu.qml", "compose.mjs", "strip.mjs"]) await copyFile(new URL(`../overlay/${file}`, import.meta.url), join(dir, "ui", file));
 	// Only Quickshell's singleton wrapper is replaced; use the actual palette and menu with Qt Quick Test.
 	const theme = (await readFile(new URL("../overlay/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
@@ -120,6 +120,7 @@ test("Qt's right-click take menu preserves left selection, targets the reply, an
 import QtQuick
 import QtTest
 import "ui"
+import "ui/strip.mjs" as Strip
 Item {
   id: root
   width: 500; height: 240
@@ -166,6 +167,19 @@ Item {
       open(); compare(popup().itemAt(1).text, "Forward"); compare(popup().itemAt(2).visible, false);
       const item = popup().itemAt(1);
       mouseClick(item, item.width / 2, item.height / 2); tryVerify(() => root.chosen !== null); compare(root.chosen.op, "advance");
+    }
+    function test_older_reply_after_new_words() {
+      const items = [
+        { kind: "assistant", id: "42", text: "An earlier reply", streaming: false, artVersion: "saved", take: 1, takes: [{ take: 0 }, { take: 1 }, { take: 2 }] },
+        { kind: "assistant", id: "43", text: "A later update", streaming: false }
+      ];
+      const panels = Strip.panels(items);
+      compare(panels.length, 2);
+      area.panel = panels[0];
+      open(); compare(popup().itemAt(1).text, "Back"); compare(popup().itemAt(2).text, "Forward");
+      const item = popup().itemAt(1);
+      mouseClick(item, item.width / 2, item.height / 2); tryVerify(() => root.chosen !== null);
+      compare(root.chosen.op, "restore"); compare(root.chosen.reply, "42"); compare(root.chosen.revision, "saved");
     }
     function test_busy_and_offline() {
       area.taking = { "42": "request" }; open();
