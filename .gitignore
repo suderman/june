@@ -3,6 +3,9 @@ result
 result-*
 *.sqlite
 *.sqlite-*
+# Python helper bytecode.
+__pycache__/
+*.py[cod]
 # Local Gradle builds of the Android app (Nix builds in its sandbox).
 android/build/
 android/.gradle/

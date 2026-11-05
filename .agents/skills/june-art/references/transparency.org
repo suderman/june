@@ -1,0 +1,58 @@
+* Preferred ToonOut transparency
+** Actual installed model and comparison
+Preferred saved workflow: =June - Production alpha ToonOut.json=, exported under =$ART/production-idle/workflows/=. It references the original seed-4002 RGB output, not the normalized production WebP. Do not resegment an already accepted production sprite just to improve a metric.
+
+Native converted weight: =/data/comfyui/models/background_removal/toonout-fp16.safetensors=, 444473860 bytes, SHA256 =15e5b901e64d276857fca81a2ba1896698bff2f8785ce6b329b9001d25253bc7=. Upstream model repository https://huggingface.co/joelseytre/toonout , revision =cbf720eca394edcde66b861a8a8c20fbabe9c748=. Original =birefnet_finetuned_toonout.pth= was 885046394 bytes, SHA256 =8c7f8a0bc24400f4caade76622f75ff22ca1e93e169add9d2b70093e2487fbe5=. Anime-oriented project: https://github.com/MatteoKartoon/BiRefNet . No upstream Python code was executed or installed.
+
+General native BiRefNet comparison weight: =background_removal/birefnet.safetensors=, SHA256 =9ab37426bf4de0567af6b5d21b16151357149139362e6e8992021b8ce356a154=, from https://huggingface.co/Comfy-Org/BiRefNet at revision =884af709e9b795d89dafbf97f29c8d6a2386f5c6=. It left pale hair fringes against dark backgrounds on June. That observed failure justified one ToonOut comparison. See =$ART/production-idle/alpha-comparison/hair-edges.png= and =$ART/production-idle/background-comparison.jpg=. ToonOut was preferred and Jon accepted the remaining tiny bright hair pixels. Do not install several segmentation models or start another tuning cycle without a material image-specific failure.
+
+** Conversion and compatibility
+Existing weight already works through core =LoadBackgroundRemovalModel= and =RemoveBackground=. No ToonOut custom node is needed. Inspect live =/object_info/LoadBackgroundRemovalModel= and confirm the filename is listed. Core implementation is discoverable from =/system_stats= source root, then =comfy_extras/nodes_bg_removal.py= and =comfy/bg_removal_model.py=. Do not assume a filename alone proves architecture compatibility.
+
+Historical conversion is preserved as =$STATE/production-idle/convert-toonout.py= with =toonout-model.json=. It loaded the hash-verified PTH with =torch.load(...,map_location='cpu',weights_only=True)=, removed =module._orig_mod.= or =module.= training prefixes, rejected duplicate keys/non-tensors/nonfinite floats, converted floating tensors to contiguous FP16 and retained integer buffers. All native BiRefNet expected tensor names/shapes were checked with =safetensors.safe_open=, including the integer =relative_position_index= buffer; converted total was 754 tensors. It saved safetensors with upstream revision/source-hash/conversion metadata, then verified the installed file hash above.
+
+The archived converter's temporary source path was deleted after successful conversion. Do not run it blindly: it intentionally refuses an existing target. For disaster recovery only, obtain separate installation permission, download that exact upstream revision, verify original SHA, adapt input/output paths to unused files, run with the service's existing Torch/safetensors environment and verify keys/shapes, metadata and resulting hash. Discover the container Python through =/system_stats= rather than copying a historical Nix store interpreter path. Never use unsafe =weights_only=False= or fetch/execute remote model Python. Do not install packages just to repeat an already verified conversion. If the native model or provenance is missing, report the dependency before generating production art.
+
+** Eight-node extraction graph
+| ID | Node | Connection |
+|----+------+------------|
+| 1 | LoadImage | Original RGB, for example June/production-idle/idle-attentive-s4002_00001_.png [output] |
+| 2 | LoadBackgroundRemovalModel | toonout-fp16.safetensors |
+| 3 | RemoveBackground | image 1 and model 2, produces foreground-probability MASK |
+| 4 | MaskToImage | mask 3 to inspectable grayscale IMAGE |
+| 5 | SaveImage | Native foreground mask PNG |
+| 6 | InvertMask | 1 minus foreground mask |
+| 7 | JoinImageWithAlpha | Original image 1 and inverted mask 6 |
+| 8 | SaveImage | Source-size RGBA PNG |
+
+=RemoveBackground= gives 1 for foreground. ComfyUI =JoinImageWithAlpha= expects a transparency mask, where 1 means transparent, so inversion is required. The final PNG alpha is the original foreground mask. Omitting inversion produces the opposite cutout. Native 8-bit PNG alpha equals the saved grayscale mask. Keep both native outputs, their API history and workflow; extraction is not another diffusion or face-replacement pass.
+
+Use separate prefixes and source names for each candidate. Native loading supports =... [output]= references; do not modify source files. Use the same frontend/API execution and success checks as generation, reading actual node schemas for current input names.
+
+** Pixel and color checks
+Preserve original RGB even beneath transparent pixels. Alpha is genuine when corners are zero, silhouette interiors near 255 and edge samples graded, not when an image merely depicts a checkerboard. These commands inspect an existing extraction without altering it:
+
+#+begin_src sh
+magick identify -format '%wx%h %[channels] %[colorspace]\n' "$RGBA"
+magick "$RGBA" -alpha extract -format 'min=%[min] max=%[max] levels=%k\n' info:
+cmp <(magick "$RGB" -alpha off -depth 8 rgb:-) <(magick "$RGBA" -alpha off -depth 8 rgb:-)
+cmp <(magick "$MASK" -colorspace gray -depth 8 gray:-) <(magick "$RGBA" -alpha extract -depth 8 gray:-)
+#+end_src
+
+Here =RGB=, =RGBA= and =MASK= are explicit paths you selected; use bash for process substitution. The approved archive names are =production-idle/candidates/idle-attentive-s4002.png=, =production-idle/idle-attentive-source-alpha.png= and =production-idle/idle-attentive-mask.png=. The latter two are source-size 1024x1344, not the final 2048x2662 asset. =idle-attentive-processed-mask.png= instead describes final normalized alpha.
+
+Use sRGB output. Inspect actual PNG chunks/profile, not just ImageMagick's inferred colorspace. Source RGB was already sRGB; declaring its sRGB intent can be a metadata-only operation that preserves IDAT/pixels. Historical reference-sheet builders insert an sRGB chunk explicitly because =png:include-chunk=sRGB= did not actually emit one in this environment. For a new file requiring only that declaration, use a separate output path, PNG intent byte 0 and correct CRC after IHDR; verify decoded pixels unchanged with the inspector. Do not recolor source RGB, rewrite approved files, or confuse a metadata tag with conversion from a genuinely different color space. Keep untouched native PNGs with embedded prompt/workflow even if a separate tagged copy is made.
+
+Ingestion's lossless WebP retains alpha. Transparent RGB may be normalized by =webp:exact=false= and upscale/placement changes source pixels, so compare final PNG to decoded final WebP, not final output to raw generation. Compare source alpha RGB to raw generation separately. Original ComfyUI PNGs remain the provenance source.
+
+** Review over four grounds
+Create NEW preview files, never flatten the deliverable. For example, with =RGBA= pointing at the source or final PNG and =OUT= an unused PNG path:
+
+#+begin_src sh
+magick "$RGBA" -background white -alpha remove -alpha off "$OUT"
+# Repeat to different OUT paths with '#101018' and '#2058E0'.
+#+end_src
+
+Also composite over a representative room/panel background from the actual application. Inspect at ordinary panel size and enlarged edges: hair wisps/bangs, headset band and earcups, microphone boom, collar/blouse, dark skirt contours, fingers/hand gaps and held-prop holes. Check for lost lines, opaque background islands, pale halos and partially erased skin. Sample known source coordinates carefully; a point outside an earcup is not evidence of an erased earcup.
+
+Idle source has no hands in the finished crop. Its successful matte does not validate future finger gaps. Later isolated-prop tests preserved the mug-handle and clipboard-ring holes; those do not establish hand anatomy either. Bright RGB hair highlights remain opaque by design. Avoid default erosion, hard thresholding, aggressive defringing and hair-color removal. Correct a material failure only after a source/mask/background comparison demonstrates it and the change has a reviewable before/after.

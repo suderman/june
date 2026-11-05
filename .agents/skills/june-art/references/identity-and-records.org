@@ -1,0 +1,71 @@
+* Identity, authority and records
+** Locate the project material
+From the checkout, use =REPO=$(git rev-parse --show-toplevel)=. Jon's =~/org/work/= is synchronized across his workstations; the project is =$HOME/org/work/suderman/june/june.org=. Kit is the designated ComfyUI/NVIDIA host. Read synced material from another workstation as needed, but perform GPU/service operations on kit rather than provisioning a second installation. Read the active art task for current approval and scope. Old milestone summaries retain their original pending-review language; later explicit project decisions take precedence.
+
+The current material root is =$HOME/org/work/suderman/june/2026-11-03-june-art=. Confirm it contains =art-list.org= and =june-agent-character-sheet.png=. If moved, find the project file's links rather than assuming the checkout contains artwork. Optional shell names used throughout these references:
+
+#+begin_src sh
+REPO=$(git rev-parse --show-toplevel)
+ART="$HOME/org/work/suderman/june/2026-11-03-june-art"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/org-work/suderman/june/2026-11-03-june-art"
+AVATAR="${XDG_DATA_HOME:-$HOME/.local/share}/june/avatar"
+SKILL="$REPO/.agents/skills/june-art"
+test -f "$ART/art-list.org" && test -f "$ART/june-agent-character-sheet.png"
+readlink -f "$AVATAR"
+#+end_src
+
+These are shell variables, not existing required environment settings. =$HOME/.local/share/june= resolves to =$HOME/org/june= on kit; confirm before writes. Runtime logs/builders/manifests belong under =$STATE/<milestone>/=. Human-review images, sources and summaries belong under =$ART/<milestone>/=. The repository keeps this skill, application code and placeholder art, not production images or models.
+
+** Canonical June
+June is an adult with soft rounded cheeks and a compact lower face, long mostly smooth dark chocolate-brown hair with gentle bends and familiar bangs, olive-hazel eyes with green-dominant material color and warm amber near the pupils. Her acting is warm, clever, playful and mischievous; personality should change her pose and eyes, not just her mouth.
+
+Her costume is a dusty-rose collared blouse, neckline casually open, sleeves rolled toward the elbows; high-waisted dark charcoal/plum A-line skirt, approximately 5-10 cm above the knees standing; slim dark belt; opaque dark tights; brown ankle boots with modest block heels; delicate gold necklaces including a small pendant; dark over-ear headset and compact mouth-level boom. Wristwatch/bracelets are optional, not identity anchors. The rasters have no physical scale, so the centimeter target is an instruction, not a measured claim about the sheet.
+
+Authority order:
+1. Original =june-agent-character-sheet.png= for identity, proportions, appearance and rendering. SHA256 =ec3c8cf42ffa5bf1096ae9c502a89e3af30bf1f1513381466b8f954868d70057=.
+2. Approved palette/material references and accepted working views, only within their documented limits. =production-references/sheet-palette.png= is finished/approved. =sheet-turnaround.png= is accepted as a working reference: shallow three-quarter angle, folded side forearm, narrower new chins and boot/necklace drift remain marked. =production-outfit-props/sheet-outfit-props.png= and its isolated prop designs await review at this writing.
+3. Approved production assets as implementation examples. =idle-attentive= seed 4002 is approved and promoted. Its uncropped lower garment is ambiguous and blue/navy-biased; never use it as a full-body costume or skirt-color reference.
+4. Experiments as technical evidence, not automatic design changes. Pretty newer faces do not supersede canon.
+5. Prompts for the requested scene/acting and explicit amendments. Approved above-knee skirt wording overrides older inventory jeans/generic-shirt wording. Do not silently treat any new prompt as permission to redesign June.
+
+Secondary preserved face: =june-approved-face.png=, SHA256 =3853c7c6cb4532d9ded78b9eab7b8406675ec867005880f63c05e62cc7cd090a=. It remains valuable but does not compete with or replace the complete canonical sheet. Its early F-eyes/G-nose compositing workflow is an archived design experiment, not the production generator.
+
+Do not recursively replace input references with each attractive output. Keep canonical inputs fixed, compare new generations directly against them, and obtain approval for a reference change. This prevents gradual changes in jaw, hair, eye shape, accessories and costume.
+
+** Reference crops and current server inputs
+Canonical crops under =$ART/canonical-references/= use source-sheet coordinates =x,y,width,height=:
+
+| File | Crop | Purpose |
+|------+------|---------|
+| june-canonical-fullbody.png | 8,0,410,1086 | Clothing, silhouette and overall appearance |
+| june-canonical-face.png | 1019,169,402,665 | Face, bangs, headset and rendering |
+| june-canonical-side.png | 435,10,270,1076 | Primary-source profile, bent arm |
+| june-canonical-back.png | 725,6,275,1080 | Primary-source rear silhouette |
+
+=manifest.json= in that folder records provenance. Server inputs =/data/comfyui/input/june-canonical-fullbody.png= and =june-canonical-face.png= have identical decoded RGBA to the archives, but different PNG date metadata and therefore different file hashes. Check pixels as well as filenames. =ImageStitch= constructs a conditioning board; it does not assemble the generated output. Exact-angle experiments add side-face crops under =production-references/reference-inputs/=, but are not default replacements.
+
+** Evidence map
+All paths in this table are beneath =$ART= unless prefixed =$STATE=.
+
+| Location | What to read or inspect |
+|----------+-------------------------|
+| art-list.org | Complete 105-piece inventory, exact names/directions/composition and reference sizes |
+| canonical-tests/technical-summary.org | First native reference-conditioned standing/seated calibration and limits |
+| canonical-tests/models.json | Four generation-weight hashes and source locations |
+| canonical-refinement/technical-summary.org | Twelve matched-seed text/board tests; why defaults were kept |
+| conversational-pilot/technical-summary.org | Twelve expression studies; selections, clipped crowns, hand/headset failures |
+| production-idle/ | Three RGB candidates, original seed-4002 source, native alpha, sidecars, final PNG/WebP, four-background tests and actual panel preview |
+| production-references/ | Approved palette, working turnaround, promotion evidence, all ten view studies, source crops, masks and workflows |
+| production-outfit-props/ | Pending-review construction sheet, five isolated prop proposals, exact source-index.csv, native alpha and workflows |
+| $STATE/production-idle/ | Five API histories, ToonOut conversion/provenance, pixel checks and original panel harness |
+| $STATE/production-references/ | View histories, deterministic palette/turnaround builders, alignment geometry and preservation checks |
+| $STATE/production-outfit-props/ | Prop histories, deterministic sheet builder, status investigation and preservation checks |
+
+Approval ledger for idle: the project explicitly approves and promotes seed 4002; =$ART/production-references/promotion/idle-attentive.json= and =$AVATAR/source/idle-attentive.json= record that promotion. Original experiment JSON/TXT and the production source TXT still contain historical awaiting-review/not-publication-approval wording. Preserve those provenance bytes; do not interpret them as revoking later approval. Use current project decisions plus promotion metadata for approval, original PNG/TXT for generation settings.
+
+** Host-state durability
+The skill is repository-local and must be included in version control to appear in another checkout. It does not make external data part of Git. Org art/project material is synced separately; do not assume =/data/comfyui= or =$STATE= is backed up or synced. Full API histories, conversion/build scripts and run logs currently rely on kit-local state. Record any separate backup policy explicitly rather than inventing one or copying private logs/weights into Git.
+
+A checkout on kit uses the existing art and service paths. Agents on Jon's other workstations use synchronized Org material and access kit for ComfyUI work. Supporting unrelated environments is not a goal; no alternate installation or configuration layer is required. Original archived PNGs carry executable prompt/UI graphs, so many generations remain recoverable without API history; workflow exports and reference crop coordinates also survive in Org. Full original timing/log evidence and exact sheet-builder scripts may be lost if host state disappears. Portable SVGs embed sheet images and CSVs retain palette/crop provenance. The bundled panel proof replaces dependence on the old absolute-path harness. ToonOut conversion provenance and recovery algorithm are in transparency.org; a missing native model still requires an authorized recovery, not automatic installation.
+
+Each recent milestone has =technical-summary.org=, =workflows/= exports and host-local =run-record.json=/=verification.json=. Early summaries describe what was known then. Consult project approvals before treating an experiment as publishable. No =sheet-expressions= or =sheet-hands= batch is authorized by this skill.

@@ -1,0 +1,52 @@
+* Inspect crops and render the actual comic panel
+** First use the existing crop sheet
+=nix run .#art -- sheet SET NAME OUT= reads the existing manifest and processed image, producing a contact sheet with face/mouth annotation and the allowed framing crops. It does not ingest or change source art, but it writes OUT and creates its parent. Choose a new output under host-local state or a review directory. The default writes =SET/sheets/NAME.png=, so supply OUT when auditing production read-only.
+
+The command uses actual =overlay/compose.mjs= functions =readPoses= and =frame=. Finished face/mouth are normalized against the complete canvas. Inspect hair/headset, expression, face size, margins, props and bottom crop rather than considering a successful command visual approval.
+
+** Actual renderer, isolated from the user's app
+Production proof used unchanged =overlay/Panel.qml=, =compose.mjs=, room/scenery components and approved staged WebP, with a speech balloon at 820 px and 360 px widths. Artifact: =$ART/production-idle/actual-panel-preview.png=. Original host-only harness/logs remain under =$STATE/production-idle/render/= and =render-xvfb.log=. It contained fixed checkout/staging/output paths. The bundled helpers remove those dependencies for a new proof:
+
+#+begin_src sh
+PROOF="$STATE/preview-audit-$(date +%s)"
+python "$SKILL/examples/preview-panel.py" --set "$AVATAR" --name idle-attentive --out "$PROOF" --repo "$REPO"
+#+end_src
+
+Record =git rev-parse HEAD= and =git status --short= beside the proof. This prepares a NEW directory, manifest snapshot and symlinks to current QML/mjs files. It does not launch the app, submit generation, change art or ingest. =examples/panel.qml= supplies the ordinary Window, proof text and capture; Panel itself is the repository component, not a redrawn imitation. The manifest is read at preparation time, so prepare another proof after changing an asset. The helper expects a pose supporting waist framing. It is not a general Android or animation test runner.
+
+Run the proof with matching Quickshell/Qt libraries, isolated from the live overlay. Read =nix/overlay.nix= and the installed wrapper located by =command -v june-overlay=. Its =PATH= identifies qs; =QML2_IMPORT_PATH=, =QT_PLUGIN_PATH= and =JUNE_OVERLAY_FONTS= identify compatible Qt modules, WebP plugin and fonts. Read the wrapper; DO NOT source or execute it to discover these values, since it would launch/control the user's application. Do not hardcode a historical Nix store hash or mix Qt 6.11 and 6.12 plugins.
+
+For read-only discovery, =readlink -f "$(command -v june-overlay)"= gives the wrapper; =rg '^export (PATH|QML2_IMPORT_PATH|QT_PLUGIN_PATH|JUNE_OVERLAY_FONTS)=' "$(command -v june-overlay)"= shows only the relevant lines. Assign/export their literal current paths in the proof shell without executing the wrapper. For QT_PLUGIN_PATH take only the matching store plugin directory, not the wrapper's optional ${QT_PLUGIN_PATH:+...} expansion or unrelated inherited Qt plugins. =readlink -f "$(command -v qs)"= locates qs; =ls /nix/store/*-xorg-server-*/bin/Xvfb= can locate existing Xvfb copies. Those unrooted store copies may be garbage-collected; this is a host dependency, not a portable binary bundled with the skill.
+
+On kit, qs is installed. Xvfb was available from an existing Nix store xorg-server output, not PATH. Locate that existing binary or, only if permitted, use a temporary Nix environment such as =nix shell nixpkgs#xorg.xorgserver=. Absence is an unresolved preview dependency, not permission to change system configuration. A private Xvfb/OpenGL display rendered shader layers that were missing with =QT_QPA_PLATFORM=offscreen=. Do not accept a blank-layer offscreen capture as an art failure.
+
+After resolving =QS= and =XVFB= to existing executable paths, and setting matching =QML2_IMPORT_PATH=, =QT_PLUGIN_PATH= and =JUNE_OVERLAY_FONTS= from the current wrapper, run this in bash. It starts and stops only its own Xvfb; it does not touch the user's display or running overlay:
+
+#+begin_src sh
+(
+  set -euo pipefail
+  : "${PROOF:?}" "${QS:?}" "${XVFB:?}" "${QT_PLUGIN_PATH:?}" "${QML2_IMPORT_PATH:?}"
+  "$XVFB" -displayfd 3 -screen 0 1400x1000x24 -nolisten tcp 3>"$PROOF/display" >"$PROOF/xvfb.log" 2>&1 &
+  xvfb_pid=$!
+  trap 'kill "$xvfb_pid" 2>/dev/null || true; wait "$xvfb_pid" 2>/dev/null || true' EXIT
+  for attempt in {1..50}; do
+    test -s "$PROOF/display" && break
+    kill -0 "$xvfb_pid"
+    sleep 0.1
+  done
+  test -s "$PROOF/display"
+  DISPLAY=":$(<"$PROOF/display")" QT_QPA_PLATFORM=xcb QSG_RHI_BACKEND=opengl \
+    LIBGL_ALWAYS_SOFTWARE=1 QT_QUICK_CONTROLS_STYLE=Basic \
+    timeout 30s env -u WAYLAND_DISPLAY -u QT_STYLE_OVERRIDE -u QT_QPA_PLATFORMTHEME \
+    "$QS" -p "$PROOF/shell.qml" >"$PROOF/render.log" 2>&1
+  grep 'JUNE_PROOF' "$PROOF/render.log"
+  test -s "$PROOF/panel-preview.png"
+)
+#+end_src
+
+Export the Qt/font variables, not just shell-local assignments, so qs receives them. Inspect =render.log=: both =desktopReady= and =narrowReady= should be =true= (derived from each Panel's presented property), with an existing pose URL, computed image/face/mouth geometry, and =JUNE_PROOF_SAVED true=. Open =panel-preview.png= yourself and verify the character, room and balloon all rendered. No unknown-type, missing WebP plugin, QML import or shader errors should be ignored. The template waits two seconds before capture and fails if panels are not ready; if startup is unusually slow, diagnose readiness before adjusting that proof-only timer.
+
+The proof's broad desktop waist view makes June smaller than the automatic narrow close-up. Jon considers this acceptable and recorded a possible future layout review. Do not alter the sprite, face box or renderer just to make a wider panel feel closer. 360 px QML output is a narrow-layout check, not a claim of testing an Android device. Phone code imports the shared compose/scenery/light modules through =android/js/june.mjs=, but its native drawing/runtime still needs device testing separately.
+
+** Gates and reproducibility
+Use source-pixel measurements in incoming metadata; do not modify final manifest geometry to hide a source defect. Preserve proof manifest, current repository commit, output PNG and log so a later worker can distinguish art changes from renderer changes. The read-only status/preview path should not start a daemon, send overlay IPC, change =JUNE_OVERLAY_ART= globally or reload production. If a real contract problem appears, record it for the code agent rather than editing the app under an art task.

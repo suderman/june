@@ -1,0 +1,98 @@
+* Production contract, measurement and ingestion
+** Read current code and the actual inventory entry
+Implementation authorities are =art/june-art.mjs=, =art/layout.mjs=, =src/avatar.ts=, =overlay/compose.mjs= and =docs/interfaces.org= in the checkout. The full inventory is =$ART/art-list.org=. Inspect these before assuming flags or metadata are unchanged. CLI usage is printed for an unrecognized command; there is no dedicated help flag. =nix run .#art -- --help= prints usage and exits 2, not an installation failure.
+
+Current syntax, from repository root:
+
+#+begin_example
+nix run .#art -- status SET
+nix run .#art -- ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--key COLOUR] [--fuzz PERCENT]
+nix run .#art -- sheet SET NAME [OUT]
+#+end_example
+
+Nix provides ImageMagick and =realesrgan-ncnn-vulkan=. First realization may fetch dependencies; it is not permission to install a replacement image toolkit. Plain =node art/june-art.mjs= needs a compatible Node TypeScript loader/runtime and those binaries, so prefer the flake command.
+
+** Inventory and vocabulary
+| Class | Count | Target canvas / behavior |
+|-------+-------+--------------------------|
+| Standard poses | 39 | 2048x2662, head/close-up/bust/waist |
+| Working poses | 8 | Same canvas, activity plus expression |
+| Tall poses | 9 | 2048x4096, includes full framing |
+| Chibi stills | 10 | 1024x1024 whole figure |
+| Live loops | 18 | 512x512 per frame, inventory suggests 8-12 frames near 8 fps |
+| Rooms | 5 | 3200x2000, transparent window for computed sky/view |
+| Window views | 4 | 1600x1000, transparent sky |
+| Environmental props | 7 | Inventory-specific room-pixel sizes |
+| Production references | 5 | Sheet-specific 2048-4096 sizes, not runtime manifest entries |
+
+Use exact inventory names, not a second invented catalogue. Pose names must be lowercase words joined by hyphens; output is =poses/NAME.webp=. Expression is a separate fixed identifier:
+
+| Frequency | Names |
+|-----------+-------|
+| Common | idle, warm, wry, curious, skeptical, determined, serious, gentle |
+| Occasional | smug, exasperated, laughing, surprised, confused |
+| Rare | indignant, pout, bashful, delighted, cheering |
+
+Current operational contract has exactly 18 expressions. Do not add =sleepy= under an art task; the older inventory lists it as an open design question, and any vocabulary change needs separate coordination. Working pose activities are =thinking=, =working= or =watching=, not new feelings. Live states have their own runtime vocabulary in =src/avatar.ts=. Chibi names such as =chibi-warm= ingest into the =chibi= section keyed by =warm=. Current CLI supports sections =poses,chibi,rooms,plates,props=; there is no live-loop ingester section. Runtime has live/chibi/activity support despite old inventory claims that additions are still needed. Animation needs its own validated production path, not an assumed extension of this sprite recipe.
+
+Reference sheets stay with production material, not pose entries or the ingester's =sheets/= crop previews. The outfit sheet's mug/pen/laptop examples are visual references, not the seven weather/season environmental props. Do not register them as new runtime expressions.
+
+** Sprite composition
+Foreground character assets need genuine PNG/lossless-WebP alpha, sRGB, no room, floor shadow, panel tint, speech bubble or lettering. Application draws hearts, sparkles, sweat/anger/steam/emphasis marks; blush and facial tears may be drawn. Live thought-puff and snoozing-letter descriptions conflict with that rule and require coordination, not silent baking-in.
+
+Standard source should include complete crown/hair/headset down to about waist, face looking/gesturing as specified, with clear side/top space and all needed hands/props. Raised arms need extra headroom. Approximately a third of library faces front, a third viewer-left and a third viewer-right, following each named entry. =facing:right= means toward the viewer's right edge, and =left= toward the viewer's left, not June's anatomical right/left. Do not mirror an image to conceal wrong headset/accessory construction. Metadata can allow mirroring, but approved idle uses =mirror:false=.
+
+Actual standard normalization targets face height =0.27*2662= and face center y =0.33*2662=. Tall targets face height =0.10*4096= and center y =0.13*4096=. Face width is determined by measured source proportions. Standard side/top protection is 4%; the figure may intentionally run off the bottom for a waist cut. This conflicts with a literal four-sided margin statement in the inventory. Jon accepted current ingestion for idle; document the discrepancy without changing art direction, ingester or renderer. If the silhouette is too wide at target face scale the ingester warns rather than shrinking to hide it. A too-high crown is shifted down with a warning. A source that ends too early may float at the bottom.
+
+** Measure source pixels, not the final canvas
+Measure face cheek-to-cheek, forehead/hairline through chin, excluding hair/headset as far as anatomy permits. Record =[x,y,width,height]= on the source-size transparent image. Measure the mouth center =[x,y]= on the same image. Annotate a separate source copy with a box/dot and inspect visually. Do not copy the old face box onto a newly generated head. ImageMagick =-draw 'rectangle ...' ... -draw 'circle ...'= is enough; no automatic face detector was validated here.
+
+Worked source =idle-attentive-s4002= is 1024x1344: =faceBox=[402,104,224,276]=, mouth =[507,321]=. Annotated evidence is =$ART/production-idle/source-face-box.png=. Feed source mouth through =--mouth 507,321=; a pixel mouth array in JSON would be interpreted as finished manifest data, not automatically transformed. If absent, code guesses center-x and 80% down the final face.
+
+Finished =face= and =mouth= are BOTH fractions of the entire final image. Mouth is not relative to face. With source placement =(x0,y0)=, original-to-output scale =s=, canvas =(W,H)=, final mouth is =[(x0+mx*s)/W,(y0+my*s)/H]=, rounded to three decimals. Manifest validator requires mouth inside face. =readPoses= converts them to objects for =frame=/=panelLayout=; face geometry controls scale/crop/clear space, mouth controls balloon-tail target.
+
+Approved normalized idle: size =[2048,2662]=, face =[0.358,0.195,0.285,0.270]=, mouth =[0.491,0.407]=. Its 276-pixel source face becomes about 719 pixels high. Ingest invokes 4x anime Real-ESRGAN when placement scale exceeds 1.05, then Lanczos normalization. Final resolution is not native diffusion detail.
+
+** Sidecars and safe staging
+An incoming metadata file is a flat entry plus =section= and optionally source =faceBox=. Minimal idle JSON example:
+
+#+begin_example
+{
+  "section": "poses",
+  "faceBox": [402, 104, 224, 276],
+  "expression": "idle",
+  "facing": "front",
+  "mirror": false,
+  "framings": ["close-up", "head", "bust", "waist"],
+  "description": "Approved production waist-up sprite, seed 4002; not a full-body costume reference."
+}
+#+end_example
+
+Other pose fields include =setting= (desk/couch/kitchen/standing, default desk), optional =activity=, =props= and application-drawn =marks=. Omit =marks= when none; an empty =marks:[]= fails the nonempty-list validator. =props:[]= is allowed. Do not include =full= framing for a standard source: =kindOf= uses that field to choose the tall canvas. Keep a =NAME.txt= sidecar with exact prompts, seeds, models/hashes, sampler/adapter settings, input identity, alpha method and approval state. PNG metadata is also retained, not replaced by prose.
+
+Metadata precedence is incoming sidecar merged over existing/planned entry, then existing manifest, then optional =planned.json=. A new set can start with sidecar only; ingester creates minimal version-1 manifest. =status= counts finished manifest entries and optional planned catalogue, not the Org inventory. Production currently has no =planned.json=, so one finished/zero planned/empty incoming is expected and does not mean the 105-piece library is finished. Runtime reads finished manifests and merges fallback sets; it does not need a catalogue of every unproduced item.
+
+The following writes a NEW staging set and runs image processing; use only with staging authorization. It never targets production:
+
+#+begin_src sh
+mkdir -p "$HOME/.local/share/june-art-staging"
+SET=$(mktemp -d "$HOME/.local/share/june-art-staging/idle-replay.XXXXXX")
+mkdir "$SET/incoming"
+cp "$ART/production-idle/idle-attentive-source-alpha.png" "$SET/incoming/idle-attentive.png"
+cp "$ART/production-idle/idle-attentive.txt" "$SET/incoming/idle-attentive.txt"
+cp "$ART/production-references/promotion/idle-attentive.json" "$SET/incoming/idle-attentive.json"
+nix run .#art -- ingest "$SET" idle-attentive --mouth 507,321
+nix run .#art -- sheet "$SET" idle-attentive "$SET/idle-crop-proof.png"
+nix run .#art -- status "$SET"
+#+end_src
+
+Original proof remains =$HOME/.local/share/june-art-staging/idle-attentive-v2=. Do not reuse it as scratch. Ingest validates metadata, reads alpha and places/scales, writes lossless WebP and manifest, copies source PNG bytes into =source/=, MOVES txt/json sidecars there and deletes incoming PNG unless =--file= was used. Preserve independent source archives before ingest. =--file= keeps that PNG, but still consumes matching incoming sidecars. The CLI can overwrite same-name output/source/manifest entries and is not a transactional no-clobber API. It checks alpha existence, not semantic matting quality; no ToonOut segmentation or default defringing occurs inside ingest.
+
+Inspect the processed alpha, face/mouth box, dimensions and all allowed framing crops. Run the actual panel proof described in preview.org. Confirm no clipped hair/headset/props, no floating bottom, natural expression at actual size and no substantial alpha loss after upscaling. The crop sheet uses the same =readPoses/frame= functions as the application, not an invented preview geometry.
+
+** Safe promotion after explicit approval
+The completed promotion used approved source alpha/settings/metadata and the same source mouth. Production asset is =$AVATAR/poses/idle-attentive.webp=, with original =$AVATAR/source/idle-attentive.png= and txt/json. The production WebP is byte-identical to staging; JSON description alone records approval rather than pending review. No application restart/configuration change was required for that file operation.
+
+For a new approved name, resolve destination symlinks, inspect =manifest.json=, target =poses/= path, =source/= files, =incoming/= and any planned entry. Record all existing hashes before changes. If that name exists anywhere, stop for replacement coordination rather than blindly rerun ingest. Approval of a new sprite does not authorize overwriting another one. Copy the archived source PNG and sidecars to production incoming only after review, adjust description to the actual approval, then run existing ingest with the measured coordinates. Verify unrelated hashes, staging preservation, expected manifest delta, normalized alpha, crop sheet and status afterward. Capture outputs and command results.
+
+Do not re-promote idle merely to test these instructions: it already exists and is approved. Read-only checks are =sha256sum=, manifest inspection and =status=. Production changes, catalogue creation, runtime configuration and renderer fixes are separate decisions, not automatic consequences of generating art.

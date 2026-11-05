@@ -1,0 +1,96 @@
+* Reproduce and extend the reference-conditioned workflow
+** Select the right saved workflow
+Saved UI files are under =/data/comfyui/user/default/workflows/= on kit. Milestone exports below are relative to =$ART=; confirm byte identity before reproduction.
+
+| Workflow filename | Export directory | Use |
+|-------------------+------------------+-----|
+| June - Production idle-attentive v2.json | production-idle/workflows/ | Approved isolated sprite, seed 4002 |
+| June - Production alpha ToonOut.json | production-idle/workflows/ | Preferred extraction of that RGB output |
+| June - Conversational pilot v2.json | conversational-pilot/workflows/ | Scene/expression studies, default listening seed 3002 |
+| June - Canonical Anima standing v2.json | canonical-tests/workflows/ | Approved standing baseline, seed 1002 |
+| June - Canonical Anima seated v2.json | canonical-tests/workflows/ | Approved seated baseline, seed 2002 |
+| June - Canonical Anima standing refinement.json | canonical-refinement/workflows/ | Optional enlarged-face comparison, not default |
+| June - Turnaround front v2.json | production-references/workflows/ | Neutral front study, not a new facial authority |
+| June - Turnaround three-quarter study v2.json | production-references/workflows/ | Marked shallow-angle study, not reliable exact camera control |
+| June - Outfit isolated props Anima.json | production-outfit-props/workflows/ | Text-only object studies; no character board |
+
+The preserved standing/seated v2 and optional refinement prompts still contain old knee-length wording. They reproduce those historical images exactly, but before generating a NEW leg-visible pose replace that wording with the approved above-knee amendment in a separate workflow. Do not mutate approved defaults or append contradictory length instructions.
+
+Early =Photo to anime=, =Portrait tuning=, =Body type and outfit=, =Pink skirt and leggings=, outpainting and F/G face-composite workflows are preserved experiments. Do not use them as production character defaults.
+
+** Verified 13-node character graph
+| ID | Node | Actual role/input |
+|----+------+-------------------|
+| 1 | UNETLoader | anima-base-v1.0.safetensors, default precision |
+| 2 | CLIPLoader | qwen_3_06b_base.safetensors, stable_diffusion type, default device |
+| 3 | VAELoader | qwen_image_vae.safetensors |
+| 4 | LoadImage | june-canonical-fullbody.png |
+| 12 | LoadImage | june-canonical-face.png |
+| 13 | ImageStitch | body then face, direction right, match_image_size=false, spacing 24, white gap |
+| 5 | AnimaRefAdapter | model 1, VAE 3, image board 13; pretrained v2 weights |
+| 6 | EmptyLatentImage | Target size and batch 1; fresh noise, not VAEEncode |
+| 7/8 | CLIPTextEncode | Positive/negative through encoder 2 |
+| 9 | KSampler | Adapter MODEL 5, text 7/8, fresh latent 6 |
+| 10 | VAEDecode | Samples 9, VAE 3 |
+| 11 | SaveImage | Decoded result, PNG prompt/workflow metadata |
+
+The =stable_diffusion= CLIP type is the verified loader setting despite the Qwen encoder filename. Do not add =ModelSamplingAuraFlow= from an unrelated template. Baseline board is 836x1086 from the 410x1086 body and 402x665 face plus 24 pixels. Optional =match_image_size=true= enlarges the face proportionally to body height, making a 1090x1086 board. It was not a decisive likeness upgrade and altered seated skirt drape. Keep false by default.
+
+Sampling: 30 steps, CFG 4.5, =er_sde= sampler, =simple= scheduler, denoise 1. Adapter: =anima_ref_adapter_v2_r64.safetensors=, guidance 2.5, =apg=, strength 1, ref_end 1, ref_megapixels 1. Seed widget control is fixed. Read actual widget names or API inputs before editing; node IDs are examples from these exports, not a universal node contract.
+
+Successful source sizes: production idle 1024x1344; pilot 1024x1024 and 1024x1152; standing 832x1536; seated 1216x1024; isolated objects 768x768 without the character adapter. These are diffusion sizes, not final ingested sizes. Reserve crown, headset, hands and props before choosing aspect ratio. More pixels do not automatically correct identity or framing.
+
+** Worked reproduction of idle-attentive seed 4002
+Original RGB archive: =$ART/production-idle/candidates/idle-attentive-s4002.png=. Native output: =/data/comfyui/output/June/production-idle/idle-attentive-s4002_00001_.png=. Prompt ID =84dda6b6-abf2-4222-aaf6-23177a6e8300=, with full history under =$STATE/production-idle/=. Source prompt/settings are also in =$ART/production-idle/idle-attentive.txt=. All baseline settings above are confirmed in both saved JSON and embedded executed PNG.
+
+Read-only inspection or extraction to a new local directory:
+
+#+begin_src sh
+python "$SKILL/examples/inspect-png.py" "$ART/production-idle/candidates/idle-attentive-s4002.png"
+# Creates NEW files only. Choose an unused path beneath host-local state.
+export REPLAY="$STATE/replay-idle-audit"
+export COMFY=http://127.0.0.1:8188  # change only after verifying the current host/endpoint
+python "$SKILL/examples/inspect-png.py" "$ART/production-idle/candidates/idle-attentive-s4002.png" --extract "$REPLAY"
+#+end_src
+
+=prompt.json= is the executable API graph. =workflow.json= is the UI graph; posting that directly to =/prompt= is wrong. Original PNGs are the strongest evidence of what actually executed; a saved workflow tab may have changed since a run. Processed WebP need not retain ComfyUI metadata, so never discard the original PNG.
+
+For an authorized reproduction, open the production workflow as a separately named copy, retain canonical inputs and fixed seed 4002, verify 1024x1344 and all connections/settings, then queue once. Use a fresh SaveImage prefix rather than overwriting approved files. Changing only that prefix does not change image conditioning. Same seed is a comparison control, not an identity lock or a guarantee of bitwise equality across backend versions.
+
+** Direct HTTP execution, only with generation authorization
+The same API graph can run without the browser. First check =/queue=. Prepare a new record directory and extract the original metadata as above. This example submits a job; do not run it during a documentation audit.
+
+#+begin_src python
+import json, os, urllib.request, uuid
+from pathlib import Path
+base = os.environ.get('COMFY', 'http://127.0.0.1:8188').rstrip('/')
+replay = Path(os.environ['REPLAY'])  # NEW extraction directory chosen above
+prompt = json.loads((replay / 'prompt.json').read_text())
+workflow = json.loads((replay / 'workflow.json').read_text())
+prefix = 'June/replays/idle-attentive-s4002'
+prompt['11']['inputs']['filename_prefix'] = prefix
+for node in workflow['nodes']:
+    if str(node['id']) == '11':
+        node['widgets_values'][0] = prefix
+        node.pop('widgets_values_named', None)
+body = {'prompt': prompt, 'client_id': str(uuid.uuid4()),
+        'extra_data': {'extra_pnginfo': {'workflow': workflow}}}
+request = urllib.request.Request(base + '/prompt', data=json.dumps(body).encode(),
+                                 headers={'Content-Type': 'application/json'})
+with urllib.request.urlopen(request) as response:
+    result = json.load(response)
+print(result)  # retain prompt_id, number and any node_errors
+#+end_src
+
+The example synchronizes the UI SaveImage widget with the API prefix so embedded metadata describes the new path. Persist both submitted graphs and response. A returned prompt_id is not success. Poll =GET /history/PROMPT_ID= until present, then require status_str to be =success= and completed to be =true=. Read all failure messages before retrying. Save history JSON and the output descriptors from =outputs["11"].images=. Retrieve each through =GET /view?filename=...&subfolder=...&type=output=, using URL encoding, or its host output path. Counters may increment; never guess the resulting filename. Do not queue extra renders solely to restore a preview.
+
+Embedded executed prompt can include a backend =is_changed= cache field on LoadImage nodes. When comparing PNG prompt to submitted/history prompt, remove only that top-level field per node, not class names or inputs. Record hashes of originals, references, submitted graphs, workflow exports, masks and normalized output, with model hashes, custom-node commit, endpoint versions and runtime. A selected filename without this provenance is not a reproducible record.
+
+** Generate a new named expression
+Read its exact =art-list.org= entry. For example =skeptical-raised-eyebrow= maps to expression =skeptical=, frontal, one eyebrow up, folded arms and flat mouth. Pilot names like mischievous amusement are study labels, not new expression identifiers.
+
+Clone the isolated production generator or conversational baseline as appropriate, with a new workflow UUID/name. Retain canonical board/model stack. Replace scene-specific positive text with the requested pose/acting/facing and plain neutral background for sprites. Replace conflicting negatives too: idle's negative includes raised arms, crossed arms and visible hands, which must not fight an arm-folding or gesture asset. Keep quality/anatomy/decorations/duplication negatives. A short quality prefix plus scene/acting tags and precise composition usually worked better than repeatedly redescribing June.
+
+Use explicit above-knee skirt wording when legs are visible; remove inherited knee-length or jeans instructions rather than append conflicting text. Do not request alpha through text alone: generate a coherent isolated silhouette, then segment. Avoid colored key backgrounds that may contaminate edges. Neutral pale backgrounds worked with ToonOut, though warm hair highlights remain part of RGB.
+
+Honor the authorized batch cap, record independent seeds, review complete images and enlarged faces/hands, and present rejects as well as selections. Matched-seed experiments change one factor at a time; independent seeds test repeatability. Do not claim consistency from one lucky render. Obtain review, then follow transparency and staging/ingestion checks. Exact angle control remains weak; consult troubleshooting before spending another camera-angle batch.

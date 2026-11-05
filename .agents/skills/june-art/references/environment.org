@@ -1,0 +1,68 @@
+* Discover ComfyUI and verify compatibility
+** Live environment first
+Working host is kit with RTX 4070 Ti SUPER, 16 GB VRAM. Recorded service is NixOS =docker-comfyui.service=, container =comfyui=, with host =/data/comfyui= bound to container =/data=. Container command runs =comfy-ui --listen 0.0.0.0 --port 8188 --enable-manager=; port 8188 is published only on host loopback. Private proxy is =https://comfyui.kit/=. When that proxy timed out, =http://127.0.0.1:8188/= worked. Check both paths before diagnosing the GPU or restarting anything.
+
+Read-only discovery:
+
+#+begin_src sh
+hostname
+systemctl status docker-comfyui.service --no-pager
+systemctl cat docker-comfyui.service
+docker inspect comfyui --format '{{json .Mounts}} {{json .Config.Cmd}} {{json .HostConfig.PortBindings}}'
+COMFY=http://127.0.0.1:8188
+curl --fail --max-time 10 "$COMFY/system_stats"
+curl --fail --max-time 10 "$COMFY/queue"
+curl --fail --max-time 10 "$COMFY/object_info/AnimaRefAdapter"
+#+end_src
+
+Use the actual endpoint for the current host. A loopback URL on another machine is not kit. Discover required schemas with =/object_info=, not an assumed custom-node name. Required generation nodes include =UNETLoader=, =CLIPLoader=, =VAELoader=, =LoadImage=, =ImageStitch=, =AnimaRefAdapter=, =EmptyLatentImage=, =CLIPTextEncode=, =KSampler=, =VAEDecode= and =SaveImage=. Alpha requires =LoadBackgroundRemovalModel=, =RemoveBackground=, =MaskToImage=, =InvertMask= and =JoinImageWithAlpha=. Most are core nodes; their availability does not mean a new plugin must be installed.
+
+Observed 2026-11-04: ComfyUI 0.37.0, frontend 1.52.7, Python 3.12.14, PyTorch 2.10.0+cu130. These are evidence, not a compatibility guarantee for future versions. =/system_stats= provides live versions, arguments, source path and GPU. Inspect =journalctl -u docker-comfyui.service -n 100 --no-pager= and =docker logs --tail 100 comfyui= for a full error before changing anything. Service definition is in Jon's separate NixOS repository, currently =modules/nixos/default/options/comfyui/default.nix=. It uses a pinned prebuilt CUDA image and a read-only container root. Do not pip-install into it or edit a Nix store file.
+
+** Durable paths on kit
+| Host path | Contents |
+|-----------+----------|
+| /data/comfyui/models/ | Existing model weights |
+| /data/comfyui/custom_nodes/ComfyUI-Anima-Ref-Adapter/ | Only custom node required by the character baseline |
+| /data/comfyui/input/ | Workflow reference images, including canonical body/face |
+| /data/comfyui/output/June/ | Native generated PNGs with executed metadata |
+| /data/comfyui/user/default/workflows/ | Saved UI workflow JSON files |
+| /data/comfyui/user/comfyui.db | Service database; not the place to edit workflows manually |
+
+Confirm mount paths with Docker and =--base-directory= from =/system_stats=. Do not confuse host =/data/comfyui/input= with container =/data/input=. Saved workflow exports also live with art milestones; they survive a missing frontend tab. Inspect actual files and compare hashes, rather than trusting which tab is active.
+
+** Pinned generation models
+These SHA256 values were verified from installed files. Hashes identify the proven stack; check again after any service/model change.
+
+| Relative to /data/comfyui/models | SHA256 |
+|--------------------------------+--------|
+| unet/anima-base-v1.0.safetensors | bd43b7cffe1ed1153d9c41e7beb2f18cb1273eafbaa3af3edd6a173dc90a006e |
+| text_encoders/qwen_3_06b_base.safetensors | cd2a512003e2f9f3cd3c32a9c3573f820bb28c940f73c57b1ddaa983d9223eba |
+| vae/qwen_image_vae.safetensors | a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f |
+| loras/anima_ref_adapter_v2_r64.safetensors | 71dda6079e18d354e16e3347bc49a9b710afd9495c378efbb833d30cac9cb81b |
+
+Base/encoder/VAE source: https://huggingface.co/circlestone-labs/Anima . Adapter source: https://huggingface.co/ElectronGirl/anima-ref-adapter , recorded weights revision =b729afd0c3307f27438df42697ccafaecf051d26=. Custom-node repository: https://github.com/ArcAnima/ComfyUI-Anima-Ref-Adapter , installed commit =99c222e1c2da472f4b514583b2dbd1b5afb4bdd9=.
+
+#+begin_src sh
+sha256sum /data/comfyui/models/unet/anima-base-v1.0.safetensors \
+  /data/comfyui/models/text_encoders/qwen_3_06b_base.safetensors \
+  /data/comfyui/models/vae/qwen_image_vae.safetensors \
+  /data/comfyui/models/loras/anima_ref_adapter_v2_r64.safetensors
+git -C /data/comfyui/custom_nodes/ComfyUI-Anima-Ref-Adapter remote -v
+git -C /data/comfyui/custom_nodes/ComfyUI-Anima-Ref-Adapter rev-parse HEAD
+git -C /data/comfyui/custom_nodes/ComfyUI-Anima-Ref-Adapter status --short
+#+end_src
+
+The pretrained adapter uses rank-64 LoRA weights internally and custom reference attention. Load it through =AnimaRefAdapter= with MODEL, VAE and reference IMAGE, not a plain =LoraLoader=. It is not a June-specific LoRA and has never been trained on June here. A future June LoRA would be a separate training project requiring evidence and approval. =ImageCompositeMasked= face restoration is another different technique, rejected for production when it left visible mismatches. The baseline generates a complete new figure from fresh target noise.
+
+Adapter documentation recommends a single reference and can interpret side-by-side figures as different characters. Our same-June body/face board is an empirically successful project choice, not a universal promise. Read the installed README and =docs/guide.en.md= when changing its use. No additional identity plugin, face detailer, generic SDXL ControlNet, pose-control package or Turbo LoRA is part of the approved baseline. Base uses 30 steps/CFG 4.5 here, not Turbo's 8-step/CFG 1 recipe.
+
+** Browser and storage operations
+Use the shared chromium-agent browser through native Chrome DevTools MCP if operating the UI. Inspect =http://127.0.0.1:9222/json/version= and list pages; never assume old page IDs. Leave unrelated user pages alone. Read installed browser skills when available, take a fresh snapshot before clicks and wait for Run/app initialization before graph operations. User controls canvas zoom. Do not create another profile, fight zoom or treat a successful DOM mutation as a successful render.
+
+ComfyUI frontend supports =await import('/scripts/app.js')= and =await import('/scripts/api.js')=. Use =api.getUserData('workflows/NAME.json')= then response.json(), not a nonexistent =listUserData()=. =app.graphToPrompt()= yields UI =workflow= plus executable =output=. Cloning a graph needs a new UUID and removal of stale =widgets_values_named=; =app.loadGraphData(g)= creates a temporary graph, preserving originals. =app.queuePrompt(0,1)= queues through the frontend. Save a new name, or =api.storeUserData(path,g,{overwrite:false,stringify:true,throwOnError:true,full_info:false})= then fetch and verify it. Never overwrite approved saved workflows for an experiment.
+
+Current frontend's =SaveImage.onExecuted= and =app.canvas.fitView= are not callable helpers. Ctrl+s on a temporary graph opens a save dialog; focused name entry plus Enter worked when dialog clicks timed out. A cropped reference's native upload may be required for UI preview; do not bypass browser upload-root guards by moving a denied source. Allowed supplied temporary inputs or genuinely derived crops were used. Generated output images can be referenced as =June/path/file.png [output]= in LoadImage.
+
+** Missing state and permission boundaries
+This checkout does not provision ComfyUI, GPU drivers, model weights, canonical art, source PNGs or synced approval history. Verify them in place and report what is missing. Do not auto-download, reinstall nodes, restart the service, train a model or modify system configuration under an art request. For NixOS tools use the existing flake or an explicitly authorized =nix shell=, not apt, brew or imperative pip installs. Weight licenses are separate from node-code licenses; inspect current upstream licenses before redistributing weights or changing commercial use.
