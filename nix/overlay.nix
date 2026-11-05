@@ -1,4 +1,4 @@
-# june-overlay: June's Hyprland overlay (overlay/), a Quickshell config run from the store. `june-overlay` runs it;
+# june-overlay: June's Hyprland overlay (overlay/), run from a checkout when configured, else the store. `june-overlay` runs it;
 # `june-overlay cycle` steps the running one through live June, the full strip, and hidden, for a single compositor
 # bind; `toggle`, `open`, `close`, and `mini` reach each directly; `window` opens the strip in an ordinary window;
 # `live off` keeps live June away until `live on`; `look console` drops the comic for a terminal style, `look comic`
@@ -14,6 +14,7 @@
   qt6,
   systemd,
   google-fonts,
+  source ? null,
 }: let
   fonts = google-fonts.override {fonts = ["ShantellSans" "DelaGothicOne" "ZenKakuGothicNew"];};
   src = lib.fileset.toSource {
@@ -45,14 +46,18 @@ in
       personal="''${XDG_DATA_HOME:-$HOME/.local/share}/june/avatar"
       if [ -z "''${JUNE_OVERLAY_ART:-}" ] && [ -f "$personal/manifest.json" ]; then JUNE_OVERLAY_ART=$personal; fi
       export JUNE_OVERLAY_ART="''${JUNE_OVERLAY_ART:+$JUNE_OVERLAY_ART:}${art}"
+      # Service, launcher and IPC must select the same config. JUNE_SOURCE=none forces the packaged copy.
+      source="''${JUNE_SOURCE:-${lib.optionalString (source != null) source}}"
+      config=${config}
+      if [[ -n $source && -f $source/overlay/shell.qml ]]; then config="$source/overlay"; fi
       case "''${1:-}" in
-        "") exec qs -p ${config} ;;
-        cycle | toggle | open | close | mini | window | refresh) exec qs -p ${config} ipc call june "$1" ;;
-        light) exec qs -p ${config} ipc call june light "''${2:-now}" ;;
-        live) exec qs -p ${config} ipc call june live "''${2:-flip}" ;;
-        look) exec qs -p ${config} ipc call june look "''${2:-flip}" ;;
-        quiet) exec qs -p ${config} ipc call june quiet "''${2:-flip}" ;;
-        scheme) exec qs -p ${config} ipc call june scheme "''${2:-system}" ;;
+        "") exec qs -p "$config" ;;
+        cycle | toggle | open | close | mini | window | refresh) exec qs -p "$config" ipc call june "$1" ;;
+        light) exec qs -p "$config" ipc call june light "''${2:-now}" ;;
+        live) exec qs -p "$config" ipc call june live "''${2:-flip}" ;;
+        look) exec qs -p "$config" ipc call june look "''${2:-flip}" ;;
+        quiet) exec qs -p "$config" ipc call june quiet "''${2:-flip}" ;;
+        scheme) exec qs -p "$config" ipc call june scheme "''${2:-system}" ;;
         *)
           echo "usage: june-overlay [cycle|toggle|open|close|mini|window|refresh|light HOUR|live on/off|look comic/console|quiet on/off|scheme system/dark/light]" >&2
           exit 2

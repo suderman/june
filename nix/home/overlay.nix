@@ -9,7 +9,7 @@ self: {
   ...
 }: let
   cfg = config.programs.june;
-  overlay = self.packages.${pkgs.stdenv.hostPlatform.system}.overlay;
+  overlay = self.packages.${pkgs.stdenv.hostPlatform.system}.overlay.override {source = cfg.source;};
   # The service may still be starting, so try the window for a few seconds.
   openWindow = pkgs.writeShellScript "june-window" ''
     ${pkgs.systemd}/bin/systemctl --user start june-overlay.service

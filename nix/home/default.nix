@@ -45,7 +45,7 @@ in {
       type = lib.types.nullOr lib.types.str;
       default = null;
       example = "/home/alex/src/june";
-      description = "A checkout of June that runs instead of the pinned package whenever it is installed (src/cli.ts and node_modules present). Null always runs the package.";
+      description = "A checkout of June used instead of the pinned package: src/cli.ts and node_modules for the daemon/client, overlay/shell.qml for the desktop. Null uses the package unless JUNE_SOURCE overrides it.";
     };
     daemonHost = lib.mkOption {
       type = lib.types.nullOr lib.types.str;

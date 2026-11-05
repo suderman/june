@@ -220,4 +220,21 @@ The module sets up =programs.june=: the =june= client, =org-edit=, and =herdr-li
 }
 #+end_src
 
-config.json and AGENTS.md are not part of the module; =june init= writes starters in =~/.config/june=, or place your own there. The =june= wrapper runs a local checkout instead of the package when one with =node_modules= is present (=JUNE_SOURCE=none= forces the package), and =june status= shows which is in use.
+config.json and AGENTS.md are not part of the module; =june init= writes starters in =~/.config/june=, or place your own there.
+
+** Checkout development cycle
+Set =programs.june.source= to an absolute checkout path. The =june= wrapper uses it when =src/cli.ts= and =node_modules= are present; =june status --json= reports the active source. The desktop wrapper uses its =overlay/shell.qml= when present. Its service, managed launcher and IPC commands all select the same directory. Qt, Quickshell, fonts and fallback art still come from Nix. =JUNE_SOURCE= overrides the configured checkout for either wrapper; =JUNE_SOURCE=none= forces the packaged copy.
+
+After the initial Home Manager activation, ordinary daemon and desktop QML/JavaScript updates need no NixOS rebuild. On each affected host:
+
+#+begin_src sh
+git pull --ff-only
+# On the daemon host, check busy/background/queued work before restarting.
+june status --json
+systemctl --user restart june.service         # only on the daemon host, once idle
+systemctl --user restart june-overlay.service # on each desktop host
+systemctl --user is-active june-overlay.service
+june-overlay refresh
+#+end_src
+
+Run relevant checks before publishing and deploying an increment. Changes to dependencies may require =npm ci= in the daemon checkout. Nix wrapper or Qt/runtime dependency changes require updating the consuming June input and activating the configuration again. Android always uses its APK's bundled JavaScript, so shared behavior changes need a fresh =nix run .#android-install= on an attached phone.
