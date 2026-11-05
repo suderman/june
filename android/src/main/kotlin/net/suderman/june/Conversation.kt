@@ -147,11 +147,11 @@ private fun Prompt(text: String, onClick: () -> Unit) {
 
 /**
  * The conversation itself: the status line, the items newest last, and the words to send; `settings` opens June's
- * settings. `keyboard` pads it above the keyboard: an app's window no longer shrinks for one (Android 15 and later),
- * but the session's still does, and padding it too doubled the gap.
+ * settings. It pads itself above the keyboard: neither the app's window (Android 15 and later) nor the session's (set
+ * still in JuneSession) moves or shrinks for one.
  */
 @Composable
-fun Sheet(link: Link, settings: (() -> Unit)? = null, keyboard: Boolean = false) {
+fun Sheet(link: Link, settings: (() -> Unit)? = null) {
     var draft by remember { mutableStateOf("") }
     val list = rememberLazyListState()
     val shown = link.items.filter { !it.private }
@@ -167,7 +167,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, keyboard: Boolean = false)
     val avatar = remember { runCatching { Avatar(context) }.onFailure { Log.w(TAG, "avatar set did not load: $it") }.getOrNull() }
 
     val palette = pagePalette()
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().then(if (keyboard) Modifier.imePadding() else Modifier)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             val ready = decisions
             if (ready != null && avatar != null) {

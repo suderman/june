@@ -42,8 +42,6 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
         super.onCreate()
         savedState.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
-        // The sheet moves up with the keyboard rather than hiding under it.
-        window.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
     }
 
     // Compose needs a lifecycle and saved state, which a session does not have; it is its own owner of both.
@@ -55,6 +53,9 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
 
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
+        // The window neither pans nor resizes for the keyboard; the sheet pads itself above it, keeping the status line
+        // in view. Set before the window is up, Android puts it back to pan, which pushed the status line off the top.
+        window.window?.decorView?.post { window.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING) }
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         lines.clear()
         // Whether the phone wants the user's credentials, not merely whether the lock screen shows.

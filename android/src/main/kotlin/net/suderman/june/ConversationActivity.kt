@@ -43,7 +43,7 @@ class ConversationActivity : ComponentActivity() {
                         if (locked) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Unlock to talk to June", style = MaterialTheme.typography.headlineSmall) }
                         } else {
-                            Sheet(link, settings = { startActivity(android.content.Intent(this@ConversationActivity, MainActivity::class.java)) }, keyboard = true)
+                            Sheet(link, settings = { startActivity(android.content.Intent(this@ConversationActivity, MainActivity::class.java)) })
                         }
                     }
                 }
