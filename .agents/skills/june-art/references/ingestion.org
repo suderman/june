@@ -6,7 +6,7 @@ Current syntax, from repository root:
 
 #+begin_example
 nix run .#art -- status SET
-nix run .#art -- ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--key COLOUR] [--fuzz PERCENT]
+nix run .#art -- ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--gesture NAME,X,Y,W,H]... [--max-width PX] [--key COLOUR] [--fuzz PERCENT]
 nix run .#art -- sheet SET NAME [OUT]
 #+end_example
 
@@ -15,7 +15,7 @@ Nix provides ImageMagick and =realesrgan-ncnn-vulkan=. First realization may fet
 ** Inventory and vocabulary
 | Class | Count | Target canvas / behavior |
 |-------+-------+--------------------------|
-| Standard poses | 39 | 2048x2662, head/close-up/bust/waist |
+| Standard poses | 39 | Base 2048x2662; gesture width can grow, head/close-up/bust/waist |
 | Working poses | 8 | Same canvas, activity plus expression |
 | Tall poses | 9 | 2048x4096, includes full framing |
 | Chibi stills | 10 | 1024x1024 whole figure |
@@ -42,7 +42,7 @@ Foreground character assets need genuine PNG/lossless-WebP alpha, sRGB, no room,
 
 Standard source should include complete crown/hair/headset down to about waist, face looking/gesturing as specified, with clear side/top space and all needed hands/props. Raised arms need extra headroom. Approximately a third of library faces front, a third viewer-left and a third viewer-right, following each named entry. =facing:right= means toward the viewer's right edge, and =left= toward the viewer's left, not June's anatomical right/left. Do not mirror an image to conceal wrong headset/accessory construction. Metadata can allow mirroring, but approved idle uses =mirror:false=.
 
-Actual standard normalization targets face height =0.27*2662= and face center y =0.33*2662=. Tall targets face height =0.10*4096= and center y =0.13*4096=. Face width is determined by measured source proportions. Standard side/top protection is 4%; the figure may intentionally run off the bottom for a waist cut. This conflicts with a literal four-sided margin statement in the inventory. Jon accepted current ingestion for idle; document the discrepancy without changing art direction, ingester or renderer. If the silhouette is too wide at target face scale the ingester warns rather than shrinking to hide it. A too-high crown is shifted down with a warning. A source that ends too early may float at the bottom.
+Actual standard normalization targets face height =0.27*2662= and face center y =0.33*2662=. Tall targets face height =0.10*4096= and center y =0.13*4096=. Face width is determined by measured source proportions. Standard side/top protection is 4%; the figure may intentionally run off the bottom for a waist cut. This conflicts with a literal four-sided margin statement in the inventory. Jon accepted current ingestion for idle; document the discrepancy without changing art direction, ingester or renderer. Since =248b2e0=, a wide silhouette grows the canvas in =WIDTH_STEP= increments, currently 128 px, up to =MAX_WIDTH=, currently 3072 px. These values come from =art/layout.mjs= and are tunable, not permanent limits. Face scale is unchanged; artwork requiring more than the limit is refused before upscaling. =--max-width= overrides the limit only with an explicit reason and authorization. Do not shrink the face or regenerate sound gestures merely to fit the old base width. A too-high crown is shifted down with a warning. A source that ends too early may float at the bottom.
 
 ** Measure source pixels, not the final canvas
 Measure face cheek-to-cheek, forehead/hairline through chin, excluding hair/headset as far as anatomy permits. Record =[x,y,width,height]= on the source-size transparent image. Measure the mouth center =[x,y]= on the same image. Annotate a separate source copy with a box/dot and inspect visually. Do not copy the old face box onto a newly generated head. ImageMagick =-draw 'rectangle ...' ... -draw 'circle ...'= is enough; no automatic face detector was validated here.
@@ -53,8 +53,30 @@ Finished =face= and =mouth= are BOTH fractions of the entire final image. Mouth 
 
 Approved normalized idle: size =[2048,2662]=, face =[0.358,0.195,0.285,0.270]=, mouth =[0.491,0.407]=. Its 276-pixel source face becomes about 719 pixels high. Ingest invokes 4x anime Real-ESRGAN when placement scale exceeds 1.05, then Lanczos normalization. Final resolution is not native diffusion detail.
 
+** Read-only normalization preflight
+Before accepting a gesturing source, run =examples/preflight-pose.mjs= on its already segmented RGBA image. It imports this checkout's actual =placePose= and canvas/margin constants from =art/layout.mjs=, uses the ingester's alpha-over-50% bounds and integer placement/resize rounding, and prints JSON. It does not ingest, upscale, segment, write artwork or change a manifest. Requires existing =node= and =magick= on PATH. An exit status of zero means a report was produced, not that the artwork passed review.
+
+#+begin_src sh
+node "$SKILL/examples/preflight-pose.mjs" \
+  "$ART/production-gesture-pilot/sources/warm-small-wave-transparent.png" \
+  --face 442,120,226,267 --gesture wave,756,232,231,269 \
+  --normalized "$ART/production-gesture-pilot/processed/warm-small-wave.webp"
+#+end_src
+
+The helper calls current variable-width =placePose= and reads its default maximum and width step. =width_fit= reports the silhouette span, minimum margin-preserving width, step-rounded required canvas width and whether the actual placement accepts it. A refused placement is a JSON report with the ingester's reason, not a missing-size crash. Optional =--max-width= matches the ingester override; no proposed limit is hardcoded. Re-read current code and reported hashes before relying on older measurements. If =--normalized= points to a historical fixed-width asset, =size_matches_current_prediction=false= distinguishes its observed clipping from the current wider transform. An unchanged size is not proof of identical provenance. Anatomy, source completeness and panel checks remain separate.
+
+Distinguish four causes:
+- Source clipping: inspect original pixels and reported alpha contact at image edges. Bottom contact can be an intentional waist cut; clipped crowns or defining fingertips are genuine source defects.
+- Predicted normalization loss: current transformed silhouette/gesture bounds and source-pixel centers outside the canvas. Adding blank margins does not change gesture-to-face proportions or the required width. Do not enlarge a measured face box or shrink the face to conceal overflow.
+- Actual normalized clipping: inspect the saved WebP, its boundary contact, crop sheet and defining gesture. ESRGAN/Lanczos may change edge pixels, so projected source counts are not exact lost output-pixel counts.
+- Panel crop/dialogue occlusion: inspect the actual desktop/narrow preview and frame/balloon geometry. A correctly ingested hand can still be hidden; neither width fit nor zero normalization loss certifies panel visibility.
+
+Include fingertips and the visually important hand/wrist in measured gesture boxes, not an arbitrary whole-image rectangle. The implemented source schema is optional =gestureBoxes: [{name, box: [x,y,w,h], primary: true}]= in source pixels, or repeatable =--gesture NAME,X,Y,W,H= flags with the first primary. Finished =gestures= use fractions of the whole output canvas. Exactly one gesture must be primary. Ingest filters allowed framings to those that show it when any qualify; the renderer checks actual crop and dialogue visibility and can adjust framing or select a compatible fallback. None of that waives visual review. The helper's =--gesture= measures geometry only; it does not modify metadata or run the compositor.
+
+A defining gesture cut by normalization must never silently pass production review. Original wave 10002 needs about 2479 px and gentle palm 10302 about 2445 px including current side margins; the landed ingester rounds both to a 2560 px canvas at unchanged face scale. Before =248b2e0=, gentle's narrow-panel dialogue overlapped about 59% of its primary-hand bounding rectangle. That historical rectangle measurement is not a semantic visibility score or a validation of the new renderer. See =$ART/production-gesture-corrections/= for preserved pre-change measurements and the Claude handoff. Revalidate in a fresh staging set only when authorized; never silently replace earlier experiments or production assets.
+
 ** Sidecars and safe staging
-An incoming metadata file is a flat entry plus =section= and optionally source =faceBox=. Minimal idle JSON example:
+An incoming metadata file is a flat entry plus =section= and optionally source =faceBox= and =gestureBoxes=. Minimal idle JSON example:
 
 #+begin_example
 {

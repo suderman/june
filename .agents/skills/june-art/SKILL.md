@@ -44,7 +44,7 @@ Preferred alpha: saved `June - Production alpha ToonOut.json`. Preserve RGB, nat
 
 ## Read-only helpers and cold start
 
-`examples/inspect-png.py` checks PNG CRCs and reports embedded executed prompt/workflow. `examples/preview-panel.py` prepares an isolated proof using the checkout's actual QML components and an existing avatar manifest. Neither submits ComfyUI jobs or ingests artwork. Read their help before use.
+`examples/inspect-png.py` checks PNG CRCs and reports embedded executed prompt/workflow. `examples/preview-panel.py` prepares an isolated proof using the checkout's actual QML components and an existing avatar manifest. `examples/preflight-pose.mjs` imports the actual ingester geometry and reports source-edge contact, normalization overflow, experimental gesture bounds and an optional proposed-width projection. Run it before accepting gesturing sources, then inspect real panel crops separately. None submits ComfyUI jobs or ingests artwork. Read their help and `references/ingestion.org` before use.
 
 A cold-start audit must locate canon, the seed-4002 generation/alpha workflows, source/settings/mask, production WebP, a new named expression's inventory entry and its approval/staging route. Check the limitations too. Do not regenerate merely to prove documentation works.
 
