@@ -109,9 +109,9 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
         val metrics by produceState<JSONObject?>(null, width) { value = JSONObject(decisions.call("compose.metrics", width.value.toDouble())) }
         val m = metrics ?: return@BoxWithConstraints
         val count = panels.length()
-        // Built from the bottom, newest first, as the overlay's list is: the newest panel stays in view as panels
-        // arrive and settle their height, with no scrolling after them.
-        LazyColumn(Modifier.fillMaxSize(), state = rememberLazyListState(), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        // Built from the bottom, newest first, as the overlay's list is: the newest panel stays in view as it settles
+        // its height, with no scrolling after it.
+        LazyColumn(Modifier.fillMaxSize(), state = followNewest(if (count > 0) panels.getJSONObject(count - 1).getString("id") else null), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
             items(count, key = { panels.getJSONObject(count - 1 - it).getString("id") }) { i ->
                 PanelView(panels.getJSONObject(count - 1 - i), newest = i == 0, width.value, m, decisions, avatar, now, sky)
             }
@@ -483,7 +483,7 @@ fun ConsoleStrip(link: Link, decisions: Decisions, palette: Look.Palette, modifi
             .onFailure { android.util.Log.w(TAG, "console strip failed: $it") }.getOrDefault(value)
     }
     val count = strip.length()
-    LazyColumn(modifier, state = rememberLazyListState(), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyColumn(modifier, state = followNewest(if (count > 0) strip.getJSONObject(count - 1).getString("id") else null), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         items(count, key = { strip.getJSONObject(count - 1 - it).getString("id") }) { i ->
             val panel = strip.getJSONObject(count - 1 - i)
             val lines = panel.getJSONArray("lines")
@@ -628,4 +628,16 @@ private fun CutawayView(cut: JSONObject) {
             }
         }
     }
+}
+
+/**
+ * A strip's scroll state that follows a new panel. A list keyed by panel holds the panel in view where it is when a
+ * newer one arrives beneath it, so the new one would land out of sight; it scrolls to the new one when the reader was
+ * at the newest, and leaves a reader looking further back where they are.
+ */
+@Composable
+private fun followNewest(newest: String?): androidx.compose.foundation.lazy.LazyListState {
+    val list = rememberLazyListState()
+    LaunchedEffect(newest) { if (newest != null && list.firstVisibleItemIndex <= 1) list.scrollToItem(0) }
+    return list
 }
