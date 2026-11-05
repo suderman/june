@@ -36,6 +36,8 @@ class Hands : AccessibilityService() {
     private var socket: WebSocket? = null
     private var connected = false
     private var backoff = 2_000L
+    // One overlay at the top: the driving bar, and her words under it.
+    private var overlay: android.widget.LinearLayout? = null
     private var bar: TextView? = null
     // Her words while she drives: the conversation's view, attached at her first action, and the card that shows them.
     private var attached = false
@@ -44,13 +46,13 @@ class Hands : AccessibilityService() {
     private var drivingUntil = 0L
     private var said: TextView? = null
     private var saying: String? = null
-    private val hideSaid = Runnable { said?.let { runCatching { windowManager().removeView(it) } }; said = null; saying = null }
+    private val hideSaid = Runnable { said?.visibility = android.view.View.GONE; saying = null; tidy() }
     private val resumed = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context, intent: Intent) {
             stoppedUntil = 0L
         }
     }
-    private val hideBar = Runnable { bar?.let { runCatching { windowManager().removeView(it) } }; bar = null }
+    private val hideBar = Runnable { bar?.visibility = android.view.View.GONE; tidy() }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -183,8 +185,10 @@ class Hands : AccessibilityService() {
         return out.toString().ifBlank { "(nothing readable on screen)" }
     }
 
+    // Off-screen controls are listed too, marked, so a long page (an email's body) reads without scrolling; only what is
+    // on screen has a point to tap.
     private fun describe(node: AccessibilityNodeInfo, depth: Int, out: StringBuilder) {
-        if (!node.isVisibleToUser) return
+        val visible = node.isVisibleToUser
         val words = node.text?.toString()?.takeIf { it.isNotBlank() } ?: node.contentDescription?.toString()?.takeIf { it.isNotBlank() }
         val id = node.viewIdResourceName?.substringAfter(":id/")
         val does = listOfNotNull(
@@ -196,7 +200,7 @@ class Hands : AccessibilityService() {
             val box = Rect().also { node.getBoundsInScreen(it) }
             out.append("  ".repeat(depth)).append(words?.replace("\n", " ")?.take(160) ?: "(${node.className?.toString()?.substringAfterLast('.')})")
             if (id != null) out.append(" [").append(id).append("]")
-            out.append(" @").append(box.centerX()).append(",").append(box.centerY())
+            if (visible) out.append(" @").append(box.centerX()).append(",").append(box.centerY()) else out.append(" (off screen)")
             if (does.isNotEmpty()) out.append(" {").append(does.joinToString(" ")).append("}")
             out.append("\n")
         }
@@ -258,10 +262,18 @@ class Hands : AccessibilityService() {
         val id = message.optString("id").takeIf { it.isNotBlank() }
         var node = if (target != null || id != null) find(target, id) else null
         if (node == null) {
+            // The largest scrolling area on screen: the content being read, not a strip of tabs or a side list.
+            var area = 0
             val queue = ArrayDeque(windows.mapNotNull { it.root?.takeIf { r -> r.packageName != packageName } })
-            while (queue.isNotEmpty() && node == null) {
+            while (queue.isNotEmpty()) {
                 val n = queue.removeFirst()
-                if (n.isScrollable && n.isVisibleToUser) node = n
+                if (n.isScrollable && n.isVisibleToUser) {
+                    val box = Rect().also { n.getBoundsInScreen(it) }
+                    if (box.width() * box.height() > area) {
+                        area = box.width() * box.height()
+                        node = n
+                    }
+                }
                 for (i in 0 until n.childCount) n.getChild(i)?.let(queue::add)
             }
         } else while (node != null && !node.isScrollable) node = node.parent
@@ -323,22 +335,10 @@ class Hands : AccessibilityService() {
 
     private fun say(words: Item) {
         main.removeCallbacks(hideSaid)
+        ensureOverlay()
         val text = words.text.replace(Regex("[*_`#]+"), "").trim().let { if (it.length > 400) "…" + it.takeLast(400) else it }
-        val card = said ?: TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 15f
-            setPadding(36, 24, 36, 24)
-            background = android.graphics.drawable.GradientDrawable().apply { setColor(Color.argb(240, 33, 30, 46)); cornerRadius = 36f; setStroke(3, Color.argb(255, 106, 76, 168)) }
-            maxLines = 8
-            setOnClickListener { hideSaid.run() }
-            val params = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                PixelFormat.TRANSLUCENT,
-            ).apply { gravity = Gravity.TOP; y = 190; horizontalMargin = 0.04f }
-            runCatching { windowManager().addView(this, params); said = this }.onFailure { Log.w(TAG, "hands: no card: $it") }
-        }
+        val card = said ?: return
+        card.visibility = android.view.View.VISIBLE
         card.text = if (words.kind == "patter") text else "June: $text"
         card.setTypeface(null, if (words.kind == "patter") android.graphics.Typeface.ITALIC else android.graphics.Typeface.NORMAL)
         saying = words.id
@@ -351,27 +351,56 @@ class Hands : AccessibilityService() {
 
     private fun showBar() {
         main.removeCallbacks(hideBar)
-        if (bar != null) return
-        val view = TextView(this).apply {
+        ensureOverlay()
+        bar?.visibility = android.view.View.VISIBLE
+    }
+
+    /** The overlay column, made on first need: the bar (a tap stops her) and the card of her words (a tap closes it). */
+    private fun ensureOverlay() {
+        if (overlay != null) return
+        val column = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }
+        val barView = TextView(this).apply {
             text = "June is driving · tap to stop"
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.argb(230, 106, 76, 168))
             gravity = Gravity.CENTER
             textSize = 13f
             setPadding(0, 18, 0, 18)
+            visibility = android.view.View.GONE
             setOnClickListener {
                 stoppedUntil = Long.MAX_VALUE
                 Log.i(TAG, "hands: stopped by the user")
                 hideBar.run()
             }
         }
+        val card = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            setPadding(36, 24, 36, 24)
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(Color.argb(240, 33, 30, 46)); cornerRadius = 36f; setStroke(3, Color.argb(255, 106, 76, 168)) }
+            maxLines = 8
+            visibility = android.view.View.GONE
+            setOnClickListener { hideSaid.run() }
+        }
+        column.addView(barView, android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT))
+        column.addView(card, android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(28, 14, 28, 0) })
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT,
         ).apply { gravity = Gravity.TOP }
-        runCatching { windowManager().addView(view, params); bar = view }.onFailure { Log.w(TAG, "hands: no bar: $it") }
+        runCatching { windowManager().addView(column, params); overlay = column; bar = barView; said = card }
+            .onFailure { Log.w(TAG, "hands: no overlay: $it") }
+    }
+
+    /** Remove the overlay once neither the bar nor her words show, so it never sits over the screen empty. */
+    private fun tidy() {
+        if (bar?.visibility == android.view.View.VISIBLE || said?.visibility == android.view.View.VISIBLE) return
+        overlay?.let { runCatching { windowManager().removeView(it) } }
+        overlay = null
+        bar = null
+        said = null
     }
 
     companion object {
