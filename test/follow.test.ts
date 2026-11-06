@@ -284,6 +284,48 @@ test("following a waiting task by hand reads its prerequisites", async (t) => {
 	assert.match((await reports())[0]!, /has not launched \d+ minutes after its prerequisites finished/);
 });
 
+test("resuming with prerequisites passes them to org-edit and follows the task silently while it waits", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "org");
+	const file = join(root, "work.org");
+	await mkdir(root, { recursive: true });
+	const pre = "cccccccc-0000-5000-a000-000000000001";
+	const own = "cccccccc-0000-5000-a000-000000000002";
+	await writeFile(join(tmp.dir, "agenda"), `${file}\n`);
+	await writeFile(file, `#+TITLE: Work\n\n* PROG Align panels\n:PROPERTIES:\n:ID: ${pre}\n:END:\n\n* TODO Settled poses\n:PROPERTIES:\n:ID: ${own}\n:END:\n`);
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") }, dispatch: { hosts: ["kit"], agents: ["pi", "claude"] } };
+	const edits: string[][] = [];
+	// Stands in for org-edit, writing the state and DEPENDS in one save as it does.
+	const extension = createDispatchExtension(config, new Org(root), new Herdr(config.herdr, async () => "{}"), "inst", async (args) => {
+		if (args[0] === "systemctl") return "";
+		edits.push([...args]);
+		const depends = args[args.indexOf("--depends") + 1]!;
+		await replaceFile(file, (await readFile(file, "utf8")).replace("* TODO Settled poses", "* AUTO Settled poses").replace(`:ID: ${own}`, `:ID: ${own}\n:AGENT: claude\n:DEPENDS: ${depends}`));
+		return JSON.stringify({ id: own, title: "Settled poses", host: "kit", depends: depends.split(" "), written: true });
+	}, { intervalMs: 40, launchMs: 200, maxMs: 3_600_000 });
+	const faux = fauxProvider();
+	faux.setResponses([
+		fauxAssistantMessage([fauxToolCall("org_resume_task", {
+			file: "work.org", heading: "Settled poses", expected: "TODO", host: "kit", agent: "claude", depends: [`id:${pre}`], note: "Alex asked for it to wait on the alignment.",
+		})], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Resumed; it waits on the alignment."),
+		fauxAssistantMessage("It has not launched."),
+	]);
+	const daemon = await openTestDaemon({ ...tmp, faux, config, extensions: [extension, createOrgExtension(config)] });
+	t.after(() => daemon.close());
+	const reports = async () => (await daemon.root.context(BG)).entries.filter((e) => (e.data as { source?: string })?.source === "follow").map((e) => JSON.stringify(e.data));
+	await ask(tmp.paths.socket, "make it wait on the alignment and give it to claude");
+	assert.equal(edits.length, 1);
+	assert.deepEqual(edits[0]!.slice(-6), ["--agent", "claude", "--depends", `id:${pre}`, "--note", "Alex asked for it to wait on the alignment."]);
+	await new Promise((r) => setTimeout(r, 400));
+	assert.equal((await reports()).length, 0, "waiting on the prerequisite is not a stall");
+	await replaceFile(file, (await readFile(file, "utf8")).replace("* PROG Align panels", "* DONE Align panels"));
+	await until(async () => (await reports()).length === 1);
+	assert.match((await reports())[0]!, /has not launched \d+ minutes after its prerequisites finished/);
+	assert.equal((await readFile(file, "utf8")).match(/^\* /gm)?.length, 2, "no task was created");
+});
+
 test("timed updates come only while a task is in PROG, on time, and until their end", () => {
 	const timed = { ...input, everyMs: 5 * min, updatesUntil: 60 * min };
 	assert.equal(progressDue(input, "PROG", 0, 30 * min), false, "no updates unless asked for");

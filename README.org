@@ -168,7 +168,7 @@ June reads Org with ripgrep and writes only through =org-edit= and the dispatche
 - find or create a project file under =~/org/work= (=org_projects=, =org_create_project=);
 - queue a new AUTO task, now or for a later start written with it, and nudge the dispatcher (=org_queue_task=, =org_dispatch_now=), then follow it and report its transitions;
 - queue a plan of connected tasks, each waiting on its prerequisites through =:DEPENDS:=, and follow every one (=org_queue_plan=);
-- resume an existing TODO, EVAL, or HOLD task when the user asks (=org_resume_task=);
+- resume an existing TODO, EVAL, or HOLD task when the user asks, optionally adding prerequisites it waits on (=org_resume_task=);
 - follow any task the user names, with a progress update every few minutes while it is PROG (=org_follow_task=);
 - with =dispatch.improve= set, hand a gap the user hit in what she can do to a coding agent, with their words and the =june transcript= command for that stretch of conversation (=june_improve=);
 - close a task she created once its result is reviewed (=org_complete_task=).

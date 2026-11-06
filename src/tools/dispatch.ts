@@ -200,6 +200,8 @@ export type ResumeRequest = {
 	host: string;
 	/** Unset keeps the task's agent, or org-edit fills the default. */
 	agent?: string;
+	/** `id:UUID` prerequisites to add in the same save, so the task never sits AUTO without them. */
+	depends?: readonly string[];
 	note: string;
 	key: string;
 };
@@ -394,6 +396,8 @@ export class Dispatch {
 		if (!["TODO", "EVAL", "HOLD"].includes(request.expected)) throw new Error("Only TODO, EVAL, or HOLD tasks can resume");
 		checkAgent(request.agent, dispatchAgents(this.#config.dispatch));
 		if (!request.note.trim() || /[\n\r]/.test(request.note)) throw new Error(`note must be one non-empty line recording ${user()}'s instruction`);
+		for (const ref of request.depends ?? [])
+			if (!/^id:[0-9A-Za-z][0-9A-Za-z-]{0,63}$/.test(ref)) throw new Error(`depends takes id:UUID of existing Org tasks, not ${ref}`);
 		const path = await this.#target(request.file);
 		const task = await this.#org.read(request.file, request.heading);
 		const properties = task.text.split(/\n\*+ /, 1)[0]!;
@@ -407,11 +411,20 @@ export class Dispatch {
 		}
 		const out = await this.#run([
 			"org-edit", "todo", path, request.heading, "AUTO", "--expect", request.expected,
-			"--request", request.key, "--host", request.host, ...(request.agent ? ["--agent", request.agent] : []), "--note", request.note.trim(),
-		], 60_000);
+			"--request", request.key, "--host", request.host, ...(request.agent ? ["--agent", request.agent] : []),
+			// Only when asked, so a plain resume still works with an org-edit that predates --depends.
+			...(request.depends?.length ? ["--depends", request.depends.join(" ")] : []),
+			"--note", request.note.trim(),
+		], 120_000).catch((error: Error) => {
+			// Parsing options precedes any edit, so an older org-edit refuses without writing.
+			if (/unknown option --depends/.test(error.message))
+				throw new Error(`The installed org-edit cannot add dependencies yet and wrote nothing; ${user()} needs to update June's Nix input and rebuild. Do not resume the task without them, since it would launch early.`);
+			throw error;
+		});
 		try {
-			const result = JSON.parse(out) as { id: string; title: string; host: string; written: boolean };
-			return { ...result, file: this.#org.rel(path) };
+			const result = JSON.parse(out) as { id: string; title: string; host: string; depends?: string[]; written: boolean };
+			// org-edit reports the task's whole DEPENDS, including edges it already had.
+			return { ...result, depends: (result.depends ?? []).map((ref) => ref.replace(/^id:/, "")), file: this.#org.rel(path) };
 		} catch (cause) {
 			throw new Error("org-edit did not return a resume result; check the installed org-edit version", { cause });
 		}
@@ -617,7 +630,7 @@ export function createDispatchExtension(
 			})]),
 			defineTool({
 				name: "org_resume_task",
-				description: `When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and deploy off, and select one host. Refuse an active agent. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work. To resume it later rather than now, first set its SCHEDULED with org_set_date while it is still TODO, EVAL, or HOLD, then resume: the dispatcher holds it until then. Never date a task that is already AUTO.${agentNote}`,
+				description: `When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and deploy off, and select one host. Refuse an active agent. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work. To resume it later rather than now, first set its SCHEDULED with org_set_date while it is still TODO, EVAL, or HOLD, then resume: the dispatcher holds it until then. Never date a task that is already AUTO. When ${user()} wants it to wait for other tasks, pass their IDs in depends: org-edit adds them to :DEPENDS: in the same save that sets AUTO, after refusing missing or duplicate IDs, the task itself, and cycles, so it never launches early. The dispatcher then launches it only once every prerequisite is DONE, never at EVAL, and waiting costs nothing. Edges the task already has are kept; this cannot remove one, so ask ${user()} to edit :DEPENDS: by hand for that.${agentNote}`,
 				parameters: obj({
 					file: str({ description: "Org agenda file under ~/org" }),
 					heading: str({ description: "Exact title or id:UUID, as org_read_task accepts" }),
@@ -625,6 +638,7 @@ export function createDispatchExtension(
 					host: str({ description: `Keep the existing host unless the user changes it; otherwise default ${defaultHost}. Allowed: ${hosts.join(", ")}` }),
 					agent: agentParameter(`Only when ${user()} asks for a different agent: ${agents.join(" or ")}. Omit to keep the task's agent`),
 					note: str({ description: `One line recording ${user()}'s request and any answer or revised scope, naming ${user()} rather than writing you` }),
+					depends: opt(arr(str(), { description: "id:UUID of existing Org tasks that must be DONE before this one launches, read with org_read_task first; added to any it already has" })),
 				}),
 				replay: "safe",
 				execute: async (args, api, context) => {
@@ -632,6 +646,7 @@ export function createDispatchExtension(
 					const result = await dispatch.resume({ ...args, key }, herdr);
 					await api.commit((tx) => follow(tx, followTask, {
 						id: result.id, title: result.title, host: result.host, queuedAt: Date.now(), request: key,
+						...(result.depends.length ? { depends: result.depends } : {}),
 					}, Number(api.conversationId)), context);
 					// A repeated kick is harmless, including recovery after a crash between the save and kick.
 					const started = args.host === config.herdr.host
@@ -640,7 +655,8 @@ export function createDispatchExtension(
 							(error: Error) => ` Starting the dispatcher failed (${error.message}); its timer will retry.`,
 						)
 						: " That host's dispatcher will pick it up on its timer.";
-					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\nYou are following this task and will get [follow] reports.${started} Tell the user you will report back. Existing SCHEDULED dates still apply.` }] };
+					const waits = result.depends.length ? ` It waits until ${result.depends.map((id) => `id:${id}`).join(", ")} ${result.depends.length === 1 ? "is" : "are"} DONE; tell the user what it waits on.` : "";
+					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\nYou are following this task and will get [follow] reports.${started}${waits} Tell the user you will report back. Existing SCHEDULED dates still apply.` }] };
 				},
 			}),
 			defineTool({

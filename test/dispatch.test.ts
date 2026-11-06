@@ -205,6 +205,15 @@ test("resume uses the shared org-edit command with an expected state and request
 	assert.deepEqual(f.runs.at(-1)!.slice(-6), ["--host", "cog", "--agent", "claude", "--note", "Alex asked for Claude."]);
 	await assert.rejects(f.dispatch.resume({ file: request.file, heading: "Existing thread", expected: "HOLD", host: "kit", agent: "cobol", note: "Alex asked.", key: "inst:11" }, herdr), /agent is one of/);
 	await assert.rejects(f.dispatch.resume({ file: "asana.org", heading: "mirrored", expected: "TODO", host: "kit", note: "Alex asked.", key: "inst:9" }, herdr), /does not write/);
+	const waits = await f.dispatch.resume({ file: request.file, heading: "Existing thread", expected: "HOLD", host: "kit", agent: "claude", depends: ["id:pre-1", "id:pre-2"], note: "Alex asked it to wait.", key: "inst:12" }, herdr);
+	assert.deepEqual(f.runs.at(-1)!.slice(-8), ["--host", "kit", "--agent", "claude", "--depends", "id:pre-1 id:pre-2", "--note", "Alex asked it to wait."]);
+	assert.deepEqual(waits.depends, [], "an org-edit result without depends reads as none");
+	const count = f.runs.length;
+	for (const bad of ["pre-1", "id:", "id:a b", "id:x\n"])
+		await assert.rejects(f.dispatch.resume({ file: request.file, heading: "Existing thread", expected: "HOLD", host: "kit", depends: [bad], note: "Alex asked.", key: "inst:13" }, herdr), /depends takes id:UUID/);
+	assert.equal(f.runs.length, count, "a malformed prerequisite never reaches org-edit");
+	const old = new Dispatch(new Org(f.root), f.config, async (argv) => { throw new Error(`${argv.slice(0, 4).join(" ")}: unknown option --depends`); });
+	await assert.rejects(old.resume({ file: request.file, heading: "Existing thread", expected: "HOLD", host: "kit", depends: ["id:pre-1"], note: "Alex asked.", key: "inst:14" }, herdr), /cannot add dependencies yet and wrote nothing/);
 });
 
 test("resume refuses a working or blocked linked agent, but allows idle and a replay", async (t) => {

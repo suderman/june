@@ -44,7 +44,7 @@ A task is an AUTO heading in the agenda files. Its property drawer names the mac
 | MODEL     | agent's default  | model passed to the selected agent          |
 | DIR       | project checkout | working directory                           |
 | RETRY     | 0                | times the agent may reschedule a one-off    |
-| DEPENDS   | none             | space-separated prerequisite =id:UUID= references |
+| DEPENDS   | none             | space-separated prerequisite =id:UUID= references; =org-edit todo --depends= adds them when June resumes a task |
 
 The dispatcher adds =REPEAT_TO_STATE: AUTO= to repeating tasks so they return to AUTO, not TODO.
 

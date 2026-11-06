@@ -8,6 +8,7 @@ fixture="$(mktemp -d)"
 trap 'rm -rf -- "$fixture"' EXIT
 export HOME="$fixture/home"
 export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_STATE_HOME="$fixture/state"
 # The date checks compare against Calgary time, which needs zone data; NixOS keeps it in /etc/zoneinfo.
 if [[ -z ${TZDIR:-} && ! -d /usr/share/zoneinfo && -d /etc/zoneinfo ]]; then export TZDIR=/etc/zoneinfo; fi
 unset JUNE_CONFIG_DIR
@@ -171,6 +172,88 @@ check "resume can change the agent" line "$tasks" '^:AGENT: *claude$'
 run todo "$tasks" Plan HOLD >/dev/null
 out=$(run todo "$tasks" Plan AUTO --expect HOLD --request inst:6 --host kit --agent cobol --note 'Jon asked.')
 check "resume refuses an unknown agent" has "$out" 'unknown agent cobol'
+
+# Dependencies added while resuming, checked across agenda files and archives.
+export ORG_DISPATCH_ROOT="$HOME/org/work"
+mkdir -p "$ORG_DISPATCH_ROOT/deps" "$HOME/bin"
+# A failing herdr keeps the scan below away from any real server.
+printf '#!/bin/sh\nexit 1\n' >"$HOME/bin/herdr"
+chmod +x "$HOME/bin/herdr"
+deps="$ORG_DISPATCH_ROOT/deps/deps.org"
+cat >"$deps" <<'EOF2'
+* TODO Align panels
+:PROPERTIES:
+:ID:       align-1
+:END:
+* TODO Settled poses
+SCHEDULED: <2026-11-10 Tue>
+:PROPERTIES:
+:ID:       poses-1
+:DEPENDS:  id:archived-1
+:END:
+Keep this scope.
+* HOLD Upstream
+:PROPERTIES:
+:ID:       up-1
+:DEPENDS:  id:poses-1
+:END:
+* TODO First twin
+:PROPERTIES:
+:ID:       dup-1
+:END:
+* TODO Second twin
+:PROPERTIES:
+:ID:       dup-1
+:END:
+* TODO No ID yet
+EOF2
+cat >"$ORG_DISPATCH_ROOT/deps/archive.org" <<'EOF2'
+* DONE Old groundwork
+:PROPERTIES:
+:ID:       archived-1
+:END:
+EOF2
+resume_deps() { run todo "$deps" "$1" AUTO --expect "$2" --request "$3" --host kit --note 'Jon asked.' "${@:4}"; }
+before=$(<"$deps")
+out=$(resume_deps id:poses-1 TODO deps:1 --depends 'id:nowhere-1')
+check "a missing prerequisite is refused" has "$out" 'Missing dependency ID nowhere-1'
+out=$(resume_deps id:poses-1 TODO deps:1 --depends 'id:poses-1')
+check "a self dependency is refused" has "$out" 'cannot depend on itself'
+out=$(resume_deps id:poses-1 TODO deps:1 --depends 'id:up-1')
+check "a cycle is refused" has "$out" 'Dependency cycle at poses-1'
+out=$(resume_deps id:poses-1 TODO deps:1 --depends 'id:dup-1')
+check "a duplicate prerequisite ID is refused" has "$out" 'Duplicate dependency ID dup-1'
+out=$(resume_deps id:poses-1 TODO deps:1 --depends 'align-1')
+check "a bare UUID is refused" has "$out" 'takes id:UUID references'
+out=$(resume_deps id:poses-1 EVAL deps:1 --depends 'id:align-1')
+check "a stale state with dependencies is refused" has "$out" 'expected EVAL, found TODO'
+out=$(run todo "$deps" id:poses-1 AUTO --depends 'id:align-1')
+check "dependencies need a full resume" has "$out" 'resuming needs'
+out=$(run todo "$deps" id:poses-1 HOLD --depends 'id:align-1')
+check "dependencies never ride on another state change" has "$out" 'resuming needs'
+check "every refusal leaves the file unchanged" test "$before" = "$(<"$deps")"
+
+out=$(resume_deps id:poses-1 TODO deps:1 --agent claude --depends 'id:align-1 id:archived-1')
+check "resume with dependencies reports both" has "$out" '"depends":\["id:archived-1","id:align-1"\]'
+check "resume with dependencies keeps the ID" has "$out" '"id":"poses-1"'
+check "existing and new prerequisites merge without repeats" line "$deps" '^:DEPENDS: *id:archived-1 id:align-1$'
+check "the dependent is AUTO in the same save" line "$deps" '^\* AUTO Settled poses$'
+check "the dependent keeps its schedule" line "$deps" '^SCHEDULED: <2026-11-10 Tue>$'
+check "the dependent keeps its scope" line "$deps" '^Keep this scope\.$'
+check "the dependent gets the requested agent" line "$deps" '^:AGENT: *claude$'
+check "no heading is added" test "$(grep -c '^\* ' "$deps")" = 6
+check "the prerequisite is untouched" test "$(sed -n 1,4p "$deps")" = "$(sed -n 1,4p <<<"$before")"
+after=$(<"$deps")
+out=$(resume_deps id:poses-1 TODO deps:1 --agent claude --depends 'id:align-1 id:archived-1')
+check "a replay writes nothing" has "$out" '"written":false'
+check "a replay leaves the file alone" test "$after" = "$(<"$deps")"
+scan=$(ORG_DISPATCH_HOST=kit ORG_DISPATCH_SETTLE=0 PATH="$HOME/bin:$PATH" \
+  bash "$org/dispatch/org-dispatch" scan 2>/dev/null || true)
+check "the dispatcher waits instead of launching" has "$scan" '^Settled poses	.*	waiting on Align panels (TODO)$'
+out=$(resume_deps 'No ID yet' TODO deps:2 --depends 'id:align-1')
+check "a task without an ID gets one and its prerequisite" line "$deps" '^:DEPENDS: *id:align-1$'
+check "and reports its new ID" has "$out" '"id":"[0-9a-f-]\{36\}"'
+unset ORG_DISPATCH_ROOT
 
 out=$(run todo "$tasks" "Twin" PROG)
 check "a duplicate title is refused" has "$out" '2 headings'

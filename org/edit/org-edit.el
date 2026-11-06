@@ -2,7 +2,7 @@
 
 ;; Batch entry points, run through the org-edit wrapper:
 ;;   org-edit-todo      FILE HEADING STATE [--expect STATE] [--headline LINE]
-;;                      [--request KEY --host HOST [--agent AGENT] --note TEXT]
+;;                      [--request KEY --host HOST [--agent AGENT] [--depends REFS] --note TEXT]
 ;;   org-edit-schedule  FILE HEADING WHEN
 ;;   org-edit-deadline  FILE HEADING WHEN
 ;;   org-edit-date      WHEN
@@ -138,18 +138,36 @@ Print the heading unless QUIET is non-nil."
                                               (point)))))))
       (kill-buffer buffer))))
 
+;; Before the save, the task at point gains REFS: the graph must resolve with no
+;; missing, duplicate, or circular IDs, as `org-dispatch plan' requires.
+(defun org-edit--depends (refs)
+  "The heading's DEPENDS plus REFS, after checking the resulting graph."
+  (let* ((id (org-entry-get nil "ID"))
+         (all (delete-dups (append (split-string (or (org-entry-get nil "DEPENDS") "")) refs)))
+         (index (org-dispatch--dependency-index)))
+    (when (and id (member (concat "id:" id) all))
+      (error "a task cannot depend on itself"))
+    (when (and id (plist-get (gethash id index) :duplicate))
+      (error "duplicate ID %s; fix it before adding dependencies" id))
+    ;; A task without an ID yet cannot be anyone's prerequisite, so it closes no cycle.
+    (let ((self (or id "org-edit:new-task")))
+      (puthash self (list :id self :heading (org-get-heading t t t t) :depends all) index)
+      (org-dispatch--validate-graph (list self) index))
+    all))
+
 (defun org-edit-todo ()
   "Set FILE HEADING to STATE, optionally checking --expect STATE.
 For EVAL, DONE or HOLD, --headline LINE binds a fresh worker report to this write.
-June uses --request KEY --host HOST --note TEXT to resume a task once, and --agent
-AGENT to change who runs it.
+June uses --request KEY --host HOST --note TEXT to resume a task once, --agent
+AGENT to change who runs it, and --depends \"id:A id:B\" to add prerequisites in
+the same save, so the dispatcher never sees the task AUTO without them.
 Coding workers must not set AUTO; that permission lives in instructions."
   (let* ((args command-line-args-left)
          (file (pop args)) (heading (pop args)) (state (upcase (or (pop args) "")))
-         expected request host agent note headline result)
+         expected request host agent note depends headline result)
     (setq command-line-args-left nil)
     (unless (and file heading (not (string-empty-p state)))
-      (error "usage: org-edit todo FILE HEADING STATE [--expect STATE] [--headline LINE] [--request KEY --host HOST [--agent AGENT] --note TEXT]"))
+      (error "usage: org-edit todo FILE HEADING STATE [--expect STATE] [--headline LINE] [--request KEY --host HOST [--agent AGENT] [--depends REFS] --note TEXT]"))
     (while args
       (let ((flag (pop args)) (value (pop args)))
         (unless (and value (not (string-empty-p value))) (error "missing value for %s" flag))
@@ -159,17 +177,21 @@ Coding workers must not set AUTO; that permission lives in instructions."
           ("--host" (setq host value))
           ("--agent" (setq agent value))
           ("--note" (setq note value))
+          ("--depends" (setq depends (split-string value)))
           ("--headline" (setq headline (org-dispatch--validate-headline value)))
           (_ (error "unknown option %s" flag)))))
     (when (and headline (not (member state '("EVAL" "DONE" "HOLD"))))
       (error "--headline is only for EVAL, DONE, or HOLD"))
-    (when (or request host agent note)
+    (when (or request host agent note depends)
       (unless (and (equal state "AUTO") request host note (member expected '("TODO" "EVAL" "HOLD")))
         (error "resuming needs AUTO, --expect TODO|EVAL|HOLD, --request, --host, and --note"))
       (unless (member host org-dispatch-hosts) (error "unknown dispatcher host %s" host))
       (when (and agent (not (member agent org-dispatch-launchable))) (error "unknown agent %s" agent))
       (when (or (string-match-p "[\n\r]" request) (string-match-p "[\n\r]" note))
-        (error "request and note must each be one line")))
+        (error "request and note must each be one line"))
+      (dolist (ref depends)
+        (unless (string-match-p "\\`id:[[:alnum:]][[:alnum:]-]*\\'" ref)
+          (error "--depends takes id:UUID references, not %s" ref))))
     (org-edit--at
      file heading
      (lambda ()
@@ -181,6 +203,7 @@ Coding workers must not set AUTO; that permission lives in instructions."
            ;; Keywords are buffer-local, and a file may set its own.
            (unless (member state org-todo-keywords-1)
              (error "STATE is one of %s" (string-join org-todo-keywords-1 " ")))
+           (when depends (setq depends (org-edit--depends depends)))
            (when request
              (org-id-get-create)
              ;; The drawer decides where and how it runs; tags are left as they are.
@@ -192,6 +215,7 @@ Coding workers must not set AUTO; that permission lives in instructions."
              (org-entry-put nil "JUNE_REQUEST" request)
              (org-entry-put nil "REVIEW" "yes")
              (org-entry-put nil "DEPLOY" "no")
+             (when depends (org-entry-put nil "DEPENDS" (string-join depends " ")))
              (org-dispatch--append "Dialog" (org-dispatch--entry "June" note)))
            (org-dispatch--headline headline state)
            (org-todo state))
@@ -199,6 +223,7 @@ Coding workers must not set AUTO; that permission lives in instructions."
            (setq result `((id . ,(org-entry-get nil "ID"))
                           (title . ,(org-get-heading t t t t))
                           (host . ,host)
+                          (depends . ,(vconcat (split-string (or (org-entry-get nil "DEPENDS") ""))))
                           (written . ,(if replay :false t)))))))
      request)
     (when request (princ (concat (json-serialize result) "\n")))))

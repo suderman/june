@@ -368,7 +368,7 @@ task to `AUTO`, and a fresh session picks it up when it is due. Once `RETRY`
 reaches 0 the agent must use `HOLD`.
 
 - Coding agents never set `AUTO` on an existing heading. Creating new AUTO headings through `org-dispatch plan` is allowed only for a plan Jon explicitly requested; otherwise Jon grants autonomy. Set `:HOST:` or `:AGENT:` only when Jon asks. June, Jon's assistant, is the one
-  exception. Under her `AGENTS.md` (from `~/.agents/june`), she may queue new `AUTO` tasks, starting each one's body with a line saying she queued it and why. When Jon explicitly asks, she may also resume an existing TODO, EVAL, or HOLD task through `org_resume_task`, which uses the shared `org-edit` command and records his instruction in Dialog. `org-edit` accepting AUTO does not give coding workers permission to set it.
+  exception. Under her `AGENTS.md` (from `~/.agents/june`), she may queue new `AUTO` tasks, starting each one's body with a line saying she queued it and why. When Jon explicitly asks, she may also resume an existing TODO, EVAL, or HOLD task through `org_resume_task`, which uses the shared `org-edit` command and records his instruction in Dialog. It can add `:DEPENDS:` prerequisites in the same save, after checking for missing or duplicate IDs, self-dependency, and cycles. `org-edit` accepting AUTO does not give coding workers permission to set it.
 - In a dispatched session, follow the dispatch prompt where it differs from
   this skill, and change the TODO state only with `org-dispatch finish`.
 - `** Dialog` is the conversation between agents and Jon on a task. It stays
