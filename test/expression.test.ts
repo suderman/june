@@ -193,6 +193,7 @@ test("retakes preserve context, are replay safe, reject overlap, and Back restor
 	assert.match(d.asked[0]!, /an old joke/);
 	assert.match(d.asked[0]!, /Earlier takes were not right/);
 	assert.equal(d.item().take, 1);
+	assert.equal(d.item().side, "left", "another take keeps the side the panel has shown");
 	await assert.rejects(d.pass.change("retake", "2", "original", "stale"), /panel changed/);
 	const length = d.entries.length;
 	await d.pass.change("retake", "2", "original", "first");

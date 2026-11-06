@@ -933,10 +933,46 @@ test("recorded art and legacy stand-ins survive view-window changes, inventory o
 	assert.equal(original[0][2], "right", "the recorded side wins");
 	const enlarged = [{ ...warm, id: "a-future-warm", added: at + 1000 }, ...choices.slice().reverse()];
 	assert.deepEqual(render(items, enlarged), original, "later poses and manifest order cannot reshuffle history");
-	for (let i = 0; i < 3; i++) assert.deepEqual(render(items.slice(i * 2, i * 2 + 2), enlarged), [original[i]], "the previous panel is not part of a settled choice");
+	assert.deepEqual(render(items.slice(0, 2), enlarged), [original[0]], "the panels around a recorded choice are not part of it");
+	assert.deepEqual(original.slice(1).map((row) => row[2]), ["left", "left"], "a panel without a recorded side takes the other side from the latest recorded pose, as the daemon will record it");
+	assert.deepEqual(render(items.slice(4), enlarged), render(items.slice(2), enlarged).slice(1), "with no recorded pose before them, legacy panels derive from their own ids");
 	assert.deepEqual(render(items, enlarged, { sides: { first: "left" }, poseIds: { first: "missing" }, livePoses: {} }), original, "a client's discarded memory changes nothing");
 	const missing = choices.filter((p) => p.id !== warm.id);
 	assert.equal(render(items.slice(0, 2), missing)[0][1], choosePose(missing, { expression: "warm" }, "", "first").id, "a missing recorded file follows its expression chain");
+});
+
+test("June keeps one side through a panel: thinking, working, writing, settling, her picked face, reloads, later runs, and another take", async () => {
+	const { resolvePick } = await import("../src/expression.ts");
+	const at = Date.UTC(2026, 10, 6, 12);
+	// A front-facing wry pose beside the base set's wry pose that faces right and may not be mirrored.
+	const art = { ...manifest, poses: { ...manifest.poses, "wry-front": { ...manifest.poses["playful-wink-pointing"], facing: "front", mirror: true } } };
+	const poses = readPoses(art, "");
+	const fresh = () => ({ sides: {}, poseIds: {}, livePoses: {} });
+	const before = [{ ...user("u1"), at }, { ...june("a1", "first"), expression: "warm", pose: "content-holding-mug", side: "left", expressionAt: at, at }];
+	const asked = [...before, { ...user("u2", "and now?"), at }, tool("t1")];
+	const reply = (streaming) => ({ ...june("a2", "a wry answer", streaming), at });
+	const stages = [
+		[[...before, { ...user("u2", "and now?"), at }], { running: true }, false],
+		[asked, { running: true }, false],
+		[[...asked, reply(true)], { running: true }, false],
+		[[...asked, reply(false)], { running: false }, true],
+		[[...asked, reply(false)], { running: false }, false],
+	];
+	const memory = fresh();
+	const shown = stages.map(([items, state, holding]) => composeStrip(panels(items), state, poses, memory, holding).at(-1));
+	assert.deepEqual(shown.slice(0, 3).map((p) => p.pose.activity ?? p.pose.expression), ["thinking", "working", "curious"], "her pose still follows what she is doing");
+	assert.deepEqual(shown.map((p) => p.side), Array(stages.length).fill("right"), "the other side from the last recorded pose, from the moment the panel opens");
+	for (const pick of [{ expression: "wry" }, { expression: "wry", pose: "playful-wink-pointing" }]) {
+		const chosen = resolvePick(pick, art, before[1], at + 1, () => 0);
+		assert.deepEqual([chosen.side, chosen.pose], ["right", "wry-front"], "the daemon records that side, with a pose of her expression that can stand there");
+		const settled = [...asked, { ...reply(false), expression: chosen.expression, pose: chosen.pose, side: chosen.side, expressionAt: chosen.selectedAt }];
+		for (const [label, mem, state] of [["settled", memory, { running: false }], ["reloaded", fresh(), { running: false }], ["live again in a later run", memory, { running: true }]])
+			assert.equal(composeStrip(panels(settled), state, poses, mem).at(-1).side, "right", label);
+		const again = resolvePick({ expression: "wry", pose: "playful-wink-pointing" }, art, settled.at(-1), at + 2, () => 0, "right");
+		assert.equal(again.side, "right", "another take keeps the panel's side");
+	}
+	// Only when no pose of her expression can stand there does her side follow the pose.
+	assert.deepEqual(resolvePick({ expression: "wry" }, manifest, before[1], at + 1, () => 0), { expression: "wry", pose: "playful-wink-pointing", side: "left", selectedAt: at + 1 });
 });
 
 test("both native menus use the settled reply's revision and expose saved takes in both directions", () => {

@@ -122,15 +122,17 @@ export function readPoses(manifest, base) {
  * The pose for a request: the named pose; for an `activity`, a pose showing her doing it; otherwise one with the
  * requested expression or the next in its chain. A pose that shows an activity never answers an expression, so a
  * settled panel never shows her still at work. `avoid` is the previous panel's pose, skipped when another fits, and
- * `seed` picks among equals so a panel keeps its choice.
+ * `seed` picks among equals so a panel keeps its choice. Given her `side`, poses that can stand there come first.
  */
-export function choosePose(poses, request = {}, avoid = "", seed = "") {
+export function choosePose(poses, request = {}, avoid = "", seed = "", side = null) {
 	if (poses.length === 0) return null;
 	if (request.pose) {
 		const named = poses.find((p) => p.id === request.pose);
 		if (named) return named;
 	}
-	const pick = (fits) => {
+	const pick = (all) => {
+		const standing = side ? all.filter((p) => standsOn(p, side)) : all;
+		const fits = standing.length > 0 ? standing : all;
 		const fresh = fits.filter((p) => p.id !== avoid);
 		const pool = (fresh.length > 0 ? fresh : fits).slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 		return pool[hash(seed) % pool.length];
@@ -193,8 +195,11 @@ export function standIn(panel, live) {
 }
 
 /**
- * Each panel's pose and side, oldest first, as every client composes the strip. Recorded choices win. Older panels
- * derive both from their id and the art available at selection time, never from the previous panel or client memory.
+ * Each panel's pose and side, oldest first, as every client composes the strip. Recorded choices win. A panel without
+ * one takes the other side from the latest earlier recorded pose, as the daemon will record it, so her side is set when
+ * the panel opens and kept through streaming, settling, and reloads; her pose may change, preferring poses that can
+ * stand there. Before any recorded pose, a panel derives its side and stand-in from its id and the art available at
+ * selection time, never from client memory.
  * `memory` ({ sides, poseIds, livePoses }) keeps live presentation state between calls. The panel she is answering in
  * shows the pose of the moment; when the run ends, `holding` (the client's few seconds after a run) keeps her talking
  * pose there until the daemon's picked face arrives, then a
@@ -203,31 +208,40 @@ export function standIn(panel, live) {
 export function composeStrip(panels, state, poses, memory, holding = false) {
 	const running = Boolean(state && (state.running || state.compacting));
 	let previousPose = "";
+	// The side of the latest panel so far whose picked face named a pose: the reply the daemon alternates from.
+	let anchor = null;
 	return panels.map((p, i) => {
 		const live = i === panels.length - 1 && running;
 		// While she works or thinks, a pose showing that; while she writes, her expression; settled, the face the daemon
 		// picked for her reply, or a kept stand-in until it arrives.
 		const doing = live ? liveActivity(state, p) : null;
-		const face = live ? null : picked(p);
+		const recorded = picked(p);
+		const face = live ? null : recorded;
+		// Her side is settled before her pose and kept while the pose changes: the recorded side, even while a later run
+		// makes this panel live again; else the other side from the latest earlier recorded pose, which is the side the
+		// daemon will record for this reply (resolvePick in expression.ts); else, with no record before it, from its id.
+		const held = recorded?.side ?? (anchor === null ? null : anchor === "left" ? "right" : "left");
 		const hold = !live && !face && i === panels.length - 1 && holding && memory.livePoses[p.id] !== undefined;
 		const find = (id) => poses.find((x) => x.id === id) ?? null;
 		// A settled panel chooses only among poses in the set when it happened, so adding art never changes it.
 		const time = selectionMoment(p);
 		const pool = poses.filter((x) => availableAt(x, time));
 		let pose = live
-			? choosePose(poses, doing ? { activity: doing, expression: "curious" } : standIn(p, true), previousPose, p.id)
+			? choosePose(poses, doing ? { activity: doing, expression: "curious" } : standIn(p, true), previousPose, p.id, held)
 			: face
-				? (face.pose ? find(face.pose) : null) ?? choosePose(pool, face, "", p.id)
+				? (face.pose ? find(face.pose) : null) ?? choosePose(pool, face, "", p.id, held)
 				: hold
 					? find(memory.livePoses[p.id])
-					: choosePose(pool, standIn(p, false), "", p.id);
+					: choosePose(pool, standIn(p, false), "", p.id, held);
 		if (live && pose) memory.livePoses[p.id] = pose.id;
 		if (!pose && !live) {
-			pose = choosePose(pool, standIn(p, false), "", p.id);
+			pose = choosePose(pool, standIn(p, false), "", p.id, held);
 			if (pose) memory.poseIds[p.id] = pose.id;
 		}
-		const preferred = face?.side ?? (hash(p.id) % 2 === 0 ? "left" : "right");
+		// The pose yields only when none that can stand on her side answers the request.
+		const preferred = held ?? (hash(p.id) % 2 === 0 ? "left" : "right");
 		memory.sides[p.id] = chooseSide(preferred === "left" ? "right" : "left", pose);
+		if (recorded?.pose) anchor = recorded.side ?? "";
 		previousPose = pose ? pose.id : "";
 		return Object.assign({}, p, { side: memory.sides[p.id], pose, live });
 	});
@@ -394,9 +408,13 @@ export function panelLayout({ panel, width, sizes, poses }) {
  */
 export function chooseSide(previous, pose) {
 	const preferred = previous === "left" ? "right" : "left";
-	if (!pose || pose.mirror || pose.facing === "front") return preferred;
-	const facesIn = (side) => (side === "left" ? pose.facing === "right" : pose.facing === "left");
-	return facesIn(preferred) ? preferred : preferred === "left" ? "right" : "left";
+	return standsOn(pose, preferred) ? preferred : preferred === "left" ? "right" : "left";
+}
+
+/** Whether `pose` can stand on `side` facing the words: it faces front, may be mirrored, or already faces in. */
+export function standsOn(pose, side) {
+	if (!pose || pose.mirror || pose.facing === "front") return true;
+	return side === "left" ? pose.facing === "right" : pose.facing === "left";
 }
 
 /**

@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import type { Context as ModelContext, Message, Models } from "@earendil-works/pi-ai";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import type { Conversation } from "@earendil-works/pi-durable";
-import { EXPRESSIONS, type Manifest, parseManifest } from "./avatar.ts";
+import { EXPRESSIONS, type Manifest, parseManifest, type Pose } from "./avatar.ts";
 import type { ModelChoice, PromptFiles } from "./config.ts";
 import type { Reply } from "./protocol.ts";
 import type { Logger } from "./runtime.ts";
@@ -125,20 +125,34 @@ export function loadManifest(paths: readonly string[], log: Logger): Manifest | 
 	return { ...sets[0]!, poses: Object.assign({}, ...sets.toReversed().map((s) => s.poses ?? {})) };
 }
 
-/** Resolve variety once, when a choice is written, never while rendering. Explicit valid poses win. */
-export function resolvePick(pick: FacePick, manifest: Manifest | undefined, previous?: Assistant, selectedAt = Date.now(), random = Math.random): FacePick & { side: "left" | "right"; selectedAt: number } {
+/** Whether a pose can stand on `side` facing the words, as the clients judge it (standsOn in overlay/compose.mjs). */
+function standsOn(pose: Pose, side: "left" | "right"): boolean {
+	return pose.mirror !== false || pose.facing === "front" || pose.facing === (side === "left" ? "right" : "left");
+}
+
+/**
+ * Resolve variety once, when a choice is written, never while rendering. Her side comes first, because the panel has
+ * shown it since it opened: `held` when given (a retake keeps the panel's), else the other side from `previous`, the
+ * latest earlier reply with a pose, as the clients derive it for a panel still waiting for its face. Poses that can
+ * stand on that side win; an explicit valid pose that cannot gives way to one of its expression that can, and only
+ * when none can does the side follow the pose.
+ */
+export function resolvePick(pick: FacePick, manifest: Manifest | undefined, previous?: Assistant, selectedAt = Date.now(), random = Math.random, held?: "left" | "right"): FacePick & { side: "left" | "right"; selectedAt: number } {
+	let side: "left" | "right" = held ?? (previous?.side === "left" ? "right" : "left");
 	const poses = Object.entries(manifest?.poses ?? {}).filter(([, p]) => !p.activity && (p.added === undefined || Date.parse(p.added) <= selectedAt));
-	let named = poses.find(([id]) => id === pick.pose);
-	let expression: string | undefined = pick.expression;
+	const explicit = poses.find(([id]) => id === pick.pose);
+	let named = explicit && standsOn(explicit[1], side) ? explicit : undefined;
+	let expression: string | undefined = named ? undefined : explicit?.[1].expression ?? pick.expression;
 	while (!named && expression) {
 		const fitting = poses.filter(([, p]) => p.expression === expression);
-		const fresh = fitting.filter(([id]) => id !== previous?.pose);
-		const pool = fresh.length ? fresh : fitting;
+		const standing = fitting.filter(([, p]) => standsOn(p, side));
+		const choices = standing.length ? standing : explicit ? [explicit] : fitting;
+		const fresh = choices.filter(([id]) => id !== previous?.pose);
+		const pool = fresh.length ? fresh : choices;
 		if (pool.length) named = pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
 		expression = (EXPRESSIONS[expression as keyof typeof EXPRESSIONS] as { fallback?: string }).fallback;
 	}
-	let side: "left" | "right" = previous?.side === "left" ? "right" : "left";
-	if (named?.[1].mirror === false && named[1].facing !== "front") side = named[1].facing === "right" ? "left" : "right";
+	if (named && !standsOn(named[1], side)) side = side === "left" ? "right" : "left";
 	return { expression: pick.expression, ...(named ? { pose: named[0] } : {}), side, selectedAt };
 }
 
@@ -275,7 +289,10 @@ export function startExpressions(options: {
 				} else {
 					const picked = await pick(context.said, reply.text, context.earlier, takes);
 					if (!picked) throw new Error("June could not choose another face");
-					choice = { ...resolvePick(picked, options.manifest(), reply), take: Math.max(...takes.map((t) => t.take)) + 1, previous: current.take };
+					// Another take keeps the side the panel has shown: its own, or for an unpicked reply the one the clients derive.
+					const before = items.slice(0, items.indexOf(reply)).findLast((i): i is Assistant => i.kind === "assistant" && !!i.pose);
+					const side = reply.side ?? (before?.side === "left" ? "right" : "left");
+					choice = { ...resolvePick(picked, options.manifest(), reply, Date.now(), Math.random, side), take: Math.max(...takes.map((t) => t.take)) + 1, previous: current.take };
 				}
 				const live = target(id);
 				if (stopped || !live || (live.artVersion ?? "") !== revision || live.text !== reply.text) throw new Error("That panel changed while June chose its face");
