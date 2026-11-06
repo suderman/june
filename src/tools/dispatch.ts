@@ -11,7 +11,7 @@ import { type Config, expandHome } from "../config.ts";
 import { type Run, runProcess } from "./herdr.ts";
 import { createFollowTask, FOLLOW_DEFAULTS, type FollowInput, type FollowOptions, follow } from "./follow.ts";
 import type { Herdr } from "./herdr.ts";
-import { type Org, parseHeading } from "./org.ts";
+import { type Org, orgTime, parseHeading } from "./org.ts";
 import { User, user } from "../user.ts";
 
 export type QueueRequest = {
@@ -25,15 +25,20 @@ export type QueueRequest = {
 	review: boolean;
 	/** Stable across a tool's replay, so a rerun finds its own heading instead of writing a second one. */
 	key: string;
+	/** When the dispatcher may start it, as org-edit date takes it, such as `2026-11-07 09:30` or `fri 9:30`; unset starts now. */
+	scheduled?: string;
 };
 
-/** The heading text June writes: keyword, title, a property drawer that names the agent and host, then the body. */
-export function renderTask(request: QueueRequest, id: string): string {
+/**
+ * The heading text June writes: keyword, title, the SCHEDULED planning line when it waits, a property drawer that names
+ * the agent and host, then the body. `stamp` is the Org timestamp org-edit made from `request.scheduled`.
+ */
+export function renderTask(request: QueueRequest, id: string, stamp?: string): string {
 	const properties = [`:ID: ${id}`, `:AGENT: ${request.agent ?? "pi"}`, `:HOST: ${request.host}`, `:JUNE_REQUEST: ${request.key}`];
 	if (request.dir) properties.push(`:DIR: ${request.dir}`);
 	if (!request.review) properties.push(":REVIEW: no");
 	const body = request.body.trim();
-	return [`* AUTO ${request.title}`, ":PROPERTIES:", ...properties, ":END:", ...(body ? [body] : []), ""].join("\n");
+	return [`* AUTO ${request.title}`, ...(stamp ? [`SCHEDULED: ${stamp}`] : []), ":PROPERTIES:", ...properties, ":END:", ...(body ? [body] : []), ""].join("\n");
 }
 
 /** The agents June may choose for a task: `dispatch.agents`, or her default agent alone. */
@@ -41,9 +46,24 @@ export function dispatchAgents(dispatch: Config["dispatch"]): readonly string[] 
 	return dispatch.agents ?? [dispatch.agent ?? "pi"];
 }
 
-function checkAgent(agent: string | undefined, agents: readonly string[]): void {
-	if (agent !== undefined && !agents.includes(agent)) throw new Error(`The agent is one of ${agents.join(", ")}`);
+/** The agents org-dispatch can start, as its `org-dispatch-launchable` lists them. */
+export const LAUNCHABLE = ["pi", "claude"] as const;
+
+/** Agents the dispatcher could start that June's config does not let her choose. */
+export function disabledAgents(dispatch: Config["dispatch"]): string[] {
+	const agents = dispatchAgents(dispatch);
+	return LAUNCHABLE.filter((agent) => !agents.includes(agent));
 }
+
+function checkAgent(agent: string | undefined, agents: readonly string[]): void {
+	if (agent === undefined || agents.includes(agent)) return;
+	if ((LAUNCHABLE as readonly string[]).includes(agent))
+		throw new Error(`The dispatcher can run ${agent}, but June's config does not enable it: dispatch.agents allows only ${agents.join(", ")}. ${User()} can add ${agent} there; do not route around it with tags`);
+	throw new Error(`The agent is one of ${agents.join(", ")}`);
+}
+
+/** One date and an optional start time, without a range, repeater, or warning, which a one-off queued task has no use for. */
+const START = /^<\d{4}-\d{2}-\d{2} [A-Za-z]{2,3}(?: \d{2}:\d{2})?>$/;
 
 export function checkRequest(request: QueueRequest, dispatch: Config["dispatch"]): void {
 	const { hosts } = dispatch;
@@ -58,6 +78,8 @@ export function checkRequest(request: QueueRequest, dispatch: Config["dispatch"]
 	if (/^\s*:(PROPERTIES|END):/m.test(request.body)) throw new Error("The body must not contain a property drawer");
 	if (request.dir !== undefined && !request.dir.startsWith("/") && !request.dir.startsWith("~/"))
 		throw new Error("dir is an absolute or ~/ path");
+	if (request.scheduled !== undefined && (/[\n\r<>\[\]]/.test(request.scheduled) || request.scheduled.trim() === ""))
+		throw new Error("scheduled is one line, such as 2026-11-07 09:30 or fri 9:30, without brackets");
 }
 
 export type TaskParts = { reason: string; scope: string; checklist: readonly string[] };
@@ -187,10 +209,25 @@ export class Dispatch {
 	readonly #config: Config;
 	readonly #run: Run;
 
-	constructor(org: Org, config: Config, run: Run = runProcess) {
+	readonly #now: () => number;
+
+	constructor(org: Org, config: Config, run: Run = runProcess, now: () => number = Date.now) {
 		this.#org = org;
 		this.#config = config;
 		this.#run = run;
+		this.#now = now;
+	}
+
+	/** The Org timestamp for `when`, made by org-edit as for any other date, refused unless it is one plain start. */
+	async #stamp(when: string): Promise<string> {
+		// Org may print a bell before the stamp when it adjusts a date.
+		const stamp = (await this.#run(["org-edit", "date", when.trim()], 60_000)).replace(/[\x00-\x1f]/g, "").trim();
+		// An older org-edit moves an impossible or far-off date silently; never queue for a day other than the one asked for.
+		const asked = /^\d{4}-\d{2}-\d{2}/.exec(when.trim())?.[0];
+		if (asked !== undefined && !stamp.startsWith(`<${asked} `) && stamp !== `<${asked}>`)
+			throw new Error(`There is no ${asked} Org can schedule; it reads it as ${stamp}`);
+		if (!START.test(stamp)) throw new Error(`scheduled is a date and optional start time, such as 2026-11-07 09:30, without a range or repeater; ${when} gives ${stamp}`);
+		return stamp;
 	}
 
 	#target(file: string): Promise<string> {
@@ -246,27 +283,38 @@ export class Dispatch {
 		return { file, created, directory: dirname(await this.#org.file(file)) };
 	}
 
-	/** Write the task once. A replay with the same key returns the heading it already wrote. */
+	/**
+	 * Write the task once. A replay with the same key returns the heading it already wrote. A scheduled task is written
+	 * with its SCHEDULED line in the same save, so no dispatcher run, here or on another host, can see it without one.
+	 */
 	async queue(request: QueueRequest) {
+		// Some model calls send empty strings for omitted optional fields.
+		if (request.scheduled === "") request = { ...request, scheduled: undefined };
 		checkRequest(request, this.#config.dispatch);
 		if (request.dir !== undefined) {
 			const dir = await stat(expandHome(request.dir)).catch(() => undefined);
 			if (!dir?.isDirectory()) throw new Error(`dir ${request.dir} is not a directory; use one of the project's repository links`);
 		}
 		const path = await this.#target(request.file);
+		let stamp: string | undefined;
 		for (let attempt = 0; attempt < 3; attempt++) {
 			const before = await stat(path);
 			const content = await readFile(path, "utf8");
 			const existing = new RegExp(`^:JUNE_REQUEST: ${request.key}$`, "m").exec(content);
 			if (existing !== null) return { file: this.#org.rel(path), written: false, ...this.#located(content, existing.index) };
+			// Only before the first write: a replay finds the heading above, whatever the date now means.
+			if (request.scheduled !== undefined) stamp ??= await this.#stamp(request.scheduled);
+			const startsAt = stamp === undefined ? undefined : orgTime(stamp)!;
+			if (startsAt !== undefined && startsAt <= this.#now())
+				throw new Error(`scheduled ${stamp} has already passed in Calgary time; omit scheduled to start now, or choose a later time`);
 			const id = randomUUID();
-			const next = insertAfterPreamble(content, renderTask({ agent: this.#config.dispatch.agent ?? "pi", ...request }, id));
+			const next = insertAfterPreamble(content, renderTask({ agent: this.#config.dispatch.agent ?? "pi", ...request }, id, stamp));
 			// Replace only if nobody (Emacs, Syncthing) changed the file since it was read.
 			if ((await stat(path)).mtimeMs !== before.mtimeMs) continue;
 			const temp = join(dirname(path), `.${basename(path)}.june-${process.pid}`);
 			await writeFile(temp, next, { mode: before.mode & 0o777 });
 			await rename(temp, path);
-			return { file: this.#org.rel(path), written: true, id, heading: `AUTO ${request.title}` };
+			return { file: this.#org.rel(path), written: true, id, heading: `AUTO ${request.title}`, ...(stamp ? { scheduled: stamp } : {}) };
 		}
 		throw new Error(`${this.#org.rel(path)} kept changing; try again shortly`);
 	}
@@ -387,9 +435,10 @@ export class Dispatch {
 
 	#located(content: string, index: number) {
 		const head = content.slice(0, index).lastIndexOf("\n* ");
-		const line = content.slice(head + 1).split("\n")[0];
+		const [line, planning] = content.slice(head + 1).split("\n");
 		const id = /^:ID: (.+)$/m.exec(content.slice(head + 1))?.[1];
-		return { heading: line?.replace(/^\* /, ""), ...(id ? { id } : {}) };
+		const scheduled = /^SCHEDULED: (<[^>]+>)$/.exec(planning ?? "")?.[1];
+		return { heading: line?.replace(/^\* /, ""), ...(id ? { id } : {}), ...(scheduled ? { scheduled } : {}) };
 	}
 
 	/** Run this host's dispatcher now, the same unit its timer starts, then report what it would launch. */
@@ -428,13 +477,21 @@ export function createDispatchExtension(
 	const defaultAgent = config.dispatch.agent ?? "pi";
 	const agents = dispatchAgents(config.dispatch);
 	const agentParameter = (description: string) => opt(union(agents.map((agent) => lit(agent)), { description }));
+	// Say what the dispatcher could run but June may not choose, so she gives one accurate answer instead of a workaround.
+	const disabled = disabledAgents(config.dispatch);
+	const agentNote = disabled.length === 0
+		? ""
+		: ` The dispatcher can also run ${disabled.join(" and ")}, but ${user()} has not enabled ${disabled.length === 1 ? "it" : "them"} for you: dispatch.agents in your config lists only ${agents.join(", ")}. If ${user()} asks for ${disabled.join(" or ")}, say exactly that and that adding it to dispatch.agents enables it; never add agent tags such as :${disabled[0]}:, edit the drawer, or give the work to another agent instead.`;
 	/** Write the task, follow it once whether this call wrote it or a replay found it, and start this host's dispatcher. */
 	const queueAndFollow = async (request: QueueRequest, followIt: (input: FollowInput) => Promise<unknown>): Promise<string> => {
 		const result = await dispatch.queue(request);
 		if (result.id !== undefined) await followIt({ id: result.id, title: request.title, host: request.host, queuedAt: Date.now() });
 		// The dispatcher launches headings June wrote without settling, so start it now instead of waiting a minute.
+		// A scheduled task would only be skipped now; the dispatcher's timer launches it when its time comes.
 		let started = "";
-		if (result.written && request.host === config.herdr.host)
+		if (result.scheduled)
+			started = ` It is SCHEDULED for ${result.scheduled}, Calgary time: the dispatcher holds it until then and its timer launches it within about a minute after.`;
+		else if (result.written && request.host === config.herdr.host)
 			started = await dispatch.kick().then(
 				() => " The dispatcher was started and launches it now.",
 				(error: Error) => ` Starting the dispatcher failed (${error.message}); its timer runs within a minute.`,
@@ -464,7 +521,7 @@ export function createDispatchExtension(
 			}),
 			defineTool({
 				name: "org_queue_task",
-				description: `Queue new work for an unattended agent: write a new AUTO heading, its host (${hosts.join(", ")}) and agent in its property drawer, into an Org agenda file. The dispatcher on that host launches it, and this tool starts the one on this host right away, and the agent ends at EVAL for review by you or the user unless review is explicitly waived. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task and use org_projects to find its project first. If no project fits, use org_create_project before queueing. The tool writes the body from reason, scope, and checklist. If it refuses the file, tell ${user()} why and ask how to proceed; never get around a refusal by queueing in another file.`,
+				description: `Queue new work for an unattended agent: write a new AUTO heading, its host (${hosts.join(", ")}) and agent in its property drawer, into an Org agenda file. The dispatcher on that host launches it, and this tool starts the one on this host right away, and the agent ends at EVAL for review by you or the user unless review is explicitly waived. You then follow it: a [follow] message tells you when it fails to launch, blocks, holds, or finishes. Search for an existing task and use org_projects to find its project first. If no project fits, use org_create_project before queueing. The tool writes the body from reason, scope, and checklist. If it refuses the file, tell ${user()} why and ask how to proceed; never get around a refusal by queueing in another file. To start it later, pass scheduled: the dispatcher already honours SCHEDULED, and this writes it with the task. Never queue first and set the date afterward with org_set_date, since the dispatcher may launch it in between; for an existing task, set the date while it is still TODO, EVAL, or HOLD, then use org_resume_task.${agentNote}`,
 				parameters: obj({
 					file: str({ description: "Org file under ~/org, usually the project's <project>.org" }),
 					title: str({ description: "Concise verb-led heading title, without keyword or tags" }),
@@ -472,9 +529,10 @@ export function createDispatchExtension(
 					scope: str({ description: "Outcome, constraints, and success criteria in Org; one physical line per paragraph" }),
 					checklist: arr(str(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
 					host: str({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` }),
-					agent: agentParameter(`Coding agent the dispatcher starts: ${agents.join(" or ")}; default ${defaultAgent}. Choose one when ${user()} names it`),
+					agent: agentParameter(`Coding agent the dispatcher starts: ${agents.join(" or ")}; default ${defaultAgent}. Choose one when ${user()} names it. It is written as :AGENT: in the drawer, which the dispatcher reads before any agent tag, so no tag is needed`),
 					dir: opt(str({ description: "Existing working directory override, usually one of the project's local repository links. Omit for one-offs without a checkout: the dispatcher uses the project directory" })),
 					review: opt(bool({ description: `Default true: the worker stops at EVAL for human or agent review, including read-only lookups you will review yourself. Set false only when ${user()} explicitly waives review` })),
+					scheduled: opt(str({ description: `Only when ${user()} wants it to start later: the earliest start, in Calgary time as the dispatcher reads it, as a date (2026-11-07, today, tomorrow, fri, +2d; a weekday name is the next one, never today) and optional time (09:30). Omit to start now. It goes into the heading before the file is saved, so the task cannot launch early; a time already past is refused` })),
 				}),
 				// Idempotent by key: a rerun after a restart finds the heading it wrote.
 				replay: "safe",
@@ -487,7 +545,7 @@ export function createDispatchExtension(
 			}),
 			defineTool({
 				name: "org_queue_plan",
-				description: `Queue a plan of connected tasks for unattended agents when ${user()} asks for a series of tasks on a bigger project, some in parallel and some waiting on others. Each task is a new AUTO heading in its project file, with a :DEPENDS: edge to each task it waits on; the dispatcher launches a task only once every prerequisite is DONE, never at EVAL, and waiting costs nothing. A table of the plan's tasks goes in file. You follow every task: [follow] messages report a failed launch, a blocked agent, HOLD, and each finish. Each task ends at EVAL unless review is waived; review it as for org_queue_task, and close it with org_complete_task when satisfied, which is what lets its dependents start: you are what moves the plan along. A task left at EVAL for ${user()}'s review or decision holds everything after it, so tell ${user()} which tasks are waiting behind it. Report each task as it finishes, and tell ${user()} when the whole plan is done. Use this rather than queueing connected tasks one at a time; for a single task use org_queue_task. Search for existing tasks first, and use org_projects and org_create_project as for org_queue_task. Never use it to resume existing tasks.`,
+				description: `Queue a plan of connected tasks for unattended agents when ${user()} asks for a series of tasks on a bigger project, some in parallel and some waiting on others. Each task is a new AUTO heading in its project file, with a :DEPENDS: edge to each task it waits on; the dispatcher launches a task only once every prerequisite is DONE, never at EVAL, and waiting costs nothing. A table of the plan's tasks goes in file. You follow every task: [follow] messages report a failed launch, a blocked agent, HOLD, and each finish. Each task ends at EVAL unless review is waived; review it as for org_queue_task, and close it with org_complete_task when satisfied, which is what lets its dependents start: you are what moves the plan along. A task left at EVAL for ${user()}'s review or decision holds everything after it, so tell ${user()} which tasks are waiting behind it. Report each task as it finishes, and tell ${user()} when the whole plan is done. Use this rather than queueing connected tasks one at a time; for a single task use org_queue_task. Search for existing tasks first, and use org_projects and org_create_project as for org_queue_task. Never use it to resume existing tasks. A plan cannot be scheduled: tasks without prerequisites launch as soon as it is written, so if ${user()} wants it to start later, say so and ask rather than adding dates afterward.${agentNote}`,
 				parameters: obj({
 					title: str({ description: "One-line name of the plan, used for its table heading" }),
 					file: str({ description: "Org agenda file for the plan's table, usually the main project's file" }),
@@ -559,7 +617,7 @@ export function createDispatchExtension(
 			})]),
 			defineTool({
 				name: "org_resume_task",
-				description: "When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and deploy off, and select one host. Refuse an active agent. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work.",
+				description: `When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and deploy off, and select one host. Refuse an active agent. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work. To resume it later rather than now, first set its SCHEDULED with org_set_date while it is still TODO, EVAL, or HOLD, then resume: the dispatcher holds it until then. Never date a task that is already AUTO.${agentNote}`,
 				parameters: obj({
 					file: str({ description: "Org agenda file under ~/org" }),
 					heading: str({ description: "Exact title or id:UUID, as org_read_task accepts" }),

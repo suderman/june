@@ -13,6 +13,30 @@ const HERDR_LINK = /herdr:([a-z0-9-]+)\/([a-z]+):([0-9a-f-]{36})(?:@([A-Za-z0-9:
 
 export type Heading = { line: number; level: number; state?: string; title: string; tags: string[] };
 
+/** org-dispatch and org-edit pin Calgary time whatever the host's zone, so Org timestamps are read in it too. */
+export const ORG_ZONE = "America/Edmonton";
+
+/** How far `zone`'s wall clock is ahead of UTC at `ms`. */
+function zoneOffset(ms: number, zone: string): number {
+	const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+		timeZone: zone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+	}).formatToParts(ms).map((part) => [part.type, part.value]));
+	return Date.UTC(+parts.year!, +parts.month! - 1, +parts.day!, +parts.hour!, +parts.minute!, +parts.second!) - Math.floor(ms / 1000) * 1000;
+}
+
+/**
+ * When an Org timestamp such as `<2026-11-06 Fri 09:30>` starts, in epoch ms, read as the dispatcher reads it: Calgary
+ * wall time, midnight without a time. Undefined for anything else.
+ */
+export function orgTime(stamp: string, zone = ORG_ZONE): number | undefined {
+	const match = /^[<[](\d{4})-(\d{2})-(\d{2})(?: [^\s\d>\]]+)?(?: (\d{1,2}):(\d{2}))?[\s>\]-]/.exec(stamp);
+	if (match === null) return undefined;
+	const [year, month, day, hour, minute] = match.slice(1).map((n) => Number(n ?? 0)) as [number, number, number, number, number];
+	const wall = Date.UTC(year, month - 1, day, hour, minute);
+	// The offset at the wall time read as UTC can be an hour off near a DST change; one correction settles it.
+	return wall - zoneOffset(wall - zoneOffset(wall, zone), zone);
+}
+
 export function parseHeading(text: string, line: number): Heading | undefined {
 	const match = HEADING.exec(text);
 	if (match === null) return undefined;
@@ -276,7 +300,9 @@ export class Org {
 		const text = lines.slice(start - 1, end).join("\n");
 		// Only the task's own property drawer, never a child task or an old run in LOGBOOK.
 		let at = start;
-		if (/^[ \t]*(SCHEDULED|DEADLINE|CLOSED):/.test(lines[at] ?? "")) at++;
+		const planning = /^[ \t]*(SCHEDULED|DEADLINE|CLOSED):/.test(lines[at] ?? "") ? lines[at++]! : "";
+		const scheduled = /SCHEDULED:[ \t]*(<[^>\n]+>)/.exec(planning)?.[1];
+		const scheduledAt = scheduled === undefined ? undefined : orgTime(scheduled);
 		const report: Record<string, string> = {};
 		if (lines[at]?.trim() === ":PROPERTIES:") {
 			for (at++; at < end && lines[at]?.trim() !== ":END:"; at++) {
@@ -292,6 +318,8 @@ export class Org {
 			...(headline !== undefined ? { headline } : {}),
 			// Keep the stamp even in PROG/AUTO so a later transition cannot reuse it.
 			...(headlineAt !== undefined ? { headlineAt } : {}),
+			// The dispatcher holds an AUTO task until then.
+			...(scheduledAt !== undefined ? { scheduledAt } : {}),
 		};
 	}
 

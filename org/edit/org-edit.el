@@ -58,6 +58,10 @@ range, and optional repeater and warning cookies."
     (unless date (error "no date in %S" when))
     (let ((day (org-read-date nil t (if (equal date "tomorrow") "+1d" date)))
           (pad (lambda (hm) (if (= (length hm) 4) (concat "0" hm) hm))))
+      ;; org-read-date rolls 2026-02-30 into March and clamps years past 2037; refuse rather than move the date.
+      (when (and (string-match-p "\\`[0-9]\\{4\\}-" date)
+                 (not (equal (format-time-string "%F" day) date)))
+        (error "no such date %s; Org would read it as %s" date (format-time-string "%F" day)))
       (format "<%s%s%s%s>"
               (format-time-string "%F %a" day)
               (if time (concat " " (funcall pad time)) "")

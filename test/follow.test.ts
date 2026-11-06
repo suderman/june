@@ -38,6 +38,61 @@ test("follow reports each transition once and stays quiet otherwise", () => {
 	assert.equal(decide(input, { state: "PROG", missing: false }, "PROG", 8 * 24 * 60 * min, FOLLOW_DEFAULTS).done, true, "follows expire");
 });
 
+test("a task scheduled ahead is followed quietly until its start, then on the usual launch clock", () => {
+	const day = 24 * 60 * min;
+	const at = (scheduledAt: number | undefined, now: number, last = "AUTO") =>
+		decide(input, { state: "AUTO", missing: false, ...(scheduledAt !== undefined ? { scheduledAt } : {}) }, last, now, FOLLOW_DEFAULTS);
+	assert.deepEqual([at(10 * day, 8 * min).signal, at(10 * day, 8 * min).say], ["scheduled", undefined], "held by SCHEDULED is not a stall");
+	assert.equal(at(10 * day, 9 * day).done, false, "a start beyond the follow's lifetime does not expire it early");
+	assert.equal(at(10 * day, 10 * day + 3 * min).say, undefined, "settling after the start is silent");
+	assert.match(at(10 * day, 10 * day + 8 * min).say ?? "", /has not launched 8 minutes after its scheduled start/);
+	assert.match(at(-day, 8 * min).say ?? "", /has not launched 8 minutes after queueing/, "a SCHEDULED already past when queued changes nothing");
+	assert.equal(at(10 * day, 18 * day).done, true, "the follow still expires, counted from the start");
+});
+
+test("Org reads a task's SCHEDULED start as Calgary time", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "org");
+	await mkdir(root);
+	await writeFile(join(root, "todo.org"), "* AUTO Later\nSCHEDULED: <2026-11-07 Sat 09:30>\n:PROPERTIES:\n:ID: aaaaaaaa-0000-4000-8000-000000000001\n:END:\n* AUTO Summer\nDEADLINE: <2026-07-02 Thu> SCHEDULED: <2026-07-01 Wed>\n:PROPERTIES:\n:ID: aaaaaaaa-0000-4000-8000-000000000002\n:END:\n* AUTO Now\n:PROPERTIES:\n:ID: aaaaaaaa-0000-4000-8000-000000000003\n:END:\n** Child\nSCHEDULED: <2026-11-08 Sun>\n* AUTO Winter\nSCHEDULED: <2026-01-15 Thu 09:30>\n:PROPERTIES:\n:ID: aaaaaaaa-0000-4000-8000-000000000004\n:END:\n");
+	const org = new Org(root);
+	assert.equal((await org.byId("aaaaaaaa-0000-4000-8000-000000000001"))?.scheduledAt, Date.UTC(2026, 10, 7, 15, 30), "after Alberta's 2026 change, 09:30 stays UTC-6");
+	assert.equal((await org.byId("aaaaaaaa-0000-4000-8000-000000000002"))?.scheduledAt, Date.UTC(2026, 6, 1, 6), "a date alone is midnight MDT");
+	assert.equal((await org.byId("aaaaaaaa-0000-4000-8000-000000000003"))?.scheduledAt, undefined, "a child's date is not the task's");
+	assert.equal((await org.byId("aaaaaaaa-0000-4000-8000-000000000004"))?.scheduledAt, Date.UTC(2026, 0, 15, 16, 30), "09:30 MST before the change is 16:30 UTC");
+});
+
+test("org_queue_task with scheduled writes the date with the task, does not start the dispatcher, and reports no stall before it", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "org");
+	const file = join(root, "todo.org");
+	await mkdir(root, { recursive: true });
+	await writeFile(file, "#+TITLE: Todo\n");
+	await writeFile(join(tmp.dir, "agenda"), `${file}\n`);
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") }, dispatch: { hosts: ["kit"] } };
+	const runs: string[][] = [];
+	const extension = createDispatchExtension(config, new Org(root), new Herdr(config.herdr, async () => "{}"), "inst", async (args) => {
+		runs.push([...args]);
+		return args[0] === "org-edit" && args[1] === "date" ? "<2036-12-31 Wed 09:30>\n" : "";
+	}, { intervalMs: 40, launchMs: 200, maxMs: 3_600_000 });
+	const faux = fauxProvider();
+	faux.setResponses([
+		fauxAssistantMessage([fauxToolCall("org_queue_task", { file: "todo.org", title: "Check docs", reason: "Alex asked.", scope: "Check docs.", checklist: ["Compare"], host: "kit", scheduled: "2036-12-31 9:30" })], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Queued for later."),
+	]);
+	const daemon = await openTestDaemon({ ...tmp, faux, config, extensions: [extension] });
+	t.after(() => daemon.close());
+	await ask(tmp.paths.socket, "queue it for the 31st");
+	assert.match(await readFile(file, "utf8"), /^\* AUTO Check docs\nSCHEDULED: <2036-12-31 Wed 09:30>\n:PROPERTIES:\n/m);
+	assert.deepEqual(runs, [["org-edit", "date", "2036-12-31 9:30"]], "nothing starts the dispatcher for a task it would only skip");
+	assert.match(JSON.stringify((await daemon.root.context(BG)).entries), /SCHEDULED for <2036-12-31 Wed 09:30>, Calgary time/, "the tool result tells June when it starts");
+	await new Promise((r) => setTimeout(r, 600));
+	assert.equal((await daemon.root.context(BG)).entries.filter((e) => (e.data as { source?: string })?.source === "follow").length, 0, "no stall report while it waits");
+	assert.equal((await daemon.harness.inspect(BG)).tasks.filter((task) => task.record.kind === "june.follow").length, 1, "it is followed");
+});
+
 test("follow carries only the worker's own headline, verbatim in the model input and notice data", async (t) => {
 	const session = "01234567-89ab-cdef-0123-456789abcdef";
 	for (const [state, headline, agent, byHeading] of [

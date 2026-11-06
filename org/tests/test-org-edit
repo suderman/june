@@ -218,6 +218,12 @@ check "and the next heading none" has "$(tail -n 1 "$bare")" '^\* Next$'
 check "date prints a timestamp" has "$(run date '2026-11-03 9:00-10:30 +1w')" '^<2026-11-03 Tue 09:00-10:30 +1w>$'
 check "date takes a relative day" has "$(run date '+0d')" "^<$(TZ=America/Edmonton date +'%Y-%m-%d %a')>$"
 check "date refuses words Org would read as today" has "$(run date 'next tuesday')" 'not a date'
+check "date refuses a day that does not exist" has "$(run date '2026-02-30 06:00')" 'no such date 2026-02-30; Org would read it as 2026-03-02'
+check "date refuses a year Org would clamp" has "$(run date '2999-01-01')" 'no such date 2999-01-01'
+shifted="$HOME/org/shifted.org"
+printf '* TODO Shifted\n' >"$shifted"
+check "schedule refuses a day that does not exist" has "$(run schedule "$shifted" Shifted '2026-02-31')" 'no such date 2026-02-31'
+check "a refused date leaves the heading unscheduled" test "$(<"$shifted")" = '* TODO Shifted'
 check "missing zone data stops instead of using UTC" has "$(TZDIR=/nonexistent run date '+0d')" 'No zone data for America/Edmonton'
 
 cp "$tasks" "$HOME/org/asana.org"

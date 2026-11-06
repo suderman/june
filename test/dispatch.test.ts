@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { Dispatch, insertAfterPreamble, taskBody } from "../src/tools/dispatch.ts";
+import { Dispatch, insertAfterPreamble, renderTask, taskBody } from "../src/tools/dispatch.ts";
 import { Herdr } from "../src/tools/herdr.ts";
 import { Org } from "../src/tools/org.ts";
 import { tempDir, testConfig } from "./helpers.ts";
@@ -32,6 +32,15 @@ async function fixture() {
 	const runs: string[][] = [];
 	const dispatch = new Dispatch(new Org(root), config, async (argv) => {
 		runs.push([...argv]);
+		// Stands in for org-edit date, as the installed one prints these.
+		if (argv[0] === "org-edit" && argv[1] === "date") {
+			const stamps: Record<string, string> = {
+				"2999-01-01 06:00": "<2999-01-01 Tue 06:00>", "2999-01-01": "<2999-01-01 Tue>", "2000-01-01 06:00": "<2000-01-01 Sat 06:00>",
+				"2999-01-01 9:00-10:30": "<2999-01-01 Tue 09:00-10:30>", "2999-01-01 06:00 +1w": "<2999-01-01 Tue 06:00 +1w>",
+			};
+			if (!(argv[2]! in stamps)) throw new Error(`not a date: ${argv[2]}`);
+			return `${stamps[argv[2]!]}\n`;
+		}
 		if (argv[0] === "org-edit") return JSON.stringify({ id: "resume123", title: "Existing thread", host: "kit", written: true });
 		if (argv[0] === "org-dispatch") {
 			const { projects } = await new Org(root).projects();
@@ -68,7 +77,51 @@ test("June can choose the agent for a queued task", async (t) => {
 	assert.match(await readFile(f.project, "utf8"), /^:AGENT: claude\n:HOST: kit$/m);
 	await assert.rejects(f.dispatch.queue({ ...request, body, key: "inst:8", agent: "cobol" }), /agent is one of pi, claude/);
 	const only = new Dispatch(new Org(f.root), { ...f.config, dispatch: { hosts: ["kit"], agent: "pi" } }, async () => "");
-	await assert.rejects(only.queue({ ...request, body, key: "inst:9", agent: "claude" }), /agent is one of pi$/, "without dispatch.agents, only the default agent");
+	await assert.rejects(only.queue({ ...request, body, key: "inst:9", agent: "claude" }), /can run claude, but June's config does not enable it: dispatch\.agents allows only pi\./,
+		"without dispatch.agents, only the default agent, and the refusal says why");
+	await assert.rejects(only.queue({ ...request, body, key: "inst:9", agent: "cobol" }), /agent is one of pi$/);
+	assert.doesNotMatch(await readFile(f.project, "utf8"), /:claude:|:pi:/, "the agent is never written as a tag");
+});
+
+test("a scheduled task is written with its SCHEDULED line in the one save, and a replay finds it after the time passes", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	const first = await f.dispatch.queue({ ...request, body, scheduled: "2999-01-01 06:00" });
+	assert.deepEqual([first.written, first.scheduled], [true, "<2999-01-01 Tue 06:00>"]);
+	assert.deepEqual(f.runs.filter((argv) => argv[0] !== "org-edit"), [], "queueing alone starts nothing");
+	const text = await readFile(f.project, "utf8");
+	assert.match(text, /^\* AUTO Investigate the flaky login test\nSCHEDULED: <2999-01-01 Tue 06:00>\n:PROPERTIES:\n:ID: [0-9a-f-]{36}\n:AGENT: pi\n:HOST: kit\n:JUNE_REQUEST: inst:7\n:END:\n/m);
+	// Replayed long after: the heading is found, not refused as past, and nothing is written twice.
+	const later = new Dispatch(new Org(f.root), f.config, async (argv) => argv[1] === "date" ? "<2999-01-01 Tue 06:00>\n" : "", () => Date.UTC(3000, 0, 1));
+	const again = await later.queue({ ...request, body, scheduled: "2999-01-01 06:00" });
+	assert.deepEqual([again.written, again.id, again.scheduled], [false, first.id, "<2999-01-01 Tue 06:00>"]);
+	assert.equal(await readFile(f.project, "utf8"), text);
+	// A date alone is midnight Calgary time; an empty string from the model means unscheduled.
+	await f.dispatch.queue({ ...request, title: "Date only", body, key: "inst:20", scheduled: "2999-01-01" });
+	assert.match(await readFile(f.project, "utf8"), /^\* AUTO Date only\nSCHEDULED: <2999-01-01 Tue>\n:PROPERTIES:$/m);
+	const now = await f.dispatch.queue({ ...request, title: "Right away", body, key: "inst:21", scheduled: "" });
+	assert.equal(now.scheduled, undefined);
+	assert.match(await readFile(f.project, "utf8"), /^\* AUTO Right away\n:PROPERTIES:$/m);
+});
+
+test("scheduling refuses a past time, ranges, repeaters, and bad dates without writing anything", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	const before = await readFile(f.project, "utf8");
+	await assert.rejects(f.dispatch.queue({ ...request, body, scheduled: "2000-01-01 06:00" }), /<2000-01-01 Sat 06:00> has already passed in Calgary time; omit scheduled to start now/);
+	await assert.rejects(f.dispatch.queue({ ...request, body, scheduled: "2999-01-01 9:00-10:30" }), /without a range or repeater/);
+	await assert.rejects(f.dispatch.queue({ ...request, body, scheduled: "2999-01-01 06:00 +1w" }), /without a range or repeater/);
+	await assert.rejects(f.dispatch.queue({ ...request, body, scheduled: "someday" }), /not a date/);
+	await assert.rejects(f.dispatch.queue({ ...request, body, scheduled: "<2999-01-01 Tue 06:00>" }), /without brackets/);
+	await assert.rejects(f.dispatch.queue({ ...request, body, scheduled: "2999-01-01\nSCHEDULED: <2000-01-01>" }), /one line/);
+	assert.equal(await readFile(f.project, "utf8"), before);
+});
+
+test("renderTask puts SCHEDULED on the planning line, before the drawer", () => {
+	assert.equal(
+		renderTask({ ...request, body: "Body.", agent: "claude" }, "id-1", "<2999-01-01 Tue 06:00>"),
+		"* AUTO Investigate the flaky login test\nSCHEDULED: <2999-01-01 Tue 06:00>\n:PROPERTIES:\n:ID: id-1\n:AGENT: claude\n:HOST: kit\n:JUNE_REQUEST: inst:7\n:END:\nBody.\n",
+	);
 });
 
 test("queueing refuses files and requests the dispatcher should not get", async (t) => {
@@ -304,6 +357,21 @@ test("org-dispatch itself sees the task June wrote", { skip: !hasDispatcher && "
 	await actual.queue({ ...request, file: project.file, title: "Check free disk space", body, key: "inst:9" });
 	const scan = execFileSync("org-dispatch", ["scan"], options);
 	assert.match(scan, new RegExp(`^Check free disk space\\t${join(f.root, "work/june/new-oneoff")}\\tnew$`, "m"), "a one-off uses its own project directory, without a DIR override");
+
+	// Through the installed org-edit: a task scheduled ahead is held, and June's heading whose time has come launches
+	// at once, without settling. A Claude task is selected by its drawer alone.
+	// Org reads years only up to 2037.
+	const next = `${new Date().getFullYear() + 1}-01-01`;
+	await actual.queue({ ...request, title: "Wait for the future", body, key: "inst:30", agent: "claude", scheduled: `${next} 06:00` });
+	const written = await readFile(f.project, "utf8");
+	assert.match(written, new RegExp(`^\\* AUTO Wait for the future\\nSCHEDULED: <${next} [A-Z][a-z]{2} 06:00>\\n:PROPERTIES:\\n:ID: [0-9a-f-]{36}\\n:AGENT: claude\\n`, "m"));
+	await assert.rejects(actual.queue({ ...request, title: "Nonexistent day", body, key: "inst:32", scheduled: "2027-02-30 06:00" }), /2027-02-30/);
+	assert.doesNotMatch(await readFile(f.project, "utf8"), /Nonexistent day/);
+	const due = renderTask({ ...request, title: "Due already", body, key: "inst:31", agent: "claude" }, "11111111-2222-4333-8444-555555555555", "<2000-01-01 Sat 06:00>");
+	await writeFile(f.project, insertAfterPreamble(written, due));
+	const held = execFileSync("org-dispatch", ["scan"], options);
+	assert.doesNotMatch(held, /^Wait for the future\t/m, "a future SCHEDULED holds June's task");
+	assert.match(held, /^Due already\t.*\tnew$/m, "once its time has passed, June's task launches without settling");
 });
 
 const planTask = (key: string, extra: object = {}) => ({ key, file: request.file, title: `Task ${key}`, body: taskBody({ reason: "Alex asked for a plan.", scope: `Do ${key}.`, checklist: ["Do it"] }), ...extra });

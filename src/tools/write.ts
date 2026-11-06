@@ -206,7 +206,7 @@ export function createOrgWriteExtension(config: Config, org: Org, run: Run = run
 			}),
 			defineTool({
 				name: "org_set_date",
-				description: "Set or remove a heading's SCHEDULED or DEADLINE through Org, which writes the weekday and handles repeaters.",
+				description: "Set or remove a heading's SCHEDULED or DEADLINE through Org, which writes the weekday and handles repeaters. Never use it to delay an AUTO task: the dispatcher may launch it first. Queue new agent work with org_queue_task's scheduled instead, and date an existing task before resuming it.",
 				parameters: obj({
 					file,
 					heading,

@@ -41,7 +41,7 @@ export type Followed = { title: string; signal: string };
 
 /**
  * The tasks June follows that are still going: the "watching" activity clients show, and what they name. `signal` is
- * the follow's last: AUTO, waiting (on a prerequisite), stalled (not launched), PROG, blocked (its agent waits for a
+ * the follow's last: AUTO, waiting (on a prerequisite), scheduled (held until its SCHEDULED start), stalled (not launched), PROG, blocked (its agent waits for a
  * person), HOLD, or another Org state.
  */
 export async function listFollowing(tx: Tx): Promise<Followed[]> {
@@ -64,6 +64,8 @@ export type Observation = {
 	worker?: { agent: string; session: string };
 	/** Still AUTO behind a prerequisite that is not DONE. */
 	waiting?: boolean;
+	/** The task's SCHEDULED start, before which the dispatcher holds it in AUTO. */
+	scheduledAt?: number;
 };
 
 export type FollowOptions = {
@@ -87,7 +89,9 @@ export function decide(input: FollowInput, seen: Observation, last: string, now:
 	const name = `the task «${input.title}»${where} you ${input.adopted ? "are following" : "queued"}`;
 	const Name = name[0]!.toUpperCase() + name.slice(1);
 	if (seen.missing) return { signal: "missing", done: true, say: `${Name} is no longer in Org; it was moved, archived, or deleted. You are no longer following it.` };
-	if (now - input.queuedAt > options.maxMs) {
+	// A task scheduled ahead is followed from its start, not from when it was queued.
+	const scheduled = seen.scheduledAt !== undefined && seen.scheduledAt > input.queuedAt ? seen.scheduledAt : undefined;
+	if (now - Math.max(input.queuedAt, scheduled ?? 0) > options.maxMs) {
 		// A plan's later tasks can outlast a follow; say so rather than go quiet on them.
 		const say = input.depends?.length
 			? `You stopped following ${name} after ${Math.round(options.maxMs / 86_400_000)} days; it is still ${seen.state ?? "without a state"}${seen.waiting ? ", waiting on a prerequisite" : ""}. Tell ${user()} in a line, and follow it again with org_follow_task if they want.`
@@ -110,9 +114,12 @@ export function decide(input: FollowInput, seen: Observation, last: string, now:
 		case "AUTO": {
 			// Waiting on a prerequisite is the plan working; the launch clock starts once the last one is DONE.
 			if (seen.waiting) return { signal: "waiting", done: false, say: undefined };
-			const since = Math.max(input.queuedAt, waited);
+			// Before SCHEDULED the dispatcher holds it on purpose; the launch clock starts then.
+			if (scheduled !== undefined && now < scheduled) return { signal: "scheduled", done: false, say: undefined };
+			const since = Math.max(input.queuedAt, waited, scheduled ?? 0);
+			const after = waited > Math.max(input.queuedAt, scheduled ?? 0) ? "its prerequisites finished" : scheduled !== undefined ? "its scheduled start" : "queueing";
 			if (now - since > options.launchMs && last !== "stalled")
-				return { signal: "stalled", done: false, say: `${Name} has not launched ${Math.round((now - since) / 60_000)} minutes after ${waited > input.queuedAt ? "its prerequisites finished" : "queueing"}. Check org_dispatch_scan and tell the user what is holding it.` };
+				return { signal: "stalled", done: false, say: `${Name} has not launched ${Math.round((now - since) / 60_000)} minutes after ${after}. Check org_dispatch_scan and tell the user what is holding it.` };
 			return { signal: last === "stalled" ? "stalled" : "AUTO", done: false, say: undefined };
 		}
 		case "PROG":
@@ -159,6 +166,7 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 			state: task.state, missing: false, file: task.file,
 			...(agent ? { agent } : {}), ...(waiting ? { waiting } : {}),
 			...(task.headline !== undefined ? { headline: task.headline } : {}),
+			...(task.scheduledAt !== undefined ? { scheduledAt: task.scheduledAt } : {}),
 			...(worker ? { worker: { agent: worker.agent, session: worker.session } } : {}),
 		};
 	};
