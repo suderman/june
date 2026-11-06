@@ -45,6 +45,10 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 	};
 }
 
+// Daemons opened in each temporary directory. node:test runs after hooks in the order they were added, so a test's
+// cleanup often runs before its daemon's close; cleanup closes them first so no late write meets the removal.
+const opened = new Map<string, Daemon[]>();
+
 export async function tempDir(): Promise<{ dir: string; paths: Paths; cleanup(): Promise<void> }> {
 	// Short base: Unix socket paths are limited to 108 bytes.
 	const dir = await mkdtemp(join(tmpdir(), "june-"));
@@ -56,7 +60,13 @@ export async function tempDir(): Promise<{ dir: string; paths: Paths; cleanup():
 		socket: join(dir, "run", "s"),
 		database: join(dir, "state", "june.sqlite"),
 	};
-	return { dir, paths, cleanup: () => rm(dir, { recursive: true, force: true }) };
+	const cleanup = async () => {
+		// Closing twice is harmless: close returns the first close's promise.
+		for (const daemon of opened.get(dir) ?? []) await daemon.close();
+		opened.delete(dir);
+		await rm(dir, { recursive: true, force: true });
+	};
+	return { dir, paths, cleanup };
 }
 
 export async function openTestDaemon(options: {
@@ -80,7 +90,7 @@ export async function openTestDaemon(options: {
 	const models = createModels();
 	models.setProvider(options.faux.provider);
 	for (const extra of options.providers ?? []) models.setProvider(extra.provider);
-	return startDaemon({
+	const daemon = await startDaemon({
 		config: testConfig(options.dir, options.config),
 		paths: options.paths,
 		models,
@@ -98,6 +108,8 @@ export async function openTestDaemon(options: {
 		...(options.watchClock ? { watchClock: options.watchClock } : {}),
 		...(options.remoteTiming ? { remoteTiming: options.remoteTiming } : {}),
 	});
+	opened.set(options.dir, [...(opened.get(options.dir) ?? []), daemon]);
+	return daemon;
 }
 
 /** Submit over the socket and wait for the answer. */

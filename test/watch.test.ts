@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -12,6 +12,11 @@ import { openTestDaemon, tempDir, until } from "./helpers.ts";
 
 const task = (state: string, title: string, id: string, report?: { line: string; state?: string; at?: number }) =>
 	`* ${state} ${title} :kit:\n:PROPERTIES:\n:ID: ${id}\n${report ? `:HEADLINE: ${report.line}\n${report.state ? `:HEADLINE_STATE: ${report.state}\n` : ""}${report.at ? `:HEADLINE_AT: ${report.at}\n` : ""}` : ""}:END:\nBody.\n`;
+// The watch reads Org through ripgrep, another process, which can catch a file mid-write; replace it whole instead.
+const replace = (file: string, text: string) => {
+	writeFileSync(`${file}.tmp`, text);
+	renameSync(`${file}.tmp`, file);
+};
 const lastInput = (ctx: TranscriptContext) => JSON.stringify(ctx.messages.filter((m) => m.role === "user").at(-1));
 
 test("the watch learns what is there, then gathers dispatched news into one notice, in waking hours, at most every gap", async (t) => {
@@ -26,7 +31,7 @@ test("the watch learns what is there, then gathers dispatched news into one noti
 	let mine = "PROG";
 	let tidy = "PROG";
 	const text = (a: string, c: string) => [task(a, "Ship the site", "task-ship-0001"), task("DONE", "Old audit", "task-old-0002"), task(c, "Fix the build", "task-build-0003"), task(mine, "June's own", "task-mine-0004"), task(tidy, "Tidy notes", "task-tidy-0005")].join("\n");
-	const write = (a: string, c: string) => writeFile(tasks, text(a, c));
+	const write = async (a: string, c: string) => replace(tasks, text(a, c));
 	await write("PROG", "PROG");
 	await writeFile(join(records, "task-mine-0004.json"), JSON.stringify({ id: "task-mine-0004", heading: "June's own", status: "running", started: 100 }));
 	await writeFile(join(records, "task-ship-0001.json"), JSON.stringify({ id: "task-ship-0001", heading: "Ship the site", status: "running", started: 100, pane: "w1:p1" }));
@@ -46,6 +51,7 @@ test("the watch learns what is there, then gathers dispatched news into one noti
 		throw new Error(`unexpected ${argv.join(" ")}`);
 	};
 	let clock = new Date(2026, 9, 28, 12, 0).getTime();
+	let polls = 0;
 	const notices: string[] = [];
 	const faux = fauxProvider();
 	const answer = (ctx: TranscriptContext) => {
@@ -57,9 +63,15 @@ test("the watch learns what is there, then gathers dispatched news into one noti
 		...tmp,
 		faux,
 		config: { dispatch: { hosts: ["kit", "cog", "lux"] }, herdr: { session: "default", host: "kit", hosts: { cog: {}, lux: {} }, allowPrompt: false }, watch: { enabled: true, gapMinutes: 10 } },
-		watchClock: { now: () => new Date(clock), tickMs: 20, home, run },
+		watchClock: { now: () => (polls++, new Date(clock)), tickMs: 20, home, run },
 	});
 	t.after(() => daemon.close());
+	// Each poll reads the clock once as it starts, and polls never overlap, so two more starts mean a whole poll has
+	// run since a change.
+	const settled = async () => {
+		const from = polls;
+		await until(() => polls >= from + 2);
+	};
 	// June queued this one herself, so her follow reports it and the watch must not.
 	await daemon.harness.commit((tx) => follow(tx, createFollowTask({} as never, {} as never), { id: "task-mine-0004", title: "June's own", host: "kit", queuedAt: Date.now() }, Number(daemon.root.id)), BG);
 	const ledger = join(tmp.paths.state, "watch.json");
@@ -68,11 +80,17 @@ test("the watch learns what is there, then gathers dispatched news into one noti
 	await new Promise((r) => setTimeout(r, 100));
 	assert.equal(notices.length, 0, "the first look raises nothing, not even an old DONE");
 
-	// One run reaches EVAL on kit while a new one on cog blocks: one notice carries both.
+	// One run reaches EVAL on kit while a new one on cog blocks: one notice carries both. They change before waking
+	// hours, since one look reads kit and then cog and could otherwise see the second change without the first.
+	clock = new Date(2026, 9, 28, 4, 0).getTime();
+	await settled();
 	mine = "EVAL";
 	await write("EVAL", "PROG");
 	cog = [{ id: "task-build-0003", heading: "Fix the build", status: "running", started: 200, pane: "w9:p2" }];
 	blocked = true;
+	await until(async () => (await pending()) === 2);
+	assert.equal(notices.length, 0, "news waits for waking hours");
+	clock = new Date(2026, 9, 28, 12, 0).getTime();
 	await until(() => notices.length === 1);
 	assert.match(notices[0]!, /\[watch\] Dispatched tasks you did not queue changed/);
 	assert.match(notices[0]!, /«Ship the site» \(work\.org\) on kit is now EVAL/);
@@ -120,7 +138,7 @@ test("the watch learns what is there, then gathers dispatched news into one noti
 	await writeFile(join(records, "task-tidy-0005.json"), JSON.stringify({ id: "task-tidy-0005", heading: "Tidy notes", status: "running", started: 600 }));
 	await until(async () => (await readFile(ledger, "utf8")).includes("kit:task-tidy-0005:600"));
 	tidy = "EVAL";
-	writeFileSync(tasks, text("EVAL", "DONE"));
+	replace(tasks, text("EVAL", "DONE"));
 	rmSync(join(records, "task-tidy-0005.json"));
 	await until(() => notices.length === 4);
 	assert.match(notices[3]!, /«Tidy notes» \(work\.org\) on kit is now EVAL/);
@@ -153,7 +171,7 @@ test("the watch carries fresh headlines in a batch, but not missing, unbound or 
 	t.after(async () => { await daemon.close(); await tmp.cleanup(); });
 	const ledger = join(tmp.paths.state, "watch.json");
 	await until(async () => (await readFile(ledger, "utf8").catch(() => "")).includes(ids[0]!));
-	writeFileSync(file, text("EVAL"));
+	replace(file, text("EVAL"));
 	await until(async () => Object.keys(JSON.parse(await readFile(ledger, "utf8")).pending).length === ids.length);
 	assert.equal(heard.length, 0, "the existing waking-hours gate still applies");
 	clock = new Date(2026, 10, 6, 5, 30).getTime();
@@ -164,9 +182,9 @@ test("the watch carries fresh headlines in a batch, but not missing, unbound or 
 	assert.deepEqual((await reports())[0]!.data, { source: "watch", text: "5 dispatched tasks changed", surface: "gui", watch: [{ title: "Fresh", signal: "EVAL", headline: fresh.line, agent: "pi", session }] });
 
 	// Clearing and restoring an old line does not make it new on the next state change.
-	writeFileSync(file, text("PROG").replace(/^:HEADLINE(?:_STATE|_AT)?:.*\n/gm, ""));
+	replace(file, text("PROG").replace(/^:HEADLINE(?:_STATE|_AT)?:.*\n/gm, ""));
 	await until(async () => JSON.parse(await readFile(ledger, "utf8")).runs[`kit:${ids[0]}:100`]?.signal === "PROG");
-	writeFileSync(file, text("EVAL"));
+	replace(file, text("EVAL"));
 	clock += 2 * 60_000;
 	await until(async () => heard.length === 2 && !(await daemon.status()).busy);
 	assert.ok(!heard[1]!.includes(fresh.line));
@@ -180,9 +198,9 @@ test("the watch carries fresh headlines in a batch, but not missing, unbound or 
 	assert.deepEqual((await reports())[2]!.data, { source: "watch", text: "5 dispatched tasks changed", surface: "gui" });
 
 	// The worker may freshly author the same words on a later run.
-	writeFileSync(file, text("PROG"));
+	replace(file, text("PROG"));
 	await until(async () => JSON.parse(await readFile(ledger, "utf8")).runs[`kit:${ids[0]}:200`]?.signal === "PROG");
-	writeFileSync(file, text("EVAL", { ...fresh, at: 201 }));
+	replace(file, text("EVAL", { ...fresh, at: 201 }));
 	clock += 2 * 60_000;
 	await until(async () => heard.length === 4 && !(await daemon.status()).busy);
 	assert.ok(heard[3]!.includes(fresh.line));
@@ -213,11 +231,11 @@ test("a delayed watch report keeps its old state news but drops a headline after
 		const ledger = join(tmp.paths.state, "watch.json");
 		await until(async () => (await readFile(ledger, "utf8").catch(() => "")).includes(id));
 		// Exercise the last read after the dispatcher removes the run record.
-		writeFileSync(file, text("EVAL", 101));
+		replace(file, text("EVAL", 101));
 		rmSync(record);
 		await until(async () => Object.keys(JSON.parse(await readFile(ledger, "utf8")).pending).length === 1);
 		assert.deepEqual(JSON.parse(await readFile(ledger, "utf8")).pending[`kit:${id}:100`].report, { title: "Delayed", signal: "EVAL", headline: line });
-		writeFileSync(file, text(state, 101));
+		replace(file, text(state, 101));
 		writeFileSync(record, JSON.stringify({ id, status: "running", started: 200 }));
 		await until(async () => (await readFile(ledger, "utf8")).includes(`kit:${id}:200`));
 		clock = new Date(2026, 10, 6, 5, 30).getTime();
@@ -328,6 +346,60 @@ test("stopping the watch drains an in-flight poll before its files can be remove
 		await stop();
 		assert.equal(existsSync(tmp.dir), false, "no late writer recreates the removed fixture");
 	});
+});
+
+test("a task missing for one look keeps its news; only a second miss in a row makes it missing", async (t) => {
+	const tmp = await tempDir();
+	const home = join(tmp.dir, "home");
+	const records = join(home, ".local/state/org-dispatch");
+	await mkdir(records, { recursive: true });
+	const id = "task-blink-0001";
+	await writeFile(join(records, `${id}.json`), JSON.stringify({ id, heading: "Blink", status: "running", started: 100 }));
+	const faux = fauxProvider();
+	faux.setResponses(Array.from({ length: 4 }, () => fauxAssistantMessage("noted")));
+	const daemon = await openTestDaemon({ ...tmp, faux });
+	// What each look finds: undefined is a moment when the file is being saved, or the task is really gone.
+	const looks: (string | undefined)[] = ["PROG", "EVAL", undefined, "EVAL", undefined, undefined, "EVAL"];
+	let reads = 0;
+	// A minute a poll: notices are keyed by their poll's time.
+	let minute = 0;
+	t.mock.timers.enable({ apis: ["setInterval"] });
+	const stop = createWatch({
+		config: { enabled: true, gapMinutes: 0 }, hosts: ["kit"], host: "kit", ssh: {},
+		window: { start: "00:00", end: "23:59" }, home, state: tmp.paths.state, now: () => new Date(2026, 10, 6, 12, minute++),
+		org: { byId: async () => {
+			const state = looks[reads++];
+			return state === undefined ? undefined : { state, title: "Blink", file: "work.org", herdrSessions: [] } as never;
+		} },
+		registry: { snapshot: () => { throw new Error("unused"); } },
+		herdr: { json: async () => undefined }, run: async () => "",
+		log: createLogger({ sink: () => {} }), tickMs: 20,
+	}).start(daemon.harness, daemon.root);
+	// Stop this watch before the daemon it polls is closed and its directory removed.
+	t.after(async () => { await stop(); t.mock.timers.reset(); await tmp.cleanup(); });
+	const ledger = join(tmp.paths.state, "watch.json");
+	const run = async () => JSON.parse(await readFile(ledger, "utf8")).runs[`kit:${id}:100`];
+	const notices = async () => (await daemon.root.context(BG)).entries.filter((e) => e.kind === "june.input" && (e.data as { source?: string })?.source === "watch").length;
+	const look = async (n: number) => {
+		t.mock.timers.tick(20);
+		await until(async () => reads === n && (await readFile(ledger, "utf8").catch(() => "")).includes(id) && !(await daemon.status()).busy);
+		// The ledger is saved after the read; give the poll its last turn.
+		await new Promise((r) => setTimeout(r, 30));
+	};
+	await look(1);
+	await look(2);
+	await until(async () => (await notices()) === 1);
+	await look(3);
+	assert.deepEqual([(await run()).signal, (await run()).missed], ["EVAL", true], "one miss keeps what was seen");
+	await look(4);
+	assert.equal((await run()).missed, undefined);
+	assert.equal(await notices(), 1, "EVAL is not told again when the task reappears");
+	await look(5);
+	await look(6);
+	assert.equal((await run()).signal, "missing", "a second miss in a row confirms it");
+	await look(7);
+	await until(async () => (await notices()) === 2);
+	assert.equal(await notices(), 2, "a task that was really gone and comes back at EVAL is news again");
 });
 
 test("the notice names each task once, with where it lives and what it needs", () => {

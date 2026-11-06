@@ -20,7 +20,8 @@ import { user } from "./user.ts";
 /** One run as org-dispatch records it in ~/.local/state/org-dispatch/<id>.json. */
 export type DispatchRun = { id: string; heading?: string; file?: string; status?: string; started?: number; pane?: string };
 
-type Seen = { signal: string; title: string; host: string; file?: string; headlineAt?: number; report?: WorkerHeadline };
+/** `missed` marks one look that could not find the task, which only a second look in a row confirms. */
+type Seen = { signal: string; title: string; host: string; file?: string; headlineAt?: number; report?: WorkerHeadline; missed?: true };
 /** `hosts` have had a first look, which only learns what is there. */
 type Ledger = { runs: Record<string, Seen>; pending: Record<string, Seen>; notified: number; hosts: string[] };
 
@@ -109,6 +110,13 @@ export function createWatch(options: {
 		};
 	};
 
+	// A save can leave an Org file empty or absent for an instant, so one look that cannot find a task keeps what was
+	// last seen; only a second look in a row makes it missing. Otherwise its news would come again when it reappears.
+	const confirm = (observed: Omit<Seen, "host">, last: Seen | undefined, host: string): Seen =>
+		observed.signal === "missing" && last !== undefined && last.signal !== "missing" && !last.missed
+			? { ...last, missed: true, host }
+			: { ...observed, host };
+
 	const start = (harness: Harness, root: Conversation) => {
 		let busy = false;
 		let inFlight: Promise<void> | undefined;
@@ -142,7 +150,7 @@ export function createWatch(options: {
 						live.add(key);
 						const last = ledger.runs[key];
 						if (last !== undefined && run.status === "finished" && SETTLED.has(last.signal)) continue;
-						const seen = { ...(await observe(host, run, last)), host };
+						const seen = confirm(await observe(host, run, last), last, host);
 						ledger.runs[key] = seen;
 						if (seen.signal === last?.signal) continue;
 						// The first look at a host only learns what is there; it raises nothing.
@@ -156,7 +164,13 @@ export function createWatch(options: {
 						if (first || live.has(key) || !key.startsWith(`${host}:`) || SETTLED.has(last.signal)) continue;
 						const [, id, started] = key.split(":");
 						if (followed.has(id!)) continue;
-						const seen = { ...(await observe(host, { id: id!, heading: last.title, status: "finished", started: Number(started) }, last)), host };
+						const seen = confirm(await observe(host, { id: id!, heading: last.title, status: "finished", started: Number(started) }, last), last, host);
+						// Not found this once: keep it for one more look.
+						if (seen.missed) {
+							ledger.runs[key] = seen;
+							live.add(key);
+							continue;
+						}
 						if (seen.signal !== last.signal && NEWS.has(seen.signal)) ledger.pending[key] = seen;
 					}
 					if (first) ledger.hosts.push(host);
