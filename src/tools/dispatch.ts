@@ -422,7 +422,8 @@ export class Dispatch {
 			throw error;
 		});
 		try {
-			const result = JSON.parse(out) as { id: string; title: string; host: string; depends?: string[]; written: boolean };
+			// Loading the agenda for --depends can log to stdout first, as org-dispatch plan does; the result is the last line.
+			const result = JSON.parse(out.trim().split("\n").at(-1)!) as { id: string; title: string; host: string; depends?: string[]; written: boolean };
 			// org-edit reports the task's whole DEPENDS, including edges it already had.
 			return { ...result, depends: (result.depends ?? []).map((ref) => ref.replace(/^id:/, "")), file: this.#org.rel(path) };
 		} catch (cause) {

@@ -212,6 +212,8 @@ test("resume uses the shared org-edit command with an expected state and request
 	for (const bad of ["pre-1", "id:", "id:a b", "id:x\n"])
 		await assert.rejects(f.dispatch.resume({ file: request.file, heading: "Existing thread", expected: "HOLD", host: "kit", depends: [bad], note: "Alex asked.", key: "inst:13" }, herdr), /depends takes id:UUID/);
 	assert.equal(f.runs.length, count, "a malformed prerequisite never reaches org-edit");
+	const logged = new Dispatch(new Org(f.root), f.config, async () => `2026-11-06 15:33:43 could not read org-agenda-files; using the cached list\n${JSON.stringify({ id: "resume123", title: "Existing thread", host: "kit", depends: ["id:pre-1"], written: true })}\n`);
+	assert.deepEqual((await logged.resume({ file: request.file, heading: "Existing thread", expected: "HOLD", host: "kit", depends: ["id:pre-1"], note: "Alex asked.", key: "inst:15" }, herdr)).depends, ["pre-1"], "a log line before the result is skipped");
 	const old = new Dispatch(new Org(f.root), f.config, async (argv) => { throw new Error(`${argv.slice(0, 4).join(" ")}: unknown option --depends`); });
 	await assert.rejects(old.resume({ file: request.file, heading: "Existing thread", expected: "HOLD", host: "kit", depends: ["id:pre-1"], note: "Alex asked.", key: "inst:14" }, herdr), /cannot add dependencies yet and wrote nothing/);
 });
