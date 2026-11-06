@@ -2,12 +2,14 @@
 import { closeSync, fsyncSync, lstatSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { type AssistantMessage, type Message } from "@earendil-works/pi-ai";
-import { obj, str } from "@earendil-works/pi-schema";
+import { int, obj, opt, str } from "@earendil-works/pi-schema";
 import {
 	AgentDoc, CompactionTask, defineDoc, defineExtension, defineTool, type Harness, hook, section, UsageDoc,
 } from "@earendil-works/pi-durable";
 import type { PromptFiles } from "./config.ts";
+import { parseSince } from "./history.ts";
 import { appendJournal, type JournalEntry, journalTail, localStamp } from "./journal.ts";
+import { renderTimeline, type Timeline } from "./timeline.ts";
 import { user } from "./user.ts";
 
 export const MemoryReview = defineDoc<{
@@ -88,7 +90,7 @@ function save(review: Review, task: number, signal: AbortSignal | undefined): vo
 }
 
 /** One combined summary/memory request replaces the built-in summary request, not an extra conversation turn. */
-export function createMemoryExtension(files: () => PromptFiles, getHarness: () => Harness) {
+export function createMemoryExtension(files: () => PromptFiles, getHarness: () => Harness, getTimeline: () => Timeline | undefined = () => undefined) {
 	const journal = defineTool({
 		name: "journal",
 		description: `Write an entry in your own journal, filed under today's date with the current time: something ${user()} shared, a moment, a mood, or what you did together, in your own words and perspective.`,
@@ -106,9 +108,41 @@ export function createMemoryExtension(files: () => PromptFiles, getHarness: () =
 			return { output: [{ type: "text", text: added ? `Written in your journal under ${stamp.date} at ${stamp.time}.` : "Already in your journal." }] };
 		},
 	});
+	const timeline = defineTool({
+		name: "timeline",
+		description: `Search the exact record of what you and ${user()} said and did, back to your first day: their messages, your replies, patter, and one line per tool call, each with its entry id and time. Thinking, tool output, and your private looks are not in it. Give words to find (every word must appear, any case; "a phrase" as it is), newest first; or give around, an entry id from a result, to read the conversation around it.`,
+		parameters: obj({
+			query: opt(str({ description: "Words to find" })),
+			since: opt(str({ description: "Only from this time: 30m, 2h, 3d, 16:20, or a date such as 2026-10-30" })),
+			until: opt(str({ description: "Only before this time, in the same forms" })),
+			around: opt(int({ description: "An entry id: show the items around it instead of searching" })),
+			limit: opt(int({ description: "How many results or neighbours on each side; 20 and 5 by default" })),
+		}),
+		replay: "safe",
+		execute: async (args, _api, context) => {
+			const index = getTimeline();
+			if (index === undefined) throw new Error("The timeline is not ready yet");
+			const when = (text: string | undefined, name: string) => {
+				if (text === undefined) return undefined;
+				const time = parseSince(text);
+				if (time === undefined) throw new Error(`${name} must be like 30m, 2h, 3d, 16:20, or a date`);
+				return time;
+			};
+			const name = user();
+			if (args.around !== undefined) {
+				const { items, more } = await index.around(args.around, args.limit ?? 5, args.limit ?? 5, context);
+				return { output: [{ type: "text", text: items.length ? `${renderTimeline(items, { user: name, mark: args.around })}${more ? "\n(more before or after)" : ""}` : "No entry at or after that id." }] };
+			}
+			const since = when(args.since, "since");
+			const until = when(args.until, "until");
+			if (!args.query?.trim() && since === undefined && until === undefined) throw new Error("Give words to find, a time range, or an entry id to read around");
+			const { items, more } = await index.search({ query: args.query ?? "", ...(since !== undefined ? { since } : {}), ...(until !== undefined ? { until } : {}), limit: args.limit ?? 20 }, context);
+			return { output: [{ type: "text", text: items.length ? `${renderTimeline(items, { user: name, ...(args.query ? { query: args.query } : {}) })}${more ? "\n(more, older: narrow the search or set until)" : ""}` : "Nothing found." }] };
+		},
+	});
 	return defineExtension({
 		name: "june-memory",
-		tools: [journal],
+		tools: [journal, timeline],
 		sections: [section("memory-review", async ({ read, conversationId }, context) => {
 			const state = await read.snapshot(MemoryReview, conversationId, context);
 			return state?.failure === undefined ? undefined : `Memory preservation failed; compaction was skipped and old context was kept: ${state.failure.message}. Tell the user; do not claim memory was saved. Retry compaction after resolving the cause.`;

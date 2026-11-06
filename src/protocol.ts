@@ -5,6 +5,7 @@ import { connect, type Socket } from "node:net";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { EntryRecord } from "@earendil-works/pi-durable";
 import type { FileAttachment } from "./inbox.ts";
+import type { TimelineItem } from "./timeline.ts";
 import type { Change, ViewItem, ViewState } from "./transcript.ts";
 
 /**
@@ -39,6 +40,13 @@ export type Request =
 	| { op: "detail"; requestId: string; on: boolean }
 	/** Entries without a view: those since `since` (epoch ms), the newest `limit` of them. */
 	| { op: "history"; requestId: string; since?: number; limit?: number }
+	/**
+	 * The timeline (see "Timeline" in docs/architecture.org): items matching `query`, newest first, within `since` and
+	 * `until` (epoch ms) and of `kinds`; or with `around`, the items around that entry id, oldest first.
+	 */
+	| { op: "timeline"; requestId: string; query?: string; since?: number; until?: number; kinds?: string[]; limit?: number; around?: number; before?: number; after?: number }
+	/** Entry id ranges left out of the timeline, history, and views: Unix socket only. */
+	| { op: "hide"; requestId: string; action: "add" | "remove" | "list"; from?: number; to?: number }
 	/** `files` land in June's inbox on the daemon's host (see "Inbox" in docs/architecture.org); `data` is base64. */
 	| { op: "submit"; requestId: string; text: string; images?: ImageContent[]; files?: FileAttachment[]; source: Source; whenBusy?: "steer" | "followUp"; wait?: boolean }
 	| { op: "command"; requestId: string; name: string; args?: string }
@@ -68,6 +76,8 @@ export type Status = {
 	background: number;
 	queued: number;
 	entries: number;
+	/** The database and its write-ahead log, in bytes. */
+	databaseBytes?: number;
 	tools: string[];
 	/** The directory the daemon's code runs from: a checkout or the Nix store. */
 	source: string;
@@ -82,6 +92,9 @@ export type Reply =
 	| { type: "view"; changes: Change[]; state?: ViewState }
 	/** `earlier` says older entries were left out. */
 	| { type: "history"; requestId: string; entries: EntryRecord[]; earlier: boolean }
+	/** `more` says the limit or window left items out. */
+	| { type: "timeline"; requestId: string; items: TimelineItem[]; more: boolean }
+	| { type: "hidden"; requestId: string; ranges: [number, number][] }
 	| { type: "accepted"; requestId: string; submissionId: number }
 	| { type: "settled"; requestId: string; status: "done" | "unanswered"; text?: string; reason?: string }
 	| { type: "reply"; requestId: string; text: string }

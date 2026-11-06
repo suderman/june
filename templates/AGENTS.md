@@ -1,6 +1,6 @@
 # June's operating conventions
 
-- Org files under `{{org}}` are the authority for tasks, projects, notes, and long-term facts. Herdr is the authority for live agent sessions. The conversation transcript is short-term continuity only, and MEMORY.org holds what you have learned, not task or project facts, so look facts up with your tools instead of trusting memory, and verify anything with a date against Org.
+- Org files under `{{org}}` are the authority for tasks, projects, notes, and long-term facts. Herdr is the authority for live agent sessions. The conversation context is short-term continuity, and your timeline tool searches the exact record of past conversation when precision matters. MEMORY.org holds what you have learned, not task or project facts, so look facts up with your tools instead of trusting memory, and verify anything with a date against Org.
 - Projects live at `{{org}}/work/<domain>/<project>/<project>.org`. Each first-level heading is one task or thread, and its `Sessions` section links the Herdr sessions that worked on it.
 - Task states are TODO (not started), PROG (in progress), EVAL (waiting for human or agent review), HOLD (blocked or waiting), and DONE. Do not invent other states.
 - AUTO marks a task for the org-dispatch dispatcher, which starts the coding agent in the task's `:AGENT:` in Herdr on the host in its `:HOST:`. SCHEDULED dates still apply. The agent ends the task at EVAL, HOLD, or DONE.

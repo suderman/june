@@ -1,6 +1,6 @@
 // The June daemon: the one process that owns the Durable database. It runs the harness and a Unix socket that clients
 // attach to, folding the conversation into display items for each of them.
-import { chmodSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname } from "node:path";
 import type { Context } from "@earendil-works/chord";
@@ -31,6 +31,8 @@ import { setUser, user } from "./user.ts";
 import { validateImages } from "./images.ts";
 import { describeFiles, saveFiles, startInboxExpiry, validateFiles } from "./inbox.ts";
 import { createMemoryExtension } from "./memory.ts";
+import { createKeptImagesExtension, startImageExpiry } from "./kept-images.ts";
+import { Hidden, KINDS, Timeline } from "./timeline.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
 import { createGreeting } from "./greeting.ts";
 import { createLooseEnds } from "./loose.ts";
@@ -121,7 +123,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		];
 		const situation = createSituation({ config: config.situation, env: { ...process.env, ...options.secrets }, log });
 		const prompt = createPromptExtension(config, paths, situation);
-		const memory = createMemoryExtension(prompt.files, () => harness);
+		const hidden = new Hidden(`${paths.state}/hidden.json`);
+		let timeline: Timeline | undefined;
+		const memory = createMemoryExtension(prompt.files, () => harness, () => timeline);
+		const images = `${paths.state}/images`;
+		const keptImages = createKeptImagesExtension(images, (error) => log.warn("image_keep_failed", { error: error.message }));
 		const greeting = createGreeting({ wake: config.rhythm.wake });
 		const patter = config.model.patter
 			? createPatter({
@@ -136,7 +142,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		// June's working context does the work only: no memory review, task queueing, patter, or messages to the user.
 		const childless = [memory, ...extensions.filter((e) => e.name === "dispatch"), ...(patter ? [patter.extension] : [])];
 		const work = createWorkExtension(config, () => childless);
-		for (const extension of [prompt.extension, greeting.extension, memory, work, ...(patter ? [patter.extension] : []), ...extensions]) registry.install(extension);
+		for (const extension of [prompt.extension, greeting.extension, memory, work, keptImages, ...(patter ? [patter.extension] : []), ...extensions]) registry.install(extension);
 
 		const workdir = `${paths.state}/files`;
 		mkdirSync(workdir, { recursive: true, mode: 0o700 });
@@ -156,6 +162,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		// restart also lets June's hair down: she always starts in default mode.
 		const agent = { model, thinkingLevel: config.model.chat.thinkingLevel as never, cwd: expandHome("~") };
 		const root = await harness.root(BG, { agent });
+		timeline = new Timeline((query, limit, cursor, ctx) => root.entries(query, limit, cursor, ctx), hidden);
 		const current = await root.agent(BG);
 		if (
 			current.model?.modelId !== model.modelId ||
@@ -270,6 +277,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				background: Object.keys((await harness.snapshot(WorkDoc, BG))?.active ?? {}).length,
 				queued: mine.filter((s) => s.status === "queued").length,
 				entries: view.entries.length,
+				databaseBytes: [paths.database, `${paths.database}-wal`].reduce((sum, file) => sum + (statSafe(file)?.size ?? 0), 0),
 				tools: resolvedAgent.tools.map((tool) => tool.name),
 				source: dirname(import.meta.dirname),
 				...(config.remote ? { remote: { port: remote?.port ?? config.remote.port, connections: [...(remote?.connections().values() ?? [])].reduce((a, b) => a + b, 0), ...(remoteError ? { error: remoteError } : {}) } } : {}),
@@ -278,13 +286,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
 		const inbox = `${paths.state}/inbox`;
 		const stopInbox = startInboxExpiry(inbox, (error) => log.warn("inbox_expiry_failed", { error: error.message }));
+		const stopImages = startImageExpiry(images, (error) => log.warn("image_expiry_failed", { error: error.message }));
 
 		const devices = new Devices(`${paths.state}/devices.json`);
 		let remote: Remote | undefined;
 		let remoteError: string | undefined;
 		const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
 		const follows = pollFollowing(() => harness.commit((tx) => listFollowing(tx), BG), options.followingMs ?? 15_000, log);
-		const scope: Scope = { harness, root, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, ...(expressions ? { expressions } : {}) };
+		const scope: Scope = { harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, ...(expressions ? { expressions } : {}) };
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
@@ -321,6 +330,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				stopLooseEnds?.();
 				await stopWatch?.();
 				stopInbox();
+				stopImages();
 				await harness.close(BG);
 				rmSync(paths.socket, { force: true });
 				lock.release();
@@ -345,7 +355,7 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 	});
 }
 
-type Scope = CommandScope & { log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; expressions?: ReturnType<typeof startExpressions> };
+type Scope = CommandScope & { timeline: Timeline; hidden: Hidden; log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; expressions?: ReturnType<typeof startExpressions> };
 /** The sky a view sends with its state, and how it learns of a change. */
 type SkySource = Pick<Situation, "sky" | "onSky">;
 /** How many followed tasks are still going, and how a view learns of a change. */
@@ -419,7 +429,7 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 			case "attach": {
 				// A second attach on one connection starts the view over.
 				await view?.stop();
-				view = await attachView(scope.root, context, send, request.requestId, { detail: request.detail === true, ...(scope.sky ? { sky: scope.sky } : {}), ...(scope.follows ? { follows: scope.follows } : {}) });
+				view = await attachView(scope.root, context, send, request.requestId, { detail: request.detail === true, hidden: scope.hidden, ...(scope.sky ? { sky: scope.sky } : {}), ...(scope.follows ? { follows: scope.follows } : {}) });
 				// The connection closed while the view was starting.
 				if (abort.signal.aborted) void view.stop();
 				return;
@@ -430,7 +440,26 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 			case "history": {
 				const limit = Math.min(Math.max(1, request.limit ?? (request.since === undefined ? SNAPSHOT_ENTRIES : HISTORY_ENTRIES)), HISTORY_ENTRIES);
 				const { entries, earlier } = await history(scope.root, request.since, limit, context);
-				return send({ type: "history", requestId: request.requestId, entries, earlier });
+				return send({ type: "history", requestId: request.requestId, entries: entries.filter(((hidden) => (entry: EntryRecord) => !hidden(Number(entry.id)))(scope.hidden.matcher())), earlier });
+			}
+			case "timeline": {
+				const kinds = request.kinds?.filter((kind) => (KINDS as readonly string[]).includes(kind));
+				const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
+				const around = number(request.around);
+				const { items, more } =
+					around !== undefined
+						? await scope.timeline.around(around, number(request.before), number(request.after), context)
+						: await scope.timeline.search({ query: typeof request.query === "string" ? request.query : "", since: number(request.since), until: number(request.until), ...(kinds ? { kinds } : {}), limit: number(request.limit) }, context);
+				return send({ type: "timeline", requestId: request.requestId, items, more });
+			}
+			case "hide": {
+				if (!local) throw new Error("Hidden entries are managed over the Unix socket");
+				const from = Number(request.from);
+				const to = request.to === undefined ? from : Number(request.to);
+				if (request.action !== "list" && !(Number.isSafeInteger(from) && Number.isSafeInteger(to) && from > 0 && to > 0)) throw new Error("Hide needs entry ids");
+				const ranges = request.action === "add" ? scope.hidden.add(from, to) : request.action === "remove" ? scope.hidden.remove(from, to) : request.action === "list" ? scope.hidden.ranges() : undefined;
+				if (ranges === undefined) throw new Error(`Unknown hide action ${String(request.action)}`);
+				return send({ type: "hidden", requestId: request.requestId, ranges });
 			}
 			case "submit": {
 				const images = request.images ?? [];
@@ -561,13 +590,14 @@ export async function attachView(
 	context: Context,
 	send: (reply: Reply) => void,
 	requestId: string,
-	options: { detail?: boolean; sky?: SkySource; follows?: FollowSource } = {},
+	options: { detail?: boolean; sky?: SkySource; follows?: FollowSource; hidden?: Pick<Hidden, "matcher"> } = {},
 ): Promise<View> {
 	let detail = options.detail === true;
 	// The fold knows nothing of the sky or the follows; they join the state here, so a change in the weather or in what
 	// she follows is a state change like any. The activity is left out while none holds.
 	const fold = (value: Parameters<typeof foldView>[0]) => {
-		const folded = foldView(value, { detail });
+		const hidden = options.hidden?.matcher();
+		const folded = foldView(hidden ? { ...value, items: value.items.filter((item) => !(item.entry && hidden(Number((item.entry as { id?: unknown }).id)))) } : value, { detail });
 		const sky = options.sky?.sky();
 		const state: ViewState = { ...folded.state, ...(sky ? { sky } : {}), ...(options.follows ? { following: options.follows.following(), ...(options.follows.following() > 0 ? { follows: options.follows.follows() } : {}) } : {}) };
 		const activity = activityOf(state);
@@ -671,4 +701,12 @@ async function history(root: Conversation, since: number | undefined, limit: num
 	const from = since === undefined ? 0 : times.findIndex((time) => time >= since);
 	const entries = (from < 0 ? [] : all.slice(from)).slice(-limit);
 	return { entries, earlier: entries.length < all.length || cursor !== undefined };
+}
+
+function statSafe(file: string): { size: number } | undefined {
+	try {
+		return statSync(file);
+	} catch {
+		return undefined;
+	}
 }

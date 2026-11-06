@@ -6,6 +6,8 @@ import { createLogger } from "./runtime.ts";
 import { daemonHost, loadConfig, paths, readConfigFile, readEnvFiles, shortHostname } from "./config.ts";
 import { startDaemon } from "./daemon.ts";
 import { parseSince, renderHistory } from "./history.ts";
+import { formatSize } from "./inbox.ts";
+import { KINDS, parseRange, renderTimeline } from "./timeline.ts";
 import { createJuneModels, providerFromPiModels } from "./models.ts";
 import { findSkills } from "./prompt.ts";
 import { Client, DaemonUnavailable, parseCommand, type Reply, type Status } from "./protocol.ts";
@@ -18,6 +20,13 @@ const USAGE = `usage:
   june transcript [--last N] [--since WHEN] [--detail] [--json]
                           the recent conversation as text: the last N entries (200 by default), or those since
                           WHEN (30m, 2h, 1d, 16:20, or a date); --detail adds thinking, tool output, and private looks
+  june transcript --search WORDS [--since WHEN] [--until WHEN] [--kinds K,K] [--last N] [--json]
+                          search the whole timeline, newest first: every word must appear, "a phrase" as it is;
+                          kinds are user, june, patter, action, note
+  june transcript --around ID [--before N] [--after N] [--json]
+                          the timeline around entry ID, from a search result
+  june transcript --hide ID[-ID] | --unhide ID[-ID] | --hidden
+                          leave entries out of the timeline, transcripts, and views (they stay in the database)
   june device add NAME    allow a device on the WebSocket and print its token, once
   june device list        devices, when each was added, and live connections
   june device revoke NAME remove a device and close its connections
@@ -169,15 +178,58 @@ async function ask(socket: string, args: string[], json: boolean): Promise<numbe
 async function transcript(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {
 	let limit: number | undefined;
 	let since: number | undefined;
+	let until: number | undefined;
 	let detail = false;
+	let search: string | undefined;
+	let around: number | undefined;
+	let before: number | undefined;
+	let after: number | undefined;
+	let kinds: string[] | undefined;
+	let hide: { action: "add" | "remove" | "list"; range?: [number, number] } | undefined;
+	const count = (text: string | undefined) => (/^\d+$/.test(text ?? "") ? Number(text) : undefined);
 	for (let i = 0; i < args.length; i++) {
+		const next = args[i + 1];
 		if (args[i] === "--detail") detail = true;
-		else if (args[i] === "--last" && /^[1-9]\d*$/.test(args[i + 1] ?? "")) limit = Number(args[++i]);
-		else if (args[i] === "--since" && (since = parseSince(args[i + 1] ?? "")) !== undefined) i++;
+		else if (args[i] === "--last" && /^[1-9]\d*$/.test(next ?? "")) limit = Number(args[++i]);
+		else if (args[i] === "--since" && (since = parseSince(next ?? "")) !== undefined) i++;
+		else if (args[i] === "--until" && (until = parseSince(next ?? "")) !== undefined) i++;
+		else if (args[i] === "--search" && next?.trim()) search = args[++i];
+		else if (args[i] === "--around" && (around = count(next)) !== undefined) i++;
+		else if (args[i] === "--before" && (before = count(next)) !== undefined) i++;
+		else if (args[i] === "--after" && (after = count(next)) !== undefined) i++;
+		else if (args[i] === "--kinds" && next?.split(",").every((k) => (KINDS as readonly string[]).includes(k))) kinds = args[++i]!.split(",");
+		else if ((args[i] === "--hide" || args[i] === "--unhide") && parseRange(next ?? "")) hide = { action: args[i] === "--hide" ? "add" : "remove", range: parseRange(args[++i]!)! };
+		else if (args[i] === "--hidden") hide = { action: "list" };
 		else {
 			console.error(USAGE);
 			return 2;
 		}
+	}
+	const user = String(readConfigFile(p).user?.name ?? "") || "user";
+	if (hide || search !== undefined || around !== undefined || until !== undefined || kinds !== undefined) {
+		const client = await connect(p.socket);
+		if (client === undefined) return 3;
+		const reply = hide
+			? await client.request({ op: "hide", requestId: randomUUID(), action: hide.action, ...(hide.range ? { from: hide.range[0], to: hide.range[1] } : {}) })
+			: await client.request({
+					op: "timeline",
+					requestId: randomUUID(),
+					...(around !== undefined ? { around, ...(before !== undefined ? { before } : {}), ...(after !== undefined ? { after } : {}) } : { query: search ?? "", ...(since !== undefined ? { since } : {}), ...(until !== undefined ? { until } : {}), ...(kinds ? { kinds } : {}), ...(limit ? { limit } : {}) }),
+				});
+		client.close();
+		if (reply.type === "hidden") {
+			if (json) console.log(JSON.stringify({ ranges: reply.ranges }));
+			else console.log(reply.ranges.length ? reply.ranges.map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`)).join("\n") : "nothing hidden");
+			return 0;
+		}
+		if (reply.type !== "timeline") {
+			console.error(reply.type === "error" ? reply.message : "unexpected reply");
+			return 1;
+		}
+		if (json) console.log(JSON.stringify({ more: reply.more, items: reply.items }));
+		else if (reply.items.length === 0) console.log("nothing found");
+		else console.log(`${renderTimeline(reply.items, { user, ...(search && around === undefined ? { query: search } : {}), ...(around !== undefined ? { mark: around } : {}) })}${reply.more ? "\n(more not shown)" : ""}`);
+		return 0;
 	}
 	const client = await connect(p.socket);
 	if (client === undefined) return 3;
@@ -188,7 +240,7 @@ async function transcript(p: ReturnType<typeof paths>, args: string[], json: boo
 		return 1;
 	}
 	if (json) console.log(JSON.stringify({ earlier: reply.earlier, entries: reply.entries }));
-	else console.log(renderHistory(reply.entries, { detail, user: String(readConfigFile(p).user?.name ?? "") || "user", earlier: reply.earlier }));
+	else console.log(renderHistory(reply.entries, { detail, user, earlier: reply.earlier }));
 	return 0;
 }
 
@@ -238,6 +290,7 @@ function formatStatus(s: Status): string {
 		`code ${s.source}`,
 		`model ${s.model} (${s.thinkingLevel})`,
 		`conversation ${s.conversation}: ${s.entries} entries, ${s.busy ? "working" : "idle"}${s.background ? `, ${s.background} in the background` : ""}${s.queued ? `, ${s.queued} queued` : ""}`,
+		...(s.databaseBytes !== undefined ? [`database ${formatSize(s.databaseBytes)}`] : []),
 		`tools ${s.tools.join(", ")}`,
 		...(s.remote ? [`remote 127.0.0.1:${s.remote.port}: ${s.remote.error ? `not listening, ${s.remote.error}` : `${s.remote.connections} connected`}`] : []),
 	].join("\n");

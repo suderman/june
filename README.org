@@ -34,6 +34,8 @@ With Herdr, Ctrl+V can upload a clipboard image from the connecting machine and 
 
 =june transcript= prints the recent conversation as text for a reader outside the terminal, such as a worker looking into something June could not do. It shows the last 200 entries by default, or the last =--last N=, or those since =--since= =30m=, =2h=, =1d=, =16:20=, or a date. The plain view is what the terminal shows, with one line per thinking block and each tool call; =--detail= adds her full thinking, tool arguments and output (clipped at 2,000 characters), and her private heartbeat, watch, work, and follow looks, marked private. =--json= prints the raw entries. It reads through the daemon socket, so the conversation stays on the daemon's host; elsewhere it runs there over SSH, as =june ask= does.
 
+=june transcript --search WORDS= searches June's whole timeline, back to her first day, newest first: the user's messages exactly as sent, her replies, patter, and one line per tool call, each with its entry id. Every word must appear, in any case, and a "quoted phrase" as it is; =--since=, =--until=, =--kinds user,june,patter,action,note= and =--last N= narrow it. =--around ID [--before N] [--after N]= shows the conversation around an entry. =--hide ID[-ID]=, =--unhide= and =--hidden= leave entries out of the timeline, transcripts and views; they stay in the database. June searches the same timeline with her =timeline= tool.
+
 The terminal client and =june ask= share these slash commands:
 
 | Command                   | Effect                                                                                 |
