@@ -80,6 +80,11 @@ test("search matches every word in any case and quoted phrases, newest first, wi
 	assert.deepEqual(await ids({ query: "worker", kinds: ["june"] }), [12]);
 	assert.deepEqual(await ids({ query: "worker", since: at(5) }), [12]);
 	assert.deepEqual(await ids({ query: "worker", until: at(5) }), [2]);
+	assert.deepEqual(await ids({ query: "worker", oldest: true }), [2, 12], "oldest first finds the first mention");
+	assert.deepEqual(await ids({ query: "worker", oldest: true, since: at(5) }), [12]);
+	assert.deepEqual(await ids({ query: "worker", oldest: true, until: at(5) }), [2]);
+	const first = await timeline.search({ query: "worker", oldest: true, limit: 1 }, BG);
+	assert.deepEqual([first.items.map((i) => i.id), first.more], [[2], true]);
 	const limited = await timeline.search({ query: "", limit: 2 }, BG);
 	assert.deepEqual([limited.items.map((i) => i.id), limited.more], [[18, 18], true]);
 	assert.equal(items.length, 12);
@@ -143,11 +148,12 @@ test("the daemon serves the timeline across /new and a restart, hides entries, a
 	await daemon.close();
 
 	faux.setResponses([
-		fauxAssistantMessage([fauxToolCall("timeline", { query: "blue folder" })], { stopReason: "toolUse" }),
+		// As the real model does, every optional field is sent, blank: an empty time, a zero id and limit.
+		fauxAssistantMessage([fauxToolCall("timeline", { query: "blue folder", since: "", until: "", around: 0, limit: 0, oldest: true })], { stopReason: "toolUse" }),
 		(context: TranscriptContext) => {
 			const output = JSON.stringify(context.messages.at(-1));
-			assert.match(output, /June: The blue folder is on the shelf\./);
-			assert.match(output, /Alex \(cli\): where is the blue folder\?/);
+			assert.match(output, /Alex \(cli\): where is the blue folder\?[\s\S]*June: The blue folder is on the shelf\./, "searched, oldest first, not read around entry 0");
+			assert.doesNotMatch(output, /red one/, "a search, not the start of history");
 			return fauxAssistantMessage("It was on the shelf.");
 		},
 	]);
@@ -158,7 +164,9 @@ test("the daemon serves the timeline across /new and a restart, hides entries, a
 	assert.equal((await search("blue folder")).length, 2, "rebuilt after a restart");
 	assert.equal((await ask(tmp.paths.socket, "what did you say about the blue folder?")).text, "It was on the shelf.");
 	const actions = await search("timeline");
-	assert.ok(actions.some((i) => i.kind === "action" && i.text === "timeline query=blue folder"), "her own search is an action line");
+	assert.ok(actions.some((i) => i.kind === "action" && i.text.startsWith("timeline query=blue folder")), "her own search is an action line");
+	const oldest = await request({ op: "timeline", query: "folder", oldest: true });
+	assert.deepEqual(oldest.type === "timeline" && oldest.items.map((i) => i.text).slice(0, 2), ["where is the blue folder?", "The blue folder is on the shelf."], "the socket searches oldest first");
 	assert.ok(!actions.some((i) => i.kind !== "action" && /on the shelf\.\n/.test(i.text)), "tool output stays out");
 
 	const answer = first[0]!.id;

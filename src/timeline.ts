@@ -27,6 +27,8 @@ export type TimelineQuery = {
 	readonly until?: number;
 	readonly kinds?: readonly string[];
 	readonly limit?: number;
+	/** Oldest first, for the first time something was said; newest first otherwise. */
+	readonly oldest?: boolean;
 };
 
 /** The most items one query returns. */
@@ -141,7 +143,7 @@ export class Timeline {
 		return this.#items.filter((item) => !hidden(item.id));
 	}
 
-	/** Matching items, newest first; with no words, the newest in the time range. `more` says the limit cut some off. */
+	/** Matching items, newest first or with `oldest` oldest first; with no words, the newest (or oldest) in the time range. `more` says the limit cut some off. */
 	async search(query: TimelineQuery, context: Context): Promise<{ items: TimelineItem[]; more: boolean }> {
 		await this.catchUp(context);
 		const words = terms(query.query ?? "");
@@ -149,10 +151,18 @@ export class Timeline {
 		const limit = Math.min(Math.max(1, query.limit ?? 20), MAX_ITEMS);
 		const found: TimelineItem[] = [];
 		const items = this.#visible();
-		for (let i = items.length - 1; i >= 0 && found.length <= limit; i--) {
+		const step = query.oldest ? 1 : -1;
+		for (let i = query.oldest ? 0 : items.length - 1; i >= 0 && i < items.length && found.length <= limit; i += step) {
 			const item = items[i]!;
-			if (query.until !== undefined && item.at >= query.until) continue;
-			if (query.since !== undefined && item.at < query.since) break;
+			// Items are in time order, so the far edge of the range ends the walk and the near edge only skips.
+			if (query.until !== undefined && item.at >= query.until) {
+				if (query.oldest) break;
+				continue;
+			}
+			if (query.since !== undefined && item.at < query.since) {
+				if (query.oldest) continue;
+				break;
+			}
 			if (kinds && !kinds.has(item.kind)) continue;
 			const text = item.text.toLowerCase();
 			if (words.every((word) => text.includes(word))) found.push(item);

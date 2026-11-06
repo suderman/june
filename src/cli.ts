@@ -20,8 +20,8 @@ const USAGE = `usage:
   june transcript [--last N] [--since WHEN] [--detail] [--json]
                           the recent conversation as text: the last N entries (200 by default), or those since
                           WHEN (30m, 2h, 1d, 16:20, or a date); --detail adds thinking, tool output, and private looks
-  june transcript --search WORDS [--since WHEN] [--until WHEN] [--kinds K,K] [--last N] [--json]
-                          search the whole timeline, newest first: every word must appear, "a phrase" as it is;
+  june transcript --search WORDS [--since WHEN] [--until WHEN] [--kinds K,K] [--last N] [--oldest] [--json]
+                          search the whole timeline, newest first (--oldest: oldest first): every word must appear, "a phrase" as it is;
                           kinds are user, june, patter, action, note
   june transcript --around ID [--before N] [--after N] [--json]
                           the timeline around entry ID, from a search result
@@ -185,11 +185,13 @@ async function transcript(p: ReturnType<typeof paths>, args: string[], json: boo
 	let before: number | undefined;
 	let after: number | undefined;
 	let kinds: string[] | undefined;
+	let oldest = false;
 	let hide: { action: "add" | "remove" | "list"; range?: [number, number] } | undefined;
 	const count = (text: string | undefined) => (/^\d+$/.test(text ?? "") ? Number(text) : undefined);
 	for (let i = 0; i < args.length; i++) {
 		const next = args[i + 1];
 		if (args[i] === "--detail") detail = true;
+		else if (args[i] === "--oldest") oldest = true;
 		else if (args[i] === "--last" && /^[1-9]\d*$/.test(next ?? "")) limit = Number(args[++i]);
 		else if (args[i] === "--since" && (since = parseSince(next ?? "")) !== undefined) i++;
 		else if (args[i] === "--until" && (until = parseSince(next ?? "")) !== undefined) i++;
@@ -214,7 +216,7 @@ async function transcript(p: ReturnType<typeof paths>, args: string[], json: boo
 			: await client.request({
 					op: "timeline",
 					requestId: randomUUID(),
-					...(around !== undefined ? { around, ...(before !== undefined ? { before } : {}), ...(after !== undefined ? { after } : {}) } : { query: search ?? "", ...(since !== undefined ? { since } : {}), ...(until !== undefined ? { until } : {}), ...(kinds ? { kinds } : {}), ...(limit ? { limit } : {}) }),
+					...(around !== undefined ? { around, ...(before !== undefined ? { before } : {}), ...(after !== undefined ? { after } : {}) } : { query: search ?? "", ...(since !== undefined ? { since } : {}), ...(until !== undefined ? { until } : {}), ...(kinds ? { kinds } : {}), ...(limit ? { limit } : {}), ...(oldest ? { oldest: true } : {}) }),
 				});
 		client.close();
 		if (reply.type === "hidden") {

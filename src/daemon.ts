@@ -449,7 +449,7 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 				const { items, more } =
 					around !== undefined
 						? await scope.timeline.around(around, number(request.before), number(request.after), context)
-						: await scope.timeline.search({ query: typeof request.query === "string" ? request.query : "", since: number(request.since), until: number(request.until), ...(kinds ? { kinds } : {}), limit: number(request.limit) }, context);
+						: await scope.timeline.search({ query: typeof request.query === "string" ? request.query : "", since: number(request.since), until: number(request.until), ...(kinds ? { kinds } : {}), limit: number(request.limit), ...(request.oldest === true ? { oldest: true } : {}) }, context);
 				return send({ type: "timeline", requestId: request.requestId, items, more });
 			}
 			case "hide": {

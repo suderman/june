@@ -41,10 +41,10 @@ export type Request =
 	/** Entries without a view: those since `since` (epoch ms), the newest `limit` of them. */
 	| { op: "history"; requestId: string; since?: number; limit?: number }
 	/**
-	 * The timeline (see "Timeline" in docs/architecture.org): items matching `query`, newest first, within `since` and
+	 * The timeline (see "Timeline" in docs/architecture.org): items matching `query`, newest first (oldest first with `oldest`), within `since` and
 	 * `until` (epoch ms) and of `kinds`; or with `around`, the items around that entry id, oldest first.
 	 */
-	| { op: "timeline"; requestId: string; query?: string; since?: number; until?: number; kinds?: string[]; limit?: number; around?: number; before?: number; after?: number }
+	| { op: "timeline"; requestId: string; query?: string; since?: number; until?: number; kinds?: string[]; limit?: number; oldest?: boolean; around?: number; before?: number; after?: number }
 	/** Entry id ranges left out of the timeline, history, and views: Unix socket only. */
 	| { op: "hide"; requestId: string; action: "add" | "remove" | "list"; from?: number; to?: number }
 	/** `files` land in June's inbox on the daemon's host (see "Inbox" in docs/architecture.org); `data` is base64. */

@@ -2,7 +2,7 @@
 import { closeSync, fsyncSync, lstatSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { type AssistantMessage, type Message } from "@earendil-works/pi-ai";
-import { int, obj, opt, str } from "@earendil-works/pi-schema";
+import { bool, int, obj, opt, str } from "@earendil-works/pi-schema";
 import {
 	AgentDoc, CompactionTask, defineDoc, defineExtension, defineTool, type Harness, hook, section, UsageDoc,
 } from "@earendil-works/pi-durable";
@@ -110,34 +110,39 @@ export function createMemoryExtension(files: () => PromptFiles, getHarness: () =
 	});
 	const timeline = defineTool({
 		name: "timeline",
-		description: `Search the exact record of what you and ${user()} said and did, back to your first day: their messages, your replies, patter, and one line per tool call, each with its entry id and time. Thinking, tool output, and your private looks are not in it. Give words to find (every word must appear, any case; "a phrase" as it is), newest first; or give around, an entry id from a result, to read the conversation around it.`,
+		description: `Search the exact record of what you and ${user()} said and did, back to your first day: their messages, your replies, patter, and one line per tool call, each with its entry id and time. Thinking, tool output, and your private looks are not in it. Give words to find (every word must appear, any case; "a phrase" as it is), newest first, or with oldest the earliest first, for when something was first said; or give around, an entry id from a result, to read the conversation around it. Leave out what you do not need.`,
 		parameters: obj({
 			query: opt(str({ description: "Words to find" })),
 			since: opt(str({ description: "Only from this time: 30m, 2h, 3d, 16:20, or a date such as 2026-10-30" })),
 			until: opt(str({ description: "Only before this time, in the same forms" })),
-			around: opt(int({ description: "An entry id: show the items around it instead of searching" })),
+			around: opt(int({ description: "An entry id from a result: show the items around it instead of searching" })),
 			limit: opt(int({ description: "How many results or neighbours on each side; 20 and 5 by default" })),
+			oldest: opt(bool({ description: "Search from the oldest entry forward, for the first time something was said" })),
 		}),
 		replay: "safe",
 		execute: async (args, _api, context) => {
 			const index = getTimeline();
 			if (index === undefined) throw new Error("The timeline is not ready yet");
+			// Models often send every optional field: an empty string, a zero id, or a zero limit means not given.
+			const around = args.around !== undefined && args.around >= 1 ? args.around : undefined;
+			const limit = args.limit !== undefined && args.limit >= 1 ? args.limit : undefined;
 			const when = (text: string | undefined, name: string) => {
-				if (text === undefined) return undefined;
+				if (text === undefined || !text.trim()) return undefined;
 				const time = parseSince(text);
 				if (time === undefined) throw new Error(`${name} must be like 30m, 2h, 3d, 16:20, or a date`);
 				return time;
 			};
 			const name = user();
-			if (args.around !== undefined) {
-				const { items, more } = await index.around(args.around, args.limit ?? 5, args.limit ?? 5, context);
-				return { output: [{ type: "text", text: items.length ? `${renderTimeline(items, { user: name, mark: args.around })}${more ? "\n(more before or after)" : ""}` : "No entry at or after that id." }] };
+			if (around !== undefined) {
+				const { items, more } = await index.around(around, limit ?? 5, limit ?? 5, context);
+				return { output: [{ type: "text", text: items.length ? `${renderTimeline(items, { user: name, mark: around })}${more ? "\n(more before or after)" : ""}` : "No entry at or after that id." }] };
 			}
 			const since = when(args.since, "since");
 			const until = when(args.until, "until");
 			if (!args.query?.trim() && since === undefined && until === undefined) throw new Error("Give words to find, a time range, or an entry id to read around");
-			const { items, more } = await index.search({ query: args.query ?? "", ...(since !== undefined ? { since } : {}), ...(until !== undefined ? { until } : {}), limit: args.limit ?? 20 }, context);
-			return { output: [{ type: "text", text: items.length ? `${renderTimeline(items, { user: name, ...(args.query ? { query: args.query } : {}) })}${more ? "\n(more, older: narrow the search or set until)" : ""}` : "Nothing found." }] };
+			const { items, more } = await index.search({ query: args.query ?? "", ...(since !== undefined ? { since } : {}), ...(until !== undefined ? { until } : {}), limit: limit ?? 20, ...(args.oldest ? { oldest: true } : {}) }, context);
+			const rest = args.oldest ? "\n(more, newer: narrow the search or set since)" : "\n(more, older: narrow the search, set until, or search oldest first)";
+			return { output: [{ type: "text", text: items.length ? `${renderTimeline(items, { user: name, ...(args.query ? { query: args.query } : {}) })}${more ? rest : ""}` : "Nothing found." }] };
 		},
 	});
 	return defineExtension({
