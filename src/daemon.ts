@@ -67,6 +67,8 @@ export type DaemonOptions = {
 	readonly paths: Paths;
 	readonly models: Models;
 	readonly secrets?: Readonly<Record<string, string>>;
+	/** Where Home Assistant's address and token come from, under the secrets: the process environment unless given. */
+	readonly env?: Readonly<Record<string, string | undefined>>;
 	readonly log?: Logger;
 	/** Tests replace the infrastructure tools. */
 	readonly extensions?: readonly Extension[];
@@ -121,7 +123,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			createHerdrExtension(config, herdr),
 			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, herdr, instanceId(paths.state))] : []),
 		];
-		const situation = createSituation({ config: config.situation, env: { ...process.env, ...options.secrets }, log });
+		const situation = createSituation({ config: config.situation, env: { ...(options.env ?? process.env), ...options.secrets }, log });
 		const prompt = createPromptExtension(config, paths, situation);
 		const hidden = new Hidden(`${paths.state}/hidden.json`);
 		let timeline: Timeline | undefined;

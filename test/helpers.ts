@@ -86,6 +86,8 @@ export async function openTestDaemon(options: {
 		models,
 		log: createLogger({ sink: () => {} }),
 		extensions: options.extensions ?? [],
+		// Never the developer's shell: HASS_URL and HASS_TOKEN there would reach a real Home Assistant.
+		env: {},
 		...(options.secrets ? { secrets: options.secrets } : {}),
 		...(options.patterTiming ? { patterTiming: options.patterTiming } : {}),
 		...(options.focusHoldMs !== undefined ? { focusHoldMs: options.focusHoldMs } : {}),
