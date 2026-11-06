@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CANVAS, FACE, MARGIN, kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "../art/layout.mjs";
+import { CANVAS, FACE, MARGIN, gesturePreservation, kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "../art/layout.mjs";
+import { gestureShown } from "../overlay/compose.mjs";
 
 const close = (a, b, tolerance = 0.002) => assert.ok(Math.abs(a - b) <= tolerance, `${a} is not within ${tolerance} of ${b}`);
 
@@ -15,7 +16,7 @@ for (const legacy of [false, true]) test(`re-ingest preserves ${legacy ? "a lega
 	const source = join(set, "synthetic.png");
 	// Oversized synthetic face means downscaling only. This never invokes the GPU upscaler or touches real artwork.
 	execFileSync("magick", ["-size", "1600x2500", "xc:none", "-fill", "#cc9966", "-draw", "rectangle 100,100 1500,2480", source]);
-	const metadata = { section: "poses", expression: "warm", facing: "front", framings: ["head", "bust"] };
+	const metadata = { section: "poses", expression: "warm", facing: "front", framings: ["head", "bust"], gestureBoxes: [{ name: "raised-hand", box: [300, 800, 200, 200], primary: true }] };
 	const ingest = (details) => {
 		writeFileSync(join(set, "incoming", "synthetic.json"), JSON.stringify(details));
 		execFileSync(process.execPath, [new URL("../art/june-art.mjs", import.meta.url).pathname, "ingest", set, "synthetic", "--file", source, "--face", "600,200,400,800"], { stdio: "pipe" });
@@ -30,6 +31,35 @@ for (const legacy of [false, true]) test(`re-ingest preserves ${legacy ? "a lega
 	}
 	const after = ingest({ ...metadata, ...(legacy ? {} : { added: "2099-01-01T00:00:00.000Z" }) });
 	assert.equal(after.poses.synthetic.added, legacy ? undefined : first);
+});
+
+test("ingest refuses a low hand before writing an asset or clamping its gesture box", (t) => {
+	const set = mkdtempSync(join(tmpdir(), "june-art-gesture-"));
+	t.after(() => rmSync(set, { recursive: true, force: true }));
+	mkdirSync(join(set, "incoming"));
+	const source = join(set, "synthetic.png");
+	execFileSync("magick", ["-size", "1600x3000", "xc:none", "-fill", "#cc9966", "-draw", "rectangle 100,100 1500,2980", source]);
+	const metadata = { section: "poses", expression: "skeptical", facing: "left", faceBox: [600, 200, 400, 800], gestureBoxes: [{ name: "hip-hand", box: [200, 2500, 100, 300], primary: true }] };
+	writeFileSync(join(set, "incoming", "synthetic.json"), JSON.stringify(metadata));
+	assert.throws(() => execFileSync(process.execPath, [new URL("../art/june-art.mjs", import.meta.url).pathname, "ingest", set, "synthetic", "--file", source], { stdio: "pipe" }), /hip-hand.*source pixels.*outside/);
+	assert.equal(existsSync(join(set, "manifest.json")), false);
+	assert.equal(existsSync(join(set, "poses", "synthetic.webp")), false);
+	assert.equal(existsSync(join(set, "source")), false);
+	assert.equal(existsSync(join(set, "incoming", "synthetic.json")), true);
+});
+
+test("a fully visible surviving box cannot certify source-gesture preservation", () => {
+	const source = { w: 10, h: 10, alpha: new Uint8Array(100).fill(255) };
+	const place = { size: [10, 10], scale: 1, x: 0, y: 3 };
+	const [hand, high] = gesturePreservation([{ name: "hand", box: [2, 6, 3, 4] }, { name: "high", box: [2, 2, 3, 2] }], source, place);
+	assert.equal(hand.solid_source_pixels, 12);
+	assert.equal(hand.projected_outside_canvas, 9);
+	assert.equal(hand.source_edge_pixels.bottom, 3, "source completeness is a separate inspection flag");
+	assert.equal(high.projected_outside_canvas, 0);
+	const surviving = { gestures: [{ box: { x: 0.2, y: 0.9, w: 0.3, h: 0.1 } }] };
+	assert.equal(gestureShown({ art: { x: 0, y: 0, w: 10, h: 10 }, clip: { x: 0, y: 0, w: 10, h: 10 }, elements: [] }, surviving), 1);
+	assert.ok(hand.projected_outside_canvas > 0, "100% panel visibility does not waive source loss");
+	assert.throws(() => gesturePreservation([{ name: "bad", box: [-1, 2, 3, 2] }], source, place), /inside the source/);
 });
 
 test("a pose's face lands at its kind's size and height, centred across", () => {

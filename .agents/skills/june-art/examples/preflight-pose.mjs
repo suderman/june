@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { CANVAS, FACE, MARGIN, MAX_WIDTH, WIDTH_STEP, parseBox, parseNumbers, placePose } from '../../../../art/layout.mjs';
+import { CANVAS, FACE, MARGIN, MAX_WIDTH, WIDTH_STEP, gesturePreservation, parseBox, parseNumbers, placePose } from '../../../../art/layout.mjs';
 
 const help = `Usage: node preflight-pose.mjs SOURCE --face X,Y,W,H
   [--gesture NAME,X,Y,W,H]... [--normalized EXISTING.webp] [--max-width WIDTH]
@@ -90,8 +90,13 @@ try {
  };
  const solid = transform([src.box.x, src.box.y, src.box.w, src.box.h]);
  result.current = { placement, raster, normalized_solid_bounds: solid, overflow_px: overflow(solid), ...lostPixels([0, 0, src.w, src.h]) };
- result.gestures = result.gestures.map(g => ({ ...g, normalized_box: transform(g.box), overflow_px: overflow(transform(g.box)), ...lostPixels(g.box) }));
+ const preservation = gesturePreservation(gestures, src, placement);
+ result.gestures = result.gestures.map((g, i) => ({ ...g, normalized_box: transform(g.box), overflow_px: overflow(transform(g.box)), ...preservation[i] }));
  }
+ result.source_preservation_gate = {
+  accepted: !placement.refused && result.gestures.every(g => g.solid_source_pixels > 0 && g.projected_outside_canvas === 0),
+  scope: 'Measured opaque gesture-region pixel centers only, before clamping. Source completeness/anatomy require visual review; source-edge contacts are inspection flags. No guarantee about interpolation edges, unmeasured gestures, panel crops or balloon occlusion.'
+ };
  if (normalized) {
   const out = image(normalized);
   result.actual_normalized = { file: normalized, sha256: hash(normalized), size: [out.w, out.h], solid_alpha_bounds: out.box, solid_edge_pixels: out.edges, size_matches_current_prediction: placement.refused ? null : out.w === placement.size[0] && out.h === placement.size[1], note: 'Existing asset observation only. A size mismatch may indicate an older contract; do not compare its edge counts with the current transform as if they were one run. Upscale/Lanczos can change edges.' };

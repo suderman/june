@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseManifest } from "../src/avatar.ts";
 import { FRAMINGS, frame, framingsShowing, readPoses } from "../overlay/compose.mjs";
-import { kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "./layout.mjs";
+import { gesturePreservation, kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "./layout.mjs";
 
 const SECTIONS = ["poses", "chibi", "rooms", "plates", "props"];
 const BACKGROUND = ["rooms", "plates", "props"];
@@ -133,6 +133,16 @@ function ingest(set, name, options) {
 			place = placeProp(figure, fit);
 		}
 
+		const gestures = options.gestures?.length ? options.gestures : gestureBoxes;
+		if (face && Array.isArray(gestures) && gestures.length > 0) {
+			const alpha = execFileSync("magick", [image, "-alpha", "extract", "-depth", "8", "gray:-"], { maxBuffer: 64 * 1024 * 1024 });
+			for (const g of gesturePreservation(gestures, { ...whole, alpha }, place)) {
+				if (!g.solid_source_pixels) throw new Error(`${name}: ${g.name} has no solid source pixels`);
+				if (g.projected_outside_canvas) throw new Error(`${name}: ${g.name} projects ${g.projected_outside_canvas}/${g.solid_source_pixels} solid source pixels outside the normalized canvas; recompose the source gesture, not its clamped box`);
+				if (Object.values(g.source_edge_pixels).some((n) => n > 0)) place.problems.push(`${g.name} touches the source edge; inspect original gesture completeness`);
+			}
+		}
+
 		// Upscale when the piece would be drawn larger than generated, then scale down to the exact size.
 		const fromSource = place.scale;
 		if (place.scale > 1.05) {
@@ -159,7 +169,6 @@ function ingest(set, name, options) {
 			const at = (px, py) => [Math.round(((place.x + px * fromSource) / W) * 1000) / 1000, Math.round(((place.y + py * fromSource) / H) * 1000) / 1000];
 			finished.mouth = options.mouth ? at(options.mouth[0], options.mouth[1]) : mouthOf(place.face);
 			// Its gestures in the finished image, the primary first, and only the framings that keep that one in view.
-			const gestures = options.gestures?.length ? options.gestures : gestureBoxes;
 			if (Array.isArray(gestures) && gestures.length > 0) {
 				const clamp = (n) => Math.min(1, Math.max(0, Math.round(n * 1000) / 1000));
 				finished.gestures = gestures.map((g, i) => {

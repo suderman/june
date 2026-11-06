@@ -72,6 +72,35 @@ export function placePose(kind, figure, face, { maxWidth = MAX_WIDTH } = {}) {
 	return { scale, x, y, size: [W, H], face: faceOut, problems };
 }
 
+/** Project opaque source-pixel centers before gesture boxes are clamped. This does not certify anatomy or panel visibility. */
+export function gesturePreservation(gestures, source, place) {
+	const { w, h, alpha } = source;
+	if (alpha.length !== w * h) throw new Error("gesture preservation needs one 8-bit alpha plane");
+	const [W, H] = place.size;
+	const sx = Math.round(w * place.scale) / w;
+	const sy = Math.round(h * place.scale) / h;
+	const dx = Math.round(place.x), dy = Math.round(place.y);
+	return gestures.map((g) => {
+		const b = g.box;
+		if (!Array.isArray(b) || b.length !== 4 || !b.every(Number.isFinite) || b[0] < 0 || b[1] < 0 || b[2] <= 0 || b[3] <= 0 || b[0] + b[2] > w || b[1] + b[3] > h) throw new Error(`${g.name}: gesture box must be inside the source`);
+		let total = 0, outside = 0;
+		const edges = { left: 0, right: 0, top: 0, bottom: 0 };
+		for (let y = Math.floor(b[1]); y < Math.ceil(b[1] + b[3]); y++) {
+			for (let x = Math.floor(b[0]); x < Math.ceil(b[0] + b[2]); x++) {
+				if (alpha[y * w + x] <= 127) continue;
+				total++;
+				if (x === 0) edges.left++;
+				if (x === w - 1) edges.right++;
+				if (y === 0) edges.top++;
+				if (y === h - 1) edges.bottom++;
+				const px = dx + (x + 0.5) * sx, py = dy + (y + 0.5) * sy;
+				if (px < 0 || px >= W || py < 0 || py >= H) outside++;
+			}
+		}
+		return { name: g.name, solid_source_pixels: total, projected_outside_canvas: outside, source_edge_pixels: edges };
+	});
+}
+
 /** A mouth point below the middle of the face, where a balloon tail aims when none is given. */
 export function mouthOf(face) {
 	return [round(face[0] + face[2] / 2), round(face[1] + face[3] * 0.8)];
