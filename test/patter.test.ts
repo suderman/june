@@ -210,8 +210,9 @@ test("patter hears the recent conversation and new steps, but no results", async
 	faux.setResponses([
 		call("bash", { command: "echo $((6*7))" }),
 		fauxAssistantMessage("The wombats are counted."),
-		call("bash", { command: "sleep 0.6; echo $((7*8))" }),
-		() => call("bash", { command: "sleep 0.6; echo $((8*9))" }),
+		// Each prints its result while still running, as a long command's last lines often are its result.
+		call("bash", { command: "echo $((7*8)); sleep 0.6" }),
+		() => call("bash", { command: "echo $((8*9)); sleep 0.6" }),
 		() => fauxAssistantMessage("Both done."),
 	]);
 	const daemon = await openTestDaemon({ ...tmp, faux, config, providers: [patter.faux], extensions: [createCodingExtension()], patterTiming: fast });
@@ -221,8 +222,9 @@ test("patter hears the recent conversation and new steps, but no results", async
 	const opener = patter.heard[0]!.update;
 	assert.match(opener, /Recent conversation:\nAlex: count the wombats\nJune: The wombats are counted\./);
 	assert.match(opener, /Alex just said: now the slow part/);
-	assert.doesNotMatch(patter.heard.map((h) => h.all).join("\n"), /\b(42|56)\b/, "results stay out");
-	const later = patter.heard.find((h) => /New since your last line:\n- bash command=sleep 0\.6; echo \$\(\(8\*9\)\)/.test(h.update));
+	assert.doesNotMatch(patter.heard.map((h) => h.all).join("\n"), /\b(42|56|72)\b/, "results stay out, finished or still printing");
+	assert.ok(patter.heard.some((h) => /Still running:\n- bash/.test(h.update)), "patter still hears what is running");
+	const later = patter.heard.find((h) => /New since your last line:\n- bash command=echo \$\(\(8\*9\)\); sleep 0\.6/.test(h.update));
 	assert.ok(later, `a later update names only the new step: ${JSON.stringify(patter.heard.map((h) => h.update))}`);
 	assert.doesNotMatch(later!.update, /7\*8/);
 });

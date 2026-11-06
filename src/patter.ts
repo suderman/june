@@ -37,7 +37,7 @@ const TIMING: PatterTiming = {
 
 type Live = {
 	readonly run?: { inputs: readonly unknown[] };
-	readonly tools?: readonly { name: string; status: string; output?: string }[];
+	readonly tools?: readonly { name: string; status: string }[];
 	readonly generation?: { message?: { content?: readonly { type: string; text?: string }[] } };
 };
 
@@ -218,7 +218,7 @@ export function createPatter(options: {
 		/**
 		 * What patter hears before its next line, in plain words: for the opener, the recent conversation, what the user
 		 * asked, and the brief; then the steps since its last line and what is still running. Results stay out, since
-		 * the answer is June's to give.
+		 * the answer is June's to give, and so does a running tool's output, whose last lines are often its result.
 		 */
 		const activity = async (current: Wait, live: Live) => {
 			const view = await root.context(BG);
@@ -236,7 +236,7 @@ export function createPatter(options: {
 			const told = juneSaid(view.messages).map((text) => `June: ${text}`).filter((c) => !current.seen.has(c));
 			const running = [...(current.work === undefined ? (live.tools ?? []) : []), ...((childLive as Live | undefined)?.tools ?? [])]
 				.filter((slot) => slot.status === "running" && slot.name !== "work")
-				.map((slot) => `- ${slot.name}${slot.output ? `, latest output: ${clip(slot.output.slice(-200), 200)}` : ""}`);
+				.map((slot) => `- ${slot.name}`);
 			const out: string[] = [];
 			if (current.resumed) out.push(`${User()} broke in to talk with June and she has answered them; the work kept going meanwhile.`);
 			if (current.lines.length === 0) {
