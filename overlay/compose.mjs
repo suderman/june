@@ -206,7 +206,8 @@ export function standIn(panel, live) {
  * stand-in. Returns the panels with `side`, `pose`, and `live` added.
  */
 export function composeStrip(panels, state, poses, memory, holding = false) {
-	const running = Boolean(state && (state.running || state.compacting));
+	// One of June's private looks adds nothing to the newest panel, so the panel keeps its settled face through it.
+	const running = Boolean(state && ((state.running && !state.looking) || state.compacting));
 	let previousPose = "";
 	// The side of the latest panel so far whose picked face named a pose: the reply the daemon alternates from.
 	let anchor = null;

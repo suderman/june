@@ -44,6 +44,11 @@ export type ViewItem =
 
 export type ViewState = {
 	running: boolean;
+	/**
+	 * The run is one of June's private looks (a heartbeat, watch, work report, or follow-up), which adds nothing to a
+	 * panel until she sends a message, so clients leave the settled panel as it is. Absent otherwise.
+	 */
+	looking?: true;
 	/** Briefs running in June's working context in the background. */
 	background: number;
 	queued: number;
@@ -266,6 +271,8 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 	const face = items.findLast((item): item is Extract<ViewItem, { kind: "assistant" }> => item.kind === "assistant" && !item.private && !!item.expression);
 	const state: ViewState = {
 		running,
+		// The newest input is the run's: queued ones are not placed yet, and a steer from the user ends the look.
+		...(running && hidden ? { looking: true as const } : {}),
 		background: background.size,
 		queued: ((docs["pi.inbox"] as { items?: unknown[] } | undefined)?.items ?? []).length,
 		model: agent?.model?.modelId ? `${agent.model.modelId}${agent.thinkingLevel ? `:${agent.thinkingLevel}` : ""}` : "",

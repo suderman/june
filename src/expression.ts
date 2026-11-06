@@ -34,8 +34,10 @@ Expressions, with how often each should appear:
 ${vocabulary}
 ${poses ? `\nPoses, each with its expression:\n${poses}\n` : ""}
 Rules:
-- Pick the expression that fits her reply as a whole, not a single word in it.
-- Common faces are the default. Occasional ones need a clear reason in the reply. Rare ones only when the reply plainly earns it: a real win, a real compliment, a theatrical huff. Most replies are idle, warm, wry, curious, serious, or gentle.
+- Pick the expression that fits the whole panel: ${user()}'s message, what June did while answering, her asides, and her reply as a whole, not a single word in it.
+- Common faces are the default. Occasional ones need a clear reason in the panel. Rare ones only when it plainly earns it: a real win, a real compliment, a theatrical huff.
+- Idle is for a panel with no feeling in it at all. When the panel shows any reaction, even a mild one (care, amusement, interest, concern, quiet satisfaction at a finished job, resolve), choose the common face that shows it instead.
+- Faces of the earlier panels are shown. When the last two were the same face and another fits nearly as well, choose the other; never trade the right face for variety.
 - Pout is for when ${user()} wins a joke or an argument, not when June does.
 - When her reply drops the teasing (bad news, worry, serious or family matters), choose serious or gentle, never wry, smug, or pout.
 ${poses ? "- Optionally pick one pose whose expression matches; null when none fits well.\n" : ""}Reply with JSON only: {"expression": "<name>"${poses ? ', "pose": "<name>" or null' : ""}}`;
@@ -58,8 +60,10 @@ export function parsePick(text: string, manifest: Manifest | undefined): FacePic
 }
 
 type Assistant = Extract<ViewItem, { kind: "assistant" }>;
-/** An earlier exchange the pass sees for context: what the user said, and June's settled reply. */
-export type Exchange = { said: string; replied: string };
+/** An earlier exchange the pass sees for context: what the user said, June's settled reply, and the face it got. */
+export type Exchange = { said: string; replied: string; face?: string };
+/** What else is in the reply's panel: the tools June called while answering and her asides (patter), clipped. */
+export type Doing = { tools: string[]; asides: string[] };
 
 // How many earlier exchanges the pass sees, and how much of each, so a running joke or a mood carries over cheaply.
 const EARLIER = 2;
@@ -71,7 +75,7 @@ const clip = (text: string) => (text.length <= CLIP ? text : `${text.slice(0, CL
  * has ended, with the user's message before it and up to two exchanges before that. Null while she is still working or
  * when there is nothing new.
  */
-export function replyToPick(items: readonly ViewItem[], state: Pick<ViewState, "running" | "compacting">, done: ReadonlySet<string>): { reply: Assistant; said: string; earlier: Exchange[] } | null {
+export function replyToPick(items: readonly ViewItem[], state: Pick<ViewState, "running" | "compacting">, done: ReadonlySet<string>): { reply: Assistant; said: string; earlier: Exchange[]; doing: Doing } | null {
 	if (state.running || state.compacting) return null;
 	for (let i = items.length - 1; i >= 0; i--) {
 		const item = items[i]!;
@@ -87,7 +91,7 @@ export function replyToPick(items: readonly ViewItem[], state: Pick<ViewState, "
 				break;
 			}
 		}
-		return { reply: item, said, earlier: exchangesBefore(items, j, EARLIER) };
+		return { reply: item, said, earlier: exchangesBefore(items, j, EARLIER), doing: doingBetween(items, j, i) };
 	}
 	return null;
 }
@@ -95,22 +99,33 @@ export function replyToPick(items: readonly ViewItem[], state: Pick<ViewState, "
 /** Up to `count` exchanges before index `end`, oldest first: each user message with June's last settled reply to it. */
 function exchangesBefore(items: readonly ViewItem[], end: number, count: number): Exchange[] {
 	const out: Exchange[] = [];
-	let replied = "";
+	let replied: Assistant | undefined;
 	for (let k = end - 1; k >= 0 && out.length < count; k--) {
 		const item = items[k]!;
-		if (item.kind === "assistant" && !item.private && !item.error && item.text.trim() && !replied) replied = item.text;
+		if (item.kind === "assistant" && !item.private && !item.error && item.text.trim() && !replied) replied = item;
 		else if (item.kind === "user" && !item.private) {
-			if (replied) out.unshift({ said: clip(item.text), replied: clip(replied) });
-			replied = "";
+			if (replied) out.unshift({ said: clip(item.text), replied: clip(replied.text), ...(replied.expression ? { face: replied.expression } : {}) });
+			replied = undefined;
 		}
 	}
 	return out;
 }
 
-/** The words of one pick request: the earlier exchanges for context, then the message and the reply to read. */
-export function pickRequest(said: string, reply: string, earlier: readonly Exchange[]): string {
-	const before = earlier.map((e) => `${user()}: ${e.said}\nJune: ${e.replied}`).join("\n\n");
-	return `${before ? `Earlier, for context only:\n${before}\n\nNow, the reply to choose for.\n` : ""}${user()} wrote:\n${said || "(nothing: June spoke first)"}\n\nJune replied:\n${reply}`;
+const DOING = 12;
+/** The tools and asides between the user's message at `from` and the reply at `to`, the most recent kept. */
+function doingBetween(items: readonly ViewItem[], from: number, to: number): Doing {
+	const between = items.slice(from + 1, to).filter((item) => !("private" in item && item.private));
+	const tools = between.flatMap((item) => (item.kind === "tool" ? [`${item.name}${item.summary ? ` ${item.summary.slice(0, 80)}` : ""}${item.status === "error" ? " (failed)" : ""}`] : []));
+	const asides = between.flatMap((item) => (item.kind === "patter" ? [clip(item.text)] : []));
+	return { tools: tools.slice(-DOING), asides: asides.slice(-3) };
+}
+
+/** The words of one pick request: the earlier exchanges for context, then the panel to read: the message, what June did, her asides, and her reply. */
+export function pickRequest(said: string, reply: string, earlier: readonly Exchange[], doing?: Doing): string {
+	const before = earlier.map((e) => `${user()}: ${e.said}\nJune${e.face ? ` (face: ${e.face})` : ""}: ${e.replied}`).join("\n\n");
+	const did = doing?.tools.length ? `\n\nWhile answering, June used: ${doing.tools.join("; ")}` : "";
+	const asides = doing?.asides.length ? `\n\nHer asides meanwhile: ${doing.asides.join(" / ")}` : "";
+	return `${before ? `Earlier, for context only:\n${before}\n\nNow, the panel to choose for.\n` : ""}${user()} wrote:\n${said || "(nothing: June spoke first)"}${did}${asides}\n\nJune replied:\n${reply}`;
 }
 
 /** The same merged inventory the clients see: the personal set wins names and the base fills the rest. */
@@ -193,7 +208,7 @@ export function startExpressions(options: {
 		applyArt(reply, data, data.revision);
 	};
 
-	const pick = async (said: string, reply: string, earlier: readonly Exchange[], prior: readonly ArtTake[] = []): Promise<FacePick | null> => {
+	const pick = async (said: string, reply: string, earlier: readonly Exchange[], prior: readonly ArtTake[] = [], doing?: Doing): Promise<FacePick | null> => {
 		const model = models.getModel(options.model.provider, options.model.modelId);
 		if (model === undefined) throw new Error(`Unknown expression model ${options.model.provider}/${options.model.modelId}`);
 		const soul = options.files().soulFile;
@@ -202,7 +217,7 @@ export function startExpressions(options: {
 		const request: ModelContext = {
 			messages: [
 				{ role: "system", content: `${soul && existsSync(soul) ? readFileSync(soul, "utf8") : ""}\n\n${expressionRules(manifest)}`, timestamp: now } as Message,
-				{ role: "user", content: pickRequest(said, reply, earlier) + (prior.length ? `\n\nEarlier takes were not right. Read the reply again and choose a better performance, rather than rerolling blindly:\n${JSON.stringify(prior.map(({ expression, pose }) => ({ expression, pose })))}` : ""), timestamp: now } as Message,
+				{ role: "user", content: pickRequest(said, reply, earlier, doing) + (prior.length ? `\n\nEarlier takes were not right. Read the reply again and choose a better performance, rather than rerolling blindly:\n${JSON.stringify(prior.map(({ expression, pose }) => ({ expression, pose })))}` : ""), timestamp: now } as Message,
 			],
 		};
 		const thinking = options.model.thinkingLevel === "off" ? {} : { reasoning: options.model.thinkingLevel as never };
@@ -222,7 +237,7 @@ export function startExpressions(options: {
 		done.add(next.reply.id);
 		const started = Date.now();
 		try {
-			const chosen = await pick(next.said, next.reply.text, next.earlier);
+			const chosen = await pick(next.said, next.reply.text, next.earlier, [], next.doing);
 			if (chosen === null) log.warn("expression_unparsed", { reply: next.reply.id });
 			else if (!stopped && target(next.reply.id)?.artVersion === next.reply.artVersion && target(next.reply.id)?.text === next.reply.text) {
 				const previous = items.slice(0, items.indexOf(next.reply)).findLast((i): i is Assistant => i.kind === "assistant" && !!i.pose);

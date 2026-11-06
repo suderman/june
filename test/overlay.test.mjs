@@ -975,6 +975,19 @@ test("June keeps one side through a panel: thinking, working, writing, settling,
 	assert.deepEqual(resolvePick({ expression: "wry" }, manifest, before[1], at + 1, () => 0), { expression: "wry", pose: "playful-wink-pointing", side: "left", selectedAt: at + 1 });
 });
 
+test("one of June's private looks leaves the settled panel's face alone; a run answering the user still animates it", () => {
+	const at = Date.UTC(2026, 10, 6, 12);
+	const poses = readPoses(manifest, "");
+	const items = [{ ...user("u1"), at }, { ...june("a1", "all done"), expression: "warm", pose: "content-holding-mug", side: "left", expressionAt: at, at }];
+	const memory = { sides: {}, poseIds: {}, livePoses: {} };
+	const settled = composeStrip(panels(items), { running: false }, poses, memory).at(-1);
+	const looking = composeStrip(panels(items), { running: true, looking: true }, poses, memory).at(-1);
+	assert.deepEqual([looking.live, looking.pose.id, looking.side], [false, settled.pose.id, settled.side], "a heartbeat or work report keeps the face she settled on");
+	const answering = composeStrip(panels(items), { running: true }, poses, memory).at(-1);
+	assert.deepEqual([answering.live, answering.pose.activity, answering.side], [true, "thinking", "left"], "a run for the user is live, on the same side");
+	assert.equal(composeStrip(panels(items), { running: true, looking: true, compacting: true }, poses, memory).at(-1).live, true, "tidying still shows");
+});
+
 test("both native menus use the settled reply's revision and expose saved takes in both directions", () => {
 	const at = 1234;
 	const item = { ...june("answer", "one paragraph.\\n\\nAnother paragraph."), expression: "warm", expressionAt: at, side: "left", artVersion: "revision", take: 1, takes: [{ take: 0 }, { take: 1, previous: 0 }] };

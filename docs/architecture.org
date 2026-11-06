@@ -188,7 +188,7 @@ type ViewItem =
 	| { kind: "note"; id: string; text: string }
 	| { kind: "patter"; id: string; text: string };
 
-type ViewState = { running: boolean; background: number; queued: number; model: string; notice?: string; compacting: boolean; expression: string; following?: number; follows?: { title: string; signal: string }[]; activity?: "thinking" | "working" | "watching"; sky?: Sky };
+type ViewState = { running: boolean; looking?: true; background: number; queued: number; model: string; notice?: string; compacting: boolean; expression: string; following?: number; follows?: { title: string; signal: string }[]; activity?: "thinking" | "working" | "watching"; sky?: Sky };
 type Sky = { latitude: number; longitude: number; condition?: string; temperature?: number; unit?: string };
 #+end_src
 

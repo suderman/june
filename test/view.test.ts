@@ -100,6 +100,9 @@ test("the fold: a hidden heartbeat look shows only a real message, in the markup
 	];
 	const live = { run: { taskId: 3, inputs: [7], turns: 0 }, generation: { attempt: 1, message: { content: [{ type: "text", text: "thinking aloud" }] } }, tools: [{ callId: "c10", name: "bash", status: "running" }] };
 	assert.deepEqual(lines(fold(entries, { "pi.live": live }).items), ["alex: hi from the phone", "june: hello", "june: Bins *tonight*."], "Markdown, since Alex last spoke from Telegram; the look's stream and tools stay out");
+	assert.equal(fold(entries, { "pi.live": live }).state.looking, true, "a run for a private look says so");
+	assert.equal(fold(entries, {}).state.looking, undefined, "not once the look has ended");
+	assert.equal(fold(entries.slice(0, 2), { "pi.live": live }).state.looking, undefined, "nor in a run answering the user");
 });
 
 test("diff and applyChanges turn any list into any other", () => {

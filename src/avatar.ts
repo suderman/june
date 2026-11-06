@@ -6,7 +6,7 @@ export type Frequency = "common" | "occasional" | "rare";
 
 /** Each expression's meaning, how often it should appear, and the name to show when a set has no image for it. */
 export const EXPRESSIONS = {
-	idle: { meaning: "composed and attentive; the face most of the time", frequency: "common" },
+	idle: { meaning: "composed and attentive; a plain reply with no feeling to show", frequency: "common" },
 	warm: { meaning: "a sincere, open smile", frequency: "common", fallback: "idle" },
 	wry: { meaning: "a dry half-smile; cheek or affectionate teasing", frequency: "common", fallback: "idle" },
 	curious: { meaning: "interested, a little head tilt; asking or looking into something", frequency: "common", fallback: "idle" },

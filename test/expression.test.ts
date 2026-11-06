@@ -45,13 +45,13 @@ test("a pick is a known expression, and a pose only when the set has it as a rea
 
 test("the reply to pick is the newest settled one, once the run has ended, with the message it answers", () => {
 	const items = [ask("1", "any mail?"), say("2", "checking"), { kind: "tool", id: "c", name: "bash", summary: "", status: "done" } as ViewItem, say("3", "two need a reply.")];
-	assert.deepEqual(replyToPick(items, idle, new Set()), { reply: items[3], said: "any mail?", earlier: [] });
+	assert.deepEqual(replyToPick(items, idle, new Set()), { reply: items[3], said: "any mail?", earlier: [], doing: { tools: ["bash"], asides: [] } });
 	assert.equal(replyToPick(items, { running: true, compacting: false }, new Set()), null, "not while she works");
 	assert.equal(replyToPick(items, idle, new Set(["3"])), null, "not twice");
 	assert.equal(replyToPick([...items.slice(0, 3), say("3", "two", { expression: "warm" })], idle, new Set()), null, "already has a face");
 	assert.equal(replyToPick([...items, ask("4", "thanks")], idle, new Set()), null, "the user has spoken since: nothing new to pick");
 	assert.equal(replyToPick([ask("1", "hi"), say("2", "", { error: "timeout" })], idle, new Set()), null, "a failed reply has no face");
-	assert.deepEqual(replyToPick([say("2", "good morning.")], idle, new Set()), { reply: say("2", "good morning."), said: "", earlier: [] }, "she spoke first");
+	assert.deepEqual(replyToPick([say("2", "good morning.")], idle, new Set()), { reply: say("2", "good morning."), said: "", earlier: [], doing: { tools: [], asides: [] } }, "she spoke first");
 });
 
 test("the pass sees up to two earlier exchanges for context, clipped, and asks about the newest reply only", () => {
@@ -61,10 +61,13 @@ test("the pass sees up to two earlier exchanges for context, clipped, and asks a
 		say("2", "one"),
 		ask("3", "nicknames are my thing"),
 		say("4", "thinking", { private: true }),
-		say("5", "hmm. skipper, maybe."),
+		say("5", "hmm. skipper, maybe.", { expression: "wry" }),
 		ask("6", long),
 		say("7", "fair."),
 		ask("8", "you win."),
+		{ kind: "tool", id: "c1", name: "org_search", summary: "query=bet", status: "done" } as ViewItem,
+		{ kind: "tool", id: "c2", name: "bash", summary: "command=false", status: "error" } as ViewItem,
+		{ kind: "patter", id: "p1", text: "conceding gracefully, as ever." } as ViewItem,
 		say("9", "a hollow victory."),
 	];
 	const next = replyToPick(items, idle, new Set());
@@ -72,9 +75,11 @@ test("the pass sees up to two earlier exchanges for context, clipped, and asks a
 	assert.deepEqual(next?.earlier.map((e) => e.said.slice(0, 22)), ["nicknames are my thing", "x".repeat(22)], "the two exchanges before, oldest first");
 	assert.equal(next?.earlier[0]!.replied, "hmm. skipper, maybe.", "June's settled reply, not a private look");
 	assert.equal(next?.earlier[1]!.said.length, 400, "each clipped");
-	const request = pickRequest(next!.said, next!.reply.text, next!.earlier);
-	assert.match(request, /^Earlier, for context only:\n.*nicknames are my thing\nJune: hmm\. skipper, maybe\./);
-	assert.match(request, /Now, the reply to choose for\.\n.* wrote:\nyou win\.\n\nJune replied:\na hollow victory\.$/);
+	assert.deepEqual(next?.doing, { tools: ["org_search query=bet", "bash command=false (failed)"], asides: ["conceding gracefully, as ever."] }, "what else is in the panel");
+	const request = pickRequest(next!.said, next!.reply.text, next!.earlier, next!.doing);
+	assert.match(request, /^Earlier, for context only:\n.*nicknames are my thing\nJune \(face: wry\): hmm\. skipper, maybe\./, "with the face each earlier panel got");
+	assert.match(request, /Now, the panel to choose for\.\n.* wrote:\nyou win\.\n\nWhile answering, June used: org_search query=bet; bash command=false \(failed\)\n\nHer asides meanwhile: conceding gracefully, as ever\.\n\nJune replied:\na hollow victory\.$/);
+	assert.doesNotMatch(pickRequest("hi", "hello", [], { tools: [], asides: [] }), /While|asides/, "nothing done, nothing said");
 	assert.doesNotMatch(pickRequest("hi", "hello", []), /Earlier/, "no context, no preamble");
 });
 
