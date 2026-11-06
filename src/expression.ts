@@ -38,7 +38,7 @@ Rules:
 - Common faces are the default. Occasional ones need a clear reason in the panel. Rare ones only when it plainly earns it: a real win, a real compliment, a theatrical huff.
 - Idle is for a panel with no feeling in it at all. When the panel shows any reaction, even a mild one (care, amusement, interest, concern, quiet satisfaction at a finished job, resolve), choose the common face that shows it instead.
 - Faces of the earlier panels are shown. When the last two were the same face and another fits nearly as well, choose the other; never trade the right face for variety.
-- Pout is for when ${user()} wins a joke or an argument, not when June does.
+${poses ? "- Never pick the pose the panel just before had when another pose of the face you chose fits; one picture twice in a row reads as a stuck strip.\n" : ""}- Pout is for when ${user()} wins a joke or an argument, not when June does.
 - When her reply drops the teasing (bad news, worry, serious or family matters), choose serious or gentle, never wry, smug, or pout.
 ${poses ? "- Optionally pick one pose whose expression matches; null when none fits well.\n" : ""}Reply with JSON only: {"expression": "<name>"${poses ? ', "pose": "<name>" or null' : ""}}`;
 }
@@ -60,8 +60,8 @@ export function parsePick(text: string, manifest: Manifest | undefined): FacePic
 }
 
 type Assistant = Extract<ViewItem, { kind: "assistant" }>;
-/** An earlier exchange the pass sees for context: what the user said, June's settled reply, and the face it got. */
-export type Exchange = { said: string; replied: string; face?: string };
+/** An earlier exchange the pass sees for context: what the user said, June's settled reply, and the face and pose it got. */
+export type Exchange = { said: string; replied: string; face?: string; pose?: string };
 /** What else is in the reply's panel: the tools June called while answering and her asides (patter), clipped. */
 export type Doing = { tools: string[]; asides: string[] };
 
@@ -104,7 +104,7 @@ function exchangesBefore(items: readonly ViewItem[], end: number, count: number)
 		const item = items[k]!;
 		if (item.kind === "assistant" && !item.private && !item.error && item.text.trim() && !replied) replied = item;
 		else if (item.kind === "user" && !item.private) {
-			if (replied) out.unshift({ said: clip(item.text), replied: clip(replied.text), ...(replied.expression ? { face: replied.expression } : {}) });
+			if (replied) out.unshift({ said: clip(item.text), replied: clip(replied.text), ...(replied.expression ? { face: replied.expression } : {}), ...(replied.pose ? { pose: replied.pose } : {}) });
 			replied = undefined;
 		}
 	}
@@ -122,7 +122,7 @@ function doingBetween(items: readonly ViewItem[], from: number, to: number): Doi
 
 /** The words of one pick request: the earlier exchanges for context, then the panel to read: the message, what June did, her asides, and her reply. */
 export function pickRequest(said: string, reply: string, earlier: readonly Exchange[], doing?: Doing): string {
-	const before = earlier.map((e) => `${user()}: ${e.said}\nJune${e.face ? ` (face: ${e.face})` : ""}: ${e.replied}`).join("\n\n");
+	const before = earlier.map((e) => `${user()}: ${e.said}\nJune${e.face ? ` (face: ${e.face}${e.pose ? `, pose: ${e.pose}` : ""})` : ""}: ${e.replied}`).join("\n\n");
 	const did = doing?.tools.length ? `\n\nWhile answering, June used: ${doing.tools.join("; ")}` : "";
 	const asides = doing?.asides.length ? `\n\nHer asides meanwhile: ${doing.asides.join(" / ")}` : "";
 	return `${before ? `Earlier, for context only:\n${before}\n\nNow, the panel to choose for.\n` : ""}${user()} wrote:\n${said || "(nothing: June spoke first)"}${did}${asides}\n\nJune replied:\n${reply}`;

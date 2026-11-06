@@ -975,6 +975,30 @@ test("June keeps one side through a panel: thinking, working, writing, settling,
 	assert.deepEqual(resolvePick({ expression: "wry" }, manifest, before[1], at + 1, () => 0), { expression: "wry", pose: "playful-wink-pointing", side: "left", selectedAt: at + 1 });
 });
 
+test("a long reply's later panels show another pose of its face on the same side, the same for every client", () => {
+	const at = Date.UTC(2026, 10, 6, 12);
+	const poses = readPoses(manifest, "");
+	const fresh = () => ({ sides: {}, poseIds: {}, livePoses: {} });
+	const long = [1, 2, 3, 4].map((n) => `${"words ".repeat(50)}${n}`).join("\n\n");
+	const reply = (id, expression, pose) => ({ ...june(id, long), expression, pose, side: "left", expressionAt: at, at });
+	const items = [{ ...user("u1"), at }, reply("a1", "warm", "content-holding-mug"), { ...user("u2"), at }, { ...june("a2", "short"), expression: "warm", pose: "content-holding-mug", side: "right", expressionAt: at, at }];
+	const strip = composeStrip(panels(items), { running: false }, poses, fresh());
+	const first = strip.filter((p) => p.elements.some((e) => e.replyId === "a1"));
+	assert.ok(first.length >= 2, `${first.length} panels`);
+	assert.equal(first[0].pose.id, "content-holding-mug", "the first panel shows the picked pose");
+	for (const [i, p] of first.entries()) {
+		assert.equal(p.pose.expression, "warm", "every panel keeps the picked face");
+		assert.equal(p.side, "left", "and the side");
+		if (i > 0) assert.notEqual(p.pose.id, first[i - 1].pose.id, "no two panels of the reply in a row show the same picture");
+	}
+	assert.equal(strip.at(-1).pose.id, "content-holding-mug", "the next reply shows its own picked pose");
+	assert.deepEqual(composeStrip(panels(items), { running: false }, poses, fresh()).map((p) => p.pose.id), strip.map((p) => p.pose.id), "a reload or another client shows the same poses");
+	// With one pose for the face, the reply keeps it rather than changing face.
+	const wry = composeStrip(panels([{ ...user("u1"), at }, reply("a1", "wry", "playful-wink-pointing")]), { running: false }, poses, fresh());
+	assert.ok(wry.length >= 2);
+	assert.ok(wry.every((p) => p.pose.id === "playful-wink-pointing"));
+});
+
 test("one of June's private looks leaves the settled panel's face alone; a run answering the user still animates it", () => {
 	const at = Date.UTC(2026, 10, 6, 12);
 	const poses = readPoses(manifest, "");

@@ -186,6 +186,15 @@ export function picked(panel) {
 	return null;
 }
 
+/** The reply whose picked face a settled panel shows, or "" before one has arrived. */
+function pickedReply(panel) {
+	for (let i = panel.elements.length - 1; i >= 0; i--) {
+		const e = panel.elements[i];
+		if (e.kind === "june" && e.expression) return e.replyId || "";
+	}
+	return "";
+}
+
 /** A stand-in request for a panel: a failure gets exasperation, a reply in progress curiosity, the rest a common face. */
 export function standIn(panel, live) {
 	if (panel.elements.some((e) => e.kind === "burst")) return { expression: "exasperated" };
@@ -209,6 +218,7 @@ export function composeStrip(panels, state, poses, memory, holding = false) {
 	// One of June's private looks adds nothing to the newest panel, so the panel keeps its settled face through it.
 	const running = Boolean(state && ((state.running && !state.looking) || state.compacting));
 	let previousPose = "";
+	let previousReply = "";
 	// The side of the latest panel so far whose picked face named a pose: the reply the daemon alternates from.
 	let anchor = null;
 	return panels.map((p, i) => {
@@ -218,6 +228,10 @@ export function composeStrip(panels, state, poses, memory, holding = false) {
 		const doing = live ? liveActivity(state, p) : null;
 		const recorded = picked(p);
 		const face = live ? null : recorded;
+		// A long reply runs on into later panels. Those show another pose of the same face where one can stand on her
+		// side, so the strip does not print one picture twice; the panel's id keeps the choice for every client.
+		const reply = pickedReply(p);
+		const continued = face !== null && reply !== "" && reply === previousReply;
 		// Her side is settled before her pose and kept while the pose changes: the recorded side, even while a later run
 		// makes this panel live again; else the other side from the latest earlier recorded pose, which is the side the
 		// daemon will record for this reply (resolvePick in expression.ts); else, with no record before it, from its id.
@@ -230,7 +244,9 @@ export function composeStrip(panels, state, poses, memory, holding = false) {
 		let pose = live
 			? choosePose(poses, doing ? { activity: doing, expression: "curious" } : standIn(p, true), previousPose, p.id, held)
 			: face
-				? (face.pose ? find(face.pose) : null) ?? choosePose(pool, face, "", p.id, held)
+				? continued
+					? choosePose(pool, { expression: face.expression }, previousPose, p.id, held)
+					: (face.pose ? find(face.pose) : null) ?? choosePose(pool, face, "", p.id, held)
 				: hold
 					? find(memory.livePoses[p.id])
 					: choosePose(pool, standIn(p, false), "", p.id, held);
@@ -244,6 +260,7 @@ export function composeStrip(panels, state, poses, memory, holding = false) {
 		memory.sides[p.id] = chooseSide(preferred === "left" ? "right" : "left", pose);
 		if (recorded?.pose) anchor = recorded.side ?? "";
 		previousPose = pose ? pose.id : "";
+		previousReply = reply;
 		return Object.assign({}, p, { side: memory.sides[p.id], pose, live });
 	});
 }

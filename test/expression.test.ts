@@ -30,6 +30,7 @@ test("the rules list every expression with its frequency, the reaction poses, an
 	assert.doesNotMatch(rules, /working-typing-laptop/, "poses that show her at work are never a reaction");
 	assert.match(rules, /Pout is for when/);
 	assert.match(rules, /never wry, smug, or pout/);
+	assert.match(rules, /Never pick the pose the panel just before had/, "with poses, the variety rule covers them");
 	assert.doesNotMatch(expressionRules(undefined), /\bposes?\b/i, "without an avatar set, no poses to name");
 });
 
@@ -63,7 +64,7 @@ test("the pass sees up to two earlier exchanges for context, clipped, and asks a
 		say("4", "thinking", { private: true }),
 		say("5", "hmm. skipper, maybe.", { expression: "wry" }),
 		ask("6", long),
-		say("7", "fair."),
+		say("7", "fair.", { expression: "smug", pose: "smug-chin-on-hand" }),
 		ask("8", "you win."),
 		{ kind: "tool", id: "c1", name: "org_search", summary: "query=bet", status: "done" } as ViewItem,
 		{ kind: "tool", id: "c2", name: "bash", summary: "command=false", status: "error" } as ViewItem,
@@ -78,6 +79,7 @@ test("the pass sees up to two earlier exchanges for context, clipped, and asks a
 	assert.deepEqual(next?.doing, { tools: ["org_search query=bet", "bash command=false (failed)"], asides: ["conceding gracefully, as ever."] }, "what else is in the panel");
 	const request = pickRequest(next!.said, next!.reply.text, next!.earlier, next!.doing);
 	assert.match(request, /^Earlier, for context only:\n.*nicknames are my thing\nJune \(face: wry\): hmm\. skipper, maybe\./, "with the face each earlier panel got");
+	assert.match(request, /\nJune \(face: smug, pose: smug-chin-on-hand\): fair\.\n/, "and its pose when one was named");
 	assert.match(request, /Now, the panel to choose for\.\n.* wrote:\nyou win\.\n\nWhile answering, June used: org_search query=bet; bash command=false \(failed\)\n\nHer asides meanwhile: conceding gracefully, as ever\.\n\nJune replied:\na hollow victory\.$/);
 	assert.doesNotMatch(pickRequest("hi", "hello", [], { tools: [], asides: [] }), /While|asides/, "nothing done, nothing said");
 	assert.doesNotMatch(pickRequest("hi", "hello", []), /Earlier/, "no context, no preamble");
