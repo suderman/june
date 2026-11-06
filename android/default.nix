@@ -101,9 +101,16 @@
     name = "june-android-install";
     runtimeInputs = [jdk17_headless android-tools];
     text = ''
-      # The standard Android debug key, so reinstalls keep one signature.
+      # The standard Android debug key, so reinstalls keep one signature. Every host that installs the app must hold
+      # the same one (Jon's NixOS config persists ~/.android): an app signed with another key cannot be updated, only
+      # uninstalled, which clears its device token and assistant role. So a missing key is an error, not a new key.
       key="$HOME/.android/debug.keystore"
       if [ ! -f "$key" ]; then
+        if [ "''${JUNE_ANDROID_NEW_KEY:-}" != 1 ]; then
+          echo "No signing key at $key. Copy it from the host that installed June last (scp HOST:.android/debug.keystore ~/.android/)." >&2
+          echo "Only for a first install, or after uninstalling the app, rerun with JUNE_ANDROID_NEW_KEY=1 to create one." >&2
+          exit 1
+        fi
         mkdir -p "$HOME/.android"
         keytool -genkeypair -keystore "$key" -storepass android -keypass android -alias androiddebugkey \
           -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
