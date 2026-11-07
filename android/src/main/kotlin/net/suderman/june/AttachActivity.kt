@@ -55,9 +55,16 @@ class AttachActivity : ComponentActivity() {
         }.start()
     }
 
-    /** Close, and bring the sheet back when this was opened from it. */
+    /**
+     * Close, and bring the sheet back when this was opened from it; if Android has not bound the assistant service since
+     * the app started, the full screen shows the same draft instead, so what was attached is never out of sight.
+     */
     private fun back() {
-        if (intent.getBooleanExtra(FROM_SHEET, false)) JuneInteractionService.current?.showSession(Bundle(), 0)
+        if (intent.getBooleanExtra(FROM_SHEET, false)) {
+            val service = JuneInteractionService.current
+            if (service != null) service.showSession(Bundle(), 0)
+            else startActivity(Intent(this, ConversationActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
         finish()
     }
 
