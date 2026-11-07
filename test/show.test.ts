@@ -85,6 +85,9 @@ test("a web page shows as the picture a browser draws of it, and only an http or
 	await mkdir(bin);
 	await writeFile(join(bin, "chromium"), `#!/bin/sh\nfor a in "$@"; do case $a in --screenshot=*) printf '%s' '${PNG.toString("base64")}' | base64 -d > "\${a#--screenshot=}";; esac; done\n`);
 	await chmod(join(bin, "chromium"), 0o755);
+	// And for systemd-run, which the daemon uses when it may not gain privileges: run what follows its options.
+	await writeFile(join(bin, "systemd-run"), `#!/bin/sh\nwhile [ "\${1#-}" != "$1" ]; do shift; done\nexec "$@"\n`);
+	await chmod(join(bin, "systemd-run"), 0o755);
 	const path = process.env.PATH;
 	process.env.PATH = `${bin}:${path}`;
 	t.after(() => {

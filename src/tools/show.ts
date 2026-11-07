@@ -3,6 +3,7 @@
 // own, `[shown {...}]`, which the view reads to draw it (a picture as a polaroid, anything else as a card) and the
 // remote listener reads to serve it to the user's devices.
 import { execFile } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, open, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, extname, join } from "node:path";
@@ -22,6 +23,28 @@ const EXTENSIONS: Record<string, string> = {
 
 const run = promisify(execFile);
 
+/** A program's full path from PATH, for systemd-run, which does not search the caller's. */
+function onPath(name: string): string {
+	for (const dir of (process.env.PATH ?? "").split(":")) if (dir && existsSync(join(dir, name))) return join(dir, name);
+	return name;
+}
+
+/**
+ * Whether this process may never gain privileges (June's service sets NoNewPrivileges), which stops Chromium's sandbox;
+ * then the browser runs in a transient unit of the user's own systemd instead, while June's service stays as it is.
+ */
+function noNewPrivileges(): boolean {
+	try {
+		return /^NoNewPrivs:\s*1$/m.test(readFileSync("/proc/self/status", "utf8"));
+	} catch {
+		return false;
+	}
+}
+
+/** The last few lines a browser wrote that say something, for an error. */
+const said = (stderr: unknown) =>
+	String(stderr ?? "").split("\n").filter((line) => line.trim() && !/dbus|OID|Fontconfig/i.test(line)).slice(-3).join(" / ").slice(0, 400);
+
 /**
  * A web page as headless Chromium draws it at a desktop window's size, as PNG bytes. A throwaway profile each time, so
  * no cookie or login of the user's browser is used, and a time limit for a page that never settles.
@@ -30,8 +53,17 @@ async function pageShot(url: string): Promise<Buffer> {
 	const dir = await mkdtemp(join(tmpdir(), "june-shot-"));
 	try {
 		const shot = join(dir, "page.png");
-		await run("chromium", ["--headless=new", "--no-first-run", "--disable-gpu", "--hide-scrollbars", "--window-size=1280,1600", `--user-data-dir=${join(dir, "profile")}`, `--screenshot=${shot}`, url], { timeout: 45_000 });
-		return await readFile(shot);
+		const browser = [onPath("chromium"), "--headless=new", "--no-first-run", "--disable-gpu", "--hide-scrollbars", "--window-size=1280,1600", `--user-data-dir=${join(dir, "profile")}`, `--screenshot=${shot}`, url];
+		const [command, ...args] = noNewPrivileges() ? [onPath("systemd-run"), "--user", "--wait", "--collect", "--pipe", "--quiet", "--property=RuntimeMaxSec=50", ...browser] : browser;
+		let stderr = "";
+		try {
+			stderr = (await run(command!, args, { timeout: 60_000 })).stderr;
+		} catch (error) {
+			throw new Error(`The browser failed: ${said((error as { stderr?: unknown }).stderr) || (error as Error).message}`);
+		}
+		return await readFile(shot).catch(() => {
+			throw new Error(`The browser drew no picture${said(stderr) ? `: ${said(stderr)}` : ""}`);
+		});
 	} finally {
 		await rm(dir, { recursive: true, force: true });
 	}
