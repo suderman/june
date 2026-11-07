@@ -183,6 +183,9 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
         value = if (d != null && link.status is LinkStatus.Linked) runCatching { org.json.JSONObject(d.call("strip.status", link.state.raw, link.host, org.json.JSONArray(seen.toList()))) }.getOrNull() else null
     }
     val detail = said?.optJSONArray("detail")
+    // A tap on a link in June's words opens it as Links.kt allows, the sheet stepping aside for what opens.
+    val links = remember(leave) { Links.Handler(context, leave) }
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides links) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             val ready = decisions
@@ -309,6 +312,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                 enabled = link.status is LinkStatus.Linked && anything,
             ) { Text("Send") }
         }
+    }
     }
 }
 

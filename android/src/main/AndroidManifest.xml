@@ -7,9 +7,13 @@
          app; it cannot be granted any other way. -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Links.kt: a herdr: link in June's words opens a Termux session attached to the agent's pane. Granted over ADB. -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 
     <!-- June opens apps by name through her hands: the launcher's apps must be visible to her. -->
     <queries>
+        <!-- Termux, which opens herdr links (Links.kt). -->
+        <package android:name="com.termux" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />

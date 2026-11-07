@@ -134,6 +134,8 @@
       adb shell pm grant net.suderman.june android.permission.INTERNET 2>/dev/null || true
       # So June can put back her assistant settings and hands herself when Android clears them (Keep.kt). Survives updates.
       adb shell pm grant net.suderman.june android.permission.WRITE_SECURE_SETTINGS
+      # So a herdr: link in June's words can open Termux attached to the agent's pane (Links.kt); without Termux, nothing.
+      adb shell pm grant net.suderman.june com.termux.permission.RUN_COMMAND 2>/dev/null || true
       # June's hands (Hands.kt), on by Jon's choice: added to the enabled accessibility services if missing. Settings
       # would refuse it for an app from outside a store (restricted settings); the shell may set it.
       hands="net.suderman.june/net.suderman.june.Hands"

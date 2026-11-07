@@ -8,11 +8,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.style.TextDecoration
 
 // Stressed words, code, and links in June's Markdown, as the overlay's balloons show them (markup in overlay/strip.mjs):
-// **bold** and __bold__, *italic* and _italic_, `code`, [label](url) as its label. Heading and quote markers and code
-// fences go; everything else is the text as written.
-private val INLINE = Regex("""\*\*([^*]+)\*\*|__([^_]+)__|`([^`]+)`|\[([^\]]+)]\([^)\s]+\)|(?<![\w*])\*([^*\s][^*]*)\*(?!\w)|(?<!\w)_([^_\s][^_]*)_(?!\w)""")
+// **bold** and __bold__, *italic* and _italic_, `code`, and links, as [label](url) or Org's [[url][label]]. A link June
+// may open (Links.kt) is underlined and taps through; any other shows only its label. Heading and quote markers and
+// code fences go; everything else is the text as written.
+private val INLINE = Regex("""\*\*([^*]+)\*\*|__([^_]+)__|`([^`]+)`|\[([^\]]+)]\(([^)\s]+)\)|\[\[([^\]]+)]\[([^\]]+)]]|(?<![\w*])\*([^*\s][^*]*)\*(?!\w)|(?<!\w)_([^_\s][^_]*)_(?!\w)""")
 
 fun markdown(text: String, code: Color): AnnotatedString = buildAnnotatedString {
     val lines = text.lines().filterNot { it.trimStart().startsWith("```") }
@@ -21,12 +26,16 @@ fun markdown(text: String, code: Color): AnnotatedString = buildAnnotatedString 
         var at = 0
         for (m in INLINE.findAll(line)) {
             append(line.substring(at, m.range.first))
-            val (bold1, bold2, mono, label, italic1, italic2) = List(6) { m.groups[it + 1]?.value }
+            val g = { n: Int -> m.groups[n]?.value }
+            val label = g(4) ?: g(7)
+            val url = g(5) ?: g(6)
             when {
-                bold1 != null || bold2 != null -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(bold1 ?: bold2!!) }
-                mono != null -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, color = code)) { append(mono) }
+                g(1) != null || g(2) != null -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(g(1) ?: g(2)!!) }
+                g(3) != null -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, color = code)) { append(g(3)!!) }
+                label != null && url != null && Links.opens(url) ->
+                    withLink(LinkAnnotation.Url(url, TextLinkStyles(SpanStyle(textDecoration = TextDecoration.Underline)))) { append(label) }
                 label != null -> append(label)
-                else -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(italic1 ?: italic2!!) }
+                else -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(g(8) ?: g(9)!!) }
             }
             at = m.range.last + 1
         }
@@ -35,4 +44,3 @@ fun markdown(text: String, code: Color): AnnotatedString = buildAnnotatedString 
     }
 }
 
-private operator fun <T> List<T>.component6(): T = this[5]
