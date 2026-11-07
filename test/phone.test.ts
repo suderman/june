@@ -11,7 +11,7 @@ test("an action goes to the phone that offered its hands and waits for its answe
 	assert.equal(sent.length, 1);
 	assert.equal(sent[0]!.action, "global");
 	phones.answer(sent[0]!.requestId, true, "opened the power menu");
-	assert.equal(await answer, "opened the power menu");
+	assert.deepEqual(await answer, { text: "opened the power menu" });
 
 	const refused = phones.act({ action: "tap", target: "Nowhere" });
 	phones.answer(sent[1]!.requestId, false, "no control named Nowhere");
@@ -34,4 +34,16 @@ test("the newest connection from a phone acts, several phones need a name, and a
 	phones.offer("tab", () => {});
 	await assert.rejects(phones.act({ action: "screen" }), /Name the phone: gem, tab/);
 	await assert.rejects(phones.act({ action: "screen" }, "tab", 20), /tab did not answer/);
+});
+
+test("a capture brings back the picture it took, and anything but a JPEG or PNG is left out", async () => {
+	const phones = new Phones();
+	const sent: { requestId: string }[] = [];
+	phones.offer("gem", (m) => sent.push(m));
+	const shot = phones.act({ action: "capture" });
+	phones.answer(sent[0]!.requestId, true, "captured the screen; in front: org.mozilla.fenix", { data: "AAAA", mimeType: "image/jpeg" });
+	assert.deepEqual(await shot, { text: "captured the screen; in front: org.mozilla.fenix", image: { data: "AAAA", mimeType: "image/jpeg" } });
+	const odd = phones.act({ action: "capture" });
+	phones.answer(sent[1]!.requestId, true, "captured", { data: "AAAA", mimeType: "text/html" });
+	assert.deepEqual(await odd, { text: "captured" });
 });

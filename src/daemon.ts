@@ -121,7 +121,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const herdr = new Herdr(config.herdr);
 		const phones = new Phones();
 		const extensions = options.extensions ?? [
-			createPhoneExtension(phones),
+			createPhoneExtension(phones, `${paths.state}/inbox`),
 			createCodingExtension(),
 			createOrgExtension(config, org),
 			createOrgWriteExtension(config, org),
@@ -562,7 +562,7 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 				return send({ type: "reply", requestId: request.requestId, text: "hands offered" });
 			}
 			case "acted":
-				return scope.phones.answer(String(request.requestId), request.ok === true, String(request.text ?? ""));
+				return scope.phones.answer(String(request.requestId), request.ok === true, String(request.text ?? ""), request.image);
 			default:
 				throw new Error(`Unknown op ${(request as { op?: string }).op}`);
 		}

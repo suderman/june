@@ -58,8 +58,8 @@ export type Request =
 	| { op: "device"; requestId: string; action: "add" | "list" | "revoke"; name?: string }
 	/** A device's offer to act on itself for June's `phone` tool, until the connection closes: WebSocket only. */
 	| { op: "hands"; requestId: string }
-	/** A device's answer to an `act`: what it saw or did, or why it could not. */
-	| { op: "acted"; requestId: string; ok: boolean; text?: string };
+	/** A device's answer to an `act`: what it saw or did, or why it could not, and for `capture` the picture it took. */
+	| { op: "acted"; requestId: string; ok: boolean; text?: string; image?: { data: string; mimeType: string } };
 
 export type DeviceInfo = { name: string; createdAt: string; connections: number };
 

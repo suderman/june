@@ -4,13 +4,14 @@
 /** What June showed: a saved copy in the inbox, its type, and for a snippet its language. */
 export type Shown = { name: string; mimeType: string; size: number; path: string; language?: string };
 
-const LINE = /^\[shown (\{.*\})\]$/;
+// Within a line: a result's blocks are read joined, so a picture after it may follow on the same line.
+const LINE = /\[shown (\{.*\})\]/;
 
 /** The files a show result names, from its text; anything else in it is ignored. */
 export function shownFiles(text: string): Shown[] {
 	const out: Shown[] = [];
 	for (const line of text.split("\n")) {
-		const match = LINE.exec(line.trim());
+		const match = LINE.exec(line);
 		if (!match) continue;
 		try {
 			const s = JSON.parse(match[1]!) as Partial<Shown>;

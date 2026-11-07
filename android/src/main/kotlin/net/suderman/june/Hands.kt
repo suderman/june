@@ -96,7 +96,7 @@ class Hands : AccessibilityService() {
                             webSocket.send(JSONObject().put("op", "hands").put("requestId", "hands-${UUID.randomUUID()}").toString())
                             Log.i(TAG, "hands: offered to ${message.optString("device")}")
                         }
-                        "act" -> act(message) { ok, said -> webSocket.send(JSONObject().put("op", "acted").put("requestId", message.optString("requestId")).put("ok", ok).put("text", said).toString()) }
+                        "act" -> act(message) { ok, said, image -> webSocket.send(JSONObject().put("op", "acted").put("requestId", message.optString("requestId")).put("ok", ok).put("text", said).also { if (image != null) it.put("image", image) }.toString()) }
                         "view" -> view(message)
                         "error" -> Log.w(TAG, "hands: ${message.optString("message")}")
                     }
@@ -126,9 +126,9 @@ class Hands : AccessibilityService() {
 
     // The actions. Each answers once: what it saw or did, and the app now in front, so June can check before her next.
 
-    private fun act(message: JSONObject, answer: (Boolean, String) -> Unit) {
+    private fun act(message: JSONObject, answer: (Boolean, String, JSONObject?) -> Unit) {
         val action = message.optString("action")
-        if (System.currentTimeMillis() < stoppedUntil) return answer(false, "Jon stopped you from the phone; wait until he asks again")
+        if (System.currentTimeMillis() < stoppedUntil) return answer(false, "Jon stopped you from the phone; wait until he asks again", null)
         // June's own sheet covers the apps and the power menu; it closes before she acts, so Jon sees what she does.
         if (action != "screen" && sheetShowing()) {
             sendBroadcast(Intent(DISMISS).setPackage(packageName))
@@ -139,31 +139,58 @@ class Hands : AccessibilityService() {
         if (!attached) socket?.send(JSONObject().put("op", "attach").put("requestId", "hands-${UUID.randomUUID()}").toString())?.also { attached = it }
         Log.i(TAG, "hands: $action ${if (action == "type") "" else message.optString("target").ifBlank { message.optString("text").take(40) }}")
         showBar()
-        val done = { ok: Boolean, said: String ->
+        val done = { ok: Boolean, said: String, image: JSONObject? ->
             main.removeCallbacks(hideBar)
             main.postDelayed(hideBar, 1_500)
             // Never the screen's words in the log: they may be private.
             Log.i(TAG, "hands: ${if (ok) "done" else "failed"}: ${if (action == "screen") "${said.length} characters" else said.take(120)}")
-            answer(ok, said)
+            answer(ok, said, image)
         }
         val settled = { ok: Boolean, said: String ->
-            if (!ok) done(false, said) else main.postDelayed({ done(true, "$said; in front: ${front()}") }, 700)
+            if (!ok) done(false, said, null) else main.postDelayed({ done(true, "$said; in front: ${front()}", null) }, 700)
             Unit
         }
         try {
             when (action) {
-                "screen" -> done(true, screen())
+                "screen" -> done(true, screen(), null)
+                "capture" -> capture(done)
                 "tap" -> tap(message, settled)
                 "type" -> type(message, settled)
                 "scroll" -> scroll(message, settled)
                 "open" -> open(message.optString("text"), settled)
                 "global" -> global(message.optString("text"), settled)
-                else -> done(false, "unknown action $action")
+                else -> done(false, "unknown action $action", null)
             }
         } catch (e: Exception) {
             Log.w(TAG, "hands: $action failed: $e")
-            done(false, "$action failed: ${e.message ?: e}")
+            done(false, "$action failed: ${e.message ?: e}", null)
         }
+    }
+
+    /**
+     * The screen as it is, as a JPEG at most 1568 px on its long side, the size the model sees: once her sheet has gone
+     * (act closes it) and with the driving bar hidden, so the picture is the app and not her.
+     */
+    private fun capture(done: (Boolean, String, JSONObject?) -> Unit) {
+        main.removeCallbacks(hideBar)
+        hideBar.run()
+        main.postDelayed({
+            takeScreenshot(android.view.Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(result: ScreenshotResult) {
+                    val shot = android.graphics.Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                    result.hardwareBuffer.close()
+                    if (shot == null) return done(false, "the screen could not be read", null)
+                    val scale = minOf(1f, 1568f / maxOf(shot.width, shot.height))
+                    val sized = if (scale < 1f) android.graphics.Bitmap.createScaledBitmap(shot, (shot.width * scale).toInt(), (shot.height * scale).toInt(), true) else shot
+                    val out = java.io.ByteArrayOutputStream()
+                    sized.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+                    val image = JSONObject().put("mimeType", "image/jpeg").put("data", android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP))
+                    done(true, "captured the screen; in front: ${front()}", image)
+                }
+
+                override fun onFailure(errorCode: Int) = done(false, "the screen could not be captured (error $errorCode)", null)
+            })
+        }, 300)
     }
 
     /** Whether June's own sheet is on screen: a window of this app that is not the driving bar. */
