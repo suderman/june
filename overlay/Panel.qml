@@ -11,6 +11,8 @@ import "scenery.mjs" as Scenery
 
 Item {
   id: panel
+  // A picture the user's message brought, to show over the strip: { url, name }.
+  signal preview(var item)
 
   required property string json
   property bool newest: false
@@ -400,7 +402,7 @@ Item {
             anchors.fill: parent
             enabled: polaroid.url !== ""
             cursorShape: Qt.PointingHandCursor
-            onClicked: Qt.openUrlExternally(polaroid.url)
+            onClicked: panel.preview({ url: polaroid.url, name: noteBox.pictures > 1 ? "picture " + (polaroid.index + 1) + " of " + noteBox.pictures : "picture" })
           }
           // The paperclip over the frame's top edge, on the front picture only.
           Shape {
@@ -420,7 +422,8 @@ Item {
           required property var modelData
           required property int index
           file: modelData
-          onChosen: url => Qt.openUrlExternally(url)
+          // A picture opens in the preview; any other file with the desktop's app for its type.
+          onChosen: url => (modelData.type ?? "").startsWith("image/") ? panel.preview({ url: url, name: modelData.name }) : Qt.openUrlExternally(url)
           url: panel.attached && noteBox.item ? panel.attached + noteBox.item.id + "/file/" + modelData.n : ""
           x: 14
           y: noteBox.cardsTop + index * 32

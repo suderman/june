@@ -27,6 +27,7 @@ FloatingWindow {
   Shortcut { sequence: "Ctrl+P"; onActivated: strip.page(-1) }
   Shortcut { sequence: "Ctrl+W"; onActivated: win.shell.windowShown = false }
   Shortcut { sequence: "Ctrl+R"; onActivated: win.shell.refresh() }
+  Shortcut { sequence: "Escape"; enabled: preview.open; onActivated: preview.close() }
 
   // The column the strip lives in: the window's width, up to the overlay's, centred on a wide window.
   Item {
@@ -140,6 +141,7 @@ FloatingWindow {
       taking: win.shell.taking
       onTake: action => win.shell.take(action)
       attached: win.shell.attached
+      onPreview: item => preview.show(item)
     }
 
     Toast {
@@ -158,6 +160,13 @@ FloatingWindow {
       send: (text, followUp) => win.shell.submit(text, followUp)
       stop: () => win.shell.stopJune()
     }
+  }
+
+  // A picture a note brought, over the whole window until closed.
+  Preview {
+    id: preview
+    anchors.fill: parent
+    onExternal: url => { preview.close(); Qt.openUrlExternally(url); }
   }
 
   /** An hour as a clock reading, 16.5 as 16:30. */

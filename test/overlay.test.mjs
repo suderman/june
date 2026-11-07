@@ -72,11 +72,11 @@ test("panels hold elements: the user's note, June's beats, tools gathered, one t
 test("a note carries the files it brought as cards, in words only for the console, closed once the inbox drops them", () => {
 	const at = Date.UTC(2026, 10, 1, 12);
 	const day = 24 * 60 * 60_000;
-	const item = { ...user("u1", "read these"), at, imageCount: 1, files: [{ name: "Report.pdf", size: 3_400_000, path: "/inbox/a" }, { name: "notes.txt", size: 812, path: "/inbox/b" }] };
+	const item = { ...user("u1", "read these"), at, imageCount: 1, files: [{ name: "Report.pdf", size: 3_400_000, path: "/inbox/a", mimeType: "application/pdf" }, { name: "notes.txt", size: 812, path: "/inbox/b" }] };
 	const [fresh] = panels([item], at + day);
 	const note = fresh.elements[0];
 	assert.equal(note.text, "read these", "the comic draws pictures and files, so the note says only the words");
-	assert.deepEqual(note.files, [{ n: 0, name: "Report.pdf", size: "3.2 MB", expired: false }, { n: 1, name: "notes.txt", size: "812 B", expired: false }]);
+	assert.deepEqual(note.files, [{ n: 0, name: "Report.pdf", size: "3.2 MB", type: "application/pdf", expired: false }, { n: 1, name: "notes.txt", size: "812 B", type: "", expired: false }]);
 	assert.equal(noteText(item), "read these\n+ picture\n+ Report.pdf\n+ notes.txt", "the console still says them");
 	assert.deepEqual(panels([item], at + 31 * day)[0].elements[0].files.map((f) => f.expired), [true, true], "past the inbox's 30 days");
 	assert.deepEqual(panels([user("u2", "hi")])[0].elements[0].files, []);

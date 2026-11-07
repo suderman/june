@@ -17,6 +17,8 @@ ListView {
   property bool linked: true
   property var taking: ({})
   signal take(var action)
+  // A picture a panel asks to show over the strip: { url, name }.
+  signal preview(var item)
   // The console look instead of the comic strip.
   property bool consoleLook: Theme.consoleLook
 
@@ -119,6 +121,7 @@ ListView {
         scenery: list.scenery
         sky: list.sky
         attached: list.attached
+        onPreview: item => list.preview(item)
       }
     }
     Component {

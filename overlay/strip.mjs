@@ -237,11 +237,12 @@ const INBOX_MS = 30 * 24 * 60 * 60_000;
 
 /**
  * The files a note brought, each with its place in the message (`n`, for the `file/n` path under the hello's
- * `attached`), its name, its size in words, and whether the inbox has dropped it, which a card shows greyed and closed.
+ * `attached`), its name, its size in words, its type ("" when unknown), and whether the inbox has dropped it, which a
+ * card shows greyed and closed.
  */
 export function noteFiles(item, now = Date.now()) {
 	const gone = typeof item.at === "number" && now - item.at > INBOX_MS;
-	return (item.files ?? []).map((file, n) => ({ n, name: String(file.name ?? ""), size: fileSize(file.size), expired: gone }));
+	return (item.files ?? []).map((file, n) => ({ n, name: String(file.name ?? ""), size: fileSize(file.size), type: String(file.mimeType ?? ""), expired: gone }));
 }
 
 /** A file's size for a card: 812 B, 14 KB, 3.2 MB. */

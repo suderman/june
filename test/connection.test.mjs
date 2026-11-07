@@ -255,3 +255,65 @@ Item {
 	assert.equal(code, 0, output);
 	assert.match(output, /Totals: 5 passed, 0 failed/);
 });
+
+test("Qt's preview shows a picture over the strip, hands it to the desktop on request, and closes from its button or the ground", { skip: !qml, timeout: 15000 }, async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "june-preview-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	await mkdir(join(dir, "ui"));
+	await copyFile(new URL("../overlay/Preview.qml", import.meta.url), join(dir, "ui", "Preview.qml"));
+	const theme = (await readFile(new URL("../overlay/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
+	await writeFile(join(dir, "ui", "Theme.qml"), theme);
+	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\nPreview 1.0 Preview.qml\n");
+	// A 2x2 PNG, served as a file url as the daemon serves an https one.
+	await writeFile(join(dir, "picture.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGP4z8DAAMIM/4EAAB/uBfsL2WiLAAAAAElFTkSuQmCC", "base64"));
+	await writeFile(join(dir, "tst_preview.qml"), `
+import QtQuick
+import QtTest
+import "ui"
+Item {
+  id: root
+  width: 600; height: 400
+  property string external: ""
+  Preview { id: preview; anchors.fill: parent; onExternal: url => root.external = url }
+  TestCase {
+    name: "Preview"
+    when: windowShown
+    function init() { root.external = ""; preview.show({ url: Qt.resolvedUrl("picture.png"), name: "picture 1 of 2" }); }
+    function test_shows_and_opens_externally() {
+      verify(preview.visible);
+      const picture = findChild(preview, "picture");
+      tryCompare(picture, "status", Image.Ready);
+      compare(findChild(preview, "status").visible, false);
+      const external = findChild(preview, "external");
+      mouseClick(external, external.width / 2, external.height / 2);
+      compare(root.external, String(Qt.resolvedUrl("picture.png")));
+    }
+    function test_close_button() {
+      const close = findChild(preview, "close");
+      mouseClick(close, close.width / 2, close.height / 2);
+      compare(preview.open, false); compare(preview.visible, false);
+    }
+    function test_ground_closes_but_picture_does_not() {
+      tryCompare(findChild(preview, "picture"), "status", Image.Ready);
+      mouseClick(preview, preview.width / 2, preview.height / 2);
+      compare(preview.open, true, "a click on the picture keeps it open");
+      mouseClick(preview, 8, preview.height - 8);
+      compare(preview.open, false, "a click on the ground closes it");
+    }
+    function test_missing_picture_says_so() {
+      preview.show({ url: Qt.resolvedUrl("gone.png"), name: "gone" });
+      tryCompare(findChild(preview, "picture"), "status", Image.Error);
+      verify(findChild(preview, "status").text.indexOf("could not be loaded") >= 0);
+    }
+  }
+}
+`);
+	const child = spawn(join(dirname(qml), "qmltestrunner"), ["-input", dir], { env: { ...process.env, QT_QPA_PLATFORM: "offscreen", QT_QUICK_BACKEND: "software", QT_STYLE_OVERRIDE: "", QT_QPA_PLATFORMTHEME: "", QT_FORCE_STDERR_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+	let output = "";
+	for (const stream of [child.stdout, child.stderr]) stream.on("data", (data) => { output += data; });
+	const closed = once(child, "close");
+	t.after(() => child.kill());
+	const [code] = await closed;
+	assert.equal(code, 0, output);
+	assert.match(output, /Totals: 6 passed, 0 failed/);
+});

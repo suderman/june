@@ -514,8 +514,9 @@ ShellRoot {
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     onVisibleChanged: if (visible) composer.focusInput()
 
-    // Esc hides from anywhere in the overlay, even after a click put the focus in a balloon to select its words.
-    Shortcut { sequence: "Escape"; onActivated: root.hide() }
+    // Esc closes a preview first, then hides from anywhere in the overlay, even after a click put the focus in a balloon
+    // to select its words.
+    Shortcut { sequence: "Escape"; onActivated: preview.open ? preview.close() : root.hide() }
     // Page through the strip: Ctrl+N toward newer panels, Ctrl+P toward earlier ones.
     Shortcut { sequence: "Ctrl+N"; onActivated: list.page(1) }
     Shortcut { sequence: "Ctrl+P"; onActivated: list.page(-1) }
@@ -594,6 +595,7 @@ ShellRoot {
             taking: root.taking
             onTake: action => root.take(action)
             attached: root.attached
+            onPreview: item => preview.show(item)
           }
 
           Toast {
@@ -634,6 +636,13 @@ ShellRoot {
         send: (text, followUp) => root.submit(text, followUp)
         stop: () => root.stopJune()
       }
+    }
+
+    // A picture a note brought, over everything in the overlay until closed.
+    Preview {
+      id: preview
+      anchors.fill: parent
+      onExternal: url => { preview.close(); Qt.openUrlExternally(url); }
     }
   }
 }
