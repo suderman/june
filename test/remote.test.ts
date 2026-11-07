@@ -343,6 +343,12 @@ test("a paired device opens a file a message brought while the inbox keeps it, s
 	assert.equal(await pdf.text(), "%PDF-1.4 tiny");
 	const html = await fetch(`${base}${sent.id}/file/1`);
 	assert.equal(html.headers.get("content-security-policy"), "sandbox", "a sent page cannot run script on this origin");
+	// Code for a preview, as coloured tokens: the page by its extension, and nothing for a file that is not text.
+	const lit = (await (await fetch(`${base}${sent.id}/file/1/highlight`)).json()) as { language: string; lines: [string, string][][] };
+	assert.equal(lit.language, "html");
+	assert.equal(lit.lines[0]!.map(([, text]) => text).join(""), page, "every character is kept, only split by what it is");
+	assert.ok(lit.lines[0]!.some(([scope]) => scope === "tag"));
+	assert.equal((await fetch(`${base}${sent.id}/file/0/highlight`)).status, 404, "a PDF is not code");
 	assert.equal(html.headers.get("x-content-type-options"), "nosniff");
 	assert.equal(await html.text(), page);
 	assert.equal((await fetch(`${base}${sent.id}/file/3`)).status, 404, "only the files it brought");

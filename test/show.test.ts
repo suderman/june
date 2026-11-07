@@ -4,7 +4,9 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+// @ts-expect-error The overlay's modules are plain JavaScript, shared with QML.
 import { panels } from "../overlay/strip.mjs";
+// @ts-expect-error As above.
 import { lines as consoleLines } from "../overlay/console.mjs";
 import { inboxFile } from "../src/daemon.ts";
 import { shownFiles } from "../src/shown.ts";
@@ -49,10 +51,10 @@ test("June shows a picture and a snippet beside her reply: the view draws them o
 	assert.equal(await inboxFile(daemon.root, inbox, shown[0]!.id, 1), undefined, "only what was shown");
 
 	const panel = panels(view.items())[0];
-	const card = panel.elements.filter((e) => e.kind === "shown");
+	const card = panel.elements.filter((e: any) => e.kind === "shown");
 	assert.equal(card.length, 1, "shows in a row make one card");
-	assert.deepEqual(card[0].files.map((f) => [f.id, f.n, f.name, f.preview]).sort(), shown.map((i) => [i.id, 0, i.kind === "shown" ? i.files[0]!.name : "", i.kind === "shown" && i.files[0]!.mimeType === "image/png" ? "picture" : "text"]).sort(), "each file keeps the show it came from, for its address");
-	assert.ok(consoleLines(panel).some((l) => l.text === "shown: snippet.nix (29 B)"), "the console says it in words");
+	assert.deepEqual(card[0].files.map((f: any) => [f.id, f.n, f.name, f.preview]).sort(), shown.map((i) => [i.id, 0, i.kind === "shown" ? i.files[0]!.name : "", i.kind === "shown" && i.files[0]!.mimeType === "image/png" ? "picture" : "text"]).sort(), "each file keeps the show it came from, for its address");
+	assert.ok(consoleLines(panel).some((l: any) => l.text === "shown: snippet.nix (29 B)"), "the console says it in words");
 });
 
 test("a text file without a known extension shows as text, and a path that is not there fails plainly", async (t) => {

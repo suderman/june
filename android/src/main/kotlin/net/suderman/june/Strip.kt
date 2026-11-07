@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
@@ -160,7 +161,7 @@ class Avatar(private val context: Context) {
      * count or page. Asked again each time, since a file can expire; null when it cannot be had.
      */
     suspend fun bytes(path: String): ByteArray? = withContext(Dispatchers.IO) {
-        if (!Regex("^\\d+/(\\d|file/\\d(/pages|/page/\\d{1,5})?)$").matches(path)) return@withContext null
+        if (!Regex("^\\d+/(\\d|file/\\d(/pages|/page/\\d{1,5}|/highlight)?)$").matches(path)) return@withContext null
         val address = url(path) ?: return@withContext null
         runCatching { client.newCall(okhttp3.Request.Builder().url(address).build()).execute().use { r -> if (r.isSuccessful) r.body.bytes() else null } }.getOrNull()
     }
@@ -276,6 +277,10 @@ private fun Preview(set: List<Previewing>, start: Int, avatar: Avatar, close: ()
         value = listOfNotNull(bytes?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() })
     }
     val picture = got?.firstOrNull()
+    // Code's highlighted lines from the daemon (src/highlight.ts), drawn on the tool card's dark ground; null for words.
+    val lit by produceState<JSONArray?>(null, shown) {
+        value = if (shown.kind != "text") null else avatar.bytes("${shown.path}/highlight")?.let { runCatching { JSONObject(String(it)).optJSONArray("lines") }.getOrNull() }
+    }
     val words by produceState<String?>(null, shown) {
         value = if (shown.kind != "text") null else avatar.bytes(shown.path)?.let { val t = String(it, Charsets.UTF_8); if (t.length > 200_000) t.take(200_000) + "\n…" else t } ?: ""
     }
@@ -303,6 +308,9 @@ private fun Preview(set: List<Previewing>, start: Int, avatar: Avatar, close: ()
             val still = Modifier.clickable(inner, null) {}
             when {
                 picture != null -> androidx.compose.foundation.Image(picture, shown.name, still.then(if (shown.kind == "pdf") Modifier.background(Color.White) else Modifier), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+                shown.kind == "text" && lit != null -> Box(still.fillMaxSize().background(Look.cardFill, RoundedCornerShape(6.dp)).padding(14.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()).horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
+                    androidx.compose.foundation.text.selection.SelectionContainer { Text(codeText(lit!!), style = noteBody.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp, color = Look.cardInk), softWrap = false) }
+                }
                 shown.kind == "text" && !words.isNullOrEmpty() -> Box(still.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(6.dp)).padding(14.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
                     androidx.compose.foundation.text.selection.SelectionContainer { Text(words!!, style = noteBody.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 13.sp, color = Look.ink)) }
                 }
@@ -341,6 +349,31 @@ private fun Preview(set: List<Previewing>, start: Int, avatar: Avatar, close: ()
             style = noteBody.copy(color = Color.White, fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
             modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter).padding(bottom = 16.dp, start = 24.dp, end = 24.dp),
         )
+    }
+}
+
+/** Colours for code's tokens on the dark ground, as the desktop's Preview.qml paints them. */
+private val CODE = mapOf(
+    "comment" to 0xFF7D8697, "quote" to 0xFF7D8697, "doctag" to 0xFF7D8697,
+    "keyword" to 0xFFC792EA, "selector-tag" to 0xFFC792EA, "operator" to 0xFF89DDFF, "punctuation" to 0xFF89DDFF,
+    "string" to 0xFFC3E88D, "regexp" to 0xFFC3E88D, "addition" to 0xFFC3E88D, "char" to 0xFFC3E88D,
+    "number" to 0xFFF78C6C, "literal" to 0xFFF78C6C, "symbol" to 0xFFF78C6C, "bullet" to 0xFFF78C6C,
+    "title" to 0xFF82AAFF, "section" to 0xFF82AAFF, "name" to 0xFF82AAFF, "function" to 0xFF82AAFF,
+    "type" to 0xFFFFCB6B, "built_in" to 0xFFFFCB6B, "class" to 0xFFFFCB6B, "params" to 0xFFFFCB6B,
+    "attr" to 0xFF89DDFF, "attribute" to 0xFF89DDFF, "variable" to 0xFF89DDFF, "property" to 0xFF89DDFF, "template-variable" to 0xFF89DDFF, "tag" to 0xFF89DDFF,
+    "meta" to 0xFF9AA3B8, "deletion" to 0xFFFF8F80,
+).mapValues { Color(it.value) }
+
+private fun codeText(lines: JSONArray): AnnotatedString = buildAnnotatedString {
+    for (i in 0 until lines.length()) {
+        if (i > 0) append('\n')
+        val tokens = lines.getJSONArray(i)
+        for (j in 0 until tokens.length()) {
+            val token = tokens.getJSONArray(j)
+            val colour = CODE[token.optString(0)]
+            if (colour == null) append(token.optString(1))
+            else withStyle(SpanStyle(color = colour, fontStyle = if (token.optString(0) == "comment") androidx.compose.ui.text.font.FontStyle.Italic else null)) { append(token.optString(1)) }
+        }
     }
 }
 

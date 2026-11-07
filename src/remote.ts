@@ -3,11 +3,12 @@
 // clients" in docs/architecture.org). The same port serves the user's avatar set, and the pictures their messages brought, over HTTP under paths the hello gives
 // each device, so a client loads June's art from the daemon rather than a synced folder.
 import { randomBytes } from "node:crypto";
-import { createReadStream, realpathSync, statSync } from "node:fs";
+import { createReadStream, readFileSync, realpathSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, sep } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import type { Devices } from "./devices.ts";
+import { highlight } from "./highlight.ts";
 import { pdfPage, pdfPages } from "./inbox.ts";
 import type { Reply } from "./protocol.ts";
 import type { Logger } from "./runtime.ts";
@@ -30,7 +31,7 @@ export type RemoteOptions = {
 	/** The `n`th picture the user's message `id` brought, for a client to show with it; none without the callback. */
 	readonly attachment?: (id: string, n: number) => Promise<{ data: string; mimeType: string } | undefined>;
 	/** The `n`th file the user's message `id` brought, while June's inbox keeps it; none without the callback. */
-	readonly file?: (id: string, n: number) => Promise<{ path: string; name: string; mimeType: string } | undefined>;
+	readonly file?: (id: string, n: number) => Promise<{ path: string; name: string; mimeType: string; language?: string } | undefined>;
 	/** Tests shorten these. */
 	readonly helloMs?: number;
 	readonly pingMs?: number;
@@ -114,13 +115,23 @@ export async function startRemote(options: RemoteOptions): Promise<Remote> {
 			);
 			return;
 		}
-		// A file, or for a PDF its page count (`/pages`) or one page as a picture (`/page/<p>`, from 1), for a preview.
-		const document = /^\/attached\/([\w-]+)\/(\d{1,12})\/file\/(\d)(?:\/(pages|page\/(\d{1,5})))?$/.exec(url);
+		// A file, or for a PDF its page count (`/pages`) or one page as a picture (`/page/<p>`, from 1), or for code its
+		// highlighted lines (`/highlight`, src/highlight.ts), for a preview.
+		const document = /^\/attached\/([\w-]+)\/(\d{1,12})\/file\/(\d)(?:\/(pages|page\/(\d{1,5})|highlight))?$/.exec(url);
 		if (document && (request.method === "GET" || request.method === "HEAD") && options.file !== undefined) {
 			const owner = keys.get(document[1]);
 			if (owner === undefined || !listed(owner)) return notFound();
 			void options.file(document[2]!, Number(document[3])).then(
 				async (found) => {
+					if (document[4] === "highlight") {
+						// The preview's limit on words: a larger file shows its start, and so is coloured only there.
+						const text = found && /^text\/|^application\/json$/.test(found.mimeType) ? readFileSync(found.path).subarray(0, 200_000).toString("utf8") : undefined;
+						const lit = text === undefined ? undefined : highlight(text, found!.language ?? extname(found!.name));
+						if (lit === undefined) return notFound();
+						const body = JSON.stringify(lit);
+						response.writeHead(200, { "content-type": "application/json", "cache-control": "private, no-cache" });
+						return response.end(request.method === "HEAD" ? undefined : body);
+					}
 					if (document[4] !== undefined) {
 						if (found === undefined || found.mimeType !== "application/pdf") return notFound();
 						if (document[4] === "pages") {

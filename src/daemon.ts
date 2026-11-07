@@ -694,14 +694,14 @@ export async function attachView(
  * The `n`th file the user's message `id` brought, while the inbox still keeps it: its real path, which must lie inside
  * the inbox, its name, and its type. Undefined once it has expired, or for a private look's input.
  */
-export async function inboxFile(root: Conversation, inbox: string, id: string, n: number): Promise<{ path: string; name: string; mimeType: string } | undefined> {
+export async function inboxFile(root: Conversation, inbox: string, id: string, n: number): Promise<{ path: string; name: string; mimeType: string; language?: string } | undefined> {
 	const entry = await root.commit((tx) => tx.entry(Number(id) as never), BG);
 	// Or one June showed: her show tool's result names what it saved in the inbox.
 	const result = entry?.kind === "pi.tool-result" ? (entry.model?.[0] as { toolName?: unknown; isError?: unknown; content?: unknown } | undefined) : undefined;
 	const shown = result?.toolName === "show" && !result.isError ? shownFiles(textOf(result.content)) : undefined;
 	if (shown === undefined && (entry?.kind !== "june.input" || PRIVATE.has(sourceName(String((entry.data as { source?: unknown } | undefined)?.source ?? ""))))) return undefined;
 	const files = shown ?? (entry?.data as { files?: unknown } | undefined)?.files;
-	const file = Array.isArray(files) ? (files[n] as { name?: unknown; path?: unknown; mimeType?: unknown } | undefined) : undefined;
+	const file = Array.isArray(files) ? (files[n] as { name?: unknown; path?: unknown; mimeType?: unknown; language?: unknown } | undefined) : undefined;
 	if (typeof file?.path !== "string" || typeof file.name !== "string") return undefined;
 	let path: string;
 	try {
@@ -710,7 +710,7 @@ export async function inboxFile(root: Conversation, inbox: string, id: string, n
 	} catch {
 		return undefined;
 	}
-	return { path, name: file.name, mimeType: typeof file.mimeType === "string" ? file.mimeType : typeOf(file.name) };
+	return { path, name: file.name, mimeType: typeof file.mimeType === "string" ? file.mimeType : typeOf(file.name), ...(typeof file.language === "string" ? { language: file.language } : {}) };
 }
 
 export async function attachment(root: Conversation, id: string, n: number): Promise<{ data: string; mimeType: string } | undefined> {

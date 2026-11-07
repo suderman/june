@@ -22,6 +22,8 @@ Item {
   // A text file's words, or "" while loading; `failed` when it could not be read.
   property string words: ""
   property bool failed: false
+  // Code's highlighted lines from the daemon (src/highlight.ts), [[scope, text], ...] each, or null for plain words.
+  property var lit: null
   // Asks the window to open the url with the desktop's app.
   signal external(string url)
   visible: open
@@ -34,11 +36,29 @@ Item {
     look(item);
   }
   function look(item) {
-    what = item; pages = -1; page = 1; words = ""; failed = false;
+    what = item; pages = -1; page = 1; words = ""; failed = false; lit = null;
+    if (kind === "text") ask(item.url + "/highlight", text => { lit = JSON.parse(text).lines ?? null; }, () => {});
     if (kind === "pdf") ask(item.url + "/pages", text => { pages = Number(JSON.parse(text).pages) || 0; }, () => { pages = 0; });
     else if (kind === "text") ask(item.url, text => { words = text.length > maxChars ? text.slice(0, maxChars) + "\n…" : text; }, () => { failed = true; });
   }
   function close() { what = null; set = []; at = 0; }
+
+  // Code on the tool card's dark ground, coloured by what each token is; the words as they are when no colour applies.
+  readonly property var palette: ({
+    comment: "#7d8697", quote: "#7d8697", doctag: "#7d8697",
+    keyword: "#c792ea", "selector-tag": "#c792ea", operator: "#89ddff", punctuation: "#89ddff",
+    string: "#c3e88d", regexp: "#c3e88d", addition: "#c3e88d", char: "#c3e88d", subst: "#e4e8f2",
+    number: "#f78c6c", literal: "#f78c6c", symbol: "#f78c6c", bullet: "#f78c6c",
+    title: "#82aaff", section: "#82aaff", name: "#82aaff", function: "#82aaff",
+    type: "#ffcb6b", built_in: "#ffcb6b", class: "#ffcb6b", params: "#ffcb6b",
+    attr: "#89ddff", attribute: "#89ddff", variable: "#89ddff", property: "#89ddff", "template-variable": "#89ddff", tag: "#89ddff",
+    meta: "#9aa3b8", deletion: "#ff8f80"
+  })
+  function codeHtml(lines) {
+    const escape = t => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const line = tokens => tokens.map(([scope, text]) => palette[scope] ? "<span style=\"color:" + palette[scope] + (scope === "comment" ? "; font-style:italic" : "") + "\">" + escape(text) + "</span>" : escape(text)).join("");
+    return "<pre style=\"font-family:monospace\">" + lines.map(line).join("\n") + "</pre>";
+  }
   // The next or previous of what the message brought, wrapping round.
   function step(by) { if (!stepping) return; at = (at + by + set.length) % set.length; look(set[at]); }
   // The arrow keys: a PDF's pages first, then on to the next or previous thing the message brought.
@@ -98,7 +118,7 @@ Item {
       anchors.centerIn: parent
       width: Math.min(parent.width, 820); height: parent.height
       visible: preview.kind === "text" && preview.words !== ""
-      color: "#fbf8f1"; radius: 6
+      color: preview.lit ? Theme.cardFill : "#fbf8f1"; radius: 6
       MouseArea { anchors.fill: parent }
       Flickable {
         anchors.fill: parent; anchors.margins: 18
@@ -111,9 +131,9 @@ Item {
           width: parent.width
           readOnly: true; selectByMouse: true
           wrapMode: TextEdit.Wrap
-          textFormat: TextEdit.PlainText
-          text: preview.words
-          font.family: "monospace"; font.pixelSize: 14; color: Theme.ink
+          textFormat: preview.lit ? TextEdit.RichText : TextEdit.PlainText
+          text: preview.lit ? preview.codeHtml(preview.lit) : preview.words
+          font.family: "monospace"; font.pixelSize: 14; color: preview.lit ? Theme.cardInk : Theme.ink
           selectionColor: Theme.highlight
         }
       }
