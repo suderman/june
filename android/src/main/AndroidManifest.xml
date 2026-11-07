@@ -12,8 +12,9 @@
 
     <!-- June opens apps by name through her hands: the launcher's apps must be visible to her. -->
     <queries>
-        <!-- Termux, which opens herdr links (Links.kt). -->
+        <!-- Termux, which opens herdr links, and Emacs, which opens file links (Links.kt). -->
         <package android:name="com.termux" />
+        <package android:name="org.gnu.emacs" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />

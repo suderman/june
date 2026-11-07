@@ -149,12 +149,24 @@ const HERDR = /^herdr:[a-z0-9-]+\/[a-z]+:[0-9a-f-]{36}(?:@[A-Za-z0-9:]+)?$/;
 
 /**
  * What a link in June's words opens, or null for one a tap leaves alone: "web" for an http or https page, "herdr" for an
- * agent's session. Links come from the model, so only these, and only ones that open or focus, never run anything.
+ * agent's session, "file" for a file Emacs opens (file:PATH or file:PATH::SEARCH, PATH from ~ or /). Links come from
+ * the model, so only these, and only ones that open or focus, never run anything.
  */
 export function linkKind(url) {
 	if (/^https?:\/\/[^\s<>"]+$/.test(url)) return "web";
 	if (HERDR.test(url)) return "herdr";
+	if (/^file:(~\/|\/)[^\n<>"]*$/.test(url)) return "file";
 	return null;
+}
+
+/**
+ * The emacsclient call that opens a file link in Emacs at its search: suderman/june-open in Jon's Emacs configuration
+ * takes the path and search as strings, so they are quoted as Lisp strings (JSON's escapes are Lisp's) and never read
+ * as code. -r reuses the frame Jon has, or makes one.
+ */
+export function emacsCall(url) {
+	const [path, ...rest] = url.slice("file:".length).split("::");
+	return ["emacsclient", "-r", "-n", "--eval", `(suderman/june-open ${JSON.stringify(path)} ${JSON.stringify(rest.join("::"))})`];
 }
 
 const unescape = (text) => text.replace(/&quot;/g, '"').replace(/&gt;/g, ">").replace(/&lt;/g, "<").replace(/&amp;/g, "&");

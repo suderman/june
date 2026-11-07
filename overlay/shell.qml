@@ -61,15 +61,15 @@ ShellRoot {
     stdout: StdioCollector { onStreamFinished: root.systemScheme = Desktop.parseScheme(text) }
   }
   Process { id: quietSetter; onExited: modesReader.running = true }
-  // Opens a herdr link: herdr-link focuses the agent's pane on its host, or resumes the session there, in kitty.
+  // Opens a herdr link (herdr-link focuses or resumes the agent's pane in kitty) or a file link (emacsclient).
   Process { id: linker }
   // Opens a link from June's words as Strip.linkKind allows: a web page in the browser, an agent's session through
-  // herdr-link. Returns whether it opened, so the overlay can step aside for what did.
+  // herdr-link, a file in Emacs through emacsclient. Returns whether it opened, so the overlay can step aside for what did.
   function openLink(url) {
     const kind = Strip.linkKind(url);
     if (kind === "web") return Qt.openUrlExternally(url);
-    if (kind !== "herdr" || linker.running) return false;
-    linker.command = ["herdr-link", "jump", url];
+    if (kind === null || linker.running) return false;
+    linker.command = kind === "herdr" ? ["herdr-link", "jump", url] : Strip.emacsCall(url);
     linker.running = true;
     return true;
   }

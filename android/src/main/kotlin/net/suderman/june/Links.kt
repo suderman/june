@@ -8,19 +8,25 @@ import android.widget.Toast
 import androidx.compose.ui.platform.UriHandler
 
 /**
- * The links in June's words that a tap opens: web pages in the browser, and `herdr:` links to an agent's session, which
- * Termux attaches to over ssh as Jon's Emacs does (suderman/org-herdr-follow-android). Links come from the model, so
- * nothing here runs what a link says: a herdr link must have the form herdr-link stamps, and only opens or focuses.
+ * The links in June's words that a tap opens: web pages in the browser, `herdr:` links to an agent's session, which
+ * Termux attaches to over ssh as Jon's Emacs does (suderman/org-herdr-follow-android), and `file:` links to files in
+ * ~/org, which Emacs opens at their heading or line through org-protocol (suderman/june-open in Jon's Emacs
+ * configuration; ~/org there is this phone's copy of the tree). Links come from the model, so nothing here runs what
+ * a link says: a herdr link must have the form herdr-link stamps, and every kind only opens or focuses.
  */
 object Links {
     /** HOST/AGENT:SESSION[@PANE], as org/bin/herdr-link stamps it and src/tools/org.ts reads it. */
     private val HERDR = Regex("""^herdr:([a-z0-9-]+)/([a-z]+):([0-9a-f-]{36})(?:@([A-Za-z0-9:]+))?$""")
 
-    fun opens(url: String): Boolean = url.startsWith("https://") || url.startsWith("http://") || HERDR.matches(url)
+    /** file:PATH or file:PATH::SEARCH, PATH from ~ or /, as overlay/strip.mjs linkKind reads it. */
+    private val FILE = Regex("""^file:(~/|/)[^\n<>"]*$""")
+
+    fun opens(url: String): Boolean = url.startsWith("https://") || url.startsWith("http://") || HERDR.matches(url) || FILE.matches(url)
 
     /** Open `url`; returns why it could not be, or null. */
     fun open(context: Context, url: String): String? = when {
         HERDR.matches(url) -> herdr(context, url.removePrefix("herdr:"))
+        FILE.matches(url) -> emacs(context, url.removePrefix("file:"))
         url.startsWith("https://") || url.startsWith("http://") -> runCatching {
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }.exceptionOrNull()?.let { "No app on this phone opens it" }
@@ -44,6 +50,20 @@ object Links {
             { if (it == null) "Termux is not installed" else null },
             { Log.w(TAG, "herdr link: $it"); "Termux refused it: ${it.message}" },
         )
+    }
+
+    /**
+     * A file in ~/org, opened in Emacs at its search through org-protocol://june-open. Files elsewhere live on the
+     * desktop, which opens them; Emacs here has only the Org tree.
+     */
+    private fun emacs(context: Context, link: String): String? {
+        val path = link.substringBefore("::")
+        val search = if ("::" in link) link.substringAfter("::") else ""
+        if (!path.startsWith("~/org/")) return "That file is on the desktop; open it there"
+        val uri = Uri.parse("org-protocol://june-open?path=${Uri.encode(path)}&search=${Uri.encode(search)}")
+        return runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, uri).setPackage("org.gnu.emacs").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.exceptionOrNull()?.let { "Emacs is not installed" }
     }
 
     /** What a tap on a link in June's words does, in place of Compose's default; `leave` hides the assistant sheet. */
