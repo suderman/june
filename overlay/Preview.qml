@@ -56,6 +56,15 @@ Item {
     anchors.fill: parent
     anchors.topMargin: 64; anchors.bottomMargin: 56; anchors.leftMargin: 24; anchors.rightMargin: 24
 
+    // A page of a document sits on white, as paper, for a PDF without a background of its own. A sibling drawn before the
+    // picture, so it stays behind it; a child of the picture would cover it.
+    Rectangle {
+      anchors.centerIn: picture
+      width: picture.paintedWidth; height: picture.paintedHeight
+      color: "#ffffff"
+      visible: preview.kind === "pdf" && picture.status === Image.Ready
+    }
+
     Image {
       id: picture
       objectName: "picture"
@@ -70,8 +79,6 @@ Item {
         anchors.centerIn: parent
         width: picture.paintedWidth; height: picture.paintedHeight
         MouseArea { anchors.fill: parent }
-        // A page of a document sits on white, as paper, for a PDF without a background of its own.
-        Rectangle { anchors.fill: parent; z: -1; color: "#ffffff"; visible: preview.kind === "pdf" }
       }
     }
 

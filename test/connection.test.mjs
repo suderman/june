@@ -5,6 +5,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { once } from "node:events";
+import zlib from "node:zlib";
 import { test } from "node:test";
 import { WebSocketServer } from "ws";
 
@@ -256,6 +257,19 @@ Item {
 	assert.match(output, /Totals: 5 passed, 0 failed/);
 });
 
+/** A 4x4 PNG of one colour. */
+function solidPng(r, g, b) {
+	const chunk = (type, data) => {
+		const length = Buffer.alloc(4); length.writeUInt32BE(data.length);
+		const body = Buffer.concat([Buffer.from(type), data]);
+		const crc = Buffer.alloc(4); crc.writeUInt32BE(zlib.crc32(body));
+		return Buffer.concat([length, body, crc]);
+	};
+	const header = Buffer.alloc(13); header.writeUInt32BE(4, 0); header.writeUInt32BE(4, 4); header[8] = 8; header[9] = 2;
+	const row = Buffer.from([0, ...Array(4).fill([r, g, b]).flat()]);
+	return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", header), chunk("IDAT", zlib.deflateSync(Buffer.concat([row, row, row, row]))), chunk("IEND", Buffer.alloc(0))]);
+}
+
 test("Qt's preview shows a picture over the strip, hands it to the desktop on request, and closes from its button or the ground", { skip: !qml, timeout: 15000 }, async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "june-preview-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
@@ -270,7 +284,8 @@ test("Qt's preview shows a picture over the strip, hands it to the desktop on re
 	// The daemon's routes for a PDF, as files: its page count, then its pages as pictures; and one it cannot read.
 	await mkdir(join(dir, "doc", "page"), { recursive: true });
 	await writeFile(join(dir, "doc", "pages"), JSON.stringify({ pages: 2 }));
-	for (const n of [1, 2]) await writeFile(join(dir, "doc", "page", String(n)), png);
+	// Pages of a solid red, so the test can see that the page itself is drawn, not only the paper behind it.
+	for (const n of [1, 2]) await writeFile(join(dir, "doc", "page", String(n)), solidPng(255, 0, 0));
 	await mkdir(join(dir, "broken"));
 	await writeFile(join(dir, "broken", "pages"), JSON.stringify({ pages: 0 }));
 	await writeFile(join(dir, "notes.txt"), "buy milk\nwalk Lucy\n");
@@ -319,6 +334,9 @@ Item {
       const picture = findChild(preview, "picture");
       verify(String(picture.source).endsWith("doc/page/1"));
       tryCompare(picture, "status", Image.Ready);
+      waitForRendering(preview);
+      const shot = grabImage(preview);
+      verify(Qt.colorEqual(shot.pixel(preview.width / 2, preview.height / 2), "#ff0000"), "the page shows, not only the paper: " + shot.pixel(preview.width / 2, preview.height / 2));
       verify(preview.paging);
       const next = findChild(preview, "next");
       mouseClick(next, next.width / 2, next.height / 2);
