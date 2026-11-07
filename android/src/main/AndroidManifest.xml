@@ -31,14 +31,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Hands a file Jon sent June, downloaded into the cache, to the app the phone opens its type with. -->
-        <provider android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.files"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
-        </provider>
-
         <!-- Pairing over ADB; only the shell and the system hold this permission, so no app can re-pair June. -->
         <activity android:name=".PairActivity" android:exported="true"
             android:permission="android.permission.WRITE_SECURE_SETTINGS"

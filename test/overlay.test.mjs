@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { activity, applyView, beats, caption, emptyView, fileSize, markup, panels, readInput, status, noteText } from "../overlay/strip.mjs";
+import { activity, applyView, beats, caption, emptyView, fileSize, markup, panels, previewKind, readInput, status, noteText } from "../overlay/strip.mjs";
 import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, panelLayout, jagged, liveActivity, metrics, picked, plan, readPoses, selectionMoment, standIn, takeMenu, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
@@ -76,7 +76,8 @@ test("a note carries the files it brought as cards, in words only for the consol
 	const [fresh] = panels([item], at + day);
 	const note = fresh.elements[0];
 	assert.equal(note.text, "read these", "the comic draws pictures and files, so the note says only the words");
-	assert.deepEqual(note.files, [{ n: 0, name: "Report.pdf", size: "3.2 MB", type: "application/pdf", expired: false }, { n: 1, name: "notes.txt", size: "812 B", type: "", expired: false }]);
+	assert.deepEqual(note.files, [{ n: 0, name: "Report.pdf", size: "3.2 MB", type: "application/pdf", preview: "pdf", expired: false }, { n: 1, name: "notes.txt", size: "812 B", type: "", preview: "file", expired: false }]);
+	assert.deepEqual(["image/jpeg", "application/pdf", "text/markdown", "application/json", "application/zip", ""].map(previewKind), ["picture", "pdf", "text", "text", "file", "file"]);
 	assert.equal(noteText(item), "read these\n+ picture\n+ Report.pdf\n+ notes.txt", "the console still says them");
 	assert.deepEqual(panels([item], at + 31 * day)[0].elements[0].files.map((f) => f.expired), [true, true], "past the inbox's 30 days");
 	assert.deepEqual(panels([user("u2", "hi")])[0].elements[0].files, []);

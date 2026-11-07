@@ -36,7 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import kotlinx.coroutines.launch
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
@@ -144,25 +144,21 @@ class Avatar(private val context: Context) {
         runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }.getOrNull()
     }?.also { cache.put("attached:$path", it) }
 
+    /** The https address of `path` under the hello's `attached` on the paired host, as a browser opens it; null before the hello. */
+    fun url(path: String): String? {
+        val origin = Pairing.load(context)?.url?.let { Regex("^(wss?)://([^/]+)").find(it) } ?: return null
+        val base = attachedPath ?: return null
+        return (if (origin.groupValues[1] == "wss") "https://" else "http://") + origin.groupValues[2] + base + path
+    }
+
     /**
-     * A file the user's message brought, at `path` (`<message id>/file/<n>`) under the hello's `attached`, downloaded
-     * into the cache for another app to open, with the type the daemon gives it. Null when it cannot be had, such as
-     * once June's inbox has dropped it. Fetched again each time, since the file can expire.
+     * What `path` under the hello's `attached` holds, for a preview: a file the user's message brought, or a PDF's page
+     * count or page. Asked again each time, since a file can expire; null when it cannot be had.
      */
-    suspend fun document(path: String, name: String): Pair<java.io.File, String>? = withContext(Dispatchers.IO) {
-        val m = Regex("^(\\d+)/file/(\\d)$").find(path) ?: return@withContext null
-        val origin = Pairing.load(context)?.url?.let { Regex("^(wss?)://([^/]+)").find(it) } ?: return@withContext null
-        val base = attachedPath ?: return@withContext null
-        val safe = name.replace(Regex("[/\\\\\\u0000-\\u001f]"), "_").trimStart('.').ifBlank { "file" }
-        runCatching {
-            client.newCall(okhttp3.Request.Builder().url((if (origin.groupValues[1] == "wss") "https://" else "http://") + origin.groupValues[2] + base + path).build()).execute().use { r ->
-                if (!r.isSuccessful) return@use null
-                val kept = java.io.File(context.cacheDir, "files/${m.groupValues[1]}/${m.groupValues[2]}/$safe")
-                kept.parentFile?.mkdirs()
-                r.body.byteStream().use { input -> kept.outputStream().use { input.copyTo(it) } }
-                kept to (r.header("content-type")?.substringBefore(";")?.trim()?.ifEmpty { null } ?: "application/octet-stream")
-            }
-        }.getOrNull()
+    suspend fun bytes(path: String): ByteArray? = withContext(Dispatchers.IO) {
+        if (!Regex("^\\d+/(\\d|file/\\d(/pages|/page/\\d{1,5})?)$").matches(path)) return@withContext null
+        val address = url(path) ?: return@withContext null
+        runCatching { client.newCall(okhttp3.Request.Builder().url(address).build()).execute().use { r -> if (r.isSuccessful) r.body.bytes() else null } }.getOrNull()
     }
 
     /** Where the daemon serves the pictures messages brought (the hello's `attached`), set by the strip. */
@@ -209,8 +205,8 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
         val count = shown.length()
         // Built from the bottom, newest first, as the overlay's list is: the newest panel stays in view as it settles
         // its height, with no scrolling after it.
-        // A picture the user sent, full size over the strip while open; a tap closes it.
-        var viewing by remember { mutableStateOf<String?>(null) }
+        // A picture or file the user sent, previewed over the strip while open.
+        var viewing by remember { mutableStateOf<Previewing?>(null) }
         avatar.attachedPath = link.attachedPath
         androidx.compose.runtime.CompositionLocalProvider(LocalPictures provides Pictures(avatar, link.attachedPath) { viewing = it }) {
             LazyColumn(Modifier.fillMaxSize(), state = followNewest(if (count > 0) shown.getJSONObject(count - 1).getString("id") else null), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -219,66 +215,119 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
                 }
             }
         }
-        viewing?.let { path ->
-            val picture by produceState<ImageBitmap?>(null, path) { value = avatar.attachment(path) }
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)).clickable { viewing = null }, contentAlignment = androidx.compose.ui.Alignment.Center) {
-                picture?.let { androidx.compose.foundation.Image(it, "the picture sent", Modifier.fillMaxSize().padding(12.dp), contentScale = androidx.compose.ui.layout.ContentScale.Fit) }
-            }
-        }
+        viewing?.let { shown -> Preview(shown, avatar) { viewing = null } }
     }
 }
 
 /** The pictures the user's messages brought: where they are served (the hello's `attached`), and how to open one. */
-class Pictures(val avatar: Avatar, val path: String?, val open: (String) -> Unit)
+class Pictures(val avatar: Avatar, val path: String?, val open: (Previewing) -> Unit)
+
+/** What a preview shows: `kind` as Strip.previewKind names it ("picture", "pdf", "text", "file"), at `path` under the hello's `attached`. */
+data class Previewing(val kind: String, val path: String, val name: String)
 
 val LocalPictures = androidx.compose.runtime.staticCompositionLocalOf<Pictures?> { null }
 
 /** What to do once another app is opening over June: the assistant sheet hides, so the app is not behind it. */
 val LocalLeave = androidx.compose.runtime.staticCompositionLocalOf<() -> Unit> { {} }
 
-/** Hand a downloaded file to the app the phone uses for its type, or say there is none. */
-fun openFile(context: Context, file: java.io.File, type: String): Boolean {
-    val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-    val view = android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, type)
-        .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-    return try {
-        context.startActivity(view)
-        true
-    } catch (_: android.content.ActivityNotFoundException) {
-        android.widget.Toast.makeText(context, "No app on this phone opens ${file.name}", android.widget.Toast.LENGTH_LONG).show()
-        false
+/**
+ * A picture or file the user's message brought, over the strip on a dark ground: a picture fitted to the screen, a PDF a
+ * page at a time as the daemon renders them (‹ ›), a text file's words, or only the name of any other file. "open in
+ * browser" hands its address to the phone's browser; ✕ or a tap on the ground closes it. The overlay's Preview.qml
+ * does the same on the desktop.
+ */
+@Composable
+private fun Preview(shown: Previewing, avatar: Avatar, close: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val leave = LocalLeave.current
+    var page by remember(shown) { mutableStateOf(1) }
+    // A PDF's page count: -1 while asking, 0 when it cannot be read.
+    val pages by produceState(-1, shown) {
+        value = if (shown.kind != "pdf") 0 else avatar.bytes("${shown.path}/pages")?.let { runCatching { JSONObject(String(it)).optInt("pages") }.getOrNull() } ?: 0
     }
+    // The picture shown, a picture file or a PDF's current page: a list while loading, then one bitmap, or none when it
+    // cannot be had.
+    val got by produceState<List<ImageBitmap>?>(null, shown, page, pages) {
+        value = null
+        val bytes = when {
+            shown.kind == "picture" -> avatar.bytes(shown.path)
+            shown.kind == "pdf" && pages > 0 -> avatar.bytes("${shown.path}/page/$page")
+            else -> return@produceState
+        }
+        value = listOfNotNull(bytes?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() })
+    }
+    val picture = got?.firstOrNull()
+    val words by produceState<String?>(null, shown) {
+        value = if (shown.kind != "text") null else avatar.bytes(shown.path)?.let { val t = String(it, Charsets.UTF_8); if (t.length > 200_000) t.take(200_000) + "\n…" else t } ?: ""
+    }
+    val ground = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)).clickable(ground, null, onClick = close)) {
+        Box(Modifier.fillMaxSize().padding(top = 64.dp, bottom = 48.dp, start = 12.dp, end = 12.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+            val inner = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+            val still = Modifier.clickable(inner, null) {}
+            when {
+                picture != null -> androidx.compose.foundation.Image(picture, shown.name, still.then(if (shown.kind == "pdf") Modifier.background(Color.White) else Modifier), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+                shown.kind == "text" && !words.isNullOrEmpty() -> Box(still.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(6.dp)).padding(14.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                    androidx.compose.foundation.text.selection.SelectionContainer { Text(words!!, style = noteBody.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 13.sp, color = Look.ink)) }
+                }
+                else -> Text(
+                    when {
+                        shown.kind == "file" -> "No preview for this kind of file."
+                        shown.kind == "pdf" && pages == 0 -> "Its pages could not be read here. Open it in the browser instead."
+                        shown.kind == "text" && words == "" -> "It could not be loaded. June's inbox may have dropped it."
+                        (shown.kind == "picture" || shown.kind == "pdf" && pages > 0) && got != null -> "It could not be loaded. June's inbox may have dropped it."
+                        else -> "loading…"
+                    },
+                    color = Color.White, style = noteBody.copy(color = Color.White),
+                )
+            }
+        }
+        Row(Modifier.align(androidx.compose.ui.Alignment.TopEnd).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (shown.kind == "pdf" && pages > 1) {
+                PreviewButton("‹", enabled = page > 1) { page-- }
+                PreviewButton("›", enabled = page < pages) { page++ }
+            }
+            PreviewButton("open in browser") {
+                val address = avatar.url(shown.path)
+                val opened = address != null && runCatching {
+                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(address)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                }.isSuccess
+                if (opened) { close(); leave() } else android.widget.Toast.makeText(context, "No browser on this phone opens it", android.widget.Toast.LENGTH_LONG).show()
+            }
+            PreviewButton("✕", onClick = close)
+        }
+        Text(
+            shown.name + if (shown.kind == "pdf" && pages > 0) "  ·  page $page of $pages" else "",
+            style = noteBody.copy(color = Color.White, fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
+            modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter).padding(bottom = 16.dp, start = 24.dp, end = 24.dp),
+        )
+    }
+}
+
+@Composable
+private fun PreviewButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier.alpha(if (enabled) 1f else 0.4f).background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(50)).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
+    ) { Text(label, style = noteBody.copy(fontSize = 14.sp, color = Look.ink, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)) }
 }
 
 /**
  * The files a note brought, as document cards below its words, a row each: a page with its corner folded, the name and
- * size. A tap downloads one and opens it with the phone's app for its type, while June's inbox keeps it; an expired
- * card is greyed and closed. `top` is where the first card sits, as the note's measure left room for them.
+ * size. A tap opens its preview while June's inbox keeps it; an expired card is greyed and closed. `top` is where the
+ * first card sits, as the note's measure left room for them.
  */
 @Composable
 private fun FileCards(item: JSONObject, files: org.json.JSONArray, noteW: Float, top: Float) {
     val pictures = LocalPictures.current
-    val leave = LocalLeave.current
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
     for (i in 0 until files.length()) {
         val file = files.getJSONObject(i)
         val expired = file.optBoolean("expired")
         val name = file.optString("name")
         val path = pictures?.path?.let { "${item.optString("id")}/file/${file.optInt("n")}" }
-        var fetching by remember(path) { mutableStateOf(false) }
         Box(
             Modifier.offset(14.dp, (top + i * 32).dp).size((noteW - 28).dp, 26.dp).rotate(if (file.optInt("n") % 2 == 0) -1f else 1f)
                 .alpha(if (expired) 0.5f else 1f)
-                .clickable(enabled = !expired && path != null && !fetching) {
-                    fetching = true
-                    scope.launch {
-                        val got = path?.let { pictures.avatar.document(it, name) }
-                        fetching = false
-                        if (got == null) android.widget.Toast.makeText(context, "Could not get $name; June's inbox may have dropped it", android.widget.Toast.LENGTH_LONG).show()
-                        else if (openFile(context, got.first, got.second)) leave()
-                    }
-                },
+                .clickable(enabled = !expired && path != null) { path?.let { pictures.open(Previewing(file.optString("preview", "file"), it, name)) } },
         ) {
             Box(Modifier.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(3.dp)).border(1.5.dp, Look.ink, RoundedCornerShape(3.dp)))
             Canvas(Modifier.offset(8.dp, 4.dp).size(14.dp, 18.dp)) {
@@ -292,7 +341,7 @@ private fun FileCards(item: JSONObject, files: org.json.JSONArray, noteW: Float,
             Row(Modifier.fillMaxSize().padding(start = 28.dp, end = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Text(name, style = noteBody.copy(fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
                 Spacer(Modifier.width(8.dp))
-                Text(if (expired) "expired" else if (fetching) "opening…" else file.optString("size"), style = noteBody.copy(fontSize = 12.sp, color = Look.noteLine), maxLines = 1)
+                Text(if (expired) "expired" else file.optString("size"), style = noteBody.copy(fontSize = 12.sp, color = Look.noteLine), maxLines = 1)
             }
         }
     }
@@ -308,7 +357,7 @@ private fun Polaroids(item: JSONObject, count: Int, noteW: Float) {
         Box(
             Modifier.offset((noteW - 14 - 62 - (count - 1 - index) * 16).dp, (12 + index * 3).dp).zIndex((count - index).toFloat())
                 .size(62.dp, 74.dp).rotate(listOf(-6f, 5f, -2f)[index])
-                .clickable(enabled = path != null) { path?.let { pictures.open(it) } },
+                .clickable(enabled = path != null) { path?.let { pictures.open(Previewing("picture", it, if (count > 1) "picture ${index + 1} of $count" else "picture")) } },
         ) {
             Box(Modifier.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(2.dp)).border(1.5.dp, Look.ink, RoundedCornerShape(2.dp)))
             Box(Modifier.offset(5.dp, 5.dp).size(52.dp).background(Color(0xFFCFD6E3)).clipToBounds()) {

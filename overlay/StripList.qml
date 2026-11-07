@@ -17,7 +17,7 @@ ListView {
   property bool linked: true
   property var taking: ({})
   signal take(var action)
-  // A picture a panel asks to show over the strip: { url, name }.
+  // A picture or file a panel asks to show over the strip: { kind, url, name }.
   signal preview(var item)
   // The console look instead of the comic strip.
   property bool consoleLook: Theme.consoleLook

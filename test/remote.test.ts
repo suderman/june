@@ -309,6 +309,17 @@ test("a paired device loads the picture a message brought, and only a user's own
 	assert.equal((await fetch(`http://127.0.0.1:${port}/attached/not-a-key/${sent.id}/0`)).status, 404, "an unknown key");
 });
 
+/** A two-page PDF of blank 200x100 pages, with a correct cross-reference table. */
+function twoPages(): Buffer {
+	const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] >>"];
+	let out = "%PDF-1.4\n";
+	const offsets: number[] = [];
+	objects.forEach((o, i) => { offsets.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+	const xref = out.length;
+	out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+	return Buffer.from(out);
+}
+
 test("a paired device opens a file a message brought while the inbox keeps it, sandboxed, under its own name", async (t) => {
 	const { tmp, port } = await remoteDaemon(t, [fauxAssistantMessage("got the notes")]);
 	const token = ((await device(tmp.paths.socket, "add", "gem")) as Extract<Reply, { type: "devices" }>).token!;
@@ -317,11 +328,11 @@ test("a paired device opens a file a message brought while the inbox keeps it, s
 	c.send({ op: "hello", requestId: "h", token, protocol: 1 });
 	const base = `http://127.0.0.1:${port}${((await c.reply("h")) as Extract<Reply, { type: "hello" }>).attached}`;
 	const page = "<script>alert(1)</script>";
-	c.send({ op: "submit", requestId: "s", text: "notes", files: [{ name: "My notes.pdf", mimeType: "application/pdf", data: Buffer.from("%PDF-1.4 tiny").toString("base64") }, { name: "page.html", mimeType: "text/html", data: Buffer.from(page).toString("base64") }], source: "apk", wait: true });
+	c.send({ op: "submit", requestId: "s", text: "notes", files: [{ name: "My notes.pdf", mimeType: "application/pdf", data: Buffer.from("%PDF-1.4 tiny").toString("base64") }, { name: "page.html", mimeType: "text/html", data: Buffer.from(page).toString("base64") }, { name: "two pages.pdf", mimeType: "application/pdf", data: twoPages().toString("base64") }], source: "apk", wait: true });
 	await c.reply("s", "settled");
 	c.send({ op: "attach", requestId: "a" });
 	const view = (await c.reply("a", "view")) as Extract<Reply, { type: "view"; reset: true }>;
-	const sent = view.items.find((i) => i.kind === "user" && i.files?.length === 2) as Extract<ViewItem, { kind: "user" }>;
+	const sent = view.items.find((i) => i.kind === "user" && i.files?.length === 3) as Extract<ViewItem, { kind: "user" }>;
 	assert.ok(sent, "the message is in the view with its files");
 	assert.equal(sent.files![0]!.mimeType, "application/pdf", "the type is kept with the message");
 
@@ -334,7 +345,17 @@ test("a paired device opens a file a message brought while the inbox keeps it, s
 	assert.equal(html.headers.get("content-security-policy"), "sandbox", "a sent page cannot run script on this origin");
 	assert.equal(html.headers.get("x-content-type-options"), "nosniff");
 	assert.equal(await html.text(), page);
-	assert.equal((await fetch(`${base}${sent.id}/file/2`)).status, 404, "only the files it brought");
+	assert.equal((await fetch(`${base}${sent.id}/file/3`)).status, 404, "only the files it brought");
+
+	// A PDF's pages, for a preview: its count, then each page as a picture.
+	assert.deepEqual(await (await fetch(`${base}${sent.id}/file/2/pages`)).json(), { pages: 2 });
+	const second = await fetch(`${base}${sent.id}/file/2/page/2`);
+	assert.equal(second.status, 200);
+	assert.equal(second.headers.get("content-type"), "image/png");
+	assert.deepEqual([...Buffer.from(await second.arrayBuffer()).subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], "a PNG");
+	assert.equal((await fetch(`${base}${sent.id}/file/2/page/3`)).status, 404, "past its last page");
+	assert.deepEqual(await (await fetch(`${base}${sent.id}/file/0/pages`)).json(), { pages: 0 }, "a broken PDF has no pages to show");
+	assert.equal((await fetch(`${base}${sent.id}/file/1/pages`)).status, 404, "only a PDF has pages");
 	assert.equal((await fetch(`http://127.0.0.1:${port}/attached/not-a-key/${sent.id}/file/0`)).status, 404, "an unknown key");
 
 	rmSync(sent.files![0]!.path);

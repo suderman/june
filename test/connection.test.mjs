@@ -265,7 +265,15 @@ test("Qt's preview shows a picture over the strip, hands it to the desktop on re
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
 	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\nPreview 1.0 Preview.qml\n");
 	// A 2x2 PNG, served as a file url as the daemon serves an https one.
-	await writeFile(join(dir, "picture.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGP4z8DAAMIM/4EAAB/uBfsL2WiLAAAAAElFTkSuQmCC", "base64"));
+	const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGP4z8DAAMIM/4EAAB/uBfsL2WiLAAAAAElFTkSuQmCC", "base64");
+	await writeFile(join(dir, "picture.png"), png);
+	// The daemon's routes for a PDF, as files: its page count, then its pages as pictures; and one it cannot read.
+	await mkdir(join(dir, "doc", "page"), { recursive: true });
+	await writeFile(join(dir, "doc", "pages"), JSON.stringify({ pages: 2 }));
+	for (const n of [1, 2]) await writeFile(join(dir, "doc", "page", String(n)), png);
+	await mkdir(join(dir, "broken"));
+	await writeFile(join(dir, "broken", "pages"), JSON.stringify({ pages: 0 }));
+	await writeFile(join(dir, "notes.txt"), "buy milk\nwalk Lucy\n");
 	await writeFile(join(dir, "tst_preview.qml"), `
 import QtQuick
 import QtTest
@@ -305,15 +313,51 @@ Item {
       tryCompare(findChild(preview, "picture"), "status", Image.Error);
       verify(findChild(preview, "status").text.indexOf("could not be loaded") >= 0);
     }
+    function test_pdf_pages() {
+      preview.show({ kind: "pdf", url: Qt.resolvedUrl("doc"), name: "two pages.pdf" });
+      tryCompare(preview, "pages", 2);
+      const picture = findChild(preview, "picture");
+      verify(String(picture.source).endsWith("doc/page/1"));
+      tryCompare(picture, "status", Image.Ready);
+      verify(preview.paging);
+      const next = findChild(preview, "next");
+      mouseClick(next, next.width / 2, next.height / 2);
+      compare(preview.page, 2);
+      verify(String(picture.source).endsWith("doc/page/2"));
+      preview.next(); compare(preview.page, 2, "not past the last page");
+      preview.previous(); compare(preview.page, 1);
+      const external = findChild(preview, "external");
+      mouseClick(external, external.width / 2, external.height / 2);
+      compare(root.external, String(Qt.resolvedUrl("doc")), "the browser gets the file, not a page");
+    }
+    function test_pdf_without_pages() {
+      preview.show({ kind: "pdf", url: Qt.resolvedUrl("broken"), name: "broken.pdf" });
+      tryCompare(preview, "pages", 0);
+      verify(findChild(preview, "status").text.indexOf("could not be read") >= 0);
+      compare(preview.paging, false);
+    }
+    function test_text() {
+      preview.show({ kind: "text", url: Qt.resolvedUrl("notes.txt"), name: "notes.txt" });
+      tryCompare(preview, "words", "buy milk\nwalk Lucy\n");
+      verify(findChild(preview, "words").visible);
+      compare(findChild(preview, "status").visible, false);
+    }
+    function test_other_file() {
+      preview.show({ kind: "file", url: Qt.resolvedUrl("archive.zip"), name: "archive.zip" });
+      compare(findChild(preview, "status").visible, false);
+      const external = findChild(preview, "external");
+      mouseClick(external, external.width / 2, external.height / 2);
+      compare(root.external, String(Qt.resolvedUrl("archive.zip")));
+    }
   }
 }
 `);
-	const child = spawn(join(dirname(qml), "qmltestrunner"), ["-input", dir], { env: { ...process.env, QT_QPA_PLATFORM: "offscreen", QT_QUICK_BACKEND: "software", QT_STYLE_OVERRIDE: "", QT_QPA_PLATFORMTHEME: "", QT_FORCE_STDERR_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+	const child = spawn(join(dirname(qml), "qmltestrunner"), ["-input", dir], { env: { ...process.env, QT_QPA_PLATFORM: "offscreen", QT_QUICK_BACKEND: "software", QT_STYLE_OVERRIDE: "", QT_QPA_PLATFORMTHEME: "", QT_FORCE_STDERR_LOGGING: "1", QML_XHR_ALLOW_FILE_READ: "1" }, stdio: ["ignore", "pipe", "pipe"] });
 	let output = "";
 	for (const stream of [child.stdout, child.stderr]) stream.on("data", (data) => { output += data; });
 	const closed = once(child, "close");
 	t.after(() => child.kill());
 	const [code] = await closed;
 	assert.equal(code, 0, output);
-	assert.match(output, /Totals: 6 passed, 0 failed/);
+	assert.match(output, /Totals: 10 passed, 0 failed/);
 });

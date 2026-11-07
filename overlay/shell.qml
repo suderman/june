@@ -517,6 +517,9 @@ ShellRoot {
     // Esc closes a preview first, then hides from anywhere in the overlay, even after a click put the focus in a balloon
     // to select its words.
     Shortcut { sequence: "Escape"; onActivated: preview.open ? preview.close() : root.hide() }
+    // A PDF in the preview turns its pages with the arrow keys.
+    Shortcut { sequences: ["Right", "PgDown"]; enabled: preview.paging; onActivated: preview.next() }
+    Shortcut { sequences: ["Left", "PgUp"]; enabled: preview.paging; onActivated: preview.previous() }
     // Page through the strip: Ctrl+N toward newer panels, Ctrl+P toward earlier ones.
     Shortcut { sequence: "Ctrl+N"; onActivated: list.page(1) }
     Shortcut { sequence: "Ctrl+P"; onActivated: list.page(-1) }
@@ -638,7 +641,7 @@ ShellRoot {
       }
     }
 
-    // A picture a note brought, over everything in the overlay until closed.
+    // A picture or file a note brought, over everything in the overlay until closed.
     Preview {
       id: preview
       anchors.fill: parent

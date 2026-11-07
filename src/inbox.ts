@@ -1,5 +1,6 @@
 // June's inbox: files a client sends arrive inline, and the daemon alone writes them under its state directory, where they
 // expire after 30 days. See "Inbox" in docs/architecture.org.
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, open, readdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
@@ -123,6 +124,25 @@ const TYPES: Record<string, string> = {
 };
 export function typeOf(name: string): string {
 	return TYPES[extname(name).toLowerCase()] ?? "application/octet-stream";
+}
+
+/** How many pages a PDF has, from poppler's pdfinfo; 0 when it cannot tell, as without poppler or for a broken file. */
+export function pdfPages(path: string): Promise<number> {
+	return new Promise((resolve) => {
+		execFile("pdfinfo", [path], { timeout: 20_000 }, (error, stdout) => {
+			const pages = error ? undefined : /^Pages:\s+(\d+)$/m.exec(stdout)?.[1];
+			resolve(pages === undefined ? 0 : Number(pages));
+		});
+	});
+}
+
+/** One page of a PDF, from 1, as a PNG at most 1600 px on its longer side, from poppler's pdftoppm; undefined past its last page or without poppler. */
+export function pdfPage(path: string, page: number): Promise<Buffer | undefined> {
+	return new Promise((resolve) => {
+		execFile("pdftoppm", ["-png", "-f", String(page), "-l", String(page), "-singlefile", "-scale-to", "1600", path], { encoding: "buffer", timeout: 30_000, maxBuffer: 32 * 1024 * 1024 }, (error, stdout) => {
+			resolve(error || stdout.length === 0 ? undefined : stdout);
+		});
+	});
 }
 
 export function formatSize(bytes: number): string {

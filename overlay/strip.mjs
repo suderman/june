@@ -242,7 +242,21 @@ const INBOX_MS = 30 * 24 * 60 * 60_000;
  */
 export function noteFiles(item, now = Date.now()) {
 	const gone = typeof item.at === "number" && now - item.at > INBOX_MS;
-	return (item.files ?? []).map((file, n) => ({ n, name: String(file.name ?? ""), size: fileSize(file.size), type: String(file.mimeType ?? ""), expired: gone }));
+	return (item.files ?? []).map((file, n) => {
+		const type = String(file.mimeType ?? "");
+		return { n, name: String(file.name ?? ""), size: fileSize(file.size), type, preview: previewKind(type), expired: gone };
+	});
+}
+
+/**
+ * How a preview shows a file of `type`: "picture" fitted to the window, "pdf" a page at a time as the daemon renders
+ * them, "text" as its words, or "file", only its name, for anything else. Every preview also offers the browser.
+ */
+export function previewKind(type) {
+	if (type.startsWith("image/")) return "picture";
+	if (type === "application/pdf") return "pdf";
+	if (type.startsWith("text/") || type === "application/json") return "text";
+	return "file";
 }
 
 /** A file's size for a card: 812 B, 14 KB, 3.2 MB. */

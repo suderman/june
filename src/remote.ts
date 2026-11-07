@@ -8,6 +8,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, sep } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import type { Devices } from "./devices.ts";
+import { pdfPage, pdfPages } from "./inbox.ts";
 import type { Reply } from "./protocol.ts";
 import type { Logger } from "./runtime.ts";
 
@@ -113,12 +114,25 @@ export async function startRemote(options: RemoteOptions): Promise<Remote> {
 			);
 			return;
 		}
-		const document = /^\/attached\/([\w-]+)\/(\d{1,12})\/file\/(\d)$/.exec(url);
+		// A file, or for a PDF its page count (`/pages`) or one page as a picture (`/page/<p>`, from 1), for a preview.
+		const document = /^\/attached\/([\w-]+)\/(\d{1,12})\/file\/(\d)(?:\/(pages|page\/(\d{1,5})))?$/.exec(url);
 		if (document && (request.method === "GET" || request.method === "HEAD") && options.file !== undefined) {
 			const owner = keys.get(document[1]);
 			if (owner === undefined || !listed(owner)) return notFound();
 			void options.file(document[2]!, Number(document[3])).then(
-				(found) => {
+				async (found) => {
+					if (document[4] !== undefined) {
+						if (found === undefined || found.mimeType !== "application/pdf") return notFound();
+						if (document[4] === "pages") {
+							const body = JSON.stringify({ pages: await pdfPages(found.path) });
+							response.writeHead(200, { "content-type": "application/json", "cache-control": "private, no-cache" });
+							return response.end(request.method === "HEAD" ? undefined : body);
+						}
+						const page = await pdfPage(found.path, Number(document[5]));
+						if (page === undefined) return notFound();
+						response.writeHead(200, { "content-type": "image/png", "content-length": String(page.length), "cache-control": "private, no-cache" });
+						return response.end(request.method === "HEAD" ? undefined : page);
+					}
 					let size: number;
 					try {
 						size = found === undefined ? -1 : statSync(found.path).size;
