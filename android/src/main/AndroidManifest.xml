@@ -61,11 +61,14 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/files" />
         </provider>
 
-        <!-- Pairing over ADB; only the shell and the system hold this permission, so no app can re-pair June. -->
+        <!-- Pairing over ADB; only the shell and the system hold this permission, so no app can re-pair June. Its own task,
+             so the install app starting it never brings June's conversation to the front. -->
         <activity android:name=".PairActivity" android:exported="true"
             android:permission="android.permission.WRITE_SECURE_SETTINGS"
             android:theme="@android:style/Theme.NoDisplay"
-            android:excludeFromRecents="true" />
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:noHistory="true" />
 
         <!-- Declaring this service is what makes the app eligible for Digital assistant app. -->
         <service android:name=".JuneInteractionService"
