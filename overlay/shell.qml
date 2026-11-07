@@ -61,6 +61,18 @@ ShellRoot {
     stdout: StdioCollector { onStreamFinished: root.systemScheme = Desktop.parseScheme(text) }
   }
   Process { id: quietSetter; onExited: modesReader.running = true }
+  // Opens a herdr link: herdr-link focuses the agent's pane on its host, or resumes the session there, in kitty.
+  Process { id: linker }
+  // Opens a link from June's words as Strip.linkKind allows: a web page in the browser, an agent's session through
+  // herdr-link. Returns whether it opened, so the overlay can step aside for what did.
+  function openLink(url) {
+    const kind = Strip.linkKind(url);
+    if (kind === "web") return Qt.openUrlExternally(url);
+    if (kind !== "herdr" || linker.running) return false;
+    linker.command = ["herdr-link", "jump", url];
+    linker.running = true;
+    return true;
+  }
   Timer {
     interval: 3000
     running: true
@@ -599,6 +611,7 @@ ShellRoot {
             onTake: action => root.take(action)
             attached: root.attached
             onPreview: item => preview.show(item)
+            onLink: url => { if (root.openLink(url)) root.hide(); }
           }
 
           Toast {

@@ -112,7 +112,7 @@ test("a failed tool keeps its first line in the caption, and summaries read as n
 
 test("markup escapes everything and turns stressed words, code, and links into spans", () => {
 	const out = markup("update their **résumés**.\nrun `nix flake check`, see [the notes](https://x.y) & <b>this</b>", { stress: "S", code: "C" });
-	assert.equal(out, 'update their <span style="S">résumés</span>.<br>run <span style="C">nix flake check</span>, see the notes &amp; &lt;b&gt;this&lt;/b&gt;');
+	assert.equal(out, 'update their <span style="S">résumés</span>.<br>run <span style="C">nix flake check</span>, see <a href="https://x.y">the notes</a> &amp; &lt;b&gt;this&lt;/b&gt;');
 	assert.equal(markup("an *aside* and _another_, but not snake_case_name or 2*3*4", { stress: "S" }), 'an <span style="S">aside</span> and <span style="S">another</span>, but not snake_case_name or 2*3*4');
 	assert.equal(markup("## Heading\n> quoted"), "Heading<br>quoted");
 });

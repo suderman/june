@@ -11,6 +11,8 @@ Item {
   required property string json
   property bool newest: false
   property string activity: ""
+  // A link in June's words was clicked.
+  signal link(string url)
 
   readonly property var p: JSON.parse(json)
   readonly property var out: Console.lines(p)
@@ -50,6 +52,8 @@ Item {
         color: Theme.ink
         selectionColor: Theme.highlight
         selectedTextColor: Theme.ink
+        onLinkActivated: url => row.link(url)
+        HoverHandler { cursorShape: parent.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor }
       }
     }
     Text {

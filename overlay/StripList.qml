@@ -19,6 +19,8 @@ ListView {
   signal take(var action)
   // A picture or file a panel asks to show over the strip: { kind, url, name }.
   signal preview(var item)
+  // A link in June's words was clicked, in either look.
+  signal link(string url)
   // The console look instead of the comic strip.
   property bool consoleLook: Theme.consoleLook
 
@@ -122,6 +124,7 @@ ListView {
         sky: list.sky
         attached: list.attached
         onPreview: item => list.preview(item)
+        onLink: url => list.link(url)
       }
     }
     Component {
@@ -131,6 +134,7 @@ ListView {
         width: list.width
         newest: cell.index === 0
         activity: list.activity
+        onLink: url => list.link(url)
       }
     }
   }

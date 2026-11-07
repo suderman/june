@@ -144,10 +144,26 @@ export function caption(item) {
 
 const escape = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+/** A herdr: link to an agent's session, HOST/AGENT:SESSION[@PANE], as org/bin/herdr-link stamps it. */
+const HERDR = /^herdr:[a-z0-9-]+\/[a-z]+:[0-9a-f-]{36}(?:@[A-Za-z0-9:]+)?$/;
+
+/**
+ * What a link in June's words opens, or null for one a tap leaves alone: "web" for an http or https page, "herdr" for an
+ * agent's session. Links come from the model, so only these, and only ones that open or focus, never run anything.
+ */
+export function linkKind(url) {
+	if (/^https?:\/\/[^\s<>"]+$/.test(url)) return "web";
+	if (HERDR.test(url)) return "herdr";
+	return null;
+}
+
+const unescape = (text) => text.replace(/&quot;/g, '"').replace(/&gt;/g, ">").replace(/&lt;/g, "<").replace(/&amp;/g, "&");
+
 /**
  * June's Markdown as Qt rich text for a balloon. Stressed words (**bold**, *italic*, _italic_) become `stress` spans in
- * the display face, `code` a monospace span, links their label; headings and quotes lose their markers. Everything else
- * is escaped, so nothing she writes can inject markup.
+ * the display face, `code` a monospace span; links, as [label](url) or Org's [[url][label]], become anchors when
+ * linkKind opens them and their label otherwise; headings and quotes lose their markers. Everything else is escaped,
+ * so nothing she writes can inject markup.
  */
 export function markup(text, style = {}) {
 	const stress = style.stress ?? "font-weight:800";
@@ -155,10 +171,18 @@ export function markup(text, style = {}) {
 	const lines = text.split("\n").map((line) => {
 		let out = escape(line.replace(/^\s{0,3}(#{1,6}|>)\s+/, ""));
 		out = out.replace(/`([^`]+)`/g, (_, inner) => `<span style="${code}">${inner}</span>`);
-		out = out.replace(/\[([^\]]+)\]\([^)\s]+\)/g, "$1");
+		// Links wait as numbered marks while the stress passes run, so nothing reshapes an address.
+		const links = [];
+		const link = (url, label) => {
+			if (linkKind(unescape(url)) === null) return label;
+			links.push(`<a href="${url}">${label}</a>`);
+			return `\u0000${links.length - 1}\u0000`;
+		};
+		out = out.replace(/\[\[([^\]]+)\]\[([^\]]+)\]\]/g, (_, url, label) => link(url, label));
+		out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => link(url, label));
 		out = out.replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, a, b) => `<span style="${stress}">${a ?? b}</span>`);
 		out = out.replace(/(^|[^\w*])\*([^*\s][^*]*)\*(?!\w)|(^|[^\w])_([^_\s][^_]*)_(?!\w)/g, (_, p1, a, p2, b) => `${p1 ?? p2}<span style="${stress}">${a ?? b}</span>`);
-		return out;
+		return out.replace(/\u0000(\d+)\u0000/g, (_, n) => links[Number(n)]);
 	});
 	return lines.join("<br>");
 }

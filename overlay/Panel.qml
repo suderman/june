@@ -13,6 +13,8 @@ Item {
   id: panel
   // A picture or file the user's message brought, to show over the strip: { kind, url, name } (Preview.qml).
   signal preview(var item)
+  // A link in June's words was clicked.
+  signal link(string url)
 
   required property string json
   property bool newest: false
@@ -454,6 +456,7 @@ Item {
       pixelSize: panel.newest ? 19 : 17
       weight: panel.newest ? 3 : Theme.line
       tail: box ? (box.tail ?? null) : null
+      onLink: url => panel.link(url)
       text: element ? Strip.markup(element.text, { stress: "font-weight:800; background-color:" + Theme.highlight, code: "font-family:monospace" }) + (element.streaming ? "<span style='color:" + Theme.accent + "'> ▍</span>" : "") : ""
       transformOrigin: panel.p.side === "left" ? Item.Left : Item.Right
       NumberAnimation on scale { id: pop; running: false; from: 0.9; to: 1; duration: 220; easing.type: Easing.OutBack }

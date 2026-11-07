@@ -14,6 +14,8 @@ Item {
   property int pixelSize: 17
   property real weight: Theme.line
   property var tail: null
+  // A link in the words was clicked: its address, for the window to open (Strip.linkKind says how).
+  signal link(string url)
 
   readonly property real padX: 22
   readonly property real padY: 14
@@ -62,5 +64,7 @@ Item {
     color: Theme.ink
     selectionColor: Theme.highlight
     selectedTextColor: Theme.ink
+    onLinkActivated: url => balloon.link(url)
+    HoverHandler { cursorShape: words.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor }
   }
 }

@@ -144,6 +144,7 @@ FloatingWindow {
       onTake: action => win.shell.take(action)
       attached: win.shell.attached
       onPreview: item => preview.show(item)
+      onLink: url => win.shell.openLink(url)
     }
 
     Toast {
