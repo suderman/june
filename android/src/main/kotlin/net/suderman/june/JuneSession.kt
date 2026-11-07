@@ -62,6 +62,7 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         // Opening June lets her hands act again after Jon stopped them; while she shows, her hands may close her.
         Hands.resume(context)
+        Keep.restore(context)
         if (dismissal == null) dismissal = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: Context, intent: Intent) = hide()
         }.also { context.registerReceiver(it, android.content.IntentFilter(Hands.DISMISS), Context.RECEIVER_NOT_EXPORTED) }

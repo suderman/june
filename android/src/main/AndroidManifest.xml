@@ -3,6 +3,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Keep.kt: June puts back her assistant settings and hands when Android clears them. Granted over ADB by the install
+         app; it cannot be granted any other way. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- June opens apps by name through her hands: the launcher's apps must be visible to her. -->
     <queries>
@@ -35,6 +39,14 @@
         <activity android:name=".AttachActivity" android:exported="false"
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- After an app update or a boot, June checks her assistant settings and hands are still on (Keep.kt). -->
+        <receiver android:name=".KeepReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Lends the camera the one file it writes a photo into, under the cache. -->
         <provider android:name="androidx.core.content.FileProvider"

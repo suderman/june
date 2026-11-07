@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        Keep.restore(this)
         resumed++
     }
 }

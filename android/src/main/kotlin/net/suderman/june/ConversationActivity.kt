@@ -83,6 +83,7 @@ class ConversationActivity : ComponentActivity() {
     // isDeviceLocked, not isKeyguardLocked: the phone wants the user's credentials, whatever shows on screen.
     override fun onStart() {
         super.onStart()
+        Keep.restore(this)
         locked = getSystemService(KeyguardManager::class.java).isDeviceLocked
         if (locked) {
             asked = false

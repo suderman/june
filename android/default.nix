@@ -132,6 +132,8 @@
       fi
       # GrapheneOS makes network access a permission an ADB install leaves off; elsewhere it cannot be changed.
       adb shell pm grant net.suderman.june android.permission.INTERNET 2>/dev/null || true
+      # So June can put back her assistant settings and hands herself when Android clears them (Keep.kt). Survives updates.
+      adb shell pm grant net.suderman.june android.permission.WRITE_SECURE_SETTINGS
       # June's hands (Hands.kt), on by Jon's choice: added to the enabled accessibility services if missing. Settings
       # would refuse it for an app from outside a store (restricted settings); the shell may set it.
       hands="net.suderman.june/net.suderman.june.Hands"
