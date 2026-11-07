@@ -445,7 +445,7 @@ private val burstStyle = TextStyle(fontFamily = Look.lettering, fontWeight = Fon
 private fun kindOf(e: JSONObject) = if (e.optString("kind") == "tools") (if (e.getJSONArray("items").length() > 1) "card" else "chip") else e.optString("kind")
 
 private fun juneText(e: JSONObject): AnnotatedString = buildAnnotatedString {
-    append(markdown(e.optString("text"), code = Look.chipInk))
+    append(orgText(e.optString("text"), code = Look.chipInk))
     if (e.optBoolean("streaming")) withStyle(SpanStyle(color = Look.accent)) { append(" ▍") }
 }
 
@@ -835,7 +835,7 @@ private fun ConsoleLine(line: JSONObject, palette: Look.Palette) {
             withStyle(SpanStyle(color = prefixColour, fontWeight = FontWeight.Bold)) { append(prefix) }
             append(" ")
         }
-        if (kind == "june") append(markdown(line.optString("text"), code = palette.june))
+        if (kind == "june") append(orgText(line.optString("text"), code = palette.june))
         else withStyle(SpanStyle(color = if (quiet) palette.muted else palette.ink)) { append(line.optString("text")) }
         if (line.optBoolean("streaming")) withStyle(SpanStyle(color = palette.accent)) { append(" ▍") }
     }

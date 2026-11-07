@@ -109,7 +109,7 @@ test("a heartbeat looks privately, stays quiet or messages Alex, and never shows
 	await new Promise((r) => setTimeout(r, 300));
 	assert.equal(faux.state.callCount, 4, "no heartbeat after quiet");
 
-	assert.deepEqual(lines(view.items()), ["alex: hi", "june: hello", "june: Clinic at 13:00 and it's cold: **heater** on soon?"]);
+	assert.deepEqual(lines(view.items()), ["alex: hi", "june: hello", "june: Clinic at 13:00 and it's cold: *heater* on soon?"]);
 	const reattached = await attachView(tmp.paths.socket);
 	t.after(() => reattached.close());
 	assert.deepEqual(reattached.items(), view.items(), "a reconnect shows the same");

@@ -22,6 +22,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { Client, COMMANDS, parseCommand, type Reply } from "./protocol.ts";
 import { applyChanges, type ViewItem, type ViewState } from "./transcript.ts";
+import { orgToMarkdown } from "./org.ts";
 
 /** A command's reply. Like a Telegram command reply, it is not part of the conversation; a reconnect drops it. */
 type CommandReply = { kind: "reply"; id: string; command: string; text: string };
@@ -139,8 +140,8 @@ function component(item: Item): Component[] {
 		case "assistant": {
 			const parts: Component[] = [new Line()];
 			for (const line of item.thinking?.split("\n") ?? []) parts.push(new Line(c.italic(c.muted(`∴ ${line}`))));
-			// The daemon sends Markdown, converted from the Org June writes for the terminal.
-			if (item.text) parts.push(new Markdown(item.text, 0, 0, markdownTheme));
+			// June writes Org; the terminal draws Markdown.
+			if (item.text) parts.push(new Markdown(orgToMarkdown(item.text), 0, 0, markdownTheme));
 			if (item.streaming && parts.length === 1) parts.push(new Line(c.muted("…")));
 			if (item.error) parts.push(new Line(c.err(`! ${item.error}`)));
 			return parts;

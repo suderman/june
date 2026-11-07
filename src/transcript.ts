@@ -3,7 +3,6 @@
 // the view, so a reconnect, a reset, and a live update all show the same thing.
 import type { Sky } from "./situation.ts";
 import type { ConversationView, LiveState } from "@earendil-works/pi-durable";
-import { orgToMarkdown } from "./org.ts";
 import { plain } from "./plain.ts";
 
 /** A heartbeat's whole answer when nothing is worth raising; the view shows nothing for it. */
@@ -32,7 +31,7 @@ export type ViewItem =
 	/** `at`, on a user or assistant item, is when its message was written, in epoch milliseconds, when the log has it. */
 	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; files?: { name: string; size: number; path: string; mimeType?: string }[]; private?: true; at?: number }
 	/**
-	 * `text` is Markdown. `thinking` holds one flattened line per thinking block, or in detail the full text. `answers` is
+	 * `text` is what June wrote, in Org; the terminal and Telegram convert it to Markdown themselves. `thinking` holds one flattened line per thinking block, or in detail the full text. `answers` is
 	 * the source of the input the reply follows, empty when that input is before the transcript. `alert` names the client
 	 * kind that should interrupt the user, on a finished reply only.
 	 */
@@ -113,13 +112,11 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 	const tools = new Map<string, Extract<ViewItem, { kind: "tool" }>>();
 	const background = new Set<string>();
 	let hidden = false;
-	/** The reply follows a Telegram message, already Markdown; anything else June answers in Org. */
-	let markdown = false;
 	/** The source of the input being answered, and where a notice was routed. */
 	let answering = "";
 	let surface: Surface | undefined;
 	const mark = (shown: boolean) => (shown ? {} : { private: true as const });
-	const text = (raw: string) => (markdown ? plain(raw) : orgToMarkdown(plain(raw)));
+	const text = (raw: string) => plain(raw);
 	const alert = (): Surface | undefined => (answering === "gui" || answering === "apk" ? answering : NOTICES.has(answering) ? surface : undefined);
 	/**
 	 * An assistant item. A finished one that ends its turn alerts; one in the middle of a tool round does not, nor does a
@@ -158,8 +155,6 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 				hidden = PRIVATE.has(source);
 				answering = source;
 				surface = SURFACES.has(entry.data?.surface) ? entry.data.surface : undefined;
-				// A private look is answered in the markup of where the user last spoke, so it leaves the markup alone.
-				if (!hidden) markdown = source === "telegram";
 				const said = hidden ? textOf(message?.content) || (entry.data?.text ?? "") : (entry.data?.text ?? "");
 				if (!hidden || detail) items.push({ kind: "user", id, source, text: said, ...(entry.data?.imageCount ? { imageCount: entry.data.imageCount } : {}), ...(Array.isArray(entry.data?.files) && entry.data.files.length ? { files: entry.data.files } : {}), ...mark(!hidden), ...at });
 				break;
@@ -197,7 +192,6 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 				const own = /^\[(work|follow|reminder)[\] ]\s*/.exec(words);
 				answering = own ? own[1]! : "telegram";
 				items.push({ kind: "user", id, source: answering, text: own ? clip(words.slice(own[0].length), 80) : words, ...at });
-				markdown = true;
 				break;
 			}
 			case "pi.assistant": {

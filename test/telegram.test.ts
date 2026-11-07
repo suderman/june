@@ -306,6 +306,13 @@ test("a first start sends nothing it finds; later replies to Telegram are sent, 
 	assert.deepEqual(telegram.sends().map((c) => c.text), ["Now this."]);
 });
 
+test("June's Org reaches Telegram as the Markdown it renders", async (t) => {
+	const { telegram, put } = await viewBridge(t, [user(1, "telegram")]);
+	await put(user(2, "telegram", "where?"));
+	await put(june(3, "It is *here*, in =~/org/todo.org=, see [[https://a.ca][A]].", "telegram"));
+	assert.deepEqual(telegram.sends().map((c) => c.text), ["It is **here**, in `~/org/todo.org`, see [A](https://a.ca)."]);
+});
+
 test("a notice reaches Telegram only when it is routed there", async (t) => {
 	const { telegram, put } = await viewBridge(t, [user(1, "telegram")]);
 	await put(june(2, "Your audit finished.", "work", { alert: "telegram" }));

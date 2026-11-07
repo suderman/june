@@ -169,34 +169,60 @@ export function emacsCall(url) {
 	return ["emacsclient", "-r", "-n", "--eval", `(suderman/june-open ${JSON.stringify(path)} ${JSON.stringify(rest.join("::"))})`];
 }
 
-const unescape = (text) => text.replace(/&quot;/g, '"').replace(/&gt;/g, ">").replace(/&lt;/g, "<").replace(/&amp;/g, "&");
+// Org's emphasis, as src/org.ts reads it: a marker after a space or opening punctuation, no space just inside, and
+// closing punctuation after, so /home/alex/ stays a path and snake_case_name a name.
+const PRE = String.raw`(^|[\s('"{])`;
+const POST = String.raw`(?=[\s\-.,:;!?'")}\[]|$)`;
+const span = (marker, inner) => new RegExp(`${PRE}${marker}(${inner})${marker}${POST}`, "g");
+const EMPHASIS = [
+	["b", span(String.raw`\*`, String.raw`[^\s*](?:[^*\n]*[^\s*])?`)],
+	["i", span("/", String.raw`[^\s/](?:[^/\n]*[^\s/])?`)],
+	["u", span("_", String.raw`[^\s_](?:[^_\n]*[^\s_])?`)],
+	["s", span(String.raw`\+`, String.raw`[^\s+](?:[^+\n]*[^\s+])?`)],
+];
+const VERBATIM = new RegExp(`${PRE}([=~])((?!\\2)[^\\s](?:[^\\n]*?[^\\s])??)\\2${POST}`, "g");
 
 /**
- * June's Markdown as Qt rich text for a balloon. Stressed words (**bold**, *italic*, _italic_) become `stress` spans in
- * the display face, `code` a monospace span; links, as [label](url) or Org's [[url][label]], become anchors when
- * linkKind opens them and their label otherwise; headings and quotes lose their markers. Everything else is escaped,
- * so nothing she writes can inject markup.
+ * June's Org as Qt rich text for a balloon. *bold* becomes a `stress` span in the display face, /italic/, _underline_
+ * and +strike+ their own faces, =verbatim= and ~code~ a `code` span, a #+begin_src block monospaced lines; links,
+ * [[url][label]] or [[url]], become anchors when linkKind opens them and their label otherwise; a heading keeps its
+ * words, stressed, without its stars. Markdown's **bold**, `code` and [label](url) still read, since a model slips
+ * into them. Everything else is escaped, so nothing she writes can inject markup.
  */
 export function markup(text, style = {}) {
 	const stress = style.stress ?? "font-weight:800";
 	const code = style.code ?? "font-family:monospace";
-	const lines = text.split("\n").map((line) => {
-		let out = escape(line.replace(/^\s{0,3}(#{1,6}|>)\s+/, ""));
-		out = out.replace(/`([^`]+)`/g, (_, inner) => `<span style="${code}">${inner}</span>`);
-		// Links wait as numbered marks while the stress passes run, so nothing reshapes an address.
-		const links = [];
-		const link = (url, label) => {
-			if (linkKind(unescape(url)) === null) return label;
-			links.push(`<a href="${url}">${label}</a>`);
-			return `\u0000${links.length - 1}\u0000`;
-		};
-		out = out.replace(/\[\[([^\]]+)\]\[([^\]]+)\]\]/g, (_, url, label) => link(url, label));
+	const faces = { b: [`<span style="${stress}">`, "</span>"], i: ["<i>", "</i>"], u: ["<u>", "</u>"], s: ["<s>", "</s>"] };
+	const inline = (line) => {
+		// Links and code wait as numbered marks, escaped already, so no emphasis pass reshapes an address or a command.
+		const held = [];
+		const hold = (html) => `\u0000${held.push(html) - 1}\u0000`;
+		const link = (url, label) => (linkKind(url) === null ? hold(escape(label)) : hold(`<a href="${escape(url)}">${escape(label)}</a>`));
+		let out = line.replace(/[\u0000-\u0002]/g, "");
+		out = out.replace(/\[\[([^\]\n]+)\](?:\[([^\]\n]+)\])?\]/g, (_, url, label) => link(url, label ?? url));
 		// A file link's search may name a heading with spaces, which June writes in Markdown's form too.
-		out = out.replace(/\[([^\]]+)\]\((file:[^)\n]+|[^)\s]+)\)/g, (_, label, url) => link(url, label));
-		out = out.replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, a, b) => `<span style="${stress}">${a ?? b}</span>`);
-		out = out.replace(/(^|[^\w*])\*([^*\s][^*]*)\*(?!\w)|(^|[^\w])_([^_\s][^_]*)_(?!\w)/g, (_, p1, a, p2, b) => `${p1 ?? p2}<span style="${stress}">${a ?? b}</span>`);
-		return out.replace(/\u0000(\d+)\u0000/g, (_, n) => links[Number(n)]);
-	});
+		out = out.replace(/\[([^\]\n]+)\]\((file:[^)\n]+|[^)\s]+)\)/g, (_, label, url) => link(url, label));
+		out = out.replace(VERBATIM, (_, pre, _mark, body) => `${pre}${hold(`<span style="${code}">${escape(body)}</span>`)}`);
+		out = out.replace(/`([^`\n]+)`/g, (_, body) => hold(`<span style="${code}">${escape(body)}</span>`));
+		out = out.replace(/\*\*([^*\n]+)\*\*/g, (_, body) => `\u0001b${body}\u0002b`);
+		for (const [face, pattern] of EMPHASIS) out = out.replace(pattern, (_, pre, body) => `${pre}\u0001${face}${body}\u0002${face}`);
+		return escape(out)
+			.replace(/\u0001([bius])/g, (_, f) => faces[f][0])
+			.replace(/\u0002([bius])/g, (_, f) => faces[f][1])
+			.replace(/\u0000(\d+)\u0000/g, (_, n) => held[Number(n)]);
+	};
+	const lines = [];
+	let block = false;
+	for (const raw of text.split("\n")) {
+		if (!block && /^\s*(#\+begin_(src|example)\b|```)/i.test(raw)) block = true;
+		else if (block && /^\s*(#\+end_(src|example)\b|```)/i.test(raw)) block = false;
+		else if (block) lines.push(`<span style="${code}">${escape(raw).replace(/^ +/, (lead) => "&nbsp;".repeat(lead.length))}</span>`);
+		else if (/^\s*#\+\w+(:|\s|$)/.test(raw)) continue;
+		else {
+			const heading = /^(\*+|#{1,6})\s+(.*)$/.exec(raw);
+			lines.push(heading ? `${faces.b[0]}${inline(heading[2])}${faces.b[1]}` : inline(raw.replace(/^\s{0,3}>\s+/, "")));
+		}
+	}
 	return lines.join("<br>");
 }
 

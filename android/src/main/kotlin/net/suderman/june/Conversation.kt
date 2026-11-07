@@ -335,7 +335,7 @@ private fun ItemRow(item: Item) {
             )
         }
         "assistant" -> if (item.error.isNotEmpty()) Text("(${item.error})", color = Color(0xFFFF8F80)) else Text(
-            markdown(item.text + if (item.streaming) " ▍" else "", code = Color(0xFFE9C46A)),
+            orgText(item.text + if (item.streaming) " ▍" else "", code = Color(0xFFE9C46A)),
             color = Color(0xFFECE6DA),
         )
         "tool" -> Text(

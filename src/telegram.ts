@@ -18,6 +18,7 @@ import { Client, COMMANDS, type Reply, type Request } from "./protocol.ts";
 import { createLogger, type Logger } from "./runtime.ts";
 import { escapeHtml, splitForTelegram, tail } from "./telegram-format.ts";
 import { applyChanges, type ViewItem, type ViewState } from "./transcript.ts";
+import { orgToMarkdown } from "./org.ts";
 
 /** Commands Telegram offers; /start is Telegram's own and shows help. */
 const TELEGRAM_COMMANDS = COMMANDS.filter((c) => c.name !== "reload");
@@ -393,7 +394,8 @@ export class Bridge {
 		if (latest?.kind !== "user" || latest.source !== "telegram" || this.#view === undefined) return;
 		const now = this.#now();
 		const live = items.find((item) => item.id === "live");
-		const text = live?.kind === "assistant" ? live.text.trim() : "";
+		// June writes Org; Telegram renders Markdown.
+		const text = live?.kind === "assistant" ? orgToMarkdown(live.text.trim()) : "";
 		if (text !== "" && this.#drafts) {
 			const due = now - this.#draftAt >= this.#timing.draftMs && (text !== this.#draftText || now - this.#draftAt >= this.#timing.draftRefreshMs);
 			if (this.#drafting || !due) return;
@@ -437,7 +439,7 @@ function qualifies(item: Extract<ViewItem, { kind: "assistant" }>): boolean {
  */
 function replyText(item: Extract<ViewItem, { kind: "assistant" }>): string | undefined {
 	const stopped = item.error !== undefined && /abort/i.test(item.error);
-	const text = item.text.trim();
+	const text = orgToMarkdown(item.text.trim());
 	if (item.error === undefined) return text;
 	if (text === "") return undefined;
 	return stopped ? `${text}\n\n⏹ stopped` : `${text}\n\n⚠ ${item.error}`;

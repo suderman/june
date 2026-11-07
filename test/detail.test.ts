@@ -54,7 +54,7 @@ test("answers names the input a reply follows, and only a finished reply to gui,
 	assert.deepEqual(unanswered.at(-1), { kind: "assistant", id: "failure:4", text: "", streaming: false, answers: "apk", alert: "apk", error: "model error: 429" });
 });
 
-test("stored kitty reads as tui, Telegram replies stay Markdown, and every other reply is converted from Org", () => {
+test("stored kitty reads as tui, and every reply keeps the markup June wrote, for each client to render", () => {
 	const entries = [
 		input(1, "kitty", "old terminal"),
 		said(2, [{ type: "text", text: "Use =june= *now*." }]),
@@ -66,7 +66,7 @@ test("stored kitty reads as tui, Telegram replies stay Markdown, and every other
 	const items = fold(entries, {}).items;
 	assert.deepEqual(
 		items.map((i) => (i.kind === "user" ? `${i.source} › ${i.text}` : i.kind === "assistant" ? i.text : i.kind)),
-		["tui › old terminal", "Use `june` **now**.", "telegram › from the bridge", "Use `june` *now*.", "gui › from the overlay", "Use `june` **now**."],
+		["tui › old terminal", "Use =june= *now*.", "telegram › from the bridge", "Use `june` *now*.", "gui › from the overlay", "Use =june= *now*."],
 	);
 });
 
@@ -162,7 +162,7 @@ test("a scripted client sees what the terminal shows; detail toggles with a rese
 		{ id: assistants(gui.items())[2]!.id, answers: "apk", alert: "apk" },
 		{ id: assistants(gui.items())[3]!.id, answers: "tui" },
 	]);
-	assert.deepEqual(gui.items().map((i) => (i.kind === "assistant" ? i.text : i.kind === "user" ? `${i.source} › ${i.text}` : i.kind)), ["gui › read it", "", "tool", "It says **hi**.", "apk › and the car?", "Charging.", "tui › thanks", "Any time."]);
+	assert.deepEqual(gui.items().map((i) => (i.kind === "assistant" ? i.text : i.kind === "user" ? `${i.source} › ${i.text}` : i.kind)), ["gui › read it", "", "tool", "It says *hi*.", "apk › and the car?", "Charging.", "tui › thanks", "Any time."]);
 
 	const thinking = full.items().find((i) => i.kind === "assistant" && i.thinking);
 	assert.equal(thinking?.kind === "assistant" && thinking.thinking, "**Reading** the file\nin full");
@@ -204,7 +204,7 @@ test("sources: kitty is recorded as tui, Telegram reaches the model untagged, an
 	t.after(() => view.close());
 	assert.deepEqual(
 		view.items().map((i) => (i.kind === "assistant" ? `${i.answers}: ${i.text}` : i.kind === "user" ? `${i.source} › ${i.text}` : i.kind)),
-		["tui › from an old terminal", "tui: Use `june`.", "telegram › from the phone", "telegram: Use `june`."],
+		["tui › from an old terminal", "tui: Use =june=.", "telegram › from the phone", "telegram: Use `june`."],
 	);
 	const client = await Client.open(tmp.paths.socket);
 	t.after(() => client.close());

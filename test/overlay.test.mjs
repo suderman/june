@@ -110,11 +110,14 @@ test("a failed tool keeps its first line in the caption, and summaries read as n
 	assert.equal(caption({ name: "org_read_task", summary: "file=work/nonfiction/nterchange/nterchange.org heading=Remove old migration servers", status: "done" }), "org_read_task · nterchange.org Remove old migration servers");
 });
 
-test("markup escapes everything and turns stressed words, code, and links into spans", () => {
+test("markup draws June's Org, escapes everything, and still reads the Markdown a model slips into", () => {
 	const out = markup("update their **résumés**.\nrun `nix flake check`, see [the notes](https://x.y) & <b>this</b>", { stress: "S", code: "C" });
 	assert.equal(out, 'update their <span style="S">résumés</span>.<br>run <span style="C">nix flake check</span>, see <a href="https://x.y">the notes</a> &amp; &lt;b&gt;this&lt;/b&gt;');
-	assert.equal(markup("an *aside* and _another_, but not snake_case_name or 2*3*4", { stress: "S" }), 'an <span style="S">aside</span> and <span style="S">another</span>, but not snake_case_name or 2*3*4');
-	assert.equal(markup("## Heading\n> quoted"), "Heading<br>quoted");
+	assert.equal(markup("a *bold* and _under_, but not snake_case_name or 2*3*4", { stress: "S" }), 'a <span style="S">bold</span> and <u>under</u>, but not snake_case_name or 2*3*4');
+	assert.equal(markup("Some /italic/ and +gone+; /home/alex/src/ stays a path."), "Some <i>italic</i> and <s>gone</s>; /home/alex/src/ stays a path.");
+	assert.equal(markup("Open =~/org/x.org= or run ~ls -la~.", { code: "C" }), 'Open <span style="C">~/org/x.org</span> or run <span style="C">ls -la</span>.');
+	assert.equal(markup("* Plan\n#+TITLE: gone\n#+begin_src sh\n  echo *x*\n#+end_src\nafter", { stress: "S", code: "C" }), '<span style="S">Plan</span><br><span style="C">&nbsp;&nbsp;echo *x*</span><br>after', "a heading loses its stars, keywords go, and a block stays as written");
+	assert.equal(markup("## Heading\n> quoted"), '<span style="font-weight:800">Heading</span><br>quoted');
 });
 
 test("input reads commands, refuses /new, and submits anything else; the badge says what June is doing", () => {
@@ -819,7 +822,8 @@ test("a panel becomes console lines: her name and face once a reply, tools as ma
 	assert.deepEqual(streaming.map((l) => l.prefix), ["›", "june"]);
 	assert.equal(streaming[1].streaming, true);
 	const fenced = consoleLines(panels([{ kind: "assistant", id: "a3", text: "run this:\n\n```sh\nls -la\n```" }])[0]);
-	assert.equal(fenced[0].text, "run this:\n\nls -la");
+	assert.equal(fenced[0].text, "run this:\n\n```sh\nls -la\n```", "the console keeps the block; markup draws it");
+	assert.equal(markup(fenced[0].text, { code: "C" }), 'run this:<br><br><span style="C">ls -la</span>');
 	const failed = consoleLines(panels([{ kind: "notice", id: "n1", text: "kit rebooted" }])[0]);
 	assert.deepEqual(failed, [{ kind: "burst", prefix: "!", text: "kit rebooted" }]);
 });

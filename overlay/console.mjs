@@ -65,8 +65,8 @@ export function lines(panel) {
 			const item = e.id.split("#")[0];
 			const prefix = item === reply ? "" : e.expression ? `june ${face(e.expression)}` : "june";
 			reply = item;
-			// A code block is already monospace here, so its fences go.
-			const line = { kind: "june", prefix, text: e.text.replace(/^[ \t]*```[^\n]*\n?/gm, "").replace(/\n+$/, "") };
+			// A code block is already monospace here; markup drops its #+begin_src and #+end_src lines.
+			const line = { kind: "june", prefix, text: e.text.replace(/\n+$/, "") };
 			if (e.streaming) line.streaming = true;
 			out.push(line);
 		} else if (e.kind === "tools") {

@@ -13,7 +13,7 @@ const said = (id: number, content: unknown[], extra: Record<string, unknown> = {
 const result = (id: number, callId: string, toolName: string, text: string, isError = false) => ({ id, kind: "pi.tool-result", model: [{ role: "toolResult", toolCallId: callId, toolName, content: [{ type: "text", text }], isError }] });
 const telegram = (id: number, text: string) => ({ id, kind: "pi.user", model: [{ role: "user", content: text }] });
 
-test("the fold: thinking as one line each, tool lines with their status, Org as Markdown, and notes", () => {
+test("the fold: thinking as one line each, tool lines with their status, June's Org as written, and notes", () => {
 	const entries = [
 		user(1, "kitty", "find the heading"),
 		said(2, [
@@ -36,7 +36,7 @@ test("the fold: thinking as one line each, tool lines with their status, Org as 
 		{ kind: "assistant", id: "2", text: "", streaming: false, answers: "tui", thinking: "Finding project heading" },
 		{ kind: "tool", id: "call:c1", name: "org_search", summary: "query=june", status: "done" },
 		{ kind: "tool", id: "call:c2", name: "bash", summary: "command=false", status: "error", error: "exit 1" },
-		{ kind: "assistant", id: "5", text: "It is **here**, in `june.org`.", streaming: false, answers: "tui" },
+		{ kind: "assistant", id: "5", text: "It is *here*, in =june.org=.", streaming: false, answers: "tui" },
 		{ kind: "patter", id: "6", text: "rummaging" },
 		{ kind: "note", id: "7", text: "earlier conversation compacted" },
 		{ kind: "note", id: "8", text: "new context" },
@@ -66,7 +66,7 @@ test("the fold: the streaming reply, running tools, the queue, and a retry come 
 	const { items, state } = fold(entries, { "pi.live": live, "pi.inbox": { items: [{}, {}] } });
 	assert.deepEqual(items.slice(1), [
 		{ kind: "tool", id: "call:c1", name: "bash", summary: "command=make", status: "running" },
-		{ kind: "assistant", id: "live", text: "Nearly **done**", streaming: true, answers: "tui" },
+		{ kind: "assistant", id: "live", text: "Nearly *done*", streaming: true, answers: "tui" },
 	]);
 	assert.equal(state.running, true);
 	assert.equal(state.queued, 2);
