@@ -167,8 +167,9 @@ export function liveActivity(state, panel) {
 }
 
 // Until the daemon sends June's expression (see "Send expression and activity to clients"), the overlay picks one from
-// what it can see. Common faces only: rare ones stay rare, and these choices must never claim a feeling she did not show.
-const STAND_IN = ["idle", "warm", "wry", "curious", "smug", "laughing", "serious"];
+// what it can see. Listening faces only, never a reaction: the stand-in has not read her reply, and a laugh or a smirk on
+// a serious reply reads as meant until the director's face replaces it.
+const STAND_IN = ["idle", "curious"];
 
 /**
  * What a settled panel asks for: the face the daemon picked for its latest reply (the expression and, when named, the
@@ -195,11 +196,10 @@ function pickedReply(panel) {
 	return "";
 }
 
-/** A stand-in request for a panel: a failure gets exasperation, a reply in progress curiosity, the rest a common face. */
+/** A stand-in request for a panel: a failure gets exasperation, a reply in progress curiosity, the rest a listening face. */
 export function standIn(panel, live) {
 	if (panel.elements.some((e) => e.kind === "burst")) return { expression: "exasperated" };
 	if (live) return { expression: "curious" };
-	if (panel.elements.some((e) => e.kind === "tools" && e.items.length > 1)) return { expression: "serious" };
 	return { expression: STAND_IN[hash(panel.id) % STAND_IN.length] };
 }
 

@@ -182,6 +182,9 @@ test("poses are read leniently from a manifest, and chosen by name, expression c
 	assert.equal(choosePose([], {}), null);
 	assert.deepEqual(standIn({ id: "x", elements: [{ kind: "burst" }] }, false), { expression: "exasperated" });
 	assert.deepEqual(standIn({ id: "x", elements: [] }, true), { expression: "curious" });
+	// A settled panel waiting for the director listens; it never reacts to a reply it has not read.
+	const work = [{ kind: "tools", items: [{}, {}, {}] }];
+	for (const id of Array.from({ length: 50 }, (_, i) => `panel-${i}`)) for (const elements of [[], work]) assert.ok(["idle", "curious"].includes(standIn({ id, elements }, false).expression), id);
 });
 
 test("June alternates sides, except when a pose that may not be mirrored would face away from the words", () => {
