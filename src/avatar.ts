@@ -94,6 +94,11 @@ export type Pose = {
 	props?: string[];
 	/** Gestures away from her face, as fractions of the image, the primary one marked: the strip keeps it in view. */
 	gestures?: { name: string; box: [number, number, number, number]; primary?: boolean }[];
+	/**
+	 * The box of her drawn figure (its opaque pixels) as fractions of the image, written at ingest. A tall panel uses its
+	 * bottom, where her boots end, so she never floats on the canvas's empty space below them; the image's bottom without it.
+	 */
+	figure?: [number, number, number, number];
 	/** When the pose entered the set (ISO 8601), set once at ingest: a panel falls back only to poses older than itself. */
 	added?: string;
 	/** A drawing made for one moment: the strip never swaps it for another pose. */
@@ -232,6 +237,9 @@ function poseErrors(data: unknown, options: { base?: boolean }): string[] {
 			if (!Array.isArray(p.gestures) || p.gestures.length === 0 || !p.gestures.every(ok)) errors.push(`${at}: gestures must list {name, box: [x, y, width, height] inside the image as fractions, primary}`);
 			else if (p.gestures.filter((g) => g.primary).length > 1) errors.push(`${at}: at most one gesture is primary`);
 		}
+		const figure = p?.figure;
+		if (figure !== undefined && (!Array.isArray(figure) || figure.length !== 4 || !figure.every(fraction) || !(figure[2]! > 0 && figure[3]! > 0) || figure[0]! + figure[2]! > 1.0005 || figure[1]! + figure[3]! > 1.0005))
+			errors.push(`${at}: figure must be [x, y, width, height] inside the image, as fractions`);
 		if (p?.added !== undefined && (typeof p.added !== "string" || Number.isNaN(Date.parse(p.added)))) errors.push(`${at}: added must be an ISO 8601 time`);
 		if (p?.special !== undefined && typeof p.special !== "boolean") errors.push(`${at}: special must be true or false`);
 	}

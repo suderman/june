@@ -1146,3 +1146,147 @@ test("a gesture stays whole in a panel: seen past the words, framed wider, or an
 	const longSpecial = panelLayout({ panel: { ...panel, pose: special[0] }, width: 820, sizes: [{ kind: "june", w: 300, h: 1500 }], poses: [...special, tall] });
 	assert.equal(longSpecial.pose.id, "gentle-palm", "an inset must not replace a special with a generic tall pose");
 });
+
+// Tall standing art, modelled on real staged studies (2026-11-07): face, mouth, gesture boxes and measured figure bounds
+// as fractions, with the text sizes QML measured for one, three and six paragraphs of a report.
+const flatPose = (expression, extra = {}) => ({ file: "f.webp", size: [2176, 2662], expression, face: [0.363, 0.195, 0.274, 0.27], mouth: [0.508, 0.407], facing: "front", mirror: false, framings: ["close-up", "head", "bust"], ...extra });
+const standing = (expression, facing, face, mouth, gestures, figure, extra = {}) => ({ file: "t.webp", size: [2048, 4096], expression, facing, mirror: false, setting: "standing", framings: ["bust", "waist", "full"], face, mouth, gestures: gestures.map((box, i) => ({ name: `part-${i}`, box, ...(i === 0 ? { primary: true } : {}) })), figure, ...extra });
+const STANDING = {
+	"report-front": flatPose("serious"),
+	"sigh-front": flatPose("exasperated"),
+	// A front clipboard report: board toward viewer-right, the supporting forearm behind it.
+	"clipboard-front": standing("serious", "front", [0.418, 0.08, 0.164, 0.1], [0.507, 0.157], [[0.448, 0.226, 0.241, 0.122], [0.348, 0.31, 0.112, 0.036]], [0.263, 0.051, 0.479, 0.748]),
+	// A smaller centred board with resting hands, drawn facing left: it stands only on the right, facing the words.
+	"clipboard-left": standing("serious", "left", [0.416, 0.081, 0.169, 0.1], [0.503, 0.162], [[0.37, 0.182, 0.236, 0.132], [0.371, 0.182, 0.218, 0.048]], [0.224, 0.04, 0.557, 0.791]),
+	// A two-palm shrug: each palm a gesture, so one hidden palm spoils it.
+	"shrug-front": standing("exasperated", "front", [0.426, 0.08, 0.148, 0.1], [0.502, 0.159], [[0.274, 0.19, 0.17, 0.051], [0.554, 0.189, 0.167, 0.053]], [0.276, 0.05, 0.445, 0.768]),
+};
+const REPORT = {
+	1: { 820: [{ kind: "june", w: 497, h: 288 }] },
+	3: { 480: [{ kind: "june", w: 304, h: 1448 }], 560: [{ kind: "june", w: 361, h: 1148 }], 700: [{ kind: "june", w: 419, h: 1028 }], 820: [{ kind: "june", w: 497, h: 848 }] },
+	6: { 700: [{ kind: "june", w: 419, h: 2048 }], 820: [{ kind: "june", w: 497, h: 1688 }] },
+};
+const standingPool = (personal = STANDING) => {
+	const mine = readPoses({ poses: personal }, "file:///personal/");
+	const ids = new Set(mine.map((p) => p.id));
+	return [...mine, ...readPoses(manifest, "file:///base/").filter((p) => !ids.has(p.id))];
+};
+const standingLayout = (pool, request, side, paragraphs, width, id = "a") =>
+	panelLayout({ panel: { id, side, pose: pool.find((p) => p.id === request), elements: [] }, width, sizes: REPORT[paragraphs][width], poses: pool });
+
+test("tall stand-ins are ranked by fit to the panel, not by the manifest's order", async () => {
+	const { tallCandidates } = await import("../overlay/compose.mjs");
+	const pool = standingPool();
+	const report = pool.find((p) => p.id === "report-front");
+	const ids = (list) => list.map((p) => p.id);
+	assert.deepEqual(ids(tallCandidates(pool, report, "left", "a")), ["clipboard-front", "explaining-standing-clipboard"], "on the left, a left-facing drawing that may not flip never faces out of the panel; the base placeholder comes last");
+	const right = ids(tallCandidates(pool, report, "right", "a"));
+	assert.deepEqual(right.slice().sort(), ["clipboard-front", "clipboard-left", "explaining-standing-clipboard"].sort());
+	assert.equal(right[2], "explaining-standing-clipboard", "the personal set's art before the base set's placeholder");
+	const reversed = standingPool(Object.fromEntries(Object.entries(STANDING).reverse()));
+	for (const seed of ["a", "b", "c", "d"]) assert.deepEqual(ids(tallCandidates(reversed, report, "right", seed)), ids(tallCandidates(pool, report, "right", seed)), `${seed}: the manifest's order does not decide`);
+	assert.notDeepEqual(ids(tallCandidates(pool, report, "right", "a")), ids(tallCandidates(pool, report, "right", "b")), "different panels may stand in different art");
+	assert.equal(tallCandidates(pool, pool.find((p) => p.id === "clipboard-front"), "right", "a")[0].id, "clipboard-front", "a tall pose tries itself first");
+});
+
+test("a long panel admits tall art only where her action, face, and boots read, and keeps her own pose otherwise", () => {
+	const pool = standingPool();
+	for (const id of ["a", "b", "c", "d"]) {
+		// Right, three paragraphs at 700 and 820: either clipboard stands down the panel, board clear of the words.
+		for (const width of [700, 820]) {
+			const out = standingLayout(pool, "report-front", "right", 3, width, id);
+			assert.ok(["clipboard-front", "clipboard-left"].includes(out.pose.id), `${id} right/${width}: ${out.pose.id}`);
+			assert.equal(out.layout.framing, "full");
+			assert.ok(gestureShownAt(out, 0) >= 0.9, "the board and grip are seen");
+			const feet = out.layout.art.y + (out.pose.figure.y + out.pose.figure.h) * out.layout.art.h;
+			assert.ok(feet >= out.layout.height - 1, "her drawn boots reach the bottom: she does not float");
+		}
+		// Left: the front board lies under the words, and the left-facing one may not stand there, so the placeholder.
+		assert.equal(standingLayout(pool, "report-front", "left", 3, 820, id).pose.id, "explaining-standing-clipboard");
+		// 480: no drawing reaches the bottom at her face size, so she keeps her own pose in its inset, never a tall one.
+		for (const side of ["left", "right"]) {
+			const narrow = standingLayout(pool, "report-front", side, 3, 480, id);
+			assert.equal(narrow.pose.id, "report-front", `${id} ${side}/480`);
+			assert.equal(narrow.layout.clip.inset, true);
+		}
+		// Six paragraphs at 820 on the right: the front board crosses the panel's edge, so only the centred one stands.
+		assert.equal(standingLayout(pool, "report-front", "right", 6, 820, id).pose.id, "clipboard-left");
+		// At 700 neither reaches the bottom with its action clear: her own pose in its inset.
+		assert.equal(standingLayout(pool, "report-front", "right", 6, 700, id).layout.clip.inset, true);
+		// A short panel is untouched.
+		assert.equal(standingLayout(pool, "report-front", "right", 1, 820, id).pose.id, "report-front");
+	}
+	// Without the placeholder set, the left falls back to her own pose, not to a half-hidden board.
+	const personalOnly = readPoses({ poses: STANDING }, "file:///personal/");
+	const left = standingLayout(personalOnly, "report-front", "left", 3, 820);
+	assert.equal(left.pose.id, "report-front");
+	assert.equal(left.layout.clip.inset, true);
+});
+
+const gestureShownAt = (out, index) => {
+	const g = out.pose.gestures[index];
+	const a = out.layout.art, c = out.layout.clip;
+	const box = { x: a.x + g.box.x * a.w, y: a.y + g.box.y * a.h, w: g.box.w * a.w, h: g.box.h * a.h };
+	let seen = 0;
+	for (let i = 0; i < 12; i++)
+		for (let j = 0; j < 12; j++) {
+			const x = box.x + ((i + 0.5) / 12) * box.w, y = box.y + ((j + 0.5) / 12) * box.h;
+			if (x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h && !out.layout.elements.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h)) seen++;
+		}
+	return seen / 144;
+};
+
+test("a paired gesture with one part hidden is not a tall performance, by stand-in or by name", async () => {
+	const { gestureShown, standsTall } = await import("../overlay/compose.mjs");
+	const pool = standingPool();
+	const shrug = pool.find((p) => p.id === "shrug-front");
+	// On the left at 820 the first palm is clear but the second lies under the words.
+	const full = plan({ width: 820, side: "left", pose: shrug, elements: REPORT[3][820] });
+	assert.equal(full.framing, "full");
+	assert.ok(gestureShown(full, shrug) >= 0.9 && gestureShown(full, shrug, 1) < 0.5, "primary seen, its pair hidden");
+	assert.equal(standsTall(full, shrug, null), false);
+	for (const side of ["left", "right"])
+		for (const width of [700, 820]) {
+			assert.equal(standingLayout(pool, "sigh-front", side, 3, width).pose.id, "sigh-front", `${side}/${width}: no shrug stand-in`);
+			const named = standingLayout(pool, "shrug-front", side, 3, width);
+			assert.notEqual(named.layout.framing, "full", `${side}/${width}: a named shrug does not stand tall with a palm hidden`);
+		}
+});
+
+test("a named tall pose that cannot stand is judged against the inset, not its own full figure", () => {
+	const pool = standingPool();
+	// The director named the front clipboard; at 480 it cannot show its board, so another serious pose takes the panel.
+	for (const side of ["left", "right"]) {
+		const out = standingLayout(pool, "clipboard-front", side, 3, 480);
+		assert.equal(out.pose.id, "report-front", side);
+		assert.equal(out.layout.clip.inset, true);
+	}
+	assert.equal(standingLayout(pool, "clipboard-front", "right", 3, 820).pose.id, "clipboard-front", "where it reads, the named pose itself");
+});
+
+test("tall art added after a panel never changes it", () => {
+	const at = Date.UTC(2026, 10, 7, 12);
+	const later = Object.fromEntries(Object.entries(STANDING).map(([id, p]) => [id, p.framings.includes("full") ? { ...p, added: new Date(at + 1000).toISOString() } : p]));
+	const pool = standingPool(later);
+	for (const id of ["a", "b", "c", "d"]) {
+		const panel = { id, side: "right", pose: pool.find((p) => p.id === "report-front"), elements: [{ kind: "june", text: "x", expression: "serious", pose: "report-front", at }] };
+		assert.equal(panelLayout({ panel, width: 820, sizes: REPORT[3][820], poses: pool }).pose.id, "explaining-standing-clipboard", "the art it had: the placeholder");
+		const newer = { ...panel, elements: [{ ...panel.elements[0], at: at + 5000 }] };
+		assert.ok(["clipboard-front", "clipboard-left"].includes(panelLayout({ panel: newer, width: 820, sizes: REPORT[3][820], poses: pool }).pose.id), "a newer panel may use it");
+	}
+});
+
+test("a pose's figure box is read leniently and stands her on its bottom, not the canvas's", () => {
+	const pool = standingPool();
+	assert.deepEqual(pool.find((p) => p.id === "clipboard-front").figure, { x: 0.263, y: 0.051, w: 0.479, h: 0.748 });
+	assert.equal(pool.find((p) => p.id === "report-front").figure, null);
+	const [bad] = readPoses({ poses: { odd: { ...STANDING["clipboard-front"], figure: [0.5, 0.5, 0.8, 0.1] } } }, "");
+	assert.equal(bad.figure, null, "a box past the image is ignored");
+	// The same drawing without its figure box: the empty canvas below her boots would pass for body, so she floats.
+	const blind = { ...pool.find((p) => p.id === "clipboard-front"), figure: null };
+	const seen = plan({ width: 480, side: "right", pose: pool.find((p) => p.id === "clipboard-front"), elements: REPORT[3][480] });
+	const unseen = plan({ width: 480, side: "right", pose: blind, elements: REPORT[3][480] });
+	const boots = (l, p) => l.art.y + (STANDING["clipboard-front"].figure[1] + STANDING["clipboard-front"].figure[3]) * l.art.h;
+	assert.ok(unseen.framing !== "full" || boots(unseen) < unseen.height - 100, "without it, a full framing leaves her boots well above the bottom");
+	if (seen.framing === "full") assert.ok(boots(seen) >= seen.height - 1, "with it, a full framing puts her boots on the bottom");
+});

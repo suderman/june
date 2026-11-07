@@ -33,6 +33,34 @@ for (const legacy of [false, true]) test(`re-ingest preserves ${legacy ? "a lega
 	assert.equal(after.poses.synthetic.added, legacy ? undefined : first);
 });
 
+test("ingest records where her drawn figure lies, and figure measures a finished pose without changing it otherwise", (t) => {
+	const set = mkdtempSync(join(tmpdir(), "june-art-figure-"));
+	t.after(() => rmSync(set, { recursive: true, force: true }));
+	mkdirSync(join(set, "incoming"));
+	const source = join(set, "synthetic.png");
+	// A standing figure that ends well above the source's bottom, as a tall drawing's boots do. Its face is large, so
+	// ingest only scales down and never runs the GPU upscaler.
+	execFileSync("magick", ["-size", "1600x4400", "xc:none", "-fill", "#cc9966", "-draw", "rectangle 450,100 1150,3400", source]);
+	writeFileSync(join(set, "incoming", "synthetic.json"), JSON.stringify({ section: "poses", expression: "serious", facing: "front", framings: ["bust", "waist", "full"] }));
+	const run = (...args) => execFileSync(process.execPath, [new URL("../art/june-art.mjs", import.meta.url).pathname, ...args], { stdio: "pipe" });
+	run("ingest", set, "synthetic", "--file", source, "--face", "650,150,300,500");
+	const manifest = JSON.parse(readFileSync(join(set, "manifest.json"), "utf8"));
+	const entry = manifest.poses.synthetic;
+	assert.deepEqual(entry.size, CANVAS.tall);
+	const [x, y, w, h] = entry.figure;
+	assert.ok(x > 0 && y > 0 && x + w < 1 && y + h < 1, `the figure ${entry.figure} lies inside the canvas`);
+	assert.ok(y + h < 0.95, "her feet end above the canvas bottom, and the manifest says so");
+	// A pose ingested before figures were recorded: figure measures the finished image and leaves the rest alone.
+	const before = { ...entry };
+	delete manifest.poses.synthetic.figure;
+	writeFileSync(join(set, "manifest.json"), JSON.stringify(manifest));
+	run("figure", set, "synthetic");
+	const measured = JSON.parse(readFileSync(join(set, "manifest.json"), "utf8")).poses.synthetic;
+	for (const [i, v] of measured.figure.entries()) close(v, before.figure[i], 0.003);
+	assert.deepEqual({ ...measured, figure: null }, { ...before, figure: null }, "added, face and everything else unchanged");
+	assert.throws(() => run("figure", set, "missing"), /no such pose/);
+});
+
 test("ingest refuses a low hand before writing an asset or clamping its gesture box", (t) => {
 	const set = mkdtempSync(join(tmpdir(), "june-art-gesture-"));
 	t.after(() => rmSync(set, { recursive: true, force: true }));

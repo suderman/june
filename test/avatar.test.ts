@@ -105,6 +105,8 @@ test("a bad pose names each problem, and a base set's poses need an idle one", (
 	assert.throws(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { waving: { ...good, gestures: [{ name: "Palm", box: [0.9, 0.6, 0.24, 0.12] }] } } } as never), /gestures must list/);
 	assert.throws(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { waving: { ...good, gestures: gestures.map((g) => ({ ...g, primary: true })) } } }), /at most one gesture is primary/);
 	assert.throws(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { waving: { ...good, added: "yesterday" } } }), /added must be an ISO 8601 time/);
+	assert.doesNotThrow(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { waving: { ...good, figure: [0.263, 0.051, 0.479, 0.748] } } }), "where her drawn figure lies");
+	assert.throws(() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { waving: { ...good, figure: [0.5, 0.5, 0.8, 0.1] } } } as never), /figure must be/);
 	assert.deepEqual(POSE_ACTIVITIES, ["thinking", "working", "watching"]);
 	assert.throws(
 		() => parseManifest({ version: 1, size: [64, 64], expressions: idle, poses: { "idle-working": { ...good, expression: "idle", activity: "working" } } }, { base: true }),

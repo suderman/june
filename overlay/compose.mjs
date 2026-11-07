@@ -84,6 +84,15 @@ function readGestures(list) {
 	return out;
 }
 
+/** A box in fractions of the image ([x, y, w, h] inside it) as { x, y, w, h }; null when absent or malformed. */
+function readBox(b) {
+	if (!Array.isArray(b) || b.length !== 4 || !b.every(fraction) || !(b[2] > 0 && b[3] > 0) || b[0] + b[2] > 1.0005 || b[1] + b[3] > 1.0005) return null;
+	return { x: b[0], y: b[1], w: b[2], h: b[3] };
+}
+
+/** Where her drawn figure ends, as a share of the image's height: the canvas bottom unless the manifest says otherwise. */
+const feetOf = (pose) => (pose.figure ? pose.figure.y + pose.figure.h : 1);
+
 /**
  * The usable poses of one avatar set, with image URLs under `base`. Lenient where src/avatar.ts is strict: a pose the
  * overlay cannot place is skipped, so one bad entry never blanks the strip.
@@ -111,8 +120,11 @@ export function readPoses(manifest, base) {
 			framings: framings.length > 0 ? framings : [...USUAL],
 			marks: Array.isArray(p.marks) ? p.marks.filter((m) => MARKS.includes(m)) : [],
 			gestures: readGestures(p.gestures),
+			figure: readBox(p.figure),
 			added: typeof p.added === "string" && !Number.isNaN(Date.parse(p.added)) ? Date.parse(p.added) : null,
 			special: p.special === true,
+			// The set it came from, so a tall stand-in can prefer the personal set's art to the base set's placeholders.
+			set: base,
 		});
 	}
 	return out;
@@ -266,23 +278,33 @@ export function composeStrip(panels, state, poses, memory, holding = false) {
 }
 
 /**
- * A pose that can fill a tall panel standing in for `pose`: one with a `full` framing and the same expression, or the
- * next in its chain, so a long panel shows the whole of her rather than an inset. Null when the set has none.
+ * The poses that may fill a tall panel standing in for `pose`, best first: the pose itself when drawn tall; then, for a
+ * pose of her at work, a tall one doing the same; then tall poses of the same expression, then of the next in its chain.
+ * Given her `side`, only poses that can stand there facing the words. Within one expression, art from an earlier set (the
+ * personal one) comes before a later set's (the base set's placeholders), and the panel's id (`seed`) fixes the order
+ * among the rest, so the manifest's order never decides and a panel keeps its choice. Whether one actually fits the panel
+ * is for panelLayout, which tries them in this order.
  */
-export function tallFor(poses, pose) {
-	if (!pose) return null;
-	if (pose.framings.includes("full")) return pose;
-	const tall = poses.filter((p) => p.framings.includes("full"));
+export function tallCandidates(poses, pose, side = null, seed = "") {
+	if (!pose) return [];
+	const tall = poses.filter((p) => p.framings.includes("full") && (side === null || standsOn(p, side)));
+	const sets = [];
+	for (const p of poses) if (!sets.includes(p.set)) sets.push(p.set);
+	const ranked = (group) => {
+		const out = [];
+		for (const s of sets) out.push(...stableOrder(group.filter((p) => p.set === s && p.id !== pose.id), seed));
+		return out;
+	};
+	const out = pose.framings.includes("full") ? [pose] : [];
 	// A pose showing her at work keeps her at work if a tall one does; otherwise she stands in her expression's pose.
-	if (pose.activity) {
-		const doing = tall.find((p) => p.activity === pose.activity);
-		if (doing) return doing;
-	}
-	for (const expression of chain(pose.expression)) {
-		const found = tall.find((p) => p.expression === expression && !p.activity);
-		if (found) return found;
-	}
-	return null;
+	if (pose.activity) out.push(...ranked(tall.filter((p) => p.activity === pose.activity)));
+	for (const expression of chain(pose.expression)) out.push(...ranked(tall.filter((p) => p.expression === expression && !p.activity)));
+	return out.filter((p, i) => out.indexOf(p) === i);
+}
+
+/** The first pose that may fill a tall panel for `pose` (tallCandidates), before the panel judges its fit; null for none. */
+export function tallFor(poses, pose, side = null, seed = "") {
+	return tallCandidates(poses, pose, side, seed)[0] ?? null;
 }
 
 /** When a panel happened, in epoch milliseconds: the latest time on its words; null when none carries one. */
@@ -326,11 +348,20 @@ export const GESTURE_SHOWN = 0.7;
 export const GESTURE_FACE = 0.75;
 
 /**
- * How much of the primary gesture of `pose`, as framed by `layout`, is seen: inside the art's clip and under none of
- * the panel's elements (balloons, notes, chips, cards), sampled on a grid. 1 for a pose without a gesture.
+ * In a tall panel the drawing exists to show what she is doing, so more must be seen: nearly all of the primary
+ * gesture's box (its corners are often empty, so not every sample), and at least half of each other gesture, so a
+ * paired action such as a two-palm shrug never reads with one hand hidden.
  */
-export function gestureShown(layout, pose) {
-	const g = pose?.gestures?.[0];
+export const TALL_GESTURE_SHOWN = 0.9;
+export const TALL_SECONDARY_SHOWN = 0.5;
+
+/**
+ * How much of the primary gesture of `pose` (or its gesture at `index`), as framed by `layout`, is seen: inside the
+ * art's clip and under none of the panel's elements (balloons, notes, chips, cards), sampled on a grid. 1 for a pose
+ * without that gesture.
+ */
+export function gestureShown(layout, pose, index = 0) {
+	const g = pose?.gestures?.[index];
 	if (!g || !layout?.art) return 1;
 	const art = layout.art;
 	const bx = layout.mirror ? 1 - g.box.x - g.box.w : g.box.x;
@@ -375,8 +406,20 @@ function stableOrder(list, seed) {
 }
 
 /**
- * Lay out a composed panel (composeStrip): planned with its pose first, and if the words run long enough to need an
- * inset, a pose of the same expression drawn tall takes over and she fills the panel instead. A pose with a gesture
+ * Whether a tall layout of `pose` reads: framed full down the panel (plan has already kept her face near the top and her
+ * drawn figure reaching the bottom), her face at least three quarters of the size `inset` (the requested pose in its
+ * inset) gives it, and her gestures seen as TALL_GESTURE_SHOWN and TALL_SECONDARY_SHOWN ask.
+ */
+export function standsTall(layout, pose, inset) {
+	if (layout.framing !== "full" || !layout.face) return false;
+	if (inset?.face && layout.face.h < inset.face.h * GESTURE_FACE) return false;
+	return (pose.gestures ?? []).every((_, i) => gestureShown(layout, pose, i) >= (i === 0 ? TALL_GESTURE_SHOWN : TALL_SECONDARY_SHOWN));
+}
+
+/**
+ * Lay out a composed panel (composeStrip): planned with its pose first. When the words run long enough to need an inset,
+ * she stands down the whole panel in the first pose of tallCandidates whose full layout reads (standsTall), the panel's
+ * own pose first when it is drawn tall; when none does, the panel's pose stays, in its inset. A pose with a gesture
  * must show it, not crop it or hide it behind the words; failing that, in order: the same pose framed wider while her
  * face keeps most of its size; another pose with the same expression and gesture; another with the same expression;
  * and else the pose as first framed. Only poses in the set when the panel happened count, and every choice follows
@@ -388,16 +431,25 @@ export function panelLayout({ panel, width, sizes, poses }) {
 	const time = selectionMoment(panel);
 	const usable = poses.filter((p) => availableAt(p, time));
 	const lay = (pose, framing) => {
-		const first = plan({ width, side: panel.side, pose, elements: sizes, framing: framing ?? panel.framing });
-		const tall = first.clip.inset && !pose?.special ? tallFor(usable, pose) : null;
-		if (!tall) return { layout: first, pose };
-		return { layout: plan({ width, side: panel.side, pose: tall, elements: sizes, framing: framing ?? panel.framing }), pose: tall };
+		const at = (p) => plan({ width, side: panel.side, pose: p, elements: sizes, framing: framing ?? panel.framing });
+		const first = at(pose);
+		if (!pose || (first.framing !== "full" && !first.clip.inset)) return { layout: first, pose };
+		// A long panel. Her own pose in its inset is the fallback, and the yardstick for her face.
+		const inset = first.framing === "full" ? at(Object.assign({}, pose, { framings: pose.framings.filter((f) => f !== "full") })) : first;
+		const candidates = pose.special ? [pose].filter((p) => p.framings.includes("full")) : tallCandidates(usable, pose, panel.side ?? null, panel.id ?? "");
+		for (const tall of candidates) {
+			const layout = tall === pose ? first : at(tall);
+			if (standsTall(layout, tall, inset)) return { layout, pose: tall };
+		}
+		return { layout: inset, pose };
 	};
 	const first = lay(panel.pose);
 	const pose = first.pose;
 	if (!pose?.gestures?.length) return first;
-	// Her face's size and the crop this panel would give any pose: the yardstick for how far out she may be framed.
-	const natural = plan({ width, side: panel.side, pose: Object.assign({}, pose, { framings: [...new Set([...USUAL, ...pose.framings])] }), elements: sizes, framing: panel.framing });
+	// Her face's size and the crop this panel would give any pose: the yardstick for how far out she may be framed. Full
+	// counts only when she stands tall here; a tall pose that did not is judged against the inset.
+	const reach = [...new Set([...USUAL, ...pose.framings])].filter((f) => f !== "full" || first.layout.framing === "full");
+	const natural = plan({ width, side: panel.side, pose: Object.assign({}, pose, { framings: reach }), elements: sizes, framing: panel.framing });
 	const faceH = natural.face?.h ?? 0;
 	const fits = (l) => (l.layout.face?.h ?? 0) >= faceH * GESTURE_FACE && gestureShown(l.layout, l.pose) >= GESTURE_SHOWN;
 	if (fits(first)) return first;
@@ -493,9 +545,11 @@ export function frame(pose, area, side, edge, framing, mirror) {
 	const fx = mirror ? 1 - pose.face.x - pose.face.w : pose.face.x;
 	const mx = mirror ? 1 - pose.mouth.x : pose.mouth.x;
 	const fcy = pose.face.y + pose.face.h / 2;
-	// No floating torso: the image reaches the area's bottom when the pose has body enough, growing a little if needed.
+	// No floating torso: her drawn figure (to the image's bottom, or to `figure`'s when the manifest gives it) reaches the
+	// area's bottom when the pose has body enough, growing a little if needed.
+	const feet = feetOf(pose);
 	const centerY = area.y + area.h * FACE_Y[framing];
-	const reach = (area.y + area.h - centerY) / (pose.height * (1 - fcy));
+	const reach = (area.y + area.h - centerY) / (pose.height * Math.max(feet - fcy, 0.01));
 	if (reach > scale) scale = Math.min(reach, scale * 1.35, ((room * 0.98) / faceAspect) / (pose.face.h * pose.height));
 	const w = pose.width * scale;
 	const h = pose.height * scale;
@@ -505,7 +559,7 @@ export function frame(pose, area, side, edge, framing, mirror) {
 	const x = centerX - (fx + pose.face.w / 2) * w;
 	let y = centerY - fcy * h;
 	// Still short of the bottom: move her down to meet it, but never so far that her chin leaves the area.
-	if (y + h < area.y + area.h) y = Math.max(y, Math.min(area.y + area.h - h, area.y + area.h - 4 - (pose.face.y + pose.face.h) * h));
+	if (y + feet * h < area.y + area.h) y = Math.max(y, Math.min(area.y + area.h - feet * h, area.y + area.h - 4 - (pose.face.y + pose.face.h) * h));
 	const face = { x: x + fx * w, y: y + pose.face.y * h, w: faceW, h: faceH };
 	return { image: { x, y, w, h }, face, mouth: { x: x + mx * w, y: y + pose.mouth.y * h } };
 }
@@ -705,8 +759,9 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 			// Long words and a pose drawn tall: June down the whole panel, kept only if her figure fills it.
 			framing = "full";
 			framed = frame(pose, clip, side, edgeOf(clip), framing, mirror);
-			// Her face stays near the top; a figure that only reaches the bottom by sliding down the panel is too short.
-			if (framed.image.y + framed.image.h < height - 1 || framed.face.y > height * 0.3) framed = null;
+			// Her face stays near the top; a figure that only reaches the bottom by sliding down the panel is too short, and
+			// one whose drawn boots end above the bottom would float on the image's empty canvas.
+			if (framed.image.y + feetOf(pose) * framed.image.h < height - 1 || framed.face.y > height * 0.3) framed = null;
 		}
 		if (framed === null) {
 			if (m.stacked) {

@@ -5,6 +5,8 @@
 //   june-art ingest SET NAME      finish incoming/NAME.png: key, trim, upscale, place on its canvas, write WebP and
 //                                 the manifest entry, and keep the original and its prompt in source/
 //   june-art sheet SET NAME [OUT] a contact sheet: the piece, its face box and mouth, and its crop at every framing
+//   june-art figure SET NAME...   record where finished poses' drawn figures lie (`figure`), for poses ingested before
+//                                 ingest wrote it; a tall panel stands her on the panel's bottom by it
 //
 // ingest options: --file PATH (instead of incoming/NAME.png), --face X,Y,W,H and --mouth X,Y in source pixels,
 // --gesture NAME,X,Y,W,H (repeatable, the first primary) for a gesture away from her face, --max-width PX for how wide
@@ -166,6 +168,10 @@ function ingest(set, name, options) {
 		if (section === "chibi") finished.play ??= "still";
 		if (face) {
 			finished.face = place.face;
+			// Where her drawn figure lies on the canvas, so a tall panel can stand her on its bottom edge, not the canvas's.
+			const r = (n) => Math.round(n * 1000) / 1000;
+			const fx = Math.max(0, place.x + figure.x * fromSource), fy = Math.max(0, place.y + figure.y * fromSource);
+			finished.figure = [r(fx / W), r(fy / H), r((Math.min(W, place.x + (figure.x + figure.w) * fromSource) - fx) / W), r((Math.min(H, place.y + (figure.y + figure.h) * fromSource) - fy) / H)];
 			const at = (px, py) => [Math.round(((place.x + px * fromSource) / W) * 1000) / 1000, Math.round(((place.y + py * fromSource) / H) * 1000) / 1000];
 			finished.mouth = options.mouth ? at(options.mouth[0], options.mouth[1]) : mouthOf(place.face);
 			// Its gestures in the finished image, the primary first, and only the framings that keep that one in view.
@@ -222,6 +228,29 @@ function ingest(set, name, options) {
 	} finally {
 		rmSync(work, { recursive: true, force: true });
 	}
+}
+
+/**
+ * Record where each named pose's drawn figure lies (`figure`, from the finished image's opaque pixels) in a set's
+ * manifest, for poses ingested before ingest wrote it. Changes nothing else, `added` included.
+ */
+function measureFigures(set, names) {
+	const manifestPath = join(set, "manifest.json");
+	const manifest = readJson(manifestPath, null);
+	if (!manifest) throw new Error(`${manifestPath}: no manifest`);
+	const r = (n) => Math.round(n * 1000) / 1000;
+	for (const name of names) {
+		const entry = manifest.poses?.[name];
+		if (!entry) throw new Error(`${name}: no such pose in ${manifestPath}`);
+		const file = join(set, entry.file);
+		const whole = size(file);
+		const box = alphaBox(file);
+		if (!box) throw new Error(`${name}: ${entry.file} is entirely see-through`);
+		entry.figure = [r(box.x / whole.w), r(box.y / whole.h), r(box.w / whole.w), r(box.h / whole.h)];
+		console.log(`${name}: figure ${entry.figure.join(", ")}`);
+	}
+	parseManifest(manifest);
+	writeJson(manifestPath, manifest);
 }
 
 function status(set) {
@@ -320,7 +349,8 @@ function main(argv) {
 	if (command === "status" && set) return status(set);
 	if (command === "ingest" && set && name) return ingest(set, name, options);
 	if (command === "sheet" && set && name) return sheet(set, name, positional[0]);
-	console.error("usage: june-art status SET | ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--gesture NAME,X,Y,W,H]... [--max-width PX] [--key COLOUR] [--fuzz PERCENT] | sheet SET NAME [OUT]");
+	if (command === "figure" && set && name) return measureFigures(set, [name, ...positional]);
+	console.error("usage: june-art status SET | ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--gesture NAME,X,Y,W,H]... [--max-width PX] [--key COLOUR] [--fuzz PERCENT] | sheet SET NAME [OUT] | figure SET NAME...");
 	process.exit(2);
 }
 
