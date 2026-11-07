@@ -107,7 +107,8 @@ fun Conversation(link: Link, locked: Boolean, screen: Screen?, dismiss: () -> Un
                 color = palette.page,
                 contentColor = palette.pageInk,
             ) {
-                if (locked) Prompt("Unlock to talk to June", unlock) else Sheet(link, screen = screen)
+                // A file opened from the strip goes to another app, which this sheet would cover: it hides once that app opens.
+                if (locked) Prompt("Unlock to talk to June", unlock) else androidx.compose.runtime.CompositionLocalProvider(LocalLeave provides dismiss) { Sheet(link, screen = screen) }
             }
         }
         // Where the fingerprint is read: the phone's own reader stays live under the session, and unlocking there

@@ -30,7 +30,7 @@ export type ViewItem =
 	/** `private` marks June's own look, shown only in detail. */
 	/** `files` are those the message brought to June's inbox, with where they were saved. */
 	/** `at`, on a user or assistant item, is when its message was written, in epoch milliseconds, when the log has it. */
-	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; files?: { name: string; size: number; path: string }[]; private?: true; at?: number }
+	| { kind: "user"; id: string; source: string; text: string; imageCount?: number; files?: { name: string; size: number; path: string; mimeType?: string }[]; private?: true; at?: number }
 	/**
 	 * `text` is Markdown. `thinking` holds one flattened line per thinking block, or in detail the full text. `answers` is
 	 * the source of the input the reply follows, empty when that input is before the transcript. `alert` names the client

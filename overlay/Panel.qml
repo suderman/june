@@ -340,8 +340,12 @@ Item {
       readonly property int pictures: element ? Math.min(element.pictures ?? 0, 3) : 0
       readonly property bool said: body.text.length > 0
       readonly property real photos: pictures > 0 ? 62 + (pictures - 1) * 16 + (said ? 12 : 0) : 0
-      readonly property real w: Math.ceil(Math.min(marker.implicitWidth + 8 + (said || pictures === 0 ? body.width : 0) + photos + 28, panel.m.textWidth))
-      readonly property real h: Math.ceil(Math.max(body.height, marker.height, pictures > 0 ? 78 : 0) + 20)
+      // Files it brought, as document cards clipped on below the words, a row each.
+      readonly property var files: element && element.files ? element.files : []
+      readonly property real cardW: Math.min(260, panel.m.textWidth - 28)
+      readonly property real cardsTop: Math.max(body.height, marker.height, pictures > 0 ? 78 : 0) + 16
+      readonly property real w: Math.ceil(Math.min(Math.max(marker.implicitWidth + 8 + (said || (pictures === 0 && files.length === 0) ? body.width : 0) + photos, files.length > 0 ? cardW : 0) + 28, panel.m.textWidth))
+      readonly property real h: Math.ceil(Math.max(body.height, marker.height, pictures > 0 ? 78 : 0) + 20 + (files.length > 0 ? files.length * 32 : 0))
       width: w
       height: h
       radius: 14
@@ -408,6 +412,19 @@ Item {
               PathSvg { path: "M 4 26 L 4 6 A 4 4 0 0 1 12 6 L 12 30 A 6 6 0 0 1 0 30 L 0 10" }
             }
           }
+        }
+      }
+      Repeater {
+        model: noteBox.files
+        delegate: FileCard {
+          required property var modelData
+          required property int index
+          file: modelData
+          onChosen: url => Qt.openUrlExternally(url)
+          url: panel.attached && noteBox.item ? panel.attached + noteBox.item.id + "/file/" + modelData.n : ""
+          x: 14
+          y: noteBox.cardsTop + index * 32
+          width: noteBox.w - 28
         }
       }
     }

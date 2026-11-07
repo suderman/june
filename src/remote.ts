@@ -28,6 +28,8 @@ export type RemoteOptions = {
 	readonly avatar?: string;
 	/** The `n`th picture the user's message `id` brought, for a client to show with it; none without the callback. */
 	readonly attachment?: (id: string, n: number) => Promise<{ data: string; mimeType: string } | undefined>;
+	/** The `n`th file the user's message `id` brought, while June's inbox keeps it; none without the callback. */
+	readonly file?: (id: string, n: number) => Promise<{ path: string; name: string; mimeType: string } | undefined>;
 	/** Tests shorten these. */
 	readonly helloMs?: number;
 	readonly pingMs?: number;
@@ -106,6 +108,37 @@ export async function startRemote(options: RemoteOptions): Promise<Remote> {
 					const bytes = Buffer.from(found.data, "base64");
 					response.writeHead(200, { "content-type": found.mimeType, "cache-control": "private, max-age=31536000, immutable", "content-length": String(bytes.length) });
 					response.end(request.method === "HEAD" ? undefined : bytes);
+				},
+				() => notFound(),
+			);
+			return;
+		}
+		const document = /^\/attached\/([\w-]+)\/(\d{1,12})\/file\/(\d)$/.exec(url);
+		if (document && (request.method === "GET" || request.method === "HEAD") && options.file !== undefined) {
+			const owner = keys.get(document[1]);
+			if (owner === undefined || !listed(owner)) return notFound();
+			void options.file(document[2]!, Number(document[3])).then(
+				(found) => {
+					let size: number;
+					try {
+						size = found === undefined ? -1 : statSync(found.path).size;
+					} catch {
+						size = -1;
+					}
+					if (found === undefined || size < 0) return notFound();
+					response.writeHead(200, {
+						"content-type": found.mimeType,
+						"content-length": String(size),
+						// Opened in place, under its own name. A sandbox keeps a sent HTML or SVG file from running script on
+						// this origin, where the device's paths are.
+						"content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(found.name)}`,
+						"content-security-policy": "sandbox",
+						"x-content-type-options": "nosniff",
+						// The inbox drops it after 30 days, so a client asks again rather than keeping it for good.
+						"cache-control": "private, no-cache",
+					});
+					if (request.method === "HEAD") return response.end();
+					createReadStream(found.path).on("error", () => response.destroy()).pipe(response);
 				},
 				() => notFound(),
 			);

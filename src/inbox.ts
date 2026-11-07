@@ -114,6 +114,17 @@ export function describeFiles(files: readonly SavedFile[]): string {
 	return files.map((f) => `[file ${f.name}, ${f.mimeType}, ${formatSize(f.size)}, saved at ${f.path}]`).join("\n");
 }
 
+// What a file's name says it is, for messages saved before their type was kept.
+const TYPES: Record<string, string> = {
+	".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown", ".org": "text/plain", ".csv": "text/csv",
+	".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+	".webp": "image/webp", ".zip": "application/zip", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".mp3": "audio/mpeg", ".mp4": "video/mp4",
+};
+export function typeOf(name: string): string {
+	return TYPES[extname(name).toLowerCase()] ?? "application/octet-stream";
+}
+
 export function formatSize(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;

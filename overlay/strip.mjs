@@ -62,7 +62,7 @@ const weightOf = (e) => (e.kind === "user" ? e.text.length : e.kind === "june" ?
  * while she writes), `tools` (consecutive tool calls, drawn as a chip or a status card), `thought` (patter; a panel keeps
  * only its latest), and `burst` (a notice, or a reply that failed).
  */
-export function panels(items) {
+export function panels(items, now = Date.now()) {
 	const out = [];
 	let current = null;
 	const open = (id, carried = []) => {
@@ -75,8 +75,9 @@ export function panels(items) {
 		if (item.kind === "user") {
 			open(item.id);
 			current.user = item;
-			// The comic draws the pictures themselves (polaroids clipped to the note); the console says them in words.
-			current.elements.push({ kind: "user", id: item.id, item, text: noteText(item, false), pictures: item.imageCount ?? 0 });
+			// The comic draws the pictures (polaroids) and files (document cards) clipped to the note; the console says
+			// them in words.
+			current.elements.push({ kind: "user", id: item.id, item, text: noteText(item, false, false), pictures: item.imageCount ?? 0, files: noteFiles(item, now) });
 			continue;
 		}
 		if (current === null) open(item.id);
@@ -222,13 +223,33 @@ export function followKey(f) {
  * What the user's note says: their words, and what came with them, a line each, so a picture sent with a word or with
  * none ("look") still shows. `pictures` false leaves the pictures out, for a client that draws them.
  */
-export function noteText(item, pictures = true) {
+export function noteText(item, pictures = true, files = true) {
 	const lines = [];
 	const words = (item.text ?? "").trim();
 	if (words) lines.push(words);
 	if (pictures && item.imageCount) lines.push(item.imageCount === 1 ? "+ picture" : `+ ${item.imageCount} pictures`);
-	for (const file of item.files ?? []) lines.push(`+ ${file.name}`);
+	if (files) for (const file of item.files ?? []) lines.push(`+ ${file.name}`);
 	return lines.join("\n");
+}
+
+// June's inbox keeps a file this long (INBOX_DAYS in src/inbox.ts); after it the daemon no longer serves it.
+const INBOX_MS = 30 * 24 * 60 * 60_000;
+
+/**
+ * The files a note brought, each with its place in the message (`n`, for the `file/n` path under the hello's
+ * `attached`), its name, its size in words, and whether the inbox has dropped it, which a card shows greyed and closed.
+ */
+export function noteFiles(item, now = Date.now()) {
+	const gone = typeof item.at === "number" && now - item.at > INBOX_MS;
+	return (item.files ?? []).map((file, n) => ({ n, name: String(file.name ?? ""), size: fileSize(file.size), expired: gone }));
+}
+
+/** A file's size for a card: 812 B, 14 KB, 3.2 MB. */
+export function fileSize(bytes) {
+	if (typeof bytes !== "number" || !(bytes >= 0)) return "";
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+	return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 /** The small badge for June's state, or "" when she is idle. */

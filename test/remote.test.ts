@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { rmSync } from "node:fs";
 import { mkdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -306,6 +307,40 @@ test("a paired device loads the picture a message brought, and only a user's own
 	assert.equal((await fetch(`${base}${reply.id.split("#")[0]}/0`)).status, 404, "nothing June said");
 	assert.equal((await fetch(`${base}999999/0`)).status, 404, "no such message");
 	assert.equal((await fetch(`http://127.0.0.1:${port}/attached/not-a-key/${sent.id}/0`)).status, 404, "an unknown key");
+});
+
+test("a paired device opens a file a message brought while the inbox keeps it, sandboxed, under its own name", async (t) => {
+	const { tmp, port } = await remoteDaemon(t, [fauxAssistantMessage("got the notes")]);
+	const token = ((await device(tmp.paths.socket, "add", "gem")) as Extract<Reply, { type: "devices" }>).token!;
+	const c = await connect(port);
+	t.after(() => c.ws.terminate());
+	c.send({ op: "hello", requestId: "h", token, protocol: 1 });
+	const base = `http://127.0.0.1:${port}${((await c.reply("h")) as Extract<Reply, { type: "hello" }>).attached}`;
+	const page = "<script>alert(1)</script>";
+	c.send({ op: "submit", requestId: "s", text: "notes", files: [{ name: "My notes.pdf", mimeType: "application/pdf", data: Buffer.from("%PDF-1.4 tiny").toString("base64") }, { name: "page.html", mimeType: "text/html", data: Buffer.from(page).toString("base64") }], source: "apk", wait: true });
+	await c.reply("s", "settled");
+	c.send({ op: "attach", requestId: "a" });
+	const view = (await c.reply("a", "view")) as Extract<Reply, { type: "view"; reset: true }>;
+	const sent = view.items.find((i) => i.kind === "user" && i.files?.length === 2) as Extract<ViewItem, { kind: "user" }>;
+	assert.ok(sent, "the message is in the view with its files");
+	assert.equal(sent.files![0]!.mimeType, "application/pdf", "the type is kept with the message");
+
+	const pdf = await fetch(`${base}${sent.id}/file/0`);
+	assert.equal(pdf.status, 200);
+	assert.equal(pdf.headers.get("content-type"), "application/pdf");
+	assert.equal(pdf.headers.get("content-disposition"), "inline; filename*=UTF-8''My%20notes.pdf");
+	assert.equal(await pdf.text(), "%PDF-1.4 tiny");
+	const html = await fetch(`${base}${sent.id}/file/1`);
+	assert.equal(html.headers.get("content-security-policy"), "sandbox", "a sent page cannot run script on this origin");
+	assert.equal(html.headers.get("x-content-type-options"), "nosniff");
+	assert.equal(await html.text(), page);
+	assert.equal((await fetch(`${base}${sent.id}/file/2`)).status, 404, "only the files it brought");
+	assert.equal((await fetch(`http://127.0.0.1:${port}/attached/not-a-key/${sent.id}/file/0`)).status, 404, "an unknown key");
+
+	rmSync(sent.files![0]!.path);
+	assert.equal((await fetch(`${base}${sent.id}/file/0`)).status, 404, "an expired file is gone");
+	await device(tmp.paths.socket, "revoke", "gem");
+	assert.equal((await fetch(`${base}${sent.id}/file/1`)).status, 404, "a revoked device's key stops working");
 });
 
 test("WebSocket retake, Back and Forward change only art, survive restart, and replay once", async (t) => {

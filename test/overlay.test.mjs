@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { activity, applyView, beats, caption, emptyView, markup, panels, readInput, status, noteText } from "../overlay/strip.mjs";
+import { activity, applyView, beats, caption, emptyView, fileSize, markup, panels, readInput, status, noteText } from "../overlay/strip.mjs";
 import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, panelLayout, jagged, liveActivity, metrics, picked, plan, readPoses, selectionMoment, standIn, takeMenu, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
@@ -67,6 +67,20 @@ test("panels hold elements: the user's note, June's beats, tools gathered, one t
 	assert.equal(strip[1].elements[2].item.text, "second", "a panel keeps only its latest thought");
 	assert.deepEqual(strip[1].elements.filter((e) => e.kind === "june").map((e) => e.streaming), [false, true], "only the last beat is still being written");
 	assert.deepEqual(strip[2].elements.map((e) => e.kind), ["user", "burst"]);
+});
+
+test("a note carries the files it brought as cards, in words only for the console, closed once the inbox drops them", () => {
+	const at = Date.UTC(2026, 10, 1, 12);
+	const day = 24 * 60 * 60_000;
+	const item = { ...user("u1", "read these"), at, imageCount: 1, files: [{ name: "Report.pdf", size: 3_400_000, path: "/inbox/a" }, { name: "notes.txt", size: 812, path: "/inbox/b" }] };
+	const [fresh] = panels([item], at + day);
+	const note = fresh.elements[0];
+	assert.equal(note.text, "read these", "the comic draws pictures and files, so the note says only the words");
+	assert.deepEqual(note.files, [{ n: 0, name: "Report.pdf", size: "3.2 MB", expired: false }, { n: 1, name: "notes.txt", size: "812 B", expired: false }]);
+	assert.equal(noteText(item), "read these\n+ picture\n+ Report.pdf\n+ notes.txt", "the console still says them");
+	assert.deepEqual(panels([item], at + 31 * day)[0].elements[0].files.map((f) => f.expired), [true, true], "past the inbox's 30 days");
+	assert.deepEqual(panels([user("u2", "hi")])[0].elements[0].files, []);
+	assert.deepEqual([fileSize(0), fileSize(14_336), fileSize(undefined)], ["0 B", "14 KB", ""]);
 });
 
 test("a crowded exchange continues in the next panel, taking the tools and thought that lead into the balloon", () => {

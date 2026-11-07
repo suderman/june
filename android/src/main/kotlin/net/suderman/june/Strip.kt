@@ -35,6 +35,8 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import kotlinx.coroutines.launch
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
@@ -142,6 +144,27 @@ class Avatar(private val context: Context) {
         runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }.getOrNull()
     }?.also { cache.put("attached:$path", it) }
 
+    /**
+     * A file the user's message brought, at `path` (`<message id>/file/<n>`) under the hello's `attached`, downloaded
+     * into the cache for another app to open, with the type the daemon gives it. Null when it cannot be had, such as
+     * once June's inbox has dropped it. Fetched again each time, since the file can expire.
+     */
+    suspend fun document(path: String, name: String): Pair<java.io.File, String>? = withContext(Dispatchers.IO) {
+        val m = Regex("^(\\d+)/file/(\\d)$").find(path) ?: return@withContext null
+        val origin = Pairing.load(context)?.url?.let { Regex("^(wss?)://([^/]+)").find(it) } ?: return@withContext null
+        val base = attachedPath ?: return@withContext null
+        val safe = name.replace(Regex("[/\\\\\\u0000-\\u001f]"), "_").trimStart('.').ifBlank { "file" }
+        runCatching {
+            client.newCall(okhttp3.Request.Builder().url((if (origin.groupValues[1] == "wss") "https://" else "http://") + origin.groupValues[2] + base + path).build()).execute().use { r ->
+                if (!r.isSuccessful) return@use null
+                val kept = java.io.File(context.cacheDir, "files/${m.groupValues[1]}/${m.groupValues[2]}/$safe")
+                kept.parentFile?.mkdirs()
+                r.body.byteStream().use { input -> kept.outputStream().use { input.copyTo(it) } }
+                kept to (r.header("content-type")?.substringBefore(";")?.trim()?.ifEmpty { null } ?: "application/octet-stream")
+            }
+        }.getOrNull()
+    }
+
     /** Where the daemon serves the pictures messages brought (the hello's `attached`), set by the strip. */
     @Volatile var attachedPath: String? = null
 
@@ -209,6 +232,71 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
 class Pictures(val avatar: Avatar, val path: String?, val open: (String) -> Unit)
 
 val LocalPictures = androidx.compose.runtime.staticCompositionLocalOf<Pictures?> { null }
+
+/** What to do once another app is opening over June: the assistant sheet hides, so the app is not behind it. */
+val LocalLeave = androidx.compose.runtime.staticCompositionLocalOf<() -> Unit> { {} }
+
+/** Hand a downloaded file to the app the phone uses for its type, or say there is none. */
+fun openFile(context: Context, file: java.io.File, type: String): Boolean {
+    val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+    val view = android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, type)
+        .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    return try {
+        context.startActivity(view)
+        true
+    } catch (_: android.content.ActivityNotFoundException) {
+        android.widget.Toast.makeText(context, "No app on this phone opens ${file.name}", android.widget.Toast.LENGTH_LONG).show()
+        false
+    }
+}
+
+/**
+ * The files a note brought, as document cards below its words, a row each: a page with its corner folded, the name and
+ * size. A tap downloads one and opens it with the phone's app for its type, while June's inbox keeps it; an expired
+ * card is greyed and closed. `top` is where the first card sits, as the note's measure left room for them.
+ */
+@Composable
+private fun FileCards(item: JSONObject, files: org.json.JSONArray, noteW: Float, top: Float) {
+    val pictures = LocalPictures.current
+    val leave = LocalLeave.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    for (i in 0 until files.length()) {
+        val file = files.getJSONObject(i)
+        val expired = file.optBoolean("expired")
+        val name = file.optString("name")
+        val path = pictures?.path?.let { "${item.optString("id")}/file/${file.optInt("n")}" }
+        var fetching by remember(path) { mutableStateOf(false) }
+        Box(
+            Modifier.offset(14.dp, (top + i * 32).dp).size((noteW - 28).dp, 26.dp).rotate(if (file.optInt("n") % 2 == 0) -1f else 1f)
+                .alpha(if (expired) 0.5f else 1f)
+                .clickable(enabled = !expired && path != null && !fetching) {
+                    fetching = true
+                    scope.launch {
+                        val got = path?.let { pictures.avatar.document(it, name) }
+                        fetching = false
+                        if (got == null) android.widget.Toast.makeText(context, "Could not get $name; June's inbox may have dropped it", android.widget.Toast.LENGTH_LONG).show()
+                        else if (openFile(context, got.first, got.second)) leave()
+                    }
+                },
+        ) {
+            Box(Modifier.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(3.dp)).border(1.5.dp, Look.ink, RoundedCornerShape(3.dp)))
+            Canvas(Modifier.offset(8.dp, 4.dp).size(14.dp, 18.dp)) {
+                scale(density, density, pivot = Offset.Zero) {
+                    val page = path("M 0 0 L 9 0 L 14 5 L 14 18 L 0 18 Z")
+                    drawPath(page, Color.White)
+                    drawPath(page, Look.ink, style = Stroke(1.5f, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                    drawPath(path("M 9 0 L 9 5 L 14 5"), Look.ink, style = Stroke(1.5f, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                }
+            }
+            Row(Modifier.fillMaxSize().padding(start = 28.dp, end = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text(name, style = noteBody.copy(fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
+                Text(if (expired) "expired" else if (fetching) "opening…" else file.optString("size"), style = noteBody.copy(fontSize = 12.sp, color = Look.noteLine), maxLines = 1)
+            }
+        }
+    }
+}
 
 /** The polaroids clipped to a note: its pictures after the words, fanned when there are several, the front one clipped on. */
 @Composable
@@ -310,7 +398,11 @@ private fun measure(e: JSONObject, newest: Boolean, textWidth: Float, measurer: 
             val photos = if (pictures > 0) 62f + (pictures - 1) * 16f + (if (said) 12f else 0f) else 0f
             val bodyW = min(natural(body, noteBody) + 2, textWidth - 28 - marker - 8 - photos)
             val h = max(max(height(body, noteBody, bodyW), height(AnnotatedString("›"), noteMarker, marker)), if (pictures > 0) 78f else 0f)
-            Measured(kind, ceil(min(marker + 8 + (if (said || pictures == 0) bodyW else 0f) + photos + 28, textWidth)), ceil(h + 20), e, bodyW, marker)
+            // And for its files' cards below, a row each, as the overlay's note keeps them.
+            val files = e.optJSONArray("files")?.length() ?: 0
+            val cardW = min(260f, textWidth - 28)
+            val w = max(marker + 8 + (if (said || (pictures == 0 && files == 0)) bodyW else 0f) + photos, if (files > 0) cardW else 0f)
+            Measured(kind, ceil(min(w + 28, textWidth)), ceil(h + 20 + files * 32), e, bodyW, marker)
         }
         "chip" -> {
             val call = calls(e)[0]
@@ -565,6 +657,7 @@ private fun ElementView(e: Measured, box: JSONObject, newest: Boolean) {
             Text(noteMarkerText(item), style = noteMarker, modifier = Modifier.offset(14.dp, 10.dp))
             Text(el.optString("text", item.optString("text")), style = noteBody, modifier = Modifier.offset((14 + e.markerW + 8).dp, 10.dp).width(e.textW.dp))
             Polaroids(item, min(el.optInt("pictures"), 3), e.w)
+            el.optJSONArray("files")?.takeIf { it.length() > 0 }?.let { files -> FileCards(item, files, e.w, e.h - 4 - files.length() * 32) }
         }
         "chip" -> {
             val call = calls(el)[0]

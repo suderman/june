@@ -203,3 +203,55 @@ Item {
 	assert.equal(code, 0, output);
 	assert.match(output, /test_select_and_retake.*PASS|PASS.*test_select_and_retake/);
 });
+
+test("Qt's file card shows the file's name and size, asks to open it by its url, and stays closed once expired", { skip: !qml, timeout: 15000 }, async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "june-file-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	await mkdir(join(dir, "ui"));
+	await copyFile(new URL("../overlay/FileCard.qml", import.meta.url), join(dir, "ui", "FileCard.qml"));
+	const theme = (await readFile(new URL("../overlay/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
+	await writeFile(join(dir, "ui", "Theme.qml"), theme);
+	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\nFileCard 1.0 FileCard.qml\n");
+	await writeFile(join(dir, "tst_file.qml"), `
+import QtQuick
+import QtTest
+import "ui"
+Item {
+  id: root
+  width: 320; height: 80
+  property string opened: ""
+  FileCard { id: card; x: 10; y: 10; width: 280; onChosen: url => root.opened = url }
+  TestCase {
+    name: "FileCard"
+    when: windowShown
+    function init() { root.opened = ""; card.url = "https://june.kit/attached/key/42/file/0"; card.file = { n: 0, name: "Report.pdf", size: "3.2 MB", expired: false }; }
+    function test_open() {
+      compare(findChild(card, "name").text, "Report.pdf");
+      compare(findChild(card, "size").text, "3.2 MB");
+      mouseClick(card, card.width / 2, card.height / 2);
+      compare(root.opened, "https://june.kit/attached/key/42/file/0");
+    }
+    function test_expired() {
+      card.file = { n: 1, name: "Report.pdf", size: "3.2 MB", expired: true };
+      compare(findChild(card, "size").text, "expired");
+      compare(card.opacity, 0.5);
+      mouseClick(card, card.width / 2, card.height / 2);
+      compare(root.opened, "");
+    }
+    function test_no_url_before_hello() {
+      card.url = "";
+      mouseClick(card, card.width / 2, card.height / 2);
+      compare(root.opened, "");
+    }
+  }
+}
+`);
+	const child = spawn(join(dirname(qml), "qmltestrunner"), ["-input", dir], { env: { ...process.env, QT_QPA_PLATFORM: "offscreen", QT_QUICK_BACKEND: "software", QT_STYLE_OVERRIDE: "", QT_QPA_PLATFORMTHEME: "", QT_FORCE_STDERR_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+	let output = "";
+	for (const stream of [child.stdout, child.stderr]) stream.on("data", (data) => { output += data; });
+	const closed = once(child, "close");
+	t.after(() => child.kill());
+	const [code] = await closed;
+	assert.equal(code, 0, output);
+	assert.match(output, /Totals: 5 passed, 0 failed/);
+});

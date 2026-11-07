@@ -1,8 +1,8 @@
 // The June daemon: the one process that owns the Durable database. It runs the harness and a Unix socket that clients
 // attach to, folding the conversation into display items for each of them.
-import { chmodSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { chmodSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
-import { dirname } from "node:path";
+import { dirname, sep } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT as BG, withAbortSignal } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
@@ -29,7 +29,7 @@ import { entryTimes } from "./history.ts";
 import { createSituation, type Situation } from "./situation.ts";
 import { setUser, user } from "./user.ts";
 import { validateImages } from "./images.ts";
-import { describeFiles, saveFiles, startInboxExpiry, validateFiles } from "./inbox.ts";
+import { describeFiles, saveFiles, startInboxExpiry, typeOf, validateFiles } from "./inbox.ts";
 import { createMemoryExtension } from "./memory.ts";
 import { createKeptImagesExtension, startImageExpiry } from "./kept-images.ts";
 import { Hidden, KINDS, Timeline } from "./timeline.ts";
@@ -305,7 +305,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		// The listener is a convenience beside the socket: a port already taken is logged and shown in status, not fatal.
 		if (config.remote) {
 			try {
-				remote = await startRemote({ port: config.remote.port, devices, log, session: (send, device) => session(send, scope, device), avatar: `${paths.data}/avatar`, attachment: (id, n) => attachment(root, id, n), ...options.remoteTiming });
+				remote = await startRemote({ port: config.remote.port, devices, log, session: (send, device) => session(send, scope, device), avatar: `${paths.data}/avatar`, attachment: (id, n) => attachment(root, id, n), file: (id, n) => inboxFile(root, inbox, id, n), ...options.remoteTiming });
 			} catch (error) {
 				remoteError = (error as Error).message;
 				log.error("remote_listen_failed", { port: config.remote.port, error: remoteError });
@@ -496,7 +496,7 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 								source,
 								text: request.text,
 								...(images.length ? { imageCount: images.length } : {}),
-								...(saved.length ? { files: saved.map(({ name, size, path }) => ({ name, size, path })) } : {}),
+								...(saved.length ? { files: saved.map(({ name, size, path, mimeType }) => ({ name, size, path, mimeType })) } : {}),
 							},
 						},
 					},
@@ -679,6 +679,26 @@ export async function attachView(
  * The `n`th picture the user's message `id` brought, as the model received it, for clients to show with the message.
  * Only the user's own messages from a surface they see: never a private source's, never anything June or a tool made.
  */
+/**
+ * The `n`th file the user's message `id` brought, while the inbox still keeps it: its real path, which must lie inside
+ * the inbox, its name, and its type. Undefined once it has expired, or for a private look's input.
+ */
+export async function inboxFile(root: Conversation, inbox: string, id: string, n: number): Promise<{ path: string; name: string; mimeType: string } | undefined> {
+	const entry = await root.commit((tx) => tx.entry(Number(id) as never), BG);
+	if (entry?.kind !== "june.input" || PRIVATE.has(sourceName(String((entry.data as { source?: unknown } | undefined)?.source ?? "")))) return undefined;
+	const files = (entry.data as { files?: unknown } | undefined)?.files;
+	const file = Array.isArray(files) ? (files[n] as { name?: unknown; path?: unknown; mimeType?: unknown } | undefined) : undefined;
+	if (typeof file?.path !== "string" || typeof file.name !== "string") return undefined;
+	let path: string;
+	try {
+		path = realpathSync(file.path);
+		if (!path.startsWith(realpathSync(inbox) + sep)) return undefined;
+	} catch {
+		return undefined;
+	}
+	return { path, name: file.name, mimeType: typeof file.mimeType === "string" ? file.mimeType : typeOf(file.name) };
+}
+
 export async function attachment(root: Conversation, id: string, n: number): Promise<{ data: string; mimeType: string } | undefined> {
 	const entry = await root.commit((tx) => tx.entry(Number(id) as never), BG);
 	if (entry?.kind !== "june.input" || PRIVATE.has(sourceName(String((entry.data as { source?: unknown } | undefined)?.source ?? "")))) return undefined;

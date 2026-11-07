@@ -55,12 +55,12 @@ test("a file is saved privately in the inbox, June is told its name, type, size,
 	assert.equal((await stat(path)).mode & 0o777, 0o600);
 	assert.equal((await stat(join(path, ".."))).mode & 0o777, 0o700);
 	assert.equal((await stat(inbox)).mode & 0o777, 0o700);
-	assert.deepEqual(input!.files, [{ name: "notes.txt", size: 9, path }]);
+	assert.deepEqual(input!.files, [{ name: "notes.txt", size: 9, path, mimeType: "text/plain" }], "the type is kept so a client can open it");
 	assert.equal(told, `[cli] [file notes.txt, text/plain, 9 B, saved at ${path}]`);
 	assert.ok(prompt.includes(`your inbox, ${inbox} on `) && prompt.includes("deleted after 30 days"), "June knows where her inbox is");
 	await until(() => view.items().some((i) => i.kind === "user" && i.files?.length === 1));
 	const item = view.items().find((i) => i.kind === "user")!;
-	assert.deepEqual(item.kind === "user" && item.files, [{ name: "notes.txt", size: 9, path }]);
+	assert.deepEqual(item.kind === "user" && item.files, [{ name: "notes.txt", size: 9, path, mimeType: "text/plain" }]);
 });
 
 test("a retried submit with the same request id saves its file once", async (t) => {

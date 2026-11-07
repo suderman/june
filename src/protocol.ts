@@ -99,7 +99,7 @@ export type Reply =
 	| { type: "settled"; requestId: string; status: "done" | "unanswered"; text?: string; reason?: string }
 	| { type: "reply"; requestId: string; text: string }
 	| { type: "error"; requestId?: string; message: string }
-	/** `avatar` is this device's path to the user's avatar set on the same host, when the daemon serves one; `attached`, to the pictures the user's messages brought (`<message id>/<n>`). */
+	/** `avatar` is this device's path to the user's avatar set on the same host, when the daemon serves one; `attached`, to the pictures and files the user's messages brought (`<message id>/<n>`, `<message id>/file/<n>`). */
 	| { type: "hello"; requestId: string; device: string; protocol: number; avatar?: string; attached?: string }
 	/** `token` after add; `closed` after revoke, the connections it closed. */
 	| { type: "devices"; requestId: string; devices: DeviceInfo[]; token?: string; closed?: number }
