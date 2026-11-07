@@ -152,7 +152,7 @@ export async function writable(org: Org, config: Config, file: string): Promise<
 		throw new Error(`June does not write ${rel}`);
 	const siblings = await readdir(dirname(path));
 	if (siblings.some((f) => f.startsWith(name.replace(/\.org$/, ".sync-conflict-"))))
-		throw new Error(`${rel} has a Syncthing conflict copy beside it; the user should resolve it first`);
+		throw new Error(`${rel} has a Syncthing conflict copy beside it; resolve it with the org-conflicts skill, then retry`);
 	const agenda = await readFile(config.org.agendaFiles, "utf8").catch(() => {
 		throw new Error(`No agenda list at ${config.org.agendaFiles}; the dispatcher has not run on this host`);
 	});
@@ -268,7 +268,7 @@ export class Dispatch {
 		const path = join(directory, `${request.project}.org`);
 		const siblings = await readdir(directory);
 		if (siblings.some((name) => name.startsWith(`${request.project}.sync-conflict-`)))
-			throw new Error(`${file} has a Syncthing conflict copy beside it; the user should resolve it first`);
+			throw new Error(`${file} has a Syncthing conflict copy beside it; resolve it with the org-conflicts skill, then retry`);
 		const links = [
 			...(request.dir ? [`[[file:${request.dir.replace(/\/$/, "")}/][local]]`] : []),
 			...(request.github ? [`[[${request.github}][GitHub]]`] : []),

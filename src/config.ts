@@ -105,6 +105,11 @@ export type Config = {
 	 * things from the day whose outcome she never heard, so the nightly reflection can close the day; off by default.
 	 */
 	readonly looseEnds: { readonly enabled: boolean; readonly at: string };
+	/**
+	 * June's nightly Syncthing check: once a day from `at`, local "HH:MM", until `rhythm.quiet`, the org-conflicts skill's
+	 * command retires conflict copies under the Org root that add nothing, and she reconciles the rest; off by default.
+	 */
+	readonly conflicts: { readonly enabled: boolean; readonly at: string };
 	/** New mail for the heartbeat, from a notmuch query; accounts name each maildir folder, such as {"work": "work"}. */
 	readonly mail: { readonly enabled: boolean; readonly query: string; readonly accounts: Readonly<Record<string, string>> };
 	/** Dispatched tasks June did not queue, on `dispatch.hosts`: news reaches her in waking hours, at most every `gapMinutes`. */
@@ -172,6 +177,7 @@ const DEFAULTS = {
 	reflection: { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"], bitcoin: false },
 	heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
 	looseEnds: { enabled: false, at: "20:30" },
+	conflicts: { enabled: false, at: "00:30" },
 	mail: { enabled: false, query: "tag:inbox and tag:unread", accounts: {} as Record<string, string> },
 	watch: { enabled: false, gapMinutes: 10 },
 	patter: { openAfterSeconds: 8, gapsSeconds: [25, 25, 25, 40, 60, 90, 120, 180] },
@@ -225,7 +231,8 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 		rhythm: rhythm({ ...DEFAULTS.rhythm, ...raw.rhythm }),
 		reflection: reflection({ ...DEFAULTS.reflection, ...raw.reflection }),
 		heartbeat: heartbeat({ ...DEFAULTS.heartbeat, ...raw.heartbeat }),
-		looseEnds: looseEnds({ ...DEFAULTS.looseEnds, ...raw.looseEnds }),
+		looseEnds: daily("looseEnds", { ...DEFAULTS.looseEnds, ...raw.looseEnds }),
+		conflicts: daily("conflicts", { ...DEFAULTS.conflicts, ...raw.conflicts }),
 		mail: mail({ ...DEFAULTS.mail, ...raw.mail }),
 		watch: watch({ ...DEFAULTS.watch, ...raw.watch }),
 		patter: patterTiming({ ...DEFAULTS.patter, ...raw.patter }),
@@ -267,9 +274,10 @@ function heartbeat(given: Config["heartbeat"]): Config["heartbeat"] {
 	return given;
 }
 
-function looseEnds(given: Config["looseEnds"]): Config["looseEnds"] {
-	if (typeof given.enabled !== "boolean") throw new Error("looseEnds.enabled must be true or false");
-	if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(given.at))) throw new Error(`looseEnds.at must be HH:MM, not ${given.at}`);
+/** A once-a-day look's settings: on or off, and its local "HH:MM". */
+function daily(name: string, given: { enabled: boolean; at: string }): { enabled: boolean; at: string } {
+	if (typeof given.enabled !== "boolean") throw new Error(`${name}.enabled must be true or false`);
+	if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(given.at))) throw new Error(`${name}.at must be HH:MM, not ${given.at}`);
 	return { enabled: given.enabled, at: given.at };
 }
 

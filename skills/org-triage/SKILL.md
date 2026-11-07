@@ -117,7 +117,7 @@ Hey Jon, any chance we can push Saturday to 1pm? Let me know by Friday.
 
 Re-read the destination immediately before editing so concurrent edits from
 Jon's phone or other hosts are kept. If a `*.sync-conflict-*` file sits
-beside it, tell Jon before editing.
+beside it, resolve it with the `org-conflicts` skill before editing.
 
 ## Triage inbox.org
 

@@ -64,8 +64,9 @@ synchronize the project file before the final report.
 
 Read the project file before every edit, and merge any changes made since you
 last read it. Stop and ask only when concurrent edits conflict with the same
-thread. If a `<project>.sync-conflict-*.org` sits beside the project file, tell
-Jon before editing; another host's edits may be in it.
+thread. If a `<project>.sync-conflict-*.org` sits beside the project file,
+resolve it with the `org-conflicts` skill before editing; another host's edits
+may be in it.
 
 ## Project files
 

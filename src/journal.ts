@@ -241,7 +241,7 @@ export function appendJournal(file: string, entries: readonly JournalEntry[]): n
 
 export function checkJournalConflicts(file: string): void {
 	if (readdirSync(dirname(file)).some((name) => /^JOURNAL\.sync-conflict-.*\.org$/.test(name)))
-		throw new Error("JOURNAL.org has a Syncthing conflict copy; resolve it first");
+		throw new Error("JOURNAL.org has a Syncthing conflict copy; resolve it with the org-conflicts skill first");
 }
 
 /** Replace `file` with `next` atomically, only if it still reads `base` (empty for a missing file). */

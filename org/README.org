@@ -10,7 +10,7 @@ org/
 ├── prompts/                   task.org and nudge.org, sent to the agent
 ├── bin/herdr-link             stamp and follow herdr: links
 └── tests/                     batch tests with fixtures
-skills/                        project-org-tasks, org-triage, for every agent
+skills/                        project-org-tasks, org-triage, org-conflicts, for every agent
 #+end_src
 
 ** Where each piece runs

@@ -91,6 +91,7 @@ Keys of =config.json=, with their defaults:
   "reflection": { "enabled": true, "quietMinutes": 60, "recentDays": 3, "periods": ["week", "month", "quarter", "year"], "bitcoin": false },
   "heartbeat": { "enabled": false, "everyMinutes": 60, "chattingMinutes": 15 },
   "looseEnds": { "enabled": false, "at": "20:30" },
+  "conflicts": { "enabled": false, "at": "00:30" },
   "mail": { "enabled": false, "query": "tag:inbox and tag:unread", "accounts": {} },
   "watch": { "enabled": false, "gapMinutes": 10 },
   "patter": { "openAfterSeconds": 8, "gapsSeconds": [25, 25, 25, 40, 60, 90, 120, 180] },
@@ -114,6 +115,7 @@ Keys of =config.json=, with their defaults:
 - =reflection= runs the nightly pass once the user has been quiet for =quietMinutes=; =recentDays= is how many recent "Day's end" entries June sees in her prompt; =periods= are the longer digests that follow it. =bitcoin= (false by default) has the nightly pass fetch bitcoin's price and its day and week change from CoinGecko's free public API, with no key and a 10-second timeout, so a big move reaches her mood; a failed or slow fetch is left out and never fails the pass.
 - =heartbeat= enables a private look every =everyMinutes= in waking hours; the user counts as chatting if they wrote within =chattingMinutes=.
 - =looseEnds= enables June's evening look for loose ends, once a day from =at= (local =HH:MM=) until =rhythm.quiet=.
+- =conflicts= enables June's nightly Syncthing check, once a day from =at= (local =HH:MM=) until =rhythm.quiet=.
 - =mail= gives each heartbeat the new mail matching =query= in notmuch since the last look; =accounts= names each top-level maildir folder, such as ={"personal": "home"}=.
 - =watch= tells June about dispatched tasks she did not queue on =dispatch.hosts=, in waking hours and at most every =gapMinutes=.
 - =situation= feeds the =now= section: =calendars= are Org files read for today and tomorrow, =homeAssistant.people= are =person.*= entities, =homeAssistant.weather= a =weather.*= entity, polled every =pollSeconds= when =HASS_URL= and =HASS_TOKEN= are set.
@@ -136,6 +138,12 @@ Every =heartbeat.everyMinutes= between =wake= and =quiet=, June takes a private 
 With =looseEnds= on, once a day from =looseEnds.at= until =rhythm.quiet=, June takes one more private look, shaped like a heartbeat: she reads the day's conversation and her journal entries for today for at most a few loose ends that would leave a gap when the nightly reflection closes the day, such as a conversation the user started without saying how it ended, or a family outing she never heard the end of. It is not a task audit. She asks in one natural message or answers =QUIET=; a day the user sent her no message asks no model at all, even if she wrote in the journal herself. When the user answers, she writes it in the day's journal as she would anything they share, and the reflection reads both the journal and the conversation, so an answer fills the gap and silence leaves it open: the reflection is told never to guess an outcome. Nothing waits for an answer. A receipt in the state directory, =loose-ends.json=, makes it once a day across restarts; a look missed until after =quiet= is skipped. The user's =HEARTBEAT.org= instructions apply to it too.
 
 With =mail= on, each look also lists the mail that arrived since the last one, sorted before June sees it. Messages from people come first, marked when the user has written to them before; automated senders (no-reply and alert addresses, mail domains such as =updates.=, auto-replies) follow in one line each; newsletters and list mail (=List-Unsubscribe=, =List-Id=, bulk =Precedence=) are only counted; the user's own messages are left out. She sees senders and subjects only, framed as outside text, and reads a message with notmuch when it may matter.
+
+** Syncthing conflicts
+
+The user's Org tree syncs between hosts, and Syncthing leaves =NAME.sync-conflict-DATE-TIME-DEVICE.EXT= copies when two of them change a file at once. The =org-conflicts= skill in =skills/= resolves them for June and every agent: its =org-conflict= command lists copies under the Org root, retires those identical to the live file, editor locks and temporary files, and Org copies whose every line the live file already has, and shows the lines only a diverged Org copy holds. The skill's judgment covers the rest: merge what the copy alone holds, then retire it. Copies of other files are listed and left for the user. June's writers still refuse a file with a copy beside it and point her at the skill.
+
+With =conflicts= on, once a day from =conflicts.at= until =rhythm.quiet=, the daemon runs the sweep over =org.root=, and when Org copies are left for judgment June gets a private look, shaped like a heartbeat, listing them; she resolves them with the skill or hands them to a working context, and answers =QUIET= unless something needs the user. A receipt, =conflicts.json=, makes it once a day across restarts. Run it on one host only, the one June's daemon runs on, so Syncthing sees a single writer.
 
 ** Watching dispatched work
 
@@ -179,7 +187,7 @@ June reads Org with ripgrep and writes only through =org-edit= and the dispatche
 - with =dispatch.improve= set, hand a gap the user hit in what she can do to a coding agent, with their words and the =june transcript= command for that stretch of conversation (=june_improve=);
 - close a task she created once its result is reviewed (=org_complete_task=).
 
-She never writes =asana.org=, =inbox.org=, archives, or conflict copies. The dispatcher, =org-edit=, =herdr-link=, their prompts, and the =project-org-tasks= and =org-triage= skills live in =org/= and =skills/=; see [[file:org/README.org][org/README.org]].
+She never writes =asana.org=, =inbox.org=, archives, or conflict copies. The dispatcher, =org-edit=, =herdr-link=, their prompts, and the =project-org-tasks=, =org-triage=, and =org-conflicts= skills live in =org/= and =skills/=; see [[file:org/README.org][org/README.org]].
 
 * Telegram
 

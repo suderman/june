@@ -35,6 +35,7 @@ import { createKeptImagesExtension, startImageExpiry } from "./kept-images.ts";
 import { Hidden, KINDS, Timeline } from "./timeline.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
 import { createGreeting } from "./greeting.ts";
+import { createConflicts } from "./conflicts.ts";
 import { createLooseEnds } from "./loose.ts";
 import { createReflection } from "./reflect.ts";
 import { createWatch } from "./watch.ts";
@@ -82,6 +83,8 @@ export type DaemonOptions = {
 	readonly heartbeatClock?: { now: () => Date; tickMs: number };
 	/** Tests set the clock and loop speed of the evening look for loose ends. */
 	readonly looseEndsClock?: { now: () => Date; tickMs: number };
+	/** Tests set the clock, loop speed, and command runner of the nightly Syncthing check. */
+	readonly conflictsClock?: { now: () => Date; tickMs: number; run?: Run };
 	/** Tests shorten the WebSocket's hello timeout, ping interval, and backlog limit. */
 	readonly remoteTiming?: { helloMs?: number; pingMs?: number; maxBuffered?: number };
 	/** Tests check the followed tasks more often than every 15 seconds. */
@@ -242,6 +245,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 					...options.looseEndsClock,
 				}).start(harness, root)
 			: undefined;
+		const stopConflicts = config.conflicts.enabled
+			? createConflicts({ config: config.conflicts, quiet: config.rhythm.quiet, root: config.org.root, state: paths.state, log, ...options.conflictsClock }).start(harness, root)
+			: undefined;
 
 		const watchRun = options.watchClock?.run ?? runProcess;
 		const stopWatch =
@@ -330,6 +336,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				follows.stop();
 				stopHeartbeat?.();
 				stopLooseEnds?.();
+				stopConflicts?.();
 				await stopWatch?.();
 				stopInbox();
 				stopImages();

@@ -20,12 +20,12 @@
   timezoneData = callPackage ./icu-timezone-data.nix {};
   src = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test];
+    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test ../skills];
   };
   # The tests also cover org-dispatch and org-edit, whose Emacs Lisp lives beside the daemon.
   testSrc = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test ../org ../overlay ../art];
+    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test ../org ../overlay ../art ../skills];
   };
 in
   buildNpmPackage (finalAttrs: {
@@ -46,7 +46,7 @@ in
       runHook preInstall
       npm prune --omit=dev --no-save
       mkdir -p $out/lib/june $out/bin
-      cp -r package.json src templates node_modules $out/lib/june/
+      cp -r package.json src templates skills node_modules $out/lib/june/
       makeWrapper ${nodejs}/bin/node $out/bin/june \
         --set ICU_TIMEZONE_FILES_DIR ${timezoneData} \
         --add-flags "--disable-warning=ExperimentalWarning $out/lib/june/src/cli.ts" \
@@ -67,10 +67,10 @@ in
         export ICU_TIMEZONE_FILES_DIR=${timezoneData}
         export JUNE_TEST_QML=${qt6.qtdeclarative}/bin/qml
         export QML2_IMPORT_PATH=${qt6.qtdeclarative}/lib/qt-6/qml:${qt6.qtwebsockets}/lib/qt-6/qml
-        patchShebangs org
+        patchShebangs org skills
         org/tests/test-org-dispatch
         org/tests/test-org-edit
-        node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/follow.test.ts test/heartbeat.test.ts test/history.test.ts test/mail.test.ts test/memory.test.ts test/patter.test.ts test/people.test.ts test/situation.test.ts test/watch.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts test/view.test.ts test/detail.test.ts test/telegram.test.ts test/pdf.test.ts test/timezone.test.ts test/remote.test.ts test/expression.test.ts test/avatar.test.ts test/overlay.test.mjs test/connection.test.mjs test/art.test.mjs
+        node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/conflicts.test.ts test/follow.test.ts test/heartbeat.test.ts test/history.test.ts test/mail.test.ts test/memory.test.ts test/patter.test.ts test/people.test.ts test/situation.test.ts test/watch.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts test/view.test.ts test/detail.test.ts test/telegram.test.ts test/pdf.test.ts test/timezone.test.ts test/remote.test.ts test/expression.test.ts test/avatar.test.ts test/overlay.test.mjs test/connection.test.mjs test/art.test.mjs
         runHook postBuild
       '';
       installPhase = "touch $out";

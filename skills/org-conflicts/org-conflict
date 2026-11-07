@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Find, classify, and retire Syncthing conflict copies (NAME.sync-conflict-YYYYMMDD-HHMMSS-DEVICE.EXT) under an Org tree.
+# Deterministic only: it deletes a copy that adds nothing and leaves judgment to whoever runs it. See SKILL.md beside it.
+set -euo pipefail
+export LC_ALL=C
+
+usage() {
+	cat <<'EOF'
+usage: org-conflict list [ROOT]     every copy under ROOT (default ~/org): STATUS<TAB>COPY<TAB>LIVE
+       org-conflict check COPY      its status and, when it differs, the lines only the copy has
+       org-conflict retire COPY     delete the copy
+       org-conflict sweep [ROOT]    retire every identical, contained, or junk copy; list the rest
+
+Statuses: identical (same bytes as the live file), junk (an editor lock or temporary file), and for Org
+files contained (every line already in the live file), diverged (lines of its own), or orphan (no live
+file). Any other copy is other: a different file that is not Org, left for its owner.
+Sweep retires identical, junk, and contained copies and leaves the rest.
+EOF
+}
+
+# The live file a copy belongs to: the name with the conflict marker taken out.
+live_of() {
+	local dir base
+	dir=$(dirname -- "$1")
+	base=$(basename -- "$1")
+	[[ $base =~ ^(.*)\.sync-conflict-[0-9]{8}-[0-9]{6}-[A-Za-z0-9]+(\..*)?$ ]] || return 1
+	printf '%s/%s%s\n' "$dir" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+}
+
+# Lines of the copy found nowhere in the live file, blank lines aside, numbered as in the copy.
+copy_only() { grep -nvxF -f "$2" -- "$1" | grep -v '^[0-9]*:[[:space:]]*$' || true; }
+
+status() {
+	local copy=$1 live name
+	live=$(live_of "$copy") || {
+		echo "not a conflict copy: $copy" >&2
+		return 2
+	}
+	name=$(basename -- "$copy")
+	if [[ $name == .~lock.* || $name == .#* || $name == \#*\# || $name == *.tmp* || $name == *.swp ]]; then
+		echo junk
+	elif [[ -e $live ]] && cmp -s -- "$copy" "$live"; then
+		echo identical
+	elif [[ $live != *.org ]]; then
+		echo other
+	elif [[ ! -e $live ]]; then
+		echo orphan
+	elif [[ -z $(copy_only "$copy" "$live") ]]; then
+		echo contained
+	else
+		echo diverged
+	fi
+}
+
+copies() {
+	local root=${1:-$HOME/org}
+	find "$root" \( -name .stversions -o -name '.Trash-*' -o -name .stfolder -o -name .git \) -prune -o \
+		-name '*.sync-conflict-*' \( -type f -o -type l \) -print | sort
+}
+
+list() {
+	local copy
+	while IFS= read -r copy; do
+		printf '%s\t%s\t%s\n' "$(status "$copy")" "$copy" "$(live_of "$copy")"
+	done < <(copies "$@")
+}
+
+check() {
+	local copy=$1 live state
+	[[ -e $copy || -L $copy ]] || {
+		echo "no such file: $copy" >&2
+		return 2
+	}
+	state=$(status "$copy")
+	live=$(live_of "$copy")
+	printf 'status: %s\ncopy:   %s (modified %s)\nlive:   %s' "$state" "$copy" "$(date -r "$copy" '+%F %T')" "$live"
+	[[ -e $live ]] && printf ' (modified %s)' "$(date -r "$live" '+%F %T')"
+	printf '\n'
+	if [[ $state == diverged ]]; then
+		printf '\nLines only the copy has (copy line: text), %s of %s lines. For context: diff -u %q %q\n' \
+			"$(copy_only "$copy" "$live" | wc -l)" "$(wc -l <"$copy")" "$live" "$copy"
+		copy_only "$copy" "$live"
+	fi
+}
+
+retire() {
+	local copy=$1
+	live_of "$copy" >/dev/null || {
+		echo "refusing: not a conflict copy: $copy" >&2
+		return 2
+	}
+	rm -f -- "$copy"
+	echo "retired $copy"
+}
+
+sweep() {
+	local state copy live
+	while IFS=$'\t' read -r state copy live; do
+		case $state in
+		identical | contained | junk) retire "$copy" >/dev/null && printf 'retired %s\t%s\n' "$state" "$copy" ;;
+		*) printf 'left %s\t%s\t%s\n' "$state" "$copy" "$live" ;;
+		esac
+	done < <(list "$@")
+}
+
+case ${1:-} in
+list | sweep) "$1" "${@:2}" ;;
+check | retire)
+	[[ $# -eq 2 ]] || {
+		usage >&2
+		exit 2
+	}
+	"$1" "$2"
+	;;
+-h | --help | help) usage ;;
+*)
+	usage >&2
+	exit 2
+	;;
+esac

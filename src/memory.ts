@@ -60,7 +60,7 @@ export function readMemory(file: string): string | null {
 
 export function checkConflicts(file: string): void {
 	if (readdirSync(dirname(file)).some((name) => /^(SOUL|MEMORY)\.sync-conflict-.*\.org$/.test(name)))
-		throw new Error("SOUL.org or MEMORY.org has a Syncthing conflict copy; resolve it before retrying");
+		throw new Error("SOUL.org or MEMORY.org has a Syncthing conflict copy; resolve it with the org-conflicts skill, then retry");
 }
 
 /** Save only the reviewed version. A saved proposal is also the receipt after a crash before the SQLite commit. */

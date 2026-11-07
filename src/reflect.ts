@@ -406,5 +406,5 @@ function checkPeople(value: unknown): PersonUpdate[] {
 function checkSyncConflicts(file: string): void {
 	const stem = basename(file).replace(/\.org$/, "");
 	if (readdirSync(dirname(file)).some((name) => name.startsWith(`${stem}.sync-conflict-`)))
-		throw new Error(`${basename(file)} has a Syncthing conflict copy; resolve it first`);
+		throw new Error(`${basename(file)} has a Syncthing conflict copy; resolve it with the org-conflicts skill first`);
 }
