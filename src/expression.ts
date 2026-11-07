@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import type { Context as ModelContext, Message, Models } from "@earendil-works/pi-ai";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
 import type { Conversation } from "@earendil-works/pi-durable";
-import { EXPRESSIONS, type Manifest, parseManifest, type Pose } from "./avatar.ts";
+import { EXPRESSIONS, type Manifest as AvatarManifest, parseManifest, type Pose } from "./avatar.ts";
 import type { ModelChoice, PromptFiles } from "./config.ts";
 import type { Reply } from "./protocol.ts";
 import type { Logger } from "./runtime.ts";
@@ -16,6 +16,9 @@ import { applyArt, type ArtTake, type ArtContext, type ViewItem, type ViewState 
 import { user } from "./user.ts";
 
 export const EXPRESSION = "june.expression";
+
+// Runtime provenance, not art metadata: the base set fills gaps, rather than competing with personal drawings.
+type Manifest = AvatarManifest & { personal?: string[] };
 
 export type FacePick = { expression: keyof typeof EXPRESSIONS; pose?: string };
 
@@ -131,18 +134,23 @@ export function pickRequest(said: string, reply: string, earlier: readonly Excha
 /** The same merged inventory the clients see: the personal set wins names and the base fills the rest. */
 export function loadManifest(paths: readonly string[], log: Logger): Manifest | undefined {
 	const sets: Manifest[] = [];
-	for (const path of paths) {
+	const personal: string[] = [];
+	for (const [index, path] of paths.entries()) {
 		if (!existsSync(path)) continue;
-		try { sets.push(parseManifest(JSON.parse(readFileSync(path, "utf8")))); }
+		try {
+			const set = parseManifest(JSON.parse(readFileSync(path, "utf8")));
+			sets.push(set);
+			if (index < paths.length - 1) personal.push(...Object.keys(set.poses ?? {}));
+		}
 		catch (error) { log.warn("expression_manifest", { path, error: (error as Error).message }); }
 	}
 	if (!sets.length) return undefined;
-	return { ...sets[0]!, poses: Object.assign({}, ...sets.toReversed().map((s) => s.poses ?? {})) };
+	return { ...sets[0]!, poses: Object.assign({}, ...sets.toReversed().map((s) => s.poses ?? {})), personal };
 }
 
-/** Whether a pose can stand on `side` facing the words, as the clients judge it (standsOn in overlay/compose.mjs). */
+/** A tall pose may look out of the panel without being mirrored; other poses face the words. */
 function standsOn(pose: Pose, side: "left" | "right"): boolean {
-	return pose.mirror !== false || pose.facing === "front" || pose.facing === (side === "left" ? "right" : "left");
+	return pose.framings?.includes("full") === true || pose.mirror !== false || pose.facing === "front" || pose.facing === (side === "left" ? "right" : "left");
 }
 
 /**
@@ -155,11 +163,17 @@ function standsOn(pose: Pose, side: "left" | "right"): boolean {
 export function resolvePick(pick: FacePick, manifest: Manifest | undefined, previous?: Assistant, selectedAt = Date.now(), random = Math.random, held?: "left" | "right"): FacePick & { side: "left" | "right"; selectedAt: number } {
 	let side: "left" | "right" = held ?? (previous?.side === "left" ? "right" : "left");
 	const poses = Object.entries(manifest?.poses ?? {}).filter(([, p]) => !p.activity && (p.added === undefined || Date.parse(p.added) <= selectedAt));
-	const explicit = poses.find(([id]) => id === pick.pose);
+	const preferred = poses.filter(([id]) => manifest?.personal?.includes(id));
+	const requested = poses.find(([id]) => id === pick.pose);
+	const personal = preferred.filter(([, p]) => p.expression === (requested?.[1].expression ?? pick.expression));
+	// A packaged tall request still asks for a standing performance. Try personal standing art before portraits.
+	const standingArt = requested?.[1].framings?.includes("full") ? personal.filter(([, p]) => p.framings?.includes("full")) : [];
+	const explicit = requested && (!personal.length || manifest?.personal?.includes(requested[0])) ? requested : undefined;
 	let named = explicit && standsOn(explicit[1], side) ? explicit : undefined;
-	let expression: string | undefined = named ? undefined : explicit?.[1].expression ?? pick.expression;
+	let expression: string | undefined = named ? undefined : requested?.[1].expression ?? pick.expression;
 	while (!named && expression) {
-		const fitting = poses.filter(([, p]) => p.expression === expression);
+		const own = preferred.filter(([, p]) => p.expression === expression);
+		const fitting = standingArt.length && expression === requested?.[1].expression ? standingArt : own.length ? own : poses.filter(([, p]) => p.expression === expression);
 		const standing = fitting.filter(([, p]) => standsOn(p, side));
 		const choices = standing.length ? standing : explicit ? [explicit] : fitting;
 		const fresh = choices.filter(([id]) => id !== previous?.pose);

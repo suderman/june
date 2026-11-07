@@ -1156,7 +1156,7 @@ const STANDING = {
 	"sigh-front": flatPose("exasperated"),
 	// A front clipboard report: board toward viewer-right, the supporting forearm behind it.
 	"clipboard-front": standing("serious", "front", [0.418, 0.08, 0.164, 0.1], [0.507, 0.157], [[0.448, 0.226, 0.241, 0.122], [0.348, 0.31, 0.112, 0.036]], [0.263, 0.051, 0.479, 0.748]),
-	// A smaller centred board with resting hands, drawn facing left: it stands only on the right, facing the words.
+	// A smaller centred board with resting hands, drawn facing left: it may also look outward on the left.
 	"clipboard-left": standing("serious", "left", [0.416, 0.081, 0.169, 0.1], [0.503, 0.162], [[0.37, 0.182, 0.236, 0.132], [0.371, 0.182, 0.218, 0.048]], [0.224, 0.04, 0.557, 0.791]),
 	// A two-palm shrug: each palm a gesture, so one hidden palm spoils it.
 	"shrug-front": standing("exasperated", "front", [0.426, 0.08, 0.148, 0.1], [0.502, 0.159], [[0.274, 0.19, 0.17, 0.051], [0.554, 0.189, 0.167, 0.053]], [0.276, 0.05, 0.445, 0.768]),
@@ -1204,16 +1204,20 @@ test("a long panel admits tall art only where her action, face, and boots read, 
 		const left = standingLayout(pool, "report-front", "left", 3, 820, id);
 		assert.equal(left.pose.id, "clipboard-left", `${id} left/820`);
 		assert.equal(left.layout.mirror, false, "never flipped to face in");
-		// 480: no drawing reaches the bottom at her face size, so she keeps her own pose in its inset, never a tall one.
+		// The approved primary-gesture allowance admits the compact drawing at this narrow report size too.
 		for (const side of ["left", "right"]) {
 			const narrow = standingLayout(pool, "report-front", side, 3, 480, id);
-			assert.equal(narrow.pose.id, "report-front", `${id} ${side}/480`);
-			assert.equal(narrow.layout.clip.inset, true);
+			assert.equal(narrow.pose.id, "clipboard-left", `${id} ${side}/480`);
+			assert.equal(narrow.layout.framing, "full");
+			assert.ok(gestureShownAt(narrow, 0) >= 0.8 && gestureShownAt(narrow, 1) >= 0.5);
 		}
 		// Six paragraphs at 820 on the right: the front board crosses the panel's edge, so only the centred one stands.
 		assert.equal(standingLayout(pool, "report-front", "right", 6, 820, id).pose.id, "clipboard-left");
-		// At 700 neither reaches the bottom with its action clear: her own pose in its inset.
-		assert.equal(standingLayout(pool, "report-front", "right", 6, 700, id).layout.clip.inset, true);
+		// The compact action now also clears the approved gesture floor at 700.
+		const six = standingLayout(pool, "report-front", "right", 6, 700, id);
+		assert.equal(six.pose.id, "clipboard-left");
+		assert.equal(six.layout.framing, "full");
+		assert.ok(gestureShownAt(six, 0) >= 0.8 && gestureShownAt(six, 1) >= 0.5);
 		// A short panel is untouched.
 		assert.equal(standingLayout(pool, "report-front", "right", 1, 820, id).pose.id, "report-front");
 	}
@@ -1222,6 +1226,89 @@ test("a long panel admits tall art only where her action, face, and boots read, 
 	const left = standingLayout(frontOnly, "report-front", "left", 3, 820);
 	assert.equal(left.pose.id, "report-front");
 	assert.equal(left.layout.clip.inset, true);
+});
+
+test("existing and new replies keep approved standing crops and prefer personal art over a named placeholder", async () => {
+	const pool = standingPool();
+	const sizes = [{ kind: "thought", w: 476, h: 91 }, { kind: "june", w: 476, h: 184 }, { kind: "june", w: 476, h: 106 }];
+	const panel = (id) => ({ id: "36017", side: "left", pose: pool.find((p) => p.id === id), elements: [{ kind: "june", expression: "serious" }] });
+	const front = panelLayout({ panel: panel("clipboard-front"), width: 788, sizes, poses: pool });
+	assert.equal(front.pose.id, "clipboard-front", "Jon approved this bust crop despite the partial board");
+	assert.equal(front.layout.framing, "bust");
+	assert.equal(front.layout.height, 447);
+	assert.ok(front.layout.face.h > 150, "keep the expressive face rather than shrink for the prop");
+	const base = panelLayout({ panel: panel("explaining-standing-clipboard"), width: 788, sizes, poses: pool });
+	assert.notEqual(base.pose.set, "file:///base/", "the gesture-free placeholder cannot bypass suitable personal art");
+	assert.equal(base.layout.mirror, false);
+	const { fold } = await import("../src/transcript.ts");
+	const at = Date.UTC(2026, 10, 7, 19);
+	const entries = [
+		{ id: 1, kind: "pi.assistant", model: [{ role: "assistant", content: [{ type: "text", text: "A serious report." }], timestamp: at }] },
+		{ id: 2, kind: "june.expression", data: { for: "1", take: 0, expression: "serious", pose: "clipboard-left", side: "left", selectedAt: at } },
+	];
+	const composed = () => composeStrip(panels(fold(entries, {}).items), {}, pool, { sides: {}, poseIds: {}, livePoses: {} })[0];
+	assert.equal(composed().side, "left", "an outward-facing named tall portrait keeps its recorded side");
+	const compactSizes = [{ kind: "thought", w: 367, h: 126 }, { kind: "june", w: 367, h: 262 }, { kind: "june", w: 367, h: 132 }];
+	const compact = panelLayout({ panel: panel("clipboard-left"), width: 620, sizes: compactSizes, poses: pool });
+	assert.equal(compact.pose.id, "clipboard-left");
+	assert.equal(compact.layout.framing, "full");
+	assert.equal(compact.layout.mirror, false);
+	const baseCompact = panelLayout({ panel: panel("explaining-standing-clipboard"), width: 620, sizes: compactSizes, poses: pool });
+	assert.equal(baseCompact.pose.id, "clipboard-left", "the personal standing face is judged against its own inset, not the placeholder's head proportions");
+	assert.equal(baseCompact.layout.framing, "full");
+	for (const id of ["clipboard-front", "clipboard-left", "explaining-standing-clipboard"]) {
+		const fallback = panelLayout({ panel: panel(id), width: 700, sizes: REPORT[6][700], poses: pool });
+		assert.equal(fallback.pose.set, "file:///personal/", "a suitable personal inset precedes a packaged tall stand-in");
+	}
+	const late = pool.map((p) => p.set === "file:///personal/" ? { ...p, added: at + 1 } : p);
+	assert.equal(panelLayout({ panel: { ...panel("explaining-standing-clipboard"), elements: [{ kind: "june", expression: "serious", expressionAt: at }] }, width: 788, sizes, poses: late }).pose.id, "explaining-standing-clipboard", "fallback cannot borrow art added after selection");
+	for (const side of ["left", "right"]) {
+		const reversed = standingPool(Object.fromEntries(Object.entries(STANDING).reverse()));
+		const p = { ...panel("explaining-standing-clipboard"), side };
+		assert.equal(panelLayout({ panel: p, width: 788, sizes, poses: reversed }).pose.id, panelLayout({ panel: p, width: 788, sizes, poses: pool }).pose.id, "manifest order does not choose the replacement");
+	}
+});
+
+test("standing placements Jon un-rejected at 620 and 700 px need no new take or policy flag", () => {
+	const pool = standingPool();
+	// Exact reply 36025 measurements, with the production fonts and newest-panel lettering.
+	const cases = [
+		[620, "clipboard-front", [{ kind: "thought", w: 404, h: 91 }, { kind: "june", w: 404, h: 210 }, { kind: "june", w: 404, h: 132 }]],
+		[700, "clipboard-front", [{ kind: "thought", w: 419, h: 91 }, { kind: "june", w: 419, h: 210 }, { kind: "june", w: 419, h: 106 }]],
+		[700, "clipboard-left", [{ kind: "thought", w: 419, h: 91 }, { kind: "june", w: 419, h: 210 }, { kind: "june", w: 419, h: 106 }]],
+	];
+	for (const [width, id, sizes] of cases) for (const side of ["left", "right"]) {
+		const panel = { id: "36017", side, pose: pool.find((p) => p.id === id), elements: [{ kind: "june", expression: "serious" }] };
+		const out = panelLayout({ panel, width, sizes, poses: pool });
+		assert.equal(out.pose.id, id, `${id} at ${width}/${side}: keep the approved drawing, not another pose`);
+		assert.equal(out.layout.framing, "full");
+		assert.equal(out.layout.mirror, false);
+		assert.ok(out.layout.face.h >= 70.9 && gestureShownAt(out, 0) >= 0.8 && gestureShownAt(out, 1) >= 0.5);
+		const f = out.layout.face;
+		for (const b of out.layout.elements) assert.ok(f.x + f.w <= b.x || b.x + b.w <= f.x || f.y + f.h <= b.y || b.y + b.h <= f.y, "the admitted face stays clear of the text");
+	}
+	// The approved 83% board does not waive the guard entirely: 75% still picks the clearer compact drawing.
+	const sizes = [{ kind: "thought", w: 304, h: 110 }, { kind: "june", w: 304, h: 288 }, { kind: "june", w: 304, h: 158 }];
+	const panel = { id: "36017", side: "left", pose: pool.find((p) => p.id === "clipboard-front"), elements: [{ kind: "june", expression: "serious" }] };
+	assert.equal(panelLayout({ panel, width: 480, sizes, poses: pool }).pose.id, "clipboard-left");
+});
+
+test("an existing standing take survives the real iris-review panel becoming older", () => {
+	const pool = standingPool();
+	// Reply 36725: production QML at 788 px, first newest (19 px), then older (17 px).
+	const newest = [{ kind: "thought", w: 476, h: 91 }, { kind: "june", w: 476, h: 158 }, { kind: "june", w: 476, h: 138 }, { kind: "june", w: 476, h: 158 }];
+	const older = [{ kind: "thought", w: 476, h: 91 }, { kind: "june", w: 476, h: 143 }, { kind: "june", w: 476, h: 108 }, { kind: "june", w: 476, h: 143 }];
+	for (const side of ["left", "right"]) {
+		const panel = { id: "36717", side, pose: pool.find((p) => p.id === "clipboard-front"), elements: [{ kind: "june", expression: "serious" }] };
+		for (const sizes of [newest, older]) {
+			const out = panelLayout({ panel, width: 788, sizes, poses: pool });
+			assert.ok(["clipboard-left", "clipboard-front"].includes(out.pose.id), "keep suitable personal standing art as lettering shrinks");
+			if (side === "right") assert.equal(out.pose.id, "clipboard-front", "the actual recorded side keeps its named drawing");
+			assert.equal(out.layout.framing, "full");
+			assert.ok(out.layout.face.h >= 84 && gestureShownAt(out, 0) >= 0.8);
+			assert.equal(out.layout.mirror, false);
+		}
+	}
 });
 
 const gestureShownAt = (out, index) => {
@@ -1256,11 +1343,12 @@ test("a paired gesture with one part hidden is not a tall performance, by stand-
 
 test("a named tall pose that cannot stand is judged against the inset, not its own full figure", () => {
 	const pool = standingPool();
-	// The director named the front clipboard; at 480 it cannot show its board, so another serious pose takes the panel.
+	// The director named the front clipboard; at 480 its board fails, while the compact drawing is clear enough.
 	for (const side of ["left", "right"]) {
 		const out = standingLayout(pool, "clipboard-front", side, 3, 480);
-		assert.equal(out.pose.id, "report-front", side);
-		assert.equal(out.layout.clip.inset, true);
+		assert.equal(out.pose.id, "clipboard-left", side);
+		assert.equal(out.layout.framing, "full");
+		assert.ok(gestureShownAt(out, 0) >= 0.8 && gestureShownAt(out, 1) >= 0.5);
 	}
 	assert.equal(standingLayout(pool, "clipboard-front", "right", 3, 820).pose.id, "clipboard-front", "where it reads, the named pose itself");
 });
@@ -1271,7 +1359,7 @@ test("tall art added after a panel never changes it", () => {
 	const pool = standingPool(later);
 	for (const id of ["a", "b", "c", "d"]) {
 		const panel = { id, side: "right", pose: pool.find((p) => p.id === "report-front"), elements: [{ kind: "june", text: "x", expression: "serious", pose: "report-front", at }] };
-		assert.equal(panelLayout({ panel, width: 820, sizes: REPORT[3][820], poses: pool }).pose.id, "explaining-standing-clipboard", "the art it had: the placeholder");
+		assert.equal(panelLayout({ panel, width: 820, sizes: REPORT[3][820], poses: pool }).pose.id, "report-front", "keep an available personal portrait rather than borrow a future standing drawing");
 		const newer = { ...panel, elements: [{ ...panel.elements[0], at: at + 5000 }] };
 		assert.ok(["clipboard-front", "clipboard-left"].includes(panelLayout({ panel: newer, width: 820, sizes: REPORT[3][820], poses: pool }).pose.id), "a newer panel may use it");
 	}
@@ -1287,7 +1375,7 @@ test("a pose's figure box is read leniently and stands her on its bottom, not th
 	const blind = { ...pool.find((p) => p.id === "clipboard-front"), figure: null };
 	const seen = plan({ width: 480, side: "right", pose: pool.find((p) => p.id === "clipboard-front"), elements: REPORT[3][480] });
 	const unseen = plan({ width: 480, side: "right", pose: blind, elements: REPORT[3][480] });
-	const boots = (l, p) => l.art.y + (STANDING["clipboard-front"].figure[1] + STANDING["clipboard-front"].figure[3]) * l.art.h;
+	const boots = (l, _p) => l.art.y + (STANDING["clipboard-front"].figure[1] + STANDING["clipboard-front"].figure[3]) * l.art.h;
 	assert.ok(unseen.framing !== "full" || boots(unseen) < unseen.height - 100, "without it, a full framing leaves her boots well above the bottom");
 	if (seen.framing === "full") assert.ok(boots(seen) >= seen.height - 1, "with it, a full framing puts her boots on the bottom");
 });

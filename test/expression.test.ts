@@ -169,6 +169,29 @@ test("the daemon merges both inventories and resolves a concrete pose once at mi
 	} finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("new choices prefer personal standing art on either side, including an explicit packaged tall choice", () => {
+	const dir = mkdtempSync(join(tmpdir(), "june-personal-picks-"));
+	try {
+		const shape = manifest.poses!["smug-chin-on-hand"]!;
+		const personal = { ...manifest, poses: {
+			"personal-clipboard": { ...shape, expression: "serious", facing: "left", mirror: false, framings: ["bust", "waist", "full"] },
+			future: { ...shape, expression: "serious", added: new Date(2001).toISOString() },
+		} };
+		const base = { ...manifest, poses: { "base-clipboard": { ...shape, expression: "serious", framings: ["full"] } } };
+		writeFileSync(join(dir, "personal.json"), JSON.stringify(personal));
+		writeFileSync(join(dir, "base.json"), JSON.stringify(base));
+		const merged = loadManifest([join(dir, "personal.json"), join(dir, "base.json")], silentLogger)!;
+		for (const side of ["left", "right"] as const) for (const random of [0, 0.99]) {
+			const pick = resolvePick({ expression: "serious", pose: "base-clipboard" }, merged, undefined, 2000, () => random, side);
+			assert.equal(pick.pose, "personal-clipboard");
+			assert.equal(pick.side, side, "outward is allowed for tall art without mirroring or moving sides");
+			assert.equal(resolvePick({ expression: "serious" }, merged, undefined, 2000, () => random, side).pose, "personal-clipboard");
+		}
+		assert.equal(resolvePick({ expression: "serious" }, merged, undefined, 1000, () => 0).pose, "personal-clipboard");
+		assert.equal(loadManifest([join(dir, "absent.json"), join(dir, "base.json")], silentLogger)!.poses!["base-clipboard"]!.file, shape.file, "missing personal set still has the base");
+	} finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 function director(entries: Parameters<typeof fold>[0][number][] = [
 	{ id: 1, kind: "june.input", data: { source: "gui", text: "you win" }, model: [{ role: "user", content: "you win", timestamp: 1793800000000 }] },
 	{ id: 2, kind: "pi.assistant", model: [{ role: "assistant", content: [{ type: "text", text: "a hollow victory" }], timestamp: 1793800000123 }] },

@@ -135,6 +135,7 @@ export function readPoses(manifest, base) {
  * requested expression or the next in its chain. A pose that shows an activity never answers an expression, so a
  * settled panel never shows her still at work. `avoid` is the previous panel's pose, skipped when another fits, and
  * `seed` picks among equals so a panel keeps its choice. Given her `side`, poses that can stand there come first.
+ * Personal art comes first; tall portraits may look outward without mirroring.
  */
 export function choosePose(poses, request = {}, avoid = "", seed = "", side = null) {
 	if (poses.length === 0) return null;
@@ -143,6 +144,8 @@ export function choosePose(poses, request = {}, avoid = "", seed = "", side = nu
 		if (named) return named;
 	}
 	const pick = (all) => {
+		const own = all.filter((p) => p.set === poses[0]?.set);
+		if (own.length) all = own;
 		const standing = side ? all.filter((p) => standsOn(p, side)) : all;
 		const fits = standing.length > 0 ? standing : all;
 		const fresh = fits.filter((p) => p.id !== avoid);
@@ -284,19 +287,20 @@ export function composeStrip(panels, state, poses, memory, holding = false) {
  * (Jon, 2026-11-07), and the panel's side is already settled. Within one expression, art from an earlier set (the
  * personal one) comes before a later set's (the base set's placeholders), and the panel's id (`seed`) fixes the order
  * among the rest, so the manifest's order never decides and a panel keeps its choice. Whether one actually fits the panel
- * is for panelLayout, which tries them in this order.
+ * is for panelLayout, which tries them in this order. Even a named base figure follows personal art.
  */
 export function tallCandidates(poses, pose, seed = "") {
 	if (!pose) return [];
 	const tall = poses.filter((p) => p.framings.includes("full"));
 	const sets = [];
 	for (const p of poses) if (!sets.includes(p.set)) sets.push(p.set);
+	const base = pose.set !== sets[0];
 	const ranked = (group) => {
 		const out = [];
-		for (const s of sets) out.push(...stableOrder(group.filter((p) => p.set === s && p.id !== pose.id), seed));
+		for (const s of sets) out.push(...stableOrder(group.filter((p) => p.set === s && (p.id !== pose.id || base)), seed));
 		return out;
 	};
-	const out = pose.framings.includes("full") ? [pose] : [];
+	const out = pose.framings.includes("full") && !base ? [pose] : [];
 	// A pose showing her at work keeps her at work if a tall one does; otherwise she stands in her expression's pose.
 	if (pose.activity) out.push(...ranked(tall.filter((p) => p.activity === pose.activity)));
 	for (const expression of chain(pose.expression)) out.push(...ranked(tall.filter((p) => p.expression === expression && !p.activity)));
@@ -347,14 +351,20 @@ export function availableAt(pose, time) {
 /** How much of a pose's primary gesture must be seen, and how small her face may grow to show it, as shares. */
 export const GESTURE_SHOWN = 0.7;
 export const GESTURE_FACE = 0.75;
+// Jon approved a standing portrait with 47% of the board visible. Cropped standing art keeps a recognisable part
+// of its gesture, without sacrificing the face to show the whole prop. Full-action and other portraits stay stricter.
+export const STANDING_CROP_SHOWN = 0.4;
 
 /**
  * In a tall panel the drawing exists to show what she is doing, so more must be seen: nearly all of the primary
  * gesture's box (its corners are often empty, so not every sample), and at least half of each other gesture, so a
  * paired action such as a two-palm shrug never reads with one hand hidden.
  */
-export const TALL_GESTURE_SHOWN = 0.9;
+export const TALL_GESTURE_SHOWN = 0.8;
 export const TALL_SECONDARY_SHOWN = 0.5;
+// Jon approved standing views with 83% of the board clear and a face just under 70% of its inset. Keep those
+// proportions, the secondary-gesture guard and all face/text placement checks.
+export const TALL_FACE = 2 / 3;
 
 /**
  * How much of the primary gesture of `pose` (or its gesture at `index`), as framed by `layout`, is seen: inside the
@@ -408,12 +418,12 @@ function stableOrder(list, seed) {
 
 /**
  * Whether a tall layout of `pose` reads: framed full down the panel (plan has already kept her face near the top and her
- * drawn figure reaching the bottom), her face at least three quarters of the size `inset` (the requested pose in its
- * inset) gives it, and her gestures seen as TALL_GESTURE_SHOWN and TALL_SECONDARY_SHOWN ask.
+ * drawn figure reaching the bottom), her face at least two thirds of the size `inset` gives it, and her gestures
+ * seen as TALL_GESTURE_SHOWN and TALL_SECONDARY_SHOWN ask.
  */
 export function standsTall(layout, pose, inset) {
 	if (layout.framing !== "full" || !layout.face) return false;
-	if (inset?.face && layout.face.h < inset.face.h * GESTURE_FACE) return false;
+	if (inset?.face && layout.face.h < inset.face.h * TALL_FACE) return false;
 	return (pose.gestures ?? []).every((_, i) => gestureShown(layout, pose, i) >= (i === 0 ? TALL_GESTURE_SHOWN : TALL_SECONDARY_SHOWN));
 }
 
@@ -426,65 +436,78 @@ export function standsTall(layout, pose, inset) {
  * and else the pose as first framed. Only poses in the set when the panel happened count, and every choice follows
  * from the panel, its pose, the layout, and the set, so a panel keeps its art. A drawn special (=special=) is never
  * replaced: framed wider if that shows it, else kept, with =cropped= set so a client can offer it whole. Returns the
- * layout and the pose it framed.
+ * layout and the pose it framed. Personal art precedes base stand-ins; standing crops may retain a partial gesture
+ * (STANDING_CROP_SHOWN). These placement rules apply to existing replies too.
  */
 export function panelLayout({ panel, width, sizes, poses }) {
 	const time = selectionMoment(panel);
 	const usable = poses.filter((p) => availableAt(p, time));
-	const lay = (pose, framing) => {
+	const ownSet = poses[0]?.set;
+	const lay = (pose, framing, placeholders = false) => {
 		const at = (p) => plan({ width, side: panel.side, pose: p, elements: sizes, framing: framing ?? panel.framing });
 		const first = at(pose);
 		if (!pose || (first.framing !== "full" && !first.clip.inset)) return { layout: first, pose };
 		// A long panel. Her own pose in its inset is the fallback, and the yardstick for her face.
 		const inset = first.framing === "full" ? at(Object.assign({}, pose, { framings: pose.framings.filter((f) => f !== "full") })) : first;
 		const candidates = pose.special ? [pose].filter((p) => p.framings.includes("full")) : tallCandidates(usable, pose, panel.id ?? "");
+		const prefer = !placeholders && !pose.special && usable.some((p) => p.set === ownSet && p.expression === pose.expression && !p.activity);
 		for (const tall of candidates) {
+			// Try personal portrait fallbacks before letting a packaged full figure take over the panel.
+			if (prefer && tall.set !== ownSet) continue;
 			const layout = tall === pose ? first : at(tall);
-			if (standsTall(layout, tall, inset)) return { layout, pose: tall };
+			// Personal standing art may have a smaller drawn head than the placeholder or portrait it replaces. Judge
+			// that face against its own inset too, rather than force the old drawing's proportions onto it.
+			const ownInset = at(Object.assign({}, tall, { framings: tall.framings.filter((f) => f !== "full") }));
+			const yardstick = ownInset.face?.h < inset.face?.h ? ownInset : inset;
+			if (standsTall(layout, tall, yardstick)) return { layout, pose: tall };
 		}
 		return { layout: inset, pose };
 	};
 	const first = lay(panel.pose);
 	const pose = first.pose;
-	if (!pose?.gestures?.length) return first;
+	if (!pose) return first;
+	const base = pose.set !== ownSet && !pose.activity && !pose.special && usable.some((p) => p.set === ownSet && p.expression === pose.expression && !p.activity && !p.special);
 	// Her face's size and the crop this panel would give any pose: the yardstick for how far out she may be framed. Full
 	// counts only when she stands tall here; a tall pose that did not is judged against the inset.
 	const reach = [...new Set([...USUAL, ...pose.framings])].filter((f) => f !== "full" || first.layout.framing === "full");
 	const natural = plan({ width, side: panel.side, pose: Object.assign({}, pose, { framings: reach }), elements: sizes, framing: panel.framing });
 	const faceH = natural.face?.h ?? 0;
-	const fits = (l) => (l.layout.face?.h ?? 0) >= faceH * GESTURE_FACE && gestureShown(l.layout, l.pose) >= GESTURE_SHOWN;
-	if (fits(first)) return first;
+	const shown = (l) => l.pose.framings.includes("full") && l.layout.framing !== "full" ? STANDING_CROP_SHOWN : GESTURE_SHOWN;
+	const fits = (l) => (l.layout.face?.h ?? 0) >= faceH * GESTURE_FACE && gestureShown(l.layout, l.pose) >= shown(l);
+	if (!base && fits(first)) return first;
 	// The same pose framed wider, as long as her face keeps most of its size.
 	const from = Math.max(0, USUAL.indexOf(natural.framing));
-	for (const framing of USUAL.slice(from).filter((f) => pose.framings.includes(f) && f !== first.layout.framing)) {
+	for (const framing of USUAL.slice(from).filter((f) => !base && pose.framings.includes(f) && f !== first.layout.framing)) {
 		const wider = lay(pose, framing);
 		if (wider.pose === pose && fits(wider)) return wider;
 	}
 	if (pose.special) return { layout: Object.assign({}, first.layout, { cropped: gestureShown(first.layout, pose) < GESTURE_SHOWN }), pose };
 	const others = usable.filter((p) => p.id !== pose.id && !p.activity && !p.special && p.expression === pose.expression);
-	const gesture = pose.gestures[0].name;
+	const gesture = pose.gestures?.[0]?.name;
 	const alike = others.filter((p) => p.gestures?.[0]?.name === gesture);
 	const rest = others.filter((p) => p.gestures?.[0]?.name !== gesture);
-	for (const group of [alike, rest])
+	const standing = base && pose.framings.includes("full") ? others.filter((p) => p.set === ownSet && p.framings.includes("full")) : [];
+	const groups = [standing, alike.filter((p) => p.set === ownSet), rest.filter((p) => p.set === ownSet), alike.filter((p) => p.set !== ownSet), rest.filter((p) => p.set !== ownSet)];
+	for (const group of groups)
 		for (const candidate of stableOrder(group, panel.id)) {
-			const tried = lay(candidate);
+			const tried = lay(candidate, undefined, candidate.set !== ownSet);
 			if (fits(tried)) return tried;
 		}
-	return first;
+	return base ? lay(pose, undefined, true) : first;
 }
 
 /**
  * Which side June stands on: the other side from the panel before, unless the pose faces away from the text there and
- * may not be mirrored, in which case she takes the side where she faces in.
+ * may not be mirrored, in which case she takes the side where she faces in. Tall art may look out.
  */
 export function chooseSide(previous, pose) {
 	const preferred = previous === "left" ? "right" : "left";
 	return standsOn(pose, preferred) ? preferred : preferred === "left" ? "right" : "left";
 }
 
-/** Whether `pose` can stand on `side` facing the words: it faces front, may be mirrored, or already faces in. */
+/** Whether `pose` stands on `side`: facing in, front, mirrorable, or tall art allowed to look out. */
 export function standsOn(pose, side) {
-	if (!pose || pose.mirror || pose.facing === "front") return true;
+	if (!pose || pose.mirror || pose.facing === "front" || pose.framings.includes("full")) return true;
 	return side === "left" ? pose.facing === "right" : pose.facing === "left";
 }
 
