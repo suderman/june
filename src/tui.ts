@@ -152,6 +152,8 @@ function component(item: Item): Component[] {
 			if (item.status === "error" && item.error) rows.push(new Line(c.err(`  ${item.error}`)));
 			return rows;
 		}
+		case "shown":
+			return item.files.map((f) => new Line(`${c.accent("⎘")} ${c.bold(f.name)} ${c.muted(`shown, ${f.mimeType}`)}`));
 		case "note":
 			return [new Line(c.muted(`── ${item.text}`))];
 		case "patter":

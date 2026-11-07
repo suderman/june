@@ -128,11 +128,12 @@ class Avatar(private val context: Context) {
     }
 
     /**
-     * A picture the user's message brought, at `path` (`<message id>/<n>`) under the hello's `attached` on the paired
-     * host. A message never changes, so a picture fetched once is kept and never asked for again.
+     * A picture the user's message brought, at `path` (`<message id>/<n>`), or one June showed (`<result id>/file/<n>`),
+     * under the hello's `attached` on the paired host. Neither changes, so a picture fetched once is kept and never asked
+     * for again.
      */
     suspend fun attachment(path: String): ImageBitmap? = cache.get("attached:$path") ?: withContext(Dispatchers.IO) {
-        if (!Regex("^\\d+/\\d$").matches(path)) return@withContext null
+        if (!Regex("^\\d+/(file/)?\\d$").matches(path)) return@withContext null
         val kept = java.io.File(context.cacheDir, "attached/$path")
         val bytes = kept.takeIf { it.exists() }?.readBytes() ?: run {
             val origin = Pairing.load(context)?.url?.let { Regex("^(wss?)://([^/]+)").find(it) } ?: return@withContext null
@@ -385,6 +386,48 @@ private fun FileCards(item: JSONObject, el: JSONObject, files: org.json.JSONArra
     }
 }
 
+/**
+ * What June showed: every file served at `<result id>/file/<n>`, pictures as polaroids fanned across the top and the
+ * rest as document cards below, each opening the preview over all of them, as the overlay's shown card does.
+ */
+@Composable
+private fun Shown(el: JSONObject, w: Float) {
+    val pictures = LocalPictures.current
+    val files = el.optJSONArray("files") ?: JSONArray()
+    val all = (0 until files.length()).map { files.getJSONObject(it) }
+    val set = all.map { f -> Previewing(f.optString("preview", "file"), "${el.optString("id")}/file/${f.optInt("n")}", f.optString("name")) }
+    val shots = all.indices.filter { all[it].optString("preview") == "picture" }.take(3)
+    val documents = all.indices.filter { all[it].optString("preview") != "picture" }
+    for ((i, at) in shots.withIndex()) {
+        val path = pictures?.path?.let { set[at].path }
+        val image by produceState<ImageBitmap?>(null, path) { value = path?.let { pictures.avatar.attachment(it) } }
+        Box(
+            Modifier.offset((14 + i * 16).dp, (12 + i * 3).dp).zIndex((shots.size - i).toFloat()).size(62.dp, 74.dp).rotate(listOf(-4f, 5f, -2f)[i])
+                .clickable(enabled = path != null) { pictures?.open(set, at) },
+        ) {
+            Box(Modifier.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(2.dp)).border(1.5.dp, Look.ink, RoundedCornerShape(2.dp)))
+            Box(Modifier.offset(5.dp, 5.dp).size(52.dp).background(Color(0xFFCFD6E3)).clipToBounds()) {
+                image?.let { androidx.compose.foundation.Image(it, null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop) }
+            }
+        }
+    }
+    val top = if (shots.isNotEmpty()) 96f else 12f
+    for ((row, at) in documents.withIndex()) {
+        val file = all[at]
+        Box(
+            Modifier.offset(14.dp, (top + row * 32).dp).size((w - 28).dp, 26.dp).rotate(if (file.optInt("n") % 2 == 0) -1f else 1f)
+                .clickable(enabled = pictures?.path != null) { pictures?.open(set, at) },
+        ) {
+            Box(Modifier.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(3.dp)).border(1.5.dp, Look.ink, RoundedCornerShape(3.dp)))
+            Row(Modifier.fillMaxSize().padding(start = 10.dp, end = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("▤ " + file.optString("name"), style = noteBody.copy(fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
+                Text(file.optString("size"), style = noteBody.copy(fontSize = 12.sp, color = Look.noteLine), maxLines = 1)
+            }
+        }
+    }
+}
+
 /** The polaroids clipped to a note: its pictures after the words, fanned when there are several, the front one clipped on. */
 @Composable
 private fun Polaroids(item: JSONObject, el: JSONObject, count: Int, noteW: Float) {
@@ -490,6 +533,16 @@ private fun measure(e: JSONObject, newest: Boolean, textWidth: Float, measurer: 
             val cardW = min(260f, textWidth - 28)
             val w = max(marker + 8 + (if (said || (pictures == 0 && files == 0)) bodyW else 0f) + photos, if (files > 0) cardW else 0f)
             Measured(kind, ceil(min(w + 28, textWidth)), ceil(h + 20 + files * 32), e, bodyW, marker)
+        }
+        "shown" -> {
+            // As the overlay's shown card: polaroids fanned across the top, document cards below, a row each.
+            val files = e.optJSONArray("files") ?: JSONArray()
+            val pictures = (0 until files.length()).count { files.getJSONObject(it).optString("preview") == "picture" }
+            val drawn = min(pictures, 3)
+            val documents = files.length() - pictures
+            val photos = if (drawn > 0) 62f + (drawn - 1) * 16f else 0f
+            val top = if (drawn > 0) 96f else 12f
+            Measured(kind, ceil(min(max(photos, if (documents > 0) min(260f, textWidth - 28) else 0f) + 28, textWidth)), ceil(top + documents * 32 + if (documents > 0) 4 else 0), e)
         }
         "chip" -> {
             val call = calls(e)[0]
@@ -745,6 +798,10 @@ private fun ElementView(e: Measured, box: JSONObject, newest: Boolean) {
             Text(el.optString("text", item.optString("text")), style = noteBody, modifier = Modifier.offset((14 + e.markerW + 8).dp, 10.dp).width(e.textW.dp))
             Polaroids(item, el, min(el.optInt("pictures"), 3), e.w)
             el.optJSONArray("files")?.takeIf { it.length() > 0 }?.let { files -> FileCards(item, el, files, e.w, e.h - 4 - files.length() * 32) }
+        }
+        "shown" -> {
+            Box(Modifier.fillMaxSize().background(Look.balloon, RoundedCornerShape(14.dp)).border(2.5.dp, Look.ink, RoundedCornerShape(14.dp)))
+            Shown(el, e.w)
         }
         "chip" -> {
             val call = calls(el)[0]

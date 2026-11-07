@@ -76,6 +76,8 @@ export function lines(panel) {
 			}
 		} else if (e.kind === "thought") {
 			out.push({ kind: "thought", prefix: "~", text: e.item.text });
+		} else if (e.kind === "shown") {
+			for (const file of e.files) out.push({ kind: "tool", prefix: "⎘", text: `shown: ${file.name} (${file.size})`, status: "ok" });
 		} else if (e.kind === "burst") {
 			out.push({ kind: "burst", prefix: "!", text: e.item.error ?? e.item.text ?? "" });
 		}

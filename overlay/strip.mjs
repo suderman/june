@@ -60,7 +60,8 @@ const weightOf = (e) => (e.kind === "user" ? e.text.length : e.kind === "june" ?
  *
  * A panel's elements, in reading order: `user` (their message), `june` (one beat of a reply, `streaming` on the last
  * while she writes), `tools` (consecutive tool calls, drawn as a chip or a status card), `thought` (patter; a panel keeps
- * only its latest), and `burst` (a notice, or a reply that failed).
+ * only its latest), `shown` (what she showed with her show tool: pictures as polaroids, files as cards, on her side),
+ * and `burst` (a notice, or a reply that failed).
  */
 export function panels(items, now = Date.now()) {
 	const out = [];
@@ -111,6 +112,8 @@ export function panels(items, now = Date.now()) {
 			const last = current.elements[current.elements.length - 1];
 			if (last?.kind === "tools") last.items.push(item);
 			else current.elements.push({ kind: "tools", id: item.id, items: [item] });
+		} else if (item.kind === "shown") {
+			current.elements.push({ kind: "shown", id: item.id, files: shownFiles(item) });
 		} else if (item.kind === "patter") {
 			current.elements = current.elements.filter((e) => e.kind !== "thought");
 			current.elements.push({ kind: "thought", id: item.id, item });
@@ -310,6 +313,17 @@ export function noteFiles(item, now = Date.now()) {
 	return (item.files ?? []).map((file, n) => {
 		const type = String(file.mimeType ?? "");
 		return { n, name: String(file.name ?? ""), size: fileSize(file.size), type, preview: previewKind(type), expired: gone };
+	});
+}
+
+/**
+ * What June showed, each file with its place in the show (`n`, for the `file/n` path under the hello's `attached`),
+ * name, size, type and how a preview shows it. Her inbox keeps them as it keeps the user's files.
+ */
+export function shownFiles(item) {
+	return (item.files ?? []).map((file, n) => {
+		const type = String(file.mimeType ?? "");
+		return { n, name: String(file.name ?? ""), size: fileSize(file.size), type, preview: previewKind(type), expired: false };
 	});
 }
 

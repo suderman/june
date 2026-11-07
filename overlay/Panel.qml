@@ -314,7 +314,7 @@ Item {
       x: box ? box.x : 0
       y: box ? box.y : 0
       visible: box !== null
-      sourceComponent: kind === "user" ? note : kind === "june" ? speech : kind === "thought" ? thought : kind === "chip" ? chip : kind === "card" ? card : kind === "burst" ? burst : null
+      sourceComponent: kind === "user" ? note : kind === "shown" ? shownCard : kind === "june" ? speech : kind === "thought" ? thought : kind === "chip" ? chip : kind === "card" ? card : kind === "burst" ? burst : null
       onLoaded: Qt.callLater(panel.measure)
       onKindChanged: Qt.callLater(panel.measure)
       Binding { target: slot.item; property: "element"; value: slot.element; when: slot.status === Loader.Ready }
@@ -331,6 +331,78 @@ Item {
 
   // The panel's frame, over everything it holds.
   Rectangle { anchors.fill: parent; color: "transparent"; border.color: Theme.ink; border.width: 3 }
+
+  // What June showed with her show tool: a card in her balloon's colours on her side, the pictures as polaroids fanned
+  // across it and the other files as document cards below. A click opens any of them in the preview, which steps
+  // through everything she showed.
+  Component {
+    id: shownCard
+    Rectangle {
+      id: shownBox
+      property var element
+      property var box
+      readonly property var files: element && element.files ? element.files : []
+      readonly property var pictures: files.filter(f => f.preview === "picture")
+      readonly property var documents: files.filter(f => f.preview !== "picture")
+      readonly property int drawn: Math.min(pictures.length, 3)
+      readonly property real photos: drawn > 0 ? 62 + (drawn - 1) * 16 : 0
+      readonly property real cardW: Math.min(260, panel.m.textWidth - 28)
+      readonly property real cardsTop: drawn > 0 ? 96 : 12
+      readonly property real w: Math.ceil(Math.min(Math.max(photos, documents.length > 0 ? cardW : 0) + 28, panel.m.textWidth))
+      readonly property real h: Math.ceil(cardsTop + documents.length * 32 + (documents.length > 0 ? 4 : 0))
+      function url(file) { return panel.attached && element ? panel.attached + element.id + "/file/" + file.n : ""; }
+      function opened(file) {
+        const set = files.map(f => ({ kind: f.preview ?? "file", url: url(f), name: f.name }));
+        const at = Math.max(0, files.indexOf(file));
+        return { kind: set[at].kind, url: set[at].url, name: set[at].name, set: set, at: at };
+      }
+      width: w
+      height: h
+      radius: 14
+      color: Theme.balloon
+      border.color: Theme.ink
+      border.width: Theme.line
+      Repeater {
+        model: shownBox.drawn
+        delegate: Item {
+          id: shot
+          required property int index
+          readonly property var file: shownBox.pictures[index]
+          x: 14 + index * 16
+          y: 12 + index * 3
+          width: 62; height: 74
+          rotation: [-4, 5, -2][index]
+          z: shownBox.drawn - index
+          Rectangle { anchors.fill: parent; color: "#fbf8f1"; border.color: Theme.ink; border.width: 1.5; radius: 2 }
+          Rectangle {
+            x: 5; y: 5; width: 52; height: 52
+            color: "#cfd6e3"
+            clip: true
+            Image { anchors.fill: parent; source: shownBox.url(shot.file); fillMode: Image.PreserveAspectCrop; asynchronous: true; sourceSize.width: 160 }
+          }
+          MouseArea {
+            anchors.fill: parent
+            enabled: shownBox.url(shot.file) !== ""
+            cursorShape: Qt.PointingHandCursor
+            onClicked: panel.preview(shownBox.opened(shot.file))
+          }
+        }
+      }
+      Repeater {
+        model: shownBox.documents
+        delegate: FileCard {
+          required property var modelData
+          required property int index
+          file: modelData
+          url: shownBox.url(modelData)
+          onChosen: panel.preview(shownBox.opened(modelData))
+          x: 14
+          y: shownBox.cardsTop + index * 32
+          width: shownBox.w - 28
+        }
+      }
+    }
+  }
 
   // The user's note: light blue, rounded, no tail; it enters June's world from outside the frame.
   Component {

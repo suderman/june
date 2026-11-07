@@ -164,7 +164,7 @@ export async function attachView(
 /** Items as short lines: "alex: hi", "june: hello", "tool: name", "note: text", "patter: text". */
 export function lines(items: readonly ViewItem[], user = "alex"): string[] {
 	return items.map((i) =>
-		i.kind === "user" ? `${user}: ${i.text}` : i.kind === "assistant" ? `june: ${i.text}${i.error ? ` ! ${i.error}` : ""}` : i.kind === "tool" ? `tool: ${i.name} ${i.status}` : `${i.kind}: ${i.text}`,
+		i.kind === "user" ? `${user}: ${i.text}` : i.kind === "assistant" ? `june: ${i.text}${i.error ? ` ! ${i.error}` : ""}` : i.kind === "tool" ? `tool: ${i.name} ${i.status}` : i.kind === "shown" ? `shown: ${i.files.map((f) => f.name).join(", ")}` : `${i.kind}: ${i.text}`,
 	);
 }
 

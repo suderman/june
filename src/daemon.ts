@@ -22,7 +22,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { type CommandScope, runCommand } from "./commands.ts";
 import { type Config, expandHome, type Paths } from "./config.ts";
 import { acquireDataDirLock, createLogger, createSettings, type Logger } from "./runtime.ts";
-import { diff, type Folded, foldView, PRIVATE, sourceName, type ViewState } from "./transcript.ts";
+import { diff, type Folded, foldView, PRIVATE, sourceName, textOf, type ViewState } from "./transcript.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { createHeartbeat } from "./heartbeat.ts";
 import { entryTimes } from "./history.ts";
@@ -44,6 +44,8 @@ import { Devices } from "./devices.ts";
 import { type Remote, type Session, startRemote } from "./remote.ts";
 import { createCodingExtension } from "./tools/coding.ts";
 import { type Followed, listFollowing } from "./tools/follow.ts";
+import { shownFiles } from "./shown.ts";
+import { createShowExtension } from "./tools/show.ts";
 import { createHerdrExtension, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
 import { createWorkExtension, FocusDoc, WorkDoc } from "./tools/work.ts";
@@ -131,6 +133,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const hidden = new Hidden(`${paths.state}/hidden.json`);
 		let timeline: Timeline | undefined;
 		const memory = createMemoryExtension(prompt.files, () => harness, () => timeline);
+		// Shown things are kept in the inbox beside the user's own files, for the same 30 days.
+		const show = createShowExtension(`${paths.state}/inbox`, config.herdr.host);
 		const images = `${paths.state}/images`;
 		const keptImages = createKeptImagesExtension(images, (error) => log.warn("image_keep_failed", { error: error.message }));
 		const greeting = createGreeting({ wake: config.rhythm.wake });
@@ -147,7 +151,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		// June's working context does the work only: no memory review, task queueing, patter, or messages to the user.
 		const childless = [memory, ...extensions.filter((e) => e.name === "dispatch"), ...(patter ? [patter.extension] : [])];
 		const work = createWorkExtension(config, () => childless);
-		for (const extension of [prompt.extension, greeting.extension, memory, work, keptImages, ...(patter ? [patter.extension] : []), ...extensions]) registry.install(extension);
+		for (const extension of [prompt.extension, greeting.extension, memory, show, work, keptImages, ...(patter ? [patter.extension] : []), ...extensions]) registry.install(extension);
 
 		const workdir = `${paths.state}/files`;
 		mkdirSync(workdir, { recursive: true, mode: 0o700 });
@@ -692,8 +696,11 @@ export async function attachView(
  */
 export async function inboxFile(root: Conversation, inbox: string, id: string, n: number): Promise<{ path: string; name: string; mimeType: string } | undefined> {
 	const entry = await root.commit((tx) => tx.entry(Number(id) as never), BG);
-	if (entry?.kind !== "june.input" || PRIVATE.has(sourceName(String((entry.data as { source?: unknown } | undefined)?.source ?? "")))) return undefined;
-	const files = (entry.data as { files?: unknown } | undefined)?.files;
+	// Or one June showed: her show tool's result names what it saved in the inbox.
+	const result = entry?.kind === "pi.tool-result" ? (entry.model?.[0] as { toolName?: unknown; isError?: unknown; content?: unknown } | undefined) : undefined;
+	const shown = result?.toolName === "show" && !result.isError ? shownFiles(textOf(result.content)) : undefined;
+	if (shown === undefined && (entry?.kind !== "june.input" || PRIVATE.has(sourceName(String((entry.data as { source?: unknown } | undefined)?.source ?? ""))))) return undefined;
+	const files = shown ?? (entry?.data as { files?: unknown } | undefined)?.files;
 	const file = Array.isArray(files) ? (files[n] as { name?: unknown; path?: unknown; mimeType?: unknown } | undefined) : undefined;
 	if (typeof file?.path !== "string" || typeof file.name !== "string") return undefined;
 	let path: string;
