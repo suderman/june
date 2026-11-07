@@ -1204,9 +1204,10 @@ test("a long panel admits tall art only where her action, face, and boots read, 
 			const feet = out.layout.art.y + (out.pose.figure.y + out.pose.figure.h) * out.layout.art.h;
 			assert.ok(feet >= out.layout.height - 1, "her drawn boots reach the bottom: she does not float");
 		}
-		// Left: the front board lies under the words, so the left-facing clipboard stands there, looking out of the panel.
+		// Left: partial board coverage is allowed, and either personal clipboard may stand looking out of the panel.
 		const left = standingLayout(pool, "report-front", "left", 3, 820, id);
-		assert.equal(left.pose.id, "clipboard-left", `${id} left/820`);
+		assert.ok(["clipboard-front", "clipboard-left"].includes(left.pose.id), `${id} left/820`);
+		assert.ok(gestureShownAt(left, 0) >= 0.75 && gestureShownAt(left, 1) >= 0.5);
 		assert.equal(left.layout.mirror, false, "never flipped to face in");
 		// The approved primary-gesture allowance admits the compact drawing at this narrow report size too.
 		for (const side of ["left", "right"]) {
@@ -1215,19 +1216,19 @@ test("a long panel admits tall art only where her action, face, and boots read, 
 			assert.equal(narrow.layout.framing, "full");
 			assert.ok(gestureShownAt(narrow, 0) >= 0.8 && gestureShownAt(narrow, 1) >= 0.5);
 		}
-		// Six paragraphs at 820 on the right: the front board crosses the panel's edge, so only the centred one stands.
-		assert.equal(standingLayout(pool, "report-front", "right", 6, 820, id).pose.id, "clipboard-left");
-		// The compact action now also clears the approved gesture floor at 700.
-		const six = standingLayout(pool, "report-front", "right", 6, 700, id);
-		assert.equal(six.pose.id, "clipboard-left");
-		assert.equal(six.layout.framing, "full");
-		assert.ok(gestureShownAt(six, 0) >= 0.8 && gestureShownAt(six, 1) >= 0.5);
+		// Six paragraphs still need a readable primary gesture and supporting grip at both widths.
+		for (const width of [700, 820]) {
+			const six = standingLayout(pool, "report-front", "right", 6, width, id);
+			assert.ok(["clipboard-front", "clipboard-left"].includes(six.pose.id));
+			assert.equal(six.layout.framing, "full");
+			assert.ok(gestureShownAt(six, 0) >= 0.75 && gestureShownAt(six, 1) >= 0.5);
+		}
 		// A short panel is untouched.
 		assert.equal(standingLayout(pool, "report-front", "right", 1, 820, id).pose.id, "report-front");
 	}
 	// With only the front board, which the words would cover, and no placeholder: her own pose, not a half-hidden board.
 	const frontOnly = readPoses({ poses: Object.fromEntries(Object.entries(STANDING).filter(([k]) => k !== "clipboard-left")) }, "file:///personal/");
-	const left = standingLayout(frontOnly, "report-front", "left", 3, 820);
+	const left = standingLayout(frontOnly, "report-front", "left", 3, 480);
 	assert.equal(left.pose.id, "report-front");
 	assert.equal(left.layout.clip.inset, true);
 });
@@ -1291,10 +1292,14 @@ test("standing placements Jon un-rejected at 620 and 700 px need no new take or 
 		const f = out.layout.face;
 		for (const b of out.layout.elements) assert.ok(f.x + f.w <= b.x || b.x + b.w <= f.x || f.y + f.h <= b.y || b.y + b.h <= f.y, "the admitted face stays clear of the text");
 	}
-	// The approved 83% board does not waive the guard entirely: 75% still picks the clearer compact drawing.
+	// Jon also approved the narrower front standing view, with 75% of the board visible.
 	const sizes = [{ kind: "thought", w: 304, h: 110 }, { kind: "june", w: 304, h: 288 }, { kind: "june", w: 304, h: 158 }];
 	const panel = { id: "36017", side: "left", pose: pool.find((p) => p.id === "clipboard-front"), elements: [{ kind: "june", expression: "serious" }] };
-	assert.equal(panelLayout({ panel, width: 480, sizes, poses: pool }).pose.id, "clipboard-left");
+	const narrow = panelLayout({ panel, width: 480, sizes, poses: pool });
+	assert.equal(narrow.pose.id, "clipboard-front");
+	assert.equal(narrow.layout.framing, "full");
+	assert.equal(narrow.layout.mirror, false);
+	assert.ok(narrow.layout.face.h >= 93 && gestureShownAt(narrow, 0) >= 0.75 && gestureShownAt(narrow, 1) >= 0.5);
 });
 
 test("an existing standing take survives the real iris-review panel becoming older", () => {
@@ -1306,10 +1311,9 @@ test("an existing standing take survives the real iris-review panel becoming old
 		const panel = { id: "36717", side, pose: pool.find((p) => p.id === "clipboard-front"), elements: [{ kind: "june", expression: "serious" }] };
 		for (const sizes of [newest, older]) {
 			const out = panelLayout({ panel, width: 788, sizes, poses: pool });
-			assert.ok(["clipboard-left", "clipboard-front"].includes(out.pose.id), "keep suitable personal standing art as lettering shrinks");
-			if (side === "right") assert.equal(out.pose.id, "clipboard-front", "the actual recorded side keeps its named drawing");
+			assert.equal(out.pose.id, "clipboard-front", "both sides keep the approved named drawing as lettering shrinks");
 			assert.equal(out.layout.framing, "full");
-			assert.ok(out.layout.face.h >= 84 && gestureShownAt(out, 0) >= 0.8);
+			assert.ok(out.layout.face.h >= 84 && gestureShownAt(out, 0) >= 0.75 && gestureShownAt(out, 1) >= 0.5);
 			assert.equal(out.layout.mirror, false);
 		}
 	}
@@ -1327,6 +1331,18 @@ const gestureShownAt = (out, index) => {
 		}
 	return seen / 144;
 };
+
+test("tall primary gestures still need three quarters visible", async () => {
+	const { gestureShown, standsTall } = await import("../overlay/compose.mjs");
+	const pose = { gestures: [{ box: { x: 0, y: 0.5, w: 1, h: 0.5 } }] };
+	const layout = { framing: "full", face: { h: 10 }, art: { x: 0, y: 0, w: 100, h: 100 }, clip: { x: 0, y: 0, w: 100, h: 100 }, elements: [{ x: 75, y: 50, w: 25, h: 50 }] };
+	assert.equal(gestureShown(layout, pose), 0.75);
+	assert.equal(standsTall(layout, pose, null), true);
+	layout.elements[0].x = 70;
+	layout.elements[0].w = 30;
+	assert.ok(gestureShown(layout, pose) < 0.75);
+	assert.equal(standsTall(layout, pose, null), false);
+});
 
 test("a paired gesture with one part hidden is not a tall performance, by stand-in or by name", async () => {
 	const { gestureShown, standsTall } = await import("../overlay/compose.mjs");

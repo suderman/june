@@ -356,11 +356,11 @@ export const GESTURE_FACE = 0.75;
 export const STANDING_CROP_SHOWN = 0.4;
 
 /**
- * In a tall panel the drawing exists to show what she is doing, so more must be seen: nearly all of the primary
- * gesture's box (its corners are often empty, so not every sample), and at least half of each other gesture, so a
- * paired action such as a two-palm shrug never reads with one hand hidden.
+ * Tall art keeps at least three quarters of the primary gesture and half of each other gesture. Jon approved
+ * standing clipboard views with 75% and 77% of the board clear; a paired action such as a two-palm shrug still
+ * must not read with one hand hidden.
  */
-export const TALL_GESTURE_SHOWN = 0.8;
+export const TALL_GESTURE_SHOWN = 0.75;
 export const TALL_SECONDARY_SHOWN = 0.5;
 // Jon approved standing views with 83% of the board clear and a face just under 70% of its inset. Keep those
 // proportions, the secondary-gesture guard and all face/text placement checks.
