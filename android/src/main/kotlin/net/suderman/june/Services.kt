@@ -14,7 +14,19 @@ const val TAG = "June"
 class JuneInteractionService : VoiceInteractionService() {
     override fun onReady() {
         super.onReady()
+        current = this
         Log.i(TAG, "interaction service ready")
+    }
+
+    override fun onShutdown() {
+        if (current === this) current = null
+        super.onShutdown()
+    }
+
+    companion object {
+        /** The running service, so the attach step can show the sheet again once a picker closes. */
+        var current: JuneInteractionService? = null
+            private set
     }
 }
 

@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -108,7 +110,7 @@ fun Conversation(link: Link, locked: Boolean, screen: Screen?, dismiss: () -> Un
                 contentColor = palette.pageInk,
             ) {
                 // A file opened from the strip goes to another app, which this sheet would cover: it hides once that app opens.
-                if (locked) Prompt("Unlock to talk to June", unlock) else androidx.compose.runtime.CompositionLocalProvider(LocalLeave provides dismiss) { Sheet(link, screen = screen) }
+                if (locked) Prompt("Unlock to talk to June", unlock) else androidx.compose.runtime.CompositionLocalProvider(LocalLeave provides dismiss) { Sheet(link, screen = screen, fromSheet = true) }
             }
         }
         // Where the fingerprint is read: the phone's own reader stays live under the session, and unlocking there
@@ -155,8 +157,7 @@ private fun Prompt(text: String, onClick: () -> Unit) {
  * still in JuneSession) moves or shrinks for one.
  */
 @Composable
-fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null) {
-    var draft by remember { mutableStateOf("") }
+fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fromSheet: Boolean = false) {
     val list = rememberLazyListState()
     val shown = link.items.filter { !it.private }
     // Stay on the newest item as the conversation grows.
@@ -171,6 +172,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null) {
     val avatar = remember { runCatching { Avatar(context) }.onFailure { Log.w(TAG, "avatar set did not load: $it") }.getOrNull() }
 
     val palette = pagePalette()
+    val leave = LocalLeave.current
     var showFollows by remember { mutableStateOf(false) }
     // Tasks Jon dismissed at the signal they had, kept on the phone: calm until the signal changes.
     val prefs = remember { context.getSharedPreferences("status", android.content.Context.MODE_PRIVATE) }
@@ -255,10 +257,57 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null) {
                 Text("✕", fontSize = 15.sp, color = palette.muted, modifier = Modifier.padding(horizontal = 8.dp))
             } else Text("+ add screen from ${offered.app}", fontSize = 13.sp, color = palette.muted, modifier = Modifier.padding(horizontal = 4.dp))
         }
+        // Pictures and files waiting for the next message, each removable.
+        val waiting = Outbox.items
+        if (waiting.isNotEmpty()) Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+        ) {
+            for (item in waiting) Row(
+                Modifier.background(palette.field, RoundedCornerShape(8.dp)).clickable { Outbox.remove(item) }.padding(6.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                val thumb = item.thumb
+                if (thumb != null) {
+                    val image = remember(item) { thumb.asImageBitmap() }
+                    androidx.compose.foundation.Image(image, null, Modifier.size(44.dp).clip(RoundedCornerShape(3.dp)))
+                } else Text(item.name, fontSize = 13.sp, color = palette.pageInk, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
+                Text("✕", fontSize = 15.sp, color = palette.muted)
+            }
+        }
+        if (Outbox.notice.isNotEmpty()) Text("not attached: ${Outbox.notice}", color = palette.accent, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(draft, { draft = it }, Modifier.weight(1f), placeholder = { Text(if (showing != null) "about this screen…" else "to june…") }, maxLines = 5)
+            var choosing by remember { mutableStateOf(false) }
+            Box {
+                OutlinedButton(onClick = { choosing = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp)) { Text("+") }
+                androidx.compose.material3.DropdownMenu(choosing, { choosing = false }) {
+                    for ((source, label) in listOf("photos" to "photos", "files" to "file", "camera" to "camera")) androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(label) },
+                        onClick = {
+                            choosing = false
+                            // The screen goes with the rest if Jon added it: the sheet forgets it once it hides.
+                            if (showing != null) {
+                                Outbox.add(Outbox.picture(showing.picture, "screen from ${showing.app}"))
+                                used = true
+                            }
+                            AttachActivity.open(context, source, fromSheet)
+                            if (fromSheet) leave()
+                        },
+                    )
+                }
+            }
+            OutlinedTextField(Outbox.draft, { Outbox.draft = it }, Modifier.weight(1f), placeholder = { Text(if (showing != null) "about this screen…" else "to june…") }, maxLines = 5)
             if (link.state.running || link.state.compacting) OutlinedButton(onClick = link::stop) { Text("Stop") }
-            Button(onClick = { if (link.submit(draft, images = listOfNotNull(showing?.jpeg()))) { draft = ""; if (showing != null) used = true } }, enabled = link.status is LinkStatus.Linked && (draft.isNotBlank() || showing != null)) { Text("Send") }
+            val anything = Outbox.draft.isNotBlank() || showing != null || waiting.isNotEmpty()
+            Button(
+                onClick = {
+                    if (link.submit(Outbox.draft, images = Outbox.pictures.map { it.data } + listOfNotNull(showing?.jpeg()), files = Outbox.files)) {
+                        Outbox.clear()
+                        if (showing != null) used = true
+                    }
+                },
+                enabled = link.status is LinkStatus.Linked && anything,
+            ) { Text("Send") }
         }
     }
 }

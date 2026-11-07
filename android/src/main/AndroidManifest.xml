@@ -31,6 +31,19 @@
             </intent-filter>
         </activity>
 
+        <!-- The invisible step to the photo picker, file picker, or camera (AttachActivity.kt). -->
+        <activity android:name=".AttachActivity" android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- Lends the camera the one file it writes a photo into, under the cache. -->
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="net.suderman.june.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/files" />
+        </provider>
+
         <!-- Pairing over ADB; only the shell and the system hold this permission, so no app can re-pair June. -->
         <activity android:name=".PairActivity" android:exported="true"
             android:permission="android.permission.WRITE_SECURE_SETTINGS"
