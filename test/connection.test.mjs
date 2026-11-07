@@ -360,6 +360,28 @@ Item {
       verify(findChild(preview, "words").visible);
       compare(findChild(preview, "status").visible, false);
     }
+    function test_steps_through_what_a_message_brought() {
+      compare(preview.stepping, false, "a lone picture has nothing to step to");
+      compare(findChild(preview, "forward").visible, false);
+      const set = [
+        { kind: "picture", url: Qt.resolvedUrl("picture.png"), name: "picture" },
+        { kind: "pdf", url: Qt.resolvedUrl("doc"), name: "two pages.pdf" },
+        { kind: "text", url: Qt.resolvedUrl("notes.txt"), name: "notes.txt" },
+      ];
+      preview.show({ kind: "picture", url: set[0].url, name: "picture", set: set, at: 0 });
+      verify(preview.stepping);
+      const forward = findChild(preview, "forward");
+      verify(forward.visible); verify(findChild(preview, "back").visible);
+      mouseClick(forward, forward.width / 2, forward.height / 2);
+      compare(preview.at, 1); compare(preview.kind, "pdf"); compare(preview.open, true, "the arrow does not close it");
+      tryCompare(preview, "pages", 2);
+      preview.next(); compare(preview.page, 2, "the arrow keys turn a PDF's pages first");
+      preview.next(); compare(preview.kind, "text", "then go on past its last page");
+      tryCompare(preview, "words", "buy milk\nwalk Lucy\n");
+      preview.next(); compare(preview.at, 0, "and wrap round"); compare(preview.kind, "picture");
+      preview.previous(); compare(preview.kind, "text");
+      preview.close(); compare(preview.stepping, false);
+    }
     function test_other_file() {
       preview.show({ kind: "file", url: Qt.resolvedUrl("archive.zip"), name: "archive.zip" });
       compare(findChild(preview, "status").visible, false);
@@ -377,5 +399,5 @@ Item {
 	t.after(() => child.kill());
 	const [code] = await closed;
 	assert.equal(code, 0, output);
-	assert.match(output, /Totals: 10 passed, 0 failed/);
+	assert.match(output, /Totals: 11 passed, 0 failed/);
 });

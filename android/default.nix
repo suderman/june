@@ -120,6 +120,16 @@
       ${tools}/apksigner sign --ks "$key" --ks-pass pass:android --key-pass pass:android \
         --out "$out/june.apk" ${apk}/june.apk
       adb install -r "$@" "$out/june.apk"
+      # Updating the app can leave Android with no active assistant although June keeps the role: it re-checks the
+      # assistant, finds no system speech recognizer, and clears its settings, so the gesture and power-button hold do
+      # nothing and the screen offer gets no screenshot. Put them back while June holds the role.
+      if adb shell cmd role get-role-holders android.app.role.ASSISTANT | tr -d '\r' | grep -qx net.suderman.june; then
+        sleep 2
+        adb shell settings put secure voice_recognition_service net.suderman.june/.JuneRecognitionService
+        adb shell settings put secure voice_interaction_service net.suderman.june/.JuneInteractionService
+        adb shell settings put secure assist_structure_enabled 1
+        adb shell settings put secure assist_screenshot_enabled 1
+      fi
       # GrapheneOS makes network access a permission an ADB install leaves off; elsewhere it cannot be changed.
       adb shell pm grant net.suderman.june android.permission.INTERNET 2>/dev/null || true
       # June's hands (Hands.kt), on by Jon's choice: added to the enabled accessibility services if missing. Settings

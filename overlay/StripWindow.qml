@@ -28,8 +28,8 @@ FloatingWindow {
   Shortcut { sequence: "Ctrl+W"; onActivated: win.shell.windowShown = false }
   Shortcut { sequence: "Ctrl+R"; onActivated: win.shell.refresh() }
   Shortcut { sequence: "Escape"; enabled: preview.open; onActivated: preview.close() }
-  Shortcut { sequences: ["Right", "PgDown"]; enabled: preview.paging; onActivated: preview.next() }
-  Shortcut { sequences: ["Left", "PgUp"]; enabled: preview.paging; onActivated: preview.previous() }
+  Shortcut { sequences: ["Right", "PgDown"]; enabled: preview.paging || preview.stepping; onActivated: preview.next() }
+  Shortcut { sequences: ["Left", "PgUp"]; enabled: preview.paging || preview.stepping; onActivated: preview.previous() }
 
   // The column the strip lives in: the window's width, up to the overlay's, centred on a wide window.
   Item {

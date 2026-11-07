@@ -281,7 +281,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
             Box {
                 OutlinedButton(onClick = { choosing = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp)) { Text("+") }
                 androidx.compose.material3.DropdownMenu(choosing, { choosing = false }) {
-                    for ((source, label) in listOf("photos" to "photos", "files" to "file", "camera" to "camera")) androidx.compose.material3.DropdownMenuItem(
+                    for ((source, label) in listOf("camera" to "camera", "photos" to "photos", "files" to "files")) androidx.compose.material3.DropdownMenuItem(
                         text = { Text(label) },
                         onClick = {
                             choosing = false

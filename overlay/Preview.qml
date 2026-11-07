@@ -7,8 +7,12 @@ import QtQuick
 
 Item {
   id: preview
-  // { kind: "picture" | "pdf" | "text" | "file" (Strip.previewKind), url, name }, or null when closed.
+  // { kind: "picture" | "pdf" | "text" | "file" (Strip.previewKind), url, name }, or null when closed. Opened from a
+  // message, it also carries `set`, everything the message brought, and `at`, its place there, to step through.
   property var what: null
+  property var set: []
+  property int at: 0
+  readonly property bool stepping: set.length > 1
   readonly property bool open: what !== null
   readonly property string kind: open ? (what.kind ?? "picture") : ""
   // A PDF's pages: how many (-1 while asking), and the one shown, from 1.
@@ -26,13 +30,20 @@ Item {
   readonly property int maxChars: 200000
 
   function show(item) {
+    set = item.set ?? [item]; at = item.at ?? 0;
+    look(item);
+  }
+  function look(item) {
     what = item; pages = -1; page = 1; words = ""; failed = false;
     if (kind === "pdf") ask(item.url + "/pages", text => { pages = Number(JSON.parse(text).pages) || 0; }, () => { pages = 0; });
     else if (kind === "text") ask(item.url, text => { words = text.length > maxChars ? text.slice(0, maxChars) + "\n…" : text; }, () => { failed = true; });
   }
-  function close() { what = null; }
-  function next() { if (paging && page < pages) page++; }
-  function previous() { if (paging && page > 1) page--; }
+  function close() { what = null; set = []; at = 0; }
+  // The next or previous of what the message brought, wrapping round.
+  function step(by) { if (!stepping) return; at = (at + by + set.length) % set.length; look(set[at]); }
+  // The arrow keys: a PDF's pages first, then on to the next or previous thing the message brought.
+  function next() { if (paging && page < pages) page++; else step(1); }
+  function previous() { if (paging && page > 1) page--; else step(-1); }
 
   // GET `url`, then `done(text)`, or `fail()`; a reply for a preview since closed or replaced is dropped.
   function ask(url, done, fail) {
@@ -143,7 +154,7 @@ Item {
     anchors.bottom: parent.bottom; anchors.bottomMargin: 18; anchors.horizontalCenter: parent.horizontalCenter
     width: Math.min(implicitWidth, parent.width - 48)
     elide: Text.ElideMiddle
-    text: preview.open ? (preview.what.name ?? "") + (preview.kind === "pdf" && preview.pages > 0 ? "  ·  page " + preview.page + " of " + preview.pages : "") : ""
+    text: preview.open ? (preview.stepping && preview.kind !== "picture" ? (preview.at + 1) + " of " + preview.set.length + "  ·  " : "") + (preview.what.name ?? "") + (preview.kind === "pdf" && preview.pages > 0 ? "  ·  page " + preview.page + " of " + preview.pages : "") : ""
     font.family: Theme.caption; font.pixelSize: 15; color: "#ffffff"
   }
 
@@ -156,21 +167,26 @@ Item {
     Button { objectName: "close"; label: "✕"; onClicked: preview.close() }
   }
 
+  // Between the things a message brought: a large arrow at each side, clear of what is shown.
+  Button { objectName: "back"; label: "‹"; big: true; visible: preview.stepping; anchors.left: parent.left; anchors.leftMargin: 16; anchors.verticalCenter: parent.verticalCenter; onClicked: preview.step(-1) }
+  Button { objectName: "forward"; label: "›"; big: true; visible: preview.stepping; anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter; onClicked: preview.step(1) }
+
   component Button: Rectangle {
     id: button
     property string label: ""
     property bool dim: false
+    property bool big: false
     signal clicked()
-    width: text.implicitWidth + 28
-    height: 34
-    radius: 17
+    width: big ? 48 : text.implicitWidth + 28
+    height: big ? 48 : 34
+    radius: height / 2
     color: "#ffffff"
     opacity: dim ? 0.4 : area.containsMouse ? 1 : 0.88
     Text {
       id: text
       anchors.centerIn: parent
       text: button.label
-      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 14; color: Theme.ink
+      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: button.big ? 26 : 14; color: Theme.ink
     }
     MouseArea { id: area; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: button.clicked() }
   }

@@ -346,6 +346,17 @@ Item {
       readonly property var files: element && element.files ? element.files : []
       readonly property real cardW: Math.min(260, panel.m.textWidth - 28)
       readonly property real cardsTop: Math.max(body.height, marker.height, pictures > 0 ? 78 : 0) + 16
+      // Everything the message brought for the preview to step through, every picture (not only the three drawn) then
+      // every file, opened at `at`.
+      function brought(at) {
+        const base = panel.attached && item ? panel.attached + item.id + "/" : "";
+        const count = element ? element.pictures ?? 0 : 0;
+        const set = [];
+        for (let i = 0; i < count; i++) set.push({ kind: "picture", url: base + i, name: count > 1 ? "picture " + (i + 1) + " of " + count : "picture" });
+        for (const file of files) set.push({ kind: file.preview ?? "file", url: base + "file/" + file.n, name: file.name });
+        const shown = set[Math.min(at, set.length - 1)];
+        return { kind: shown.kind, url: shown.url, name: shown.name, set: set, at: Math.min(at, set.length - 1) };
+      }
       readonly property real w: Math.ceil(Math.min(Math.max(marker.implicitWidth + 8 + (said || (pictures === 0 && files.length === 0) ? body.width : 0) + photos, files.length > 0 ? cardW : 0) + 28, panel.m.textWidth))
       readonly property real h: Math.ceil(Math.max(body.height, marker.height, pictures > 0 ? 78 : 0) + 20 + (files.length > 0 ? files.length * 32 : 0))
       width: w
@@ -402,7 +413,7 @@ Item {
             anchors.fill: parent
             enabled: polaroid.url !== ""
             cursorShape: Qt.PointingHandCursor
-            onClicked: panel.preview({ kind: "picture", url: polaroid.url, name: noteBox.pictures > 1 ? "picture " + (polaroid.index + 1) + " of " + noteBox.pictures : "picture" })
+            onClicked: panel.preview(noteBox.brought(polaroid.index))
           }
           // The paperclip over the frame's top edge, on the front picture only.
           Shape {
@@ -423,7 +434,7 @@ Item {
           required property int index
           file: modelData
           // Every file opens in the preview, which shows what it can and offers the browser.
-          onChosen: url => panel.preview({ kind: modelData.preview ?? "file", url: url, name: modelData.name })
+          onChosen: url => panel.preview(noteBox.brought((noteBox.element.pictures ?? 0) + index))
           url: panel.attached && noteBox.item ? panel.attached + noteBox.item.id + "/file/" + modelData.n : ""
           x: 14
           y: noteBox.cardsTop + index * 32

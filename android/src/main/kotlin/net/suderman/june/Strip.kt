@@ -1,5 +1,7 @@
 package net.suderman.june
 
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.util.LruCache
@@ -206,24 +208,36 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
         // Built from the bottom, newest first, as the overlay's list is: the newest panel stays in view as it settles
         // its height, with no scrolling after it.
         // A picture or file the user sent, previewed over the strip while open.
-        var viewing by remember { mutableStateOf<Previewing?>(null) }
+        var viewing by remember { mutableStateOf<Pair<List<Previewing>, Int>?>(null) }
         avatar.attachedPath = link.attachedPath
-        androidx.compose.runtime.CompositionLocalProvider(LocalPictures provides Pictures(avatar, link.attachedPath) { viewing = it }) {
+        androidx.compose.runtime.CompositionLocalProvider(LocalPictures provides Pictures(avatar, link.attachedPath) { set, at -> viewing = set to at }) {
             LazyColumn(Modifier.fillMaxSize(), state = followNewest(if (count > 0) shown.getJSONObject(count - 1).getString("id") else null), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 items(count, key = { shown.getJSONObject(count - 1 - it).getString("id") }) { i ->
                     PanelView(shown.getJSONObject(count - 1 - i), newest = i == 0, width.value, m, decisions, avatar, now, sky, link)
                 }
             }
         }
-        viewing?.let { shown -> Preview(shown, avatar) { viewing = null } }
+        viewing?.let { (set, at) -> Preview(set, at, avatar) { viewing = null } }
     }
 }
 
-/** The pictures the user's messages brought: where they are served (the hello's `attached`), and how to open one. */
-class Pictures(val avatar: Avatar, val path: String?, val open: (Previewing) -> Unit)
+/**
+ * The pictures the user's messages brought: where they are served (the hello's `attached`), and how to open one of a
+ * message's set of things to step through.
+ */
+class Pictures(val avatar: Avatar, val path: String?, val open: (List<Previewing>, Int) -> Unit)
 
 /** What a preview shows: `kind` as Strip.previewKind names it ("picture", "pdf", "text", "file"), at `path` under the hello's `attached`. */
 data class Previewing(val kind: String, val path: String, val name: String)
+
+/** Everything a note's message brought, every picture (not only the three drawn) then every file, as the preview steps through them. */
+private fun brought(item: JSONObject, el: JSONObject): List<Previewing> {
+    val id = item.optString("id")
+    val count = el.optInt("pictures")
+    val files = el.optJSONArray("files") ?: org.json.JSONArray()
+    return (0 until count).map { Previewing("picture", "$id/$it", if (count > 1) "picture ${it + 1} of $count" else "picture") } +
+        (0 until files.length()).map { files.getJSONObject(it).let { f -> Previewing(f.optString("preview", "file"), "$id/file/${f.optInt("n")}", f.optString("name")) } }
+}
 
 val LocalPictures = androidx.compose.runtime.staticCompositionLocalOf<Pictures?> { null }
 
@@ -237,9 +251,12 @@ val LocalLeave = androidx.compose.runtime.staticCompositionLocalOf<() -> Unit> {
  * does the same on the desktop.
  */
 @Composable
-private fun Preview(shown: Previewing, avatar: Avatar, close: () -> Unit) {
+private fun Preview(set: List<Previewing>, start: Int, avatar: Avatar, close: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val leave = LocalLeave.current
+    var at by remember(set) { mutableStateOf(start.coerceIn(0, set.size - 1)) }
+    val shown = set[at]
+    val stepping = set.size > 1
     var page by remember(shown) { mutableStateOf(1) }
     // A PDF's page count: -1 while asking, 0 when it cannot be read.
     val pages by produceState(-1, shown) {
@@ -260,8 +277,25 @@ private fun Preview(shown: Previewing, avatar: Avatar, close: () -> Unit) {
     val words by produceState<String?>(null, shown) {
         value = if (shown.kind != "text") null else avatar.bytes(shown.path)?.let { val t = String(it, Charsets.UTF_8); if (t.length > 200_000) t.take(200_000) + "\n…" else t } ?: ""
     }
+    // A swipe, or ‹ › at the sides: a PDF's pages first, then on to the next thing the message brought, wrapping round.
+    val step = { by: Int ->
+        if (shown.kind == "pdf" && page + by in 1..pages) page += by
+        else if (stepping) at = (at + by + set.size) % set.size
+    }
+    // The gesture below is set up once per set; it must reach the newest step, which knows the current page.
+    val stepNow by androidx.compose.runtime.rememberUpdatedState(step)
     val ground = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)).clickable(ground, null, onClick = close)) {
+    val swipe = with(androidx.compose.ui.platform.LocalDensity.current) { 64.dp.toPx() }
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)).clickable(ground, null, onClick = close)
+            .pointerInput(set) {
+                var dragged = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { dragged = 0f },
+                    onDragEnd = { if (dragged <= -swipe) stepNow(1) else if (dragged >= swipe) stepNow(-1) },
+                ) { _, dx -> dragged += dx }
+            },
+    ) {
         Box(Modifier.fillMaxSize().padding(top = 64.dp, bottom = 48.dp, start = 12.dp, end = 12.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
             val inner = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
             val still = Modifier.clickable(inner, null) {}
@@ -296,8 +330,12 @@ private fun Preview(shown: Previewing, avatar: Avatar, close: () -> Unit) {
             }
             PreviewButton("✕", onClick = close)
         }
+        if (stepping) {
+            Box(Modifier.align(androidx.compose.ui.Alignment.CenterStart).padding(start = 6.dp)) { PreviewButton("‹") { step(-1) } }
+            Box(Modifier.align(androidx.compose.ui.Alignment.CenterEnd).padding(end = 6.dp)) { PreviewButton("›") { step(1) } }
+        }
         Text(
-            shown.name + if (shown.kind == "pdf" && pages > 0) "  ·  page $page of $pages" else "",
+            (if (stepping && shown.kind != "picture") "${at + 1} of ${set.size}  ·  " else "") + shown.name + if (shown.kind == "pdf" && pages > 0) "  ·  page $page of $pages" else "",
             style = noteBody.copy(color = Color.White, fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
             modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter).padding(bottom = 16.dp, start = 24.dp, end = 24.dp),
         )
@@ -317,7 +355,7 @@ private fun PreviewButton(label: String, enabled: Boolean = true, onClick: () ->
  * first card sits, as the note's measure left room for them.
  */
 @Composable
-private fun FileCards(item: JSONObject, files: org.json.JSONArray, noteW: Float, top: Float) {
+private fun FileCards(item: JSONObject, el: JSONObject, files: org.json.JSONArray, noteW: Float, top: Float) {
     val pictures = LocalPictures.current
     for (i in 0 until files.length()) {
         val file = files.getJSONObject(i)
@@ -327,7 +365,7 @@ private fun FileCards(item: JSONObject, files: org.json.JSONArray, noteW: Float,
         Box(
             Modifier.offset(14.dp, (top + i * 32).dp).size((noteW - 28).dp, 26.dp).rotate(if (file.optInt("n") % 2 == 0) -1f else 1f)
                 .alpha(if (expired) 0.5f else 1f)
-                .clickable(enabled = !expired && path != null) { path?.let { pictures.open(Previewing(file.optString("preview", "file"), it, name)) } },
+                .clickable(enabled = !expired && path != null) { pictures?.open(brought(item, el), el.optInt("pictures") + i) },
         ) {
             Box(Modifier.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(3.dp)).border(1.5.dp, Look.ink, RoundedCornerShape(3.dp)))
             Canvas(Modifier.offset(8.dp, 4.dp).size(14.dp, 18.dp)) {
@@ -349,7 +387,7 @@ private fun FileCards(item: JSONObject, files: org.json.JSONArray, noteW: Float,
 
 /** The polaroids clipped to a note: its pictures after the words, fanned when there are several, the front one clipped on. */
 @Composable
-private fun Polaroids(item: JSONObject, count: Int, noteW: Float) {
+private fun Polaroids(item: JSONObject, el: JSONObject, count: Int, noteW: Float) {
     val pictures = LocalPictures.current
     for (index in 0 until count) {
         val path = pictures?.path?.let { "${item.optString("id")}/$index" }
@@ -357,7 +395,7 @@ private fun Polaroids(item: JSONObject, count: Int, noteW: Float) {
         Box(
             Modifier.offset((noteW - 14 - 62 - (count - 1 - index) * 16).dp, (12 + index * 3).dp).zIndex((count - index).toFloat())
                 .size(62.dp, 74.dp).rotate(listOf(-6f, 5f, -2f)[index])
-                .clickable(enabled = path != null) { path?.let { pictures.open(Previewing("picture", it, if (count > 1) "picture ${index + 1} of $count" else "picture")) } },
+                .clickable(enabled = path != null) { pictures?.open(brought(item, el), index) },
         ) {
             Box(Modifier.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(2.dp)).border(1.5.dp, Look.ink, RoundedCornerShape(2.dp)))
             Box(Modifier.offset(5.dp, 5.dp).size(52.dp).background(Color(0xFFCFD6E3)).clipToBounds()) {
@@ -705,8 +743,8 @@ private fun ElementView(e: Measured, box: JSONObject, newest: Boolean) {
             Box(Modifier.fillMaxSize().background(Look.noteFill, RoundedCornerShape(14.dp)).border(2.dp, Look.noteLine, RoundedCornerShape(14.dp)))
             Text(noteMarkerText(item), style = noteMarker, modifier = Modifier.offset(14.dp, 10.dp))
             Text(el.optString("text", item.optString("text")), style = noteBody, modifier = Modifier.offset((14 + e.markerW + 8).dp, 10.dp).width(e.textW.dp))
-            Polaroids(item, min(el.optInt("pictures"), 3), e.w)
-            el.optJSONArray("files")?.takeIf { it.length() > 0 }?.let { files -> FileCards(item, files, e.w, e.h - 4 - files.length() * 32) }
+            Polaroids(item, el, min(el.optInt("pictures"), 3), e.w)
+            el.optJSONArray("files")?.takeIf { it.length() > 0 }?.let { files -> FileCards(item, el, files, e.w, e.h - 4 - files.length() * 32) }
         }
         "chip" -> {
             val call = calls(el)[0]
