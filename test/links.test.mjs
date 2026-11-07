@@ -33,3 +33,7 @@ test("a file link becomes an emacsclient call whose path and search are only eve
 	assert.equal(emacsCall('file:~/org/a.org::x") (shell-command "rm') .at(-1), '(suderman/june-open "~/org/a.org" "x\\") (shell-command \\"rm")', "a quote stays inside the string");
 	assert.equal(emacsCall("file:/tmp/a.org::two::colons").at(-1), '(suderman/june-open "/tmp/a.org" "two::colons")');
 });
+
+test("a link's words take the colour the strip gives them", () => {
+	assert.equal(markup("see [[https://a.ca][A]]", { link: "color:#5470b8" }), 'see <a href="https://a.ca"><span style="color:#5470b8">A</span></a>');
+});

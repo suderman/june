@@ -187,17 +187,19 @@ const VERBATIM = new RegExp(`${PRE}([=~])((?!\\2)[^\\s](?:[^\\n]*?[^\\s])??)\\2$
  * and +strike+ their own faces, =verbatim= and ~code~ a `code` span, a #+begin_src block monospaced lines; links,
  * [[url][label]] or [[url]], become anchors when linkKind opens them and their label otherwise; a heading keeps its
  * words, stressed, without its stars. Markdown's **bold**, `code` and [label](url) still read, since a model slips
- * into them. Everything else is escaped, so nothing she writes can inject markup.
+ * into them. `link` styles a link's words, which Qt otherwise draws in the palette's blue. Everything else is escaped,
+ * so nothing she writes can inject markup.
  */
 export function markup(text, style = {}) {
 	const stress = style.stress ?? "font-weight:800";
 	const code = style.code ?? "font-family:monospace";
+	const words = (label) => (style.link ? `<span style="${style.link}">${escape(label)}</span>` : escape(label));
 	const faces = { b: [`<span style="${stress}">`, "</span>"], i: ["<i>", "</i>"], u: ["<u>", "</u>"], s: ["<s>", "</s>"] };
 	const inline = (line) => {
 		// Links and code wait as numbered marks, escaped already, so no emphasis pass reshapes an address or a command.
 		const held = [];
 		const hold = (html) => `\u0000${held.push(html) - 1}\u0000`;
-		const link = (url, label) => (linkKind(url) === null ? hold(escape(label)) : hold(`<a href="${escape(url)}">${escape(label)}</a>`));
+		const link = (url, label) => (linkKind(url) === null ? hold(escape(label)) : hold(`<a href="${escape(url)}">${words(label)}</a>`));
 		let out = line.replace(/[\u0000-\u0002]/g, "");
 		out = out.replace(/\[\[([^\]\n]+)\](?:\[([^\]\n]+)\])?\]/g, (_, url, label) => link(url, label ?? url));
 		// A file link's search may name a heading with spaces, which June writes in Markdown's form too.

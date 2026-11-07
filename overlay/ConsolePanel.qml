@@ -28,7 +28,7 @@ Item {
   }
   function escaped(text) { return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
   function body(line) {
-    if (line.kind === "june") return Strip.markup(line.text, { stress: "font-weight:700; color:" + Theme.ink, code: "color:" + Theme.consoleJune }) + (line.streaming ? "<span style='color:" + Theme.accent + "'> ▍</span>" : "");
+    if (line.kind === "june") return Strip.markup(line.text, { stress: "font-weight:700; color:" + Theme.ink, code: "color:" + Theme.consoleJune, link: "color:" + Theme.noteLine }) + (line.streaming ? "<span style='color:" + Theme.accent + "'> ▍</span>" : "");
     const quiet = line.kind === "tool" || line.kind === "thought";
     return "<span style='color:" + (quiet ? Theme.muted : Theme.ink) + "'>" + escaped(line.text).replace(/\n/g, "<br>") + "</span>";
   }

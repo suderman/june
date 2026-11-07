@@ -457,7 +457,7 @@ Item {
       weight: panel.newest ? 3 : Theme.line
       tail: box ? (box.tail ?? null) : null
       onLink: url => panel.link(url)
-      text: element ? Strip.markup(element.text, { stress: "font-weight:800; background-color:" + Theme.highlight, code: "font-family:monospace" }) + (element.streaming ? "<span style='color:" + Theme.accent + "'> ▍</span>" : "") : ""
+      text: element ? Strip.markup(element.text, { stress: "font-weight:800; background-color:" + Theme.highlight, code: "font-family:monospace", link: "color:" + Theme.noteLine }) + (element.streaming ? "<span style='color:" + Theme.accent + "'> ▍</span>" : "") : ""
       transformOrigin: panel.p.side === "left" ? Item.Left : Item.Right
       NumberAnimation on scale { id: pop; running: false; from: 0.9; to: 1; duration: 220; easing.type: Easing.OutBack }
       Component.onCompleted: if (panel.newest) pop.start()

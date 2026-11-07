@@ -445,7 +445,7 @@ private val burstStyle = TextStyle(fontFamily = Look.lettering, fontWeight = Fon
 private fun kindOf(e: JSONObject) = if (e.optString("kind") == "tools") (if (e.getJSONArray("items").length() > 1) "card" else "chip") else e.optString("kind")
 
 private fun juneText(e: JSONObject): AnnotatedString = buildAnnotatedString {
-    append(orgText(e.optString("text"), code = Look.chipInk))
+    append(orgText(e.optString("text"), code = Look.chipInk, stress = SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold, background = Look.highlight)))
     if (e.optBoolean("streaming")) withStyle(SpanStyle(color = Look.accent)) { append(" ▍") }
 }
 

@@ -38,9 +38,10 @@ private sealed interface Held {
     data class Code(val body: String) : Held
 }
 
-fun orgText(text: String, code: Color): AnnotatedString = buildAnnotatedString {
+/** `stress` is how *bold* reads (a balloon highlights it, as the desktop's do); `link` colours a link's words. */
+fun orgText(text: String, code: Color, stress: SpanStyle = SpanStyle(fontWeight = FontWeight.Bold), link: Color = Look.noteLine): AnnotatedString = buildAnnotatedString {
     val face = mapOf(
-        'b' to SpanStyle(fontWeight = FontWeight.Bold),
+        'b' to stress,
         'i' to SpanStyle(fontStyle = FontStyle.Italic),
         'u' to SpanStyle(textDecoration = TextDecoration.Underline),
         's' to SpanStyle(textDecoration = TextDecoration.LineThrough),
@@ -64,7 +65,7 @@ fun orgText(text: String, code: Color): AnnotatedString = buildAnnotatedString {
             when {
                 m.groups[1] != null -> when (val h = held[m.groupValues[1].toInt()]) {
                     is Held.Code -> withStyle(mono) { append(h.body) }
-                    is Held.Link -> if (Links.opens(h.url)) withLink(LinkAnnotation.Url(h.url, TextLinkStyles(SpanStyle(textDecoration = TextDecoration.Underline)))) { append(h.label) } else append(h.label)
+                    is Held.Link -> if (Links.opens(h.url)) withLink(LinkAnnotation.Url(h.url, TextLinkStyles(SpanStyle(color = link, textDecoration = TextDecoration.Underline)))) { append(h.label) } else append(h.label)
                 }
                 m.groups[2] != null -> { pushStyle(face.getValue(m.groupValues[2][0])); open++ }
                 open > 0 -> { pop(); open-- }
