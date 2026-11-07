@@ -73,6 +73,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -395,7 +396,7 @@ private fun Shown(el: JSONObject, w: Float) {
     val pictures = LocalPictures.current
     val files = el.optJSONArray("files") ?: JSONArray()
     val all = (0 until files.length()).map { files.getJSONObject(it) }
-    val set = all.map { f -> Previewing(f.optString("preview", "file"), "${el.optString("id")}/file/${f.optInt("n")}", f.optString("name")) }
+    val set = all.map { f -> Previewing(f.optString("preview", "file"), "${f.optString("id")}/file/${f.optInt("n")}", f.optString("name")) }
     val shots = all.indices.filter { all[it].optString("preview") == "picture" }.take(3)
     val documents = all.indices.filter { all[it].optString("preview") != "picture" }
     for ((i, at) in shots.withIndex()) {
@@ -411,6 +412,11 @@ private fun Shown(el: JSONObject, w: Float) {
             }
         }
     }
+    val pictureCount = all.count { it.optString("preview") == "picture" }
+    if (pictureCount > 3) Text(
+        "+${pictureCount - 3}", style = noteBody.copy(fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+        modifier = Modifier.offset((14 + 62 + 2 * 16 + 10).dp, 40.dp).clickable { pictures?.open(set, all.indices.filter { all[it].optString("preview") == "picture" }[3]) },
+    )
     val top = if (shots.isNotEmpty()) 96f else 12f
     for ((row, at) in documents.withIndex()) {
         val file = all[at]
@@ -488,7 +494,8 @@ private val burstStyle = TextStyle(fontFamily = Look.lettering, fontWeight = Fon
 private fun kindOf(e: JSONObject) = if (e.optString("kind") == "tools") (if (e.getJSONArray("items").length() > 1) "card" else "chip") else e.optString("kind")
 
 private fun juneText(e: JSONObject): AnnotatedString = buildAnnotatedString {
-    append(orgText(e.optString("text"), code = Look.chipInk, stress = SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold, background = Look.highlight)))
+    // Paths and commands read as a terminal, as the tool card does: smaller, light on dark.
+    append(orgText(e.optString("text"), code = Look.chipInk, stress = SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold, background = Look.highlight), terminal = SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 0.8.em, color = Look.cardInk, background = Look.cardFill)))
     if (e.optBoolean("streaming")) withStyle(SpanStyle(color = Look.accent)) { append(" ▍") }
 }
 
@@ -540,7 +547,7 @@ private fun measure(e: JSONObject, newest: Boolean, textWidth: Float, measurer: 
             val pictures = (0 until files.length()).count { files.getJSONObject(it).optString("preview") == "picture" }
             val drawn = min(pictures, 3)
             val documents = files.length() - pictures
-            val photos = if (drawn > 0) 62f + (drawn - 1) * 16f else 0f
+            val photos = if (drawn > 0) 62f + (drawn - 1) * 16f + (if (pictures > 3) 34f else 0f) else 0f
             val top = if (drawn > 0) 96f else 12f
             Measured(kind, ceil(min(max(photos, if (documents > 0) min(260f, textWidth - 28) else 0f) + 28, textWidth)), ceil(top + documents * 32 + if (documents > 0) 4 else 0), e)
         }

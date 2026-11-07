@@ -345,12 +345,12 @@ Item {
       readonly property var pictures: files.filter(f => f.preview === "picture")
       readonly property var documents: files.filter(f => f.preview !== "picture")
       readonly property int drawn: Math.min(pictures.length, 3)
-      readonly property real photos: drawn > 0 ? 62 + (drawn - 1) * 16 : 0
+      readonly property real photos: drawn > 0 ? 62 + (drawn - 1) * 16 + (pictures.length > 3 ? 34 : 0) : 0
       readonly property real cardW: Math.min(260, panel.m.textWidth - 28)
       readonly property real cardsTop: drawn > 0 ? 96 : 12
       readonly property real w: Math.ceil(Math.min(Math.max(photos, documents.length > 0 ? cardW : 0) + 28, panel.m.textWidth))
       readonly property real h: Math.ceil(cardsTop + documents.length * 32 + (documents.length > 0 ? 4 : 0))
-      function url(file) { return panel.attached && element ? panel.attached + element.id + "/file/" + file.n : ""; }
+      function url(file) { return panel.attached && file ? panel.attached + file.id + "/file/" + file.n : ""; }
       function opened(file) {
         const set = files.map(f => ({ kind: f.preview ?? "file", url: url(f), name: f.name }));
         const at = Math.max(0, files.indexOf(file));
@@ -387,6 +387,15 @@ Item {
             onClicked: panel.preview(shownBox.opened(shot.file))
           }
         }
+      }
+      // More pictures than the fan shows: how many more, all of them a click away in the preview.
+      Text {
+        visible: shownBox.pictures.length > 3
+        x: 14 + 62 + 2 * 16 + 10
+        y: 40
+        text: "+" + (shownBox.pictures.length - 3)
+        font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 15; color: Theme.ink
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: panel.preview(shownBox.opened(shownBox.pictures[3])) }
       }
       Repeater {
         model: shownBox.documents
@@ -529,7 +538,8 @@ Item {
       weight: panel.newest ? 3 : Theme.line
       tail: box ? (box.tail ?? null) : null
       onLink: url => panel.link(url)
-      text: element ? Strip.markup(element.text, { stress: "font-weight:800; background-color:" + Theme.highlight, code: "font-family:monospace", link: "color:" + Theme.noteLine }) + (element.streaming ? "<span style='color:" + Theme.accent + "'> ▍</span>" : "") : ""
+      // Paths and commands read as a terminal, as the tool card does: smaller, light on dark.
+      text: element ? Strip.markup(element.text, { stress: "font-weight:800; background-color:" + Theme.highlight, code: "font-family:monospace; font-size:" + Math.round(pixelSize * 0.8) + "px; color:" + Theme.cardInk + "; background-color:" + Theme.cardFill, codePad: true, link: "color:" + Theme.noteLine }) + (element.streaming ? "<span style='color:" + Theme.accent + "'> ▍</span>" : "") : ""
       transformOrigin: panel.p.side === "left" ? Item.Left : Item.Right
       NumberAnimation on scale { id: pop; running: false; from: 0.9; to: 1; duration: 220; easing.type: Easing.OutBack }
       Component.onCompleted: if (panel.newest) pop.start()

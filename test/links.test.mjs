@@ -37,3 +37,8 @@ test("a file link becomes an emacsclient call whose path and search are only eve
 test("a link's words take the colour the strip gives them", () => {
 	assert.equal(markup("see [[https://a.ca][A]]", { link: "color:#5470b8" }), 'see <a href="https://a.ca"><span style="color:#5470b8">A</span></a>');
 });
+
+test("code in a balloon can read as a terminal, padded inside its dark background", () => {
+	assert.equal(markup("edit =/etc/nixos/flake.nix= now", { code: "T", codePad: true }), 'edit <span style="T">&nbsp;/etc/nixos/flake.nix&nbsp;</span> now');
+	assert.equal(markup("edit =/etc/nixos/flake.nix= now", { code: "T" }), 'edit <span style="T">/etc/nixos/flake.nix</span> now', "no padding unless asked");
+});

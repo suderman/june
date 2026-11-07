@@ -38,15 +38,19 @@ private sealed interface Held {
     data class Code(val body: String) : Held
 }
 
-/** `stress` is how *bold* reads (a balloon highlights it, as the desktop's do); `link` colours a link's words. */
-fun orgText(text: String, code: Color, stress: SpanStyle = SpanStyle(fontWeight = FontWeight.Bold), link: Color = Look.noteLine): AnnotatedString = buildAnnotatedString {
+/**
+ * `stress` is how *bold* reads (a balloon highlights it, as the desktop's do); `link` colours a link's words; `terminal`,
+ * when given, styles code as a terminal does in a balloon, light on dark with a space each side.
+ */
+fun orgText(text: String, code: Color, stress: SpanStyle = SpanStyle(fontWeight = FontWeight.Bold), link: Color = Look.noteLine, terminal: SpanStyle? = null): AnnotatedString = buildAnnotatedString {
     val face = mapOf(
         'b' to stress,
         'i' to SpanStyle(fontStyle = FontStyle.Italic),
         'u' to SpanStyle(textDecoration = TextDecoration.Underline),
         's' to SpanStyle(textDecoration = TextDecoration.LineThrough),
     )
-    val mono = SpanStyle(fontFamily = FontFamily.Monospace, color = code)
+    val mono = terminal ?: SpanStyle(fontFamily = FontFamily.Monospace, color = code)
+    val pad = if (terminal != null) "\u00A0" else ""
     fun words(line: String) {
         // Links and code wait as numbered marks, so no emphasis pass reshapes an address or a command.
         val held = mutableListOf<Held>()
@@ -64,7 +68,7 @@ fun orgText(text: String, code: Color, stress: SpanStyle = SpanStyle(fontWeight 
             append(out.substring(at, m.range.first))
             when {
                 m.groups[1] != null -> when (val h = held[m.groupValues[1].toInt()]) {
-                    is Held.Code -> withStyle(mono) { append(h.body) }
+                    is Held.Code -> withStyle(mono) { append(pad + h.body + pad) }
                     is Held.Link -> if (Links.opens(h.url)) withLink(LinkAnnotation.Url(h.url, TextLinkStyles(SpanStyle(color = link, textDecoration = TextDecoration.Underline)))) { append(h.label) } else append(h.label)
                 }
                 m.groups[2] != null -> { pushStyle(face.getValue(m.groupValues[2][0])); open++ }
@@ -81,7 +85,7 @@ fun orgText(text: String, code: Color, stress: SpanStyle = SpanStyle(fontWeight 
         when {
             !block && Regex("""^\s*(#\+begin_(src|example)\b|```)""", RegexOption.IGNORE_CASE).containsMatchIn(raw) -> block = true
             block && Regex("""^\s*(#\+end_(src|example)\b|```)""", RegexOption.IGNORE_CASE).containsMatchIn(raw) -> block = false
-            block -> shown.add { withStyle(mono) { append(raw) } }
+            block -> shown.add { withStyle(mono) { append(pad + raw + pad) } }
             Regex("""^\s*#\+\w+(:|\s|$)""").containsMatchIn(raw) -> {}
             else -> {
                 val heading = Regex("""^(\*+|#{1,6})\s+(.*)$""").find(raw)

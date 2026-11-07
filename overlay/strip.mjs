@@ -113,7 +113,10 @@ export function panels(items, now = Date.now()) {
 			if (last?.kind === "tools") last.items.push(item);
 			else current.elements.push({ kind: "tools", id: item.id, items: [item] });
 		} else if (item.kind === "shown") {
-			current.elements.push({ kind: "shown", id: item.id, files: shownFiles(item) });
+			// Several shows in a row, one per call, are one card: their pictures fan together as a note's do.
+			const last = current.elements[current.elements.length - 1];
+			if (last?.kind === "shown") last.files.push(...shownFiles(item));
+			else current.elements.push({ kind: "shown", id: item.id, files: shownFiles(item) });
 		} else if (item.kind === "patter") {
 			current.elements = current.elements.filter((e) => e.kind !== "thought");
 			current.elements.push({ kind: "thought", id: item.id, item });
@@ -190,12 +193,15 @@ const VERBATIM = new RegExp(`${PRE}([=~])((?!\\2)[^\\s](?:[^\\n]*?[^\\s])??)\\2$
  * and +strike+ their own faces, =verbatim= and ~code~ a `code` span, a #+begin_src block monospaced lines; links,
  * [[url][label]] or [[url]], become anchors when linkKind opens them and their label otherwise; a heading keeps its
  * words, stressed, without its stars. Markdown's **bold**, `code` and [label](url) still read, since a model slips
- * into them. `link` styles a link's words, which Qt otherwise draws in the palette's blue. Everything else is escaped,
- * so nothing she writes can inject markup.
+ * into them. `link` styles a link's words, which Qt otherwise draws in the palette's blue; `codePad` pads code with a
+ * space each side, for a code style with a background. Everything else is escaped, so nothing she writes can inject
+ * markup.
  */
 export function markup(text, style = {}) {
 	const stress = style.stress ?? "font-weight:800";
 	const code = style.code ?? "font-family:monospace";
+	const pad = style.codePad ? "&nbsp;" : "";
+	const codeSpan = (body) => `<span style="${code}">${pad}${escape(body)}${pad}</span>`;
 	const words = (label) => (style.link ? `<span style="${style.link}">${escape(label)}</span>` : escape(label));
 	const faces = { b: [`<span style="${stress}">`, "</span>"], i: ["<i>", "</i>"], u: ["<u>", "</u>"], s: ["<s>", "</s>"] };
 	const inline = (line) => {
@@ -207,8 +213,8 @@ export function markup(text, style = {}) {
 		out = out.replace(/\[\[([^\]\n]+)\](?:\[([^\]\n]+)\])?\]/g, (_, url, label) => link(url, label ?? url));
 		// A file link's search may name a heading with spaces, which June writes in Markdown's form too.
 		out = out.replace(/\[([^\]\n]+)\]\((file:[^)\n]+|[^)\s]+)\)/g, (_, label, url) => link(url, label));
-		out = out.replace(VERBATIM, (_, pre, _mark, body) => `${pre}${hold(`<span style="${code}">${escape(body)}</span>`)}`);
-		out = out.replace(/`([^`\n]+)`/g, (_, body) => hold(`<span style="${code}">${escape(body)}</span>`));
+		out = out.replace(VERBATIM, (_, pre, _mark, body) => `${pre}${hold(codeSpan(body))}`);
+		out = out.replace(/`([^`\n]+)`/g, (_, body) => hold(codeSpan(body)));
 		out = out.replace(/\*\*([^*\n]+)\*\*/g, (_, body) => `\u0001b${body}\u0002b`);
 		for (const [face, pattern] of EMPHASIS) out = out.replace(pattern, (_, pre, body) => `${pre}\u0001${face}${body}\u0002${face}`);
 		return escape(out)
@@ -221,7 +227,7 @@ export function markup(text, style = {}) {
 	for (const raw of text.split("\n")) {
 		if (!block && /^\s*(#\+begin_(src|example)\b|```)/i.test(raw)) block = true;
 		else if (block && /^\s*(#\+end_(src|example)\b|```)/i.test(raw)) block = false;
-		else if (block) lines.push(`<span style="${code}">${escape(raw).replace(/^ +/, (lead) => "&nbsp;".repeat(lead.length))}</span>`);
+		else if (block) lines.push(`<span style="${code}">${pad}${escape(raw).replace(/^ +/, (lead) => "&nbsp;".repeat(lead.length))}${pad}</span>`);
 		else if (/^\s*#\+\w+(:|\s|$)/.test(raw)) continue;
 		else {
 			const heading = /^(\*+|#{1,6})\s+(.*)$/.exec(raw);
@@ -317,13 +323,14 @@ export function noteFiles(item, now = Date.now()) {
 }
 
 /**
- * What June showed, each file with its place in the show (`n`, for the `file/n` path under the hello's `attached`),
- * name, size, type and how a preview shows it. Her inbox keeps them as it keeps the user's files.
+ * What June showed, each file with the show it came from and its place there (`id` and `n`, for the `<id>/file/<n>`
+ * path under the hello's `attached`), name, size, type and how a preview shows it. Her inbox keeps them as it keeps
+ * the user's files.
  */
 export function shownFiles(item) {
 	return (item.files ?? []).map((file, n) => {
 		const type = String(file.mimeType ?? "");
-		return { n, name: String(file.name ?? ""), size: fileSize(file.size), type, preview: previewKind(type), expired: false };
+		return { id: item.id, n, name: String(file.name ?? ""), size: fileSize(file.size), type, preview: previewKind(type), expired: false };
 	});
 }
 

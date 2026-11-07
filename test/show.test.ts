@@ -50,7 +50,8 @@ test("June shows a picture and a snippet beside her reply: the view draws them o
 
 	const panel = panels(view.items())[0];
 	const card = panel.elements.filter((e) => e.kind === "shown");
-	assert.deepEqual(card.map((e) => e.files.map((f) => [f.n, f.name, f.preview])).sort(), [[[0, "panel.png", "picture"]], [[0, "snippet.nix", "text"]]]);
+	assert.equal(card.length, 1, "shows in a row make one card");
+	assert.deepEqual(card[0].files.map((f) => [f.id, f.n, f.name, f.preview]).sort(), shown.map((i) => [i.id, 0, i.kind === "shown" ? i.files[0]!.name : "", i.kind === "shown" && i.files[0]!.mimeType === "image/png" ? "picture" : "text"]).sort(), "each file keeps the show it came from, for its address");
 	assert.ok(consoleLines(panel).some((l) => l.text === "shown: snippet.nix (29 B)"), "the console says it in words");
 });
 
