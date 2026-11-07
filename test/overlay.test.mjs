@@ -1179,14 +1179,13 @@ test("tall stand-ins are ranked by fit to the panel, not by the manifest's order
 	const pool = standingPool();
 	const report = pool.find((p) => p.id === "report-front");
 	const ids = (list) => list.map((p) => p.id);
-	assert.deepEqual(ids(tallCandidates(pool, report, "left", "a")), ["clipboard-front", "explaining-standing-clipboard"], "on the left, a left-facing drawing that may not flip never faces out of the panel; the base placeholder comes last");
-	const right = ids(tallCandidates(pool, report, "right", "a"));
-	assert.deepEqual(right.slice().sort(), ["clipboard-front", "clipboard-left", "explaining-standing-clipboard"].sort());
-	assert.equal(right[2], "explaining-standing-clipboard", "the personal set's art before the base set's placeholder");
+	const order = ids(tallCandidates(pool, report, "a"));
+	assert.deepEqual(order.slice().sort(), ["clipboard-front", "clipboard-left", "explaining-standing-clipboard"].sort(), "a left-facing drawing that may not flip is offered on either side: looking out of the panel is within her range");
+	assert.equal(order[2], "explaining-standing-clipboard", "the personal set's art before the base set's placeholder");
 	const reversed = standingPool(Object.fromEntries(Object.entries(STANDING).reverse()));
-	for (const seed of ["a", "b", "c", "d"]) assert.deepEqual(ids(tallCandidates(reversed, report, "right", seed)), ids(tallCandidates(pool, report, "right", seed)), `${seed}: the manifest's order does not decide`);
-	assert.notDeepEqual(ids(tallCandidates(pool, report, "right", "a")), ids(tallCandidates(pool, report, "right", "b")), "different panels may stand in different art");
-	assert.equal(tallCandidates(pool, pool.find((p) => p.id === "clipboard-front"), "right", "a")[0].id, "clipboard-front", "a tall pose tries itself first");
+	for (const seed of ["a", "b", "c", "d"]) assert.deepEqual(ids(tallCandidates(reversed, report, seed)), ids(tallCandidates(pool, report, seed)), `${seed}: the manifest's order does not decide`);
+	assert.notDeepEqual(ids(tallCandidates(pool, report, "a")), ids(tallCandidates(pool, report, "b")), "different panels may stand in different art");
+	assert.equal(tallCandidates(pool, pool.find((p) => p.id === "clipboard-front"), "a")[0].id, "clipboard-front", "a tall pose tries itself first");
 });
 
 test("a long panel admits tall art only where her action, face, and boots read, and keeps her own pose otherwise", () => {
@@ -1201,8 +1200,10 @@ test("a long panel admits tall art only where her action, face, and boots read, 
 			const feet = out.layout.art.y + (out.pose.figure.y + out.pose.figure.h) * out.layout.art.h;
 			assert.ok(feet >= out.layout.height - 1, "her drawn boots reach the bottom: she does not float");
 		}
-		// Left: the front board lies under the words, and the left-facing one may not stand there, so the placeholder.
-		assert.equal(standingLayout(pool, "report-front", "left", 3, 820, id).pose.id, "explaining-standing-clipboard");
+		// Left: the front board lies under the words, so the left-facing clipboard stands there, looking out of the panel.
+		const left = standingLayout(pool, "report-front", "left", 3, 820, id);
+		assert.equal(left.pose.id, "clipboard-left", `${id} left/820`);
+		assert.equal(left.layout.mirror, false, "never flipped to face in");
 		// 480: no drawing reaches the bottom at her face size, so she keeps her own pose in its inset, never a tall one.
 		for (const side of ["left", "right"]) {
 			const narrow = standingLayout(pool, "report-front", side, 3, 480, id);
@@ -1216,9 +1217,9 @@ test("a long panel admits tall art only where her action, face, and boots read, 
 		// A short panel is untouched.
 		assert.equal(standingLayout(pool, "report-front", "right", 1, 820, id).pose.id, "report-front");
 	}
-	// Without the placeholder set, the left falls back to her own pose, not to a half-hidden board.
-	const personalOnly = readPoses({ poses: STANDING }, "file:///personal/");
-	const left = standingLayout(personalOnly, "report-front", "left", 3, 820);
+	// With only the front board, which the words would cover, and no placeholder: her own pose, not a half-hidden board.
+	const frontOnly = readPoses({ poses: Object.fromEntries(Object.entries(STANDING).filter(([k]) => k !== "clipboard-left")) }, "file:///personal/");
+	const left = standingLayout(frontOnly, "report-front", "left", 3, 820);
 	assert.equal(left.pose.id, "report-front");
 	assert.equal(left.layout.clip.inset, true);
 });

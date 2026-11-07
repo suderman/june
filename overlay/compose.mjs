@@ -280,14 +280,15 @@ export function composeStrip(panels, state, poses, memory, holding = false) {
 /**
  * The poses that may fill a tall panel standing in for `pose`, best first: the pose itself when drawn tall; then, for a
  * pose of her at work, a tall one doing the same; then tall poses of the same expression, then of the next in its chain.
- * Given her `side`, only poses that can stand there facing the words. Within one expression, art from an earlier set (the
+ * A tall pose may face away from the words where it may not be mirrored: looking out of the panel is within her range
+ * (Jon, 2026-11-07), and the panel's side is already settled. Within one expression, art from an earlier set (the
  * personal one) comes before a later set's (the base set's placeholders), and the panel's id (`seed`) fixes the order
  * among the rest, so the manifest's order never decides and a panel keeps its choice. Whether one actually fits the panel
  * is for panelLayout, which tries them in this order.
  */
-export function tallCandidates(poses, pose, side = null, seed = "") {
+export function tallCandidates(poses, pose, seed = "") {
 	if (!pose) return [];
-	const tall = poses.filter((p) => p.framings.includes("full") && (side === null || standsOn(p, side)));
+	const tall = poses.filter((p) => p.framings.includes("full"));
 	const sets = [];
 	for (const p of poses) if (!sets.includes(p.set)) sets.push(p.set);
 	const ranked = (group) => {
@@ -303,8 +304,8 @@ export function tallCandidates(poses, pose, side = null, seed = "") {
 }
 
 /** The first pose that may fill a tall panel for `pose` (tallCandidates), before the panel judges its fit; null for none. */
-export function tallFor(poses, pose, side = null, seed = "") {
-	return tallCandidates(poses, pose, side, seed)[0] ?? null;
+export function tallFor(poses, pose, seed = "") {
+	return tallCandidates(poses, pose, seed)[0] ?? null;
 }
 
 /** When a panel happened, in epoch milliseconds: the latest time on its words; null when none carries one. */
@@ -436,7 +437,7 @@ export function panelLayout({ panel, width, sizes, poses }) {
 		if (!pose || (first.framing !== "full" && !first.clip.inset)) return { layout: first, pose };
 		// A long panel. Her own pose in its inset is the fallback, and the yardstick for her face.
 		const inset = first.framing === "full" ? at(Object.assign({}, pose, { framings: pose.framings.filter((f) => f !== "full") })) : first;
-		const candidates = pose.special ? [pose].filter((p) => p.framings.includes("full")) : tallCandidates(usable, pose, panel.side ?? null, panel.id ?? "");
+		const candidates = pose.special ? [pose].filter((p) => p.framings.includes("full")) : tallCandidates(usable, pose, panel.id ?? "");
 		for (const tall of candidates) {
 			const layout = tall === pose ? first : at(tall);
 			if (standsTall(layout, tall, inset)) return { layout, pose: tall };
