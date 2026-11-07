@@ -46,7 +46,7 @@
 
     devShells = forAll (pkgs: {
       default = pkgs.mkShell {
-        packages = [pkgs.nodejs_22 pkgs.ripgrep pkgs.imagemagick];
+        packages = [pkgs.nodejs_22 pkgs.ripgrep pkgs.imagemagick pkgs.poppler-utils];
         ICU_TIMEZONE_FILES_DIR = self.packages.${pkgs.stdenv.hostPlatform.system}.default.timezoneData;
       };
     });
