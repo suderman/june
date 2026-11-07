@@ -332,9 +332,9 @@ Item {
   // The panel's frame, over everything it holds.
   Rectangle { anchors.fill: parent; color: "transparent"; border.color: Theme.ink; border.width: 3 }
 
-  // What June showed with her show tool: a card in her balloon's colours on her side, the pictures as polaroids fanned
-  // across it and the other files as document cards below. A click opens any of them in the preview, which steps
-  // through everything she showed.
+  // What June showed with her show tool, loose on her side with no container, since it says nothing itself: the pictures
+  // as polaroids fanned as a note's are, and the other files as document cards below. A click opens any of them in the
+  // preview, which steps through everything she showed.
   Component {
     id: shownCard
     Rectangle {
@@ -358,10 +358,7 @@ Item {
       }
       width: w
       height: h
-      radius: 14
-      color: Theme.balloon
-      border.color: Theme.ink
-      border.width: Theme.line
+      color: "transparent"
       Repeater {
         model: shownBox.drawn
         delegate: Item {

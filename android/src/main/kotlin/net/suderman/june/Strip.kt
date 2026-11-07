@@ -389,7 +389,7 @@ private fun FileCards(item: JSONObject, el: JSONObject, files: org.json.JSONArra
 
 /**
  * What June showed: every file served at `<result id>/file/<n>`, pictures as polaroids fanned across the top and the
- * rest as document cards below, each opening the preview over all of them, as the overlay's shown card does.
+ * rest as document cards below, loose with no container, each opening the preview over all of them, as the overlay does.
  */
 @Composable
 private fun Shown(el: JSONObject, w: Float) {
@@ -806,10 +806,8 @@ private fun ElementView(e: Measured, box: JSONObject, newest: Boolean) {
             Polaroids(item, el, min(el.optInt("pictures"), 3), e.w)
             el.optJSONArray("files")?.takeIf { it.length() > 0 }?.let { files -> FileCards(item, el, files, e.w, e.h - 4 - files.length() * 32) }
         }
-        "shown" -> {
-            Box(Modifier.fillMaxSize().background(Look.balloon, RoundedCornerShape(14.dp)).border(2.5.dp, Look.ink, RoundedCornerShape(14.dp)))
-            Shown(el, e.w)
-        }
+        // Loose on her side, with no container: it says nothing itself.
+        "shown" -> Shown(el, e.w)
         "chip" -> {
             val call = calls(el)[0]
             val failed = call.optString("status") == "error"
