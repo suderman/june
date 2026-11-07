@@ -9,7 +9,7 @@ import { arr, bool, lit, num, obj, opt, str, union } from "@earendil-works/pi-sc
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import { type Config, expandHome } from "../config.ts";
 import { type Run, runProcess } from "./herdr.ts";
-import { createFollowTask, FOLLOW_DEFAULTS, type FollowInput, type FollowOptions, follow } from "./follow.ts";
+import { createFollowTask, FOLLOW_DEFAULTS, type FollowInput, type FollowOptions, follow, listFollowing } from "./follow.ts";
 import type { Herdr } from "./herdr.ts";
 import { type Org, orgTime, parseHeading } from "./org.ts";
 import { User, user } from "../user.ts";
@@ -661,8 +661,17 @@ export function createDispatchExtension(
 				},
 			}),
 			defineTool({
+				name: "org_following",
+				description: "List the tasks you are still following, with the last signal each check saw, not a fresh Org or agent read. Follows persist and resume automatically after a daemon restart, including their timing and last reported state. Use this to check what you are watching, rather than re-following tasks after a restart. An empty list means no active follows.",
+				parameters: obj({}),
+				replay: "safe",
+				execute: async (_args, api, context) => ({
+					output: [{ type: "text", text: JSON.stringify(await api.commit(listFollowing, context), null, 1) }],
+				}),
+			}),
+			defineTool({
 				name: "org_follow_task",
-				description: `When ${user()} asks for regular updates on a task or the agent working on it, follow the task: every everyMinutes while it is PROG you get a [follow] message to read its agent and report, and you hear when it blocks, holds, or finishes, as for tasks you queue. Works for any Org task, including ones you did not queue. Never sends the agent anything. Following a task again replaces the earlier follow, so everyMinutes 0 stops the timed updates and keeps the rest.`,
+				description: `When ${user()} asks for regular updates on a task or the agent working on it, follow the task: every everyMinutes while it is PROG you get a [follow] message to read its agent and report, and you hear when it blocks, holds, or finishes, as for tasks you queue. Works for any Org task, including ones you did not queue. Never sends the agent anything. Follows persist and resume automatically after a daemon restart; inspect them with org_following, not this tool. Following a task again replaces the earlier follow, so everyMinutes 0 stops the timed updates and keeps the rest.`,
 				parameters: obj({
 					file: str({ description: "Path under ~/org, as org_search returns it" }),
 					heading: str({ description: "Exact title, outline path, or id:UUID, as org_read_task accepts" }),

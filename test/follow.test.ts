@@ -614,6 +614,121 @@ test("following confirms persistent removal across a restart, including a headin
 	assert.equal((await reports()).length, 1);
 });
 
+test("org_following lists persisted subscriptions without replacing or polling them", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "org");
+	await mkdir(root);
+	const file = join(root, "todo.org");
+	const contents = `* PROG Check docs\n:PROPERTIES:\n:ID: ${input.id}\n:END:\n`;
+	await writeFile(file, contents);
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") }, dispatch: { hosts: ["kit"] } };
+	const extension = () => createDispatchExtension(config, new Org(root), new Herdr(config.herdr, async () => { throw new Error("listing must not read the agent"); }), "inst", async () => "", { ...FOLLOW_DEFAULTS, intervalMs: 60_000 });
+	const list = () => fauxAssistantMessage([fauxToolCall("org_following", {})], { stopReason: "toolUse" });
+	const before = fauxProvider();
+	before.setResponses([
+		list(),
+		(ctx) => { assert.match(JSON.stringify(ctx.messages.at(-1)), /\[\]/); return fauxAssistantMessage("Not following anything."); },
+		fauxAssistantMessage([fauxToolCall("org_follow_task", { file: "todo.org", heading: `id:${input.id}`, everyMinutes: 2 })], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Following."),
+	]);
+	let daemon = await openTestDaemon({ ...tmp, faux: before, config, extensions: [extension()] });
+	t.after(() => daemon.close());
+	await ask(tmp.paths.socket, "what are you following?");
+	await ask(tmp.paths.socket, "follow it");
+	const saved = (await daemon.harness.inspect(BG)).tasks.find((task) => task.record.kind === "june.follow")!.record;
+	await daemon.close();
+	const after = fauxProvider();
+	after.setResponses([
+		list(),
+		(ctx) => {
+			const result = ctx.messages.at(-1)!;
+			assert.equal(result.role, "toolResult");
+			if (result.role === "toolResult") assert.deepEqual(JSON.parse(result.content.filter((b) => b.type === "text").map((b) => b.text).join("")), [{ title: "Check docs", signal: "AUTO" }]);
+			return fauxAssistantMessage("Still following Check docs.");
+		},
+	]);
+	daemon = await openTestDaemon({ ...tmp, faux: after, config, extensions: [extension()] });
+	await ask(tmp.paths.socket, "did you keep following after the restart?");
+	const restored = (await daemon.harness.inspect(BG)).tasks.filter((task) => task.record.kind === "june.follow");
+	assert.equal(restored.length, 1);
+	assert.equal(restored[0]!.record.id, saved.id, "same durable task, not a recreated subscription");
+	assert.deepEqual(restored[0]!.record.input, saved.input, "cadence and expiry unchanged");
+	assert.deepEqual(restored[0]!.record.state.checkpoint, saved.state.checkpoint, "listing neither polls nor resets the saved due time");
+	assert.equal(await readFile(file, "utf8"), contents, "listing and recovery do not edit Org");
+});
+
+test("restart keeps reported HOLD and blocked signals, then reports an offline completion once", async (t) => {
+	for (const state of ["HOLD", "blocked"]) await t.test(state, async (t) => {
+		const tmp = await tempDir();
+		t.after(tmp.cleanup);
+		const root = join(tmp.dir, "org");
+		const file = join(root, "todo.org");
+		await mkdir(root);
+		const session = "01234567-89ab-cdef-0123-456789abcdef";
+		await writeFile(file, `* ${state === "blocked" ? "PROG" : state} Check docs\n:PROPERTIES:\n:ID: ${input.id}\n:END:\n** Sessions\n- [[herdr:kit/pi:${session}@w1:p1][worker]]\n`);
+		const task = createFollowTask(new Org(root), new Herdr(testConfig(tmp.dir).herdr, async () => JSON.stringify({ result: { agent: { agent_status: "blocked" } } })), { ...FOLLOW_DEFAULTS, intervalMs: 150 });
+		const extensions = [defineExtension({ name: "follow-restart-test", tasks: [task] })];
+		const faux = fauxProvider();
+		faux.setResponses([fauxAssistantMessage("Needs an answer."), fauxAssistantMessage("Ready for review.")]);
+		let daemon = await openTestDaemon({ ...tmp, faux, extensions });
+		t.after(() => daemon.close());
+		const id = await daemon.harness.commit((tx) => follow(tx, task, { ...input, queuedAt: Date.now() }, Number(daemon.root.id)), BG);
+		const reports = async () => (await daemon.root.context(BG)).entries.filter((e) => (e.data as { source?: string })?.source === "follow");
+		await until(async () => (await reports()).length === 1 && !(await daemon.status()).busy);
+		await daemon.close();
+		daemon = await openTestDaemon({ ...tmp, faux, extensions });
+		await until(async () => {
+			const live = (await daemon.harness.inspect(BG)).tasks.find((task) => Number(task.record.id) === id);
+			return (live?.record.state.checkpoint as { checks: number }).checks >= 3;
+		});
+		assert.equal((await reports()).length, 1, "same signal after restart stays silent");
+		await daemon.close();
+		await replaceFile(file, (await readFile(file, "utf8")).replace(/^\* (HOLD|PROG)/, "* EVAL"));
+		daemon = await openTestDaemon({ ...tmp, faux, extensions });
+		await until(async () => (await reports()).length === 2 && !(await daemon.status()).busy);
+		assert.match(JSON.stringify((await reports()).at(-1)!.data), /is now EVAL/);
+		await daemon.close();
+		daemon = await openTestDaemon({ ...tmp, faux, extensions });
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		assert.equal((await reports()).length, 2, "terminal follow is not restored or reported again");
+		assert.equal((await daemon.harness.inspect(BG)).tasks.filter((task) => task.record.kind === "june.follow").length, 0);
+	});
+});
+
+test("overdue progress resumes once after restart and keeps its original expiry", async (t) => {
+	for (const expired of [false, true]) await t.test(expired ? "expired" : "still due", async (t) => {
+		const tmp = await tempDir();
+		t.after(tmp.cleanup);
+		const root = join(tmp.dir, "org");
+		await mkdir(root);
+		await writeFile(join(root, "todo.org"), `* PROG Check docs\n:PROPERTIES:\n:ID: ${input.id}\n:END:\n`);
+		const task = createFollowTask(new Org(root), new Herdr(testConfig(tmp.dir).herdr, async () => "{}"), { ...FOLLOW_DEFAULTS, intervalMs: 50 });
+		const extensions = [defineExtension({ name: "follow-timing-restart-test", tasks: [task] })];
+		const faux = fauxProvider();
+		faux.setResponses([fauxAssistantMessage("Progress update.")]);
+		let daemon = await openTestDaemon({ ...tmp, faux, extensions });
+		t.after(() => daemon.close());
+		const now = Date.now();
+		await daemon.harness.commit((tx) => follow(tx, task, { ...input, queuedAt: now, everyMs: 500, updatesUntil: now + (expired ? 500 : 10_000) }, Number(daemon.root.id)), BG);
+		const live = async () => (await daemon.harness.inspect(BG)).tasks.find((task) => task.record.kind === "june.follow")!.record;
+		await until(async () => (await live()).state.status === "sleeping");
+		await daemon.close();
+		await new Promise((resolve) => setTimeout(resolve, 1100));
+		daemon = await openTestDaemon({ ...tmp, faux, extensions });
+		const reports = async () => (await daemon.root.context(BG)).entries.filter((e) => (e.data as { source?: string })?.source === "follow");
+		await until(async () => ((await live()).state.checkpoint as { checks: number }).checks >= 1 && !(await daemon.status()).busy);
+		assert.equal((await reports()).length, expired ? 0 : 1, "no catch-up flood or expired progress update");
+		const saved = await live();
+		await daemon.close();
+		daemon = await openTestDaemon({ ...tmp, faux, extensions });
+		await until(async () => ((await live()).state.checkpoint as { checks: number }).checks > (saved.state.checkpoint as { checks: number }).checks);
+		assert.equal((await reports()).length, expired ? 0 : 1, "a second restart does not repeat the update");
+		assert.deepEqual((await live()).input, saved.input, "recovery never extends the update window");
+		assert.equal(((await live()).state.checkpoint as { reported: number }).reported, (saved.state.checkpoint as { reported: number }).reported, "last update time survives too");
+	});
+});
+
 test("following survives a daemon restart", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
