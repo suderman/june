@@ -191,7 +191,8 @@ export function markup(text, style = {}) {
 			return `\u0000${links.length - 1}\u0000`;
 		};
 		out = out.replace(/\[\[([^\]]+)\]\[([^\]]+)\]\]/g, (_, url, label) => link(url, label));
-		out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => link(url, label));
+		// A file link's search may name a heading with spaces, which June writes in Markdown's form too.
+		out = out.replace(/\[([^\]]+)\]\((file:[^)\n]+|[^)\s]+)\)/g, (_, label, url) => link(url, label));
 		out = out.replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, a, b) => `<span style="${stress}">${a ?? b}</span>`);
 		out = out.replace(/(^|[^\w*])\*([^*\s][^*]*)\*(?!\w)|(^|[^\w])_([^_\s][^_]*)_(?!\w)/g, (_, p1, a, p2, b) => `${p1 ?? p2}<span style="${stress}">${a ?? b}</span>`);
 		return out.replace(/\u0000(\d+)\u0000/g, (_, n) => links[Number(n)]);

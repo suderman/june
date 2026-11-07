@@ -20,6 +20,7 @@ test("June's links become anchors, in Markdown or Org form, and anything else ke
 	assert.equal(markup(`step in: [[${herdr}][claude@kit]]`), `step in: <a href="${herdr}">claude@kit</a>`);
 	assert.equal(markup(`[pane](${herdr})`), `<a href="${herdr}">pane</a>`);
 	assert.equal(markup("[[file:~/org/todo.org::*Call the dentist][the dentist]]"), '<a href="file:~/org/todo.org::*Call the dentist">the dentist</a>', "Org's form lets a heading have spaces");
+	assert.equal(markup("here's the [clipboard task](file:~/org/work/suderman/june/june.org::*Prefer Jon's approved June clipboard art)."), `here's the <a href="file:~/org/work/suderman/june/june.org::*Prefer Jon's approved June clipboard art">clipboard task</a>.`, "June writes file links in Markdown's form too, spaces and all");
 	assert.equal(markup("[secrets](ftp://example.com/x)"), "secrets");
 	assert.equal(markup('[x](https://a.b/"onclick=)'), "x", "a quote cannot break out of the attribute");
 	assert.equal(markup("**bold** and [it](https://a.b/**c**)"), '<span style="font-weight:800">bold</span> and <a href="https://a.b/**c**">it</a>');

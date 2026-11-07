@@ -14,10 +14,11 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.style.TextDecoration
 
 // Stressed words, code, and links in June's Markdown, as the overlay's balloons show them (markup in overlay/strip.mjs):
-// **bold** and __bold__, *italic* and _italic_, `code`, and links, as [label](url) or Org's [[url][label]]. A link June
+// **bold** and __bold__, *italic* and _italic_, `code`, and links, as [label](url) (a file: target may hold the
+// spaces of a heading) or Org's [[url][label]]. A link June
 // may open (Links.kt) is underlined and taps through; any other shows only its label. Heading and quote markers and
 // code fences go; everything else is the text as written.
-private val INLINE = Regex("""\*\*([^*]+)\*\*|__([^_]+)__|`([^`]+)`|\[([^\]]+)]\(([^)\s]+)\)|\[\[([^\]]+)]\[([^\]]+)]]|(?<![\w*])\*([^*\s][^*]*)\*(?!\w)|(?<!\w)_([^_\s][^_]*)_(?!\w)""")
+private val INLINE = Regex("""\*\*([^*]+)\*\*|__([^_]+)__|`([^`]+)`|\[([^\]]+)]\((file:[^)\n]+|[^)\s]+)\)|\[\[([^\]]+)]\[([^\]]+)]]|(?<![\w*])\*([^*\s][^*]*)\*(?!\w)|(?<!\w)_([^_\s][^_]*)_(?!\w)""")
 
 fun markdown(text: String, code: Color): AnnotatedString = buildAnnotatedString {
     val lines = text.lines().filterNot { it.trimStart().startsWith("```") }
