@@ -119,6 +119,26 @@ test("the rhythm, reflection, heartbeat, and patter timing have defaults, take o
 	assert.throws(() => loadConfig({ ...tmp.paths, config: silent }), /patter\.gapsSeconds/);
 });
 
+test("dispatch commands select executables, not agent types or shell snippets", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const config = async (commands?: unknown) => {
+		await writeFile(join(tmp.paths.config, "config.json"), JSON.stringify({
+			model: { chat: { provider: "p", modelId: "m" } }, dispatch: { commands },
+		}));
+		return loadConfig(tmp.paths, {});
+	};
+	assert.equal((await config()).dispatch.commands, undefined);
+	assert.deepEqual((await config({ claude: "claude-auto", pi: "/opt/workers/pi" })).dispatch.commands,
+		{ claude: "claude-auto", pi: "/opt/workers/pi" });
+	assert.deepEqual((await config({})).dispatch.commands, {});
+	for (const commands of [null, [], "claude-auto", { codex: "codex" }, { claude: 1 }, { claude: "" },
+		{ claude: "claude-auto --explain" }, { claude: "claude;true" }, { claude: "./claude" },
+		{ claude: "--help" }, { claude: "/" }, { claude: "claude\n" }]) {
+		await assert.rejects(config(commands), /dispatch\.commands must map/);
+	}
+});
+
 test("the templates load: the example config is valid, and the identity files are where June looks for them", () => {
 	const templates = join(import.meta.dirname, "..", "templates");
 	const config = loadConfig({ ...paths({}), config: templates, data: templates }, {});

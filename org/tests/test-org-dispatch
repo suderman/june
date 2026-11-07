@@ -364,7 +364,8 @@ cat >"$fixture/launch-tests.el" <<'EOF'
     (`("workspace" "list") '((result (workspaces . []))))
     (`("workspace" "create") '((result (root_pane (pane_id . "p-new") (tab_id . "t-new")))))
     (`("pane" "get")
-     `((result (pane (agent_session (agent . ,test-agent)
+     `((result (pane (agent . ,test-agent) (agent_status . ,test-status)
+                     (agent_session (agent . ,test-agent)
                                    (value . ,(if (equal test-agent "claude") test-session
                                                (concat "x_" test-session ".jsonl"))))))))
     (`("agent" "list")
@@ -481,6 +482,136 @@ cat >"$fixture/launch-tests.el" <<'EOF'
                     (should-not (member "--session" start)))
            (should (equal (cadr (member "--session" start)) session-file))
            (should-not (member "--resume" start))))))))
+
+(defmacro test-with-command (agent command &rest body)
+  `(let ((org-dispatch--defaults (make-hash-table :test 'equal))
+         (commands (make-hash-table :test 'equal)))
+     (puthash ,agent ,command commands)
+     (puthash "commands" commands org-dispatch--defaults)
+     ,@body))
+
+(ert-deftest command-config-loads-from-june-and-rejects-invalid-overrides ()
+  (let ((org-dispatch-config (make-temp-file "dispatch-config"))
+        (org-dispatch--defaults nil))
+    (unwind-protect
+        (progn
+          (with-temp-file org-dispatch-config
+            (insert "{\"dispatch\":{\"commands\":{\"claude\":\"claude-auto\"}}}"))
+          (should (equal (org-dispatch--command "claude") "claude-auto"))
+          (should-not (org-dispatch--command "pi")))
+      (delete-file org-dispatch-config)))
+  (dolist (json '("null" "[]" "false" "\"claude-auto\"" "{\"codex\":\"codex\"}"
+                  "{\"claude\":1}" "{\"claude\":\"\"}" "{\"claude\":\"./claude\"}"
+                  "{\"claude\":\"claude-auto --explain\"}" "{\"claude\":\"claude;true\"}"
+                  "{\"claude\":\"--help\"}" "{\"claude\":\"/\"}" "{\"claude\":\"claude\\n\"}"))
+    (let ((org-dispatch--defaults (json-parse-string (concat "{\"commands\":" json "}"))))
+      (should-error (org-dispatch--command "claude"))))
+  (test-with-command "pi" "/opt/workers/pi"
+    (should (equal (org-dispatch--command "pi") "/opt/workers/pi"))))
+
+(ert-deftest custom-launches-keep-worker-identity-and-native-flags ()
+  (test-with-herdr
+   (dolist (test-agent '("pi" "claude"))
+     (test-with-command test-agent (concat test-agent "-auto")
+       (setq test-calls nil)
+       (let ((task (plist-put (test-task test-agent) :model "test-model")))
+         (should (org-dispatch--launch task))
+         (let ((run (seq-find (lambda (args) (equal (seq-take args 2) '("pane" "run"))) test-calls)))
+           (should (string-prefix-p (concat "command " test-agent "-auto ") (nth 3 run)))
+           (should (string-search (if (equal test-agent "claude") "--dangerously-skip-permissions" "--no-approve") (nth 3 run)))
+           (should (string-search "--model test-model" (nth 3 run))))
+         (should-not (seq-find (lambda (args) (equal (seq-take args 2) '("agent" "start"))) test-calls))
+         (should (seq-find (lambda (args) (equal (seq-take args 2) '("agent" "rename"))) test-calls))
+         (should (equal (plist-get (car (org-dispatch--states)) :agent) test-agent))
+         (should (equal (plist-get (car (org-dispatch--states)) :status) "running")))))))
+
+(ert-deftest custom-command-quotes-every-argument-for-the-pane-shell ()
+  (test-with-herdr
+   (let* ((test-agent "claude")
+          (literal "a title'; $(false) \"quoted\" & | > *")
+          (args (list "%s" literal)))
+     (org-dispatch--start-command "p-new" "claude" "printf" args "test-quote")
+     (let ((run (seq-find (lambda (call) (equal (seq-take call 2) '("pane" "run"))) test-calls)))
+       (with-temp-buffer
+         (should (eq 0 (call-process "sh" nil t nil "-c" (nth 3 run))))
+         (should (equal (buffer-string) literal)))))))
+
+(ert-deftest scheduled-tasks-choose-the-command-only-when-due ()
+  (test-with-herdr
+   (let* ((test-agent "claude") (task (test-task test-agent))
+          (file (plist-get task :file)) (id (plist-get task :id)))
+     (test-with-command "claude" "claude-home"
+       (org-dispatch--edit file id (lambda () (org-schedule nil "2999-01-01")))
+       (setq task (org-dispatch--edit file id #'org-dispatch--task))
+       (should-not (org-dispatch--eligible (list task) nil t))
+       (should-not test-calls)
+       (puthash "claude" "claude-auto" (gethash "commands" org-dispatch--defaults))
+       (org-dispatch--edit file id (lambda () (org-schedule nil "2000-01-01")))
+       (setq task (car (org-dispatch--eligible
+                        (list (org-dispatch--edit file id #'org-dispatch--task)) nil t)))
+       (should task)
+       (should (org-dispatch--launch task))
+       (should (seq-find (lambda (args) (and (equal (seq-take args 2) '("pane" "run"))
+                                           (string-prefix-p "command claude-auto " (nth 3 args)))) test-calls))))))
+
+(ert-deftest custom-launchers-reuse-live-sessions-but-restart-closed-ones-fresh ()
+  (test-with-herdr
+   (let ((test-agent "claude"))
+     (test-with-command "claude" "claude-auto"
+       (let ((task (test-task test-agent t)) (test-live t))
+         (should (org-dispatch--launch task))
+         (should-not (seq-find (lambda (args) (equal (seq-take args 2) '("pane" "run"))) test-calls))
+         (should (equal (plist-get (car (org-dispatch--states)) :pane) "p-live")))
+       (setq test-calls nil)
+       (let* ((task (test-task test-agent t))
+              (test-session "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+         (should (org-dispatch--launch task))
+         (let ((run (seq-find (lambda (args) (equal (seq-take args 2) '("pane" "run"))) test-calls)))
+           (should-not (string-search "--resume" (nth 3 run)))
+           (should-not (string-search "--session" (nth 3 run))))
+         (should (equal (plist-get (car (org-dispatch--states)) :session) test-session))
+         (should (seq-find (lambda (args) (and (equal (seq-take args 2) '("agent" "prompt"))
+                                             (string-search "fresh session, not a native resume" (nth 3 args)))) test-calls))
+         (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                             (lambda () (should (= 2 (how-many "herdr:kit/claude:" (point-min) (point-max)))))))))))
+
+(ert-deftest custom-startup-waits-for-readiness-and-refuses-wrong-workers ()
+  (test-with-herdr
+   (let ((polls 0) (test-agent "claude"))
+     (cl-letf (((symbol-function 'sleep-for) (lambda (&rest _) (setq polls (1+ polls))))
+               ((symbol-function 'org-dispatch--herdr)
+                (lambda (&rest args)
+                  (let ((test-status (if (< polls 2) "unknown" "idle")))
+                    (apply #'test-herdr args)))))
+       (org-dispatch--start-command "p-new" "claude" "claude-auto" nil "test-ready")
+       (should (= polls 2))))
+   (let ((test-agent "pi"))
+     (should-error (org-dispatch--start-command "p-new" "claude" "wrong-worker" nil "test-wrong")))))
+
+(ert-deftest custom-startup-failures-hold-without-prompting-or-retrying ()
+  (dolist (failure '(blocked wrong-worker timeout missing-session))
+    (test-with-herdr
+     (test-with-command "claude" "claude-auto"
+       (let* ((task (test-task "claude"))
+              (test-agent (if (eq failure 'wrong-worker) "pi" "claude"))
+              (test-status (pcase failure ('blocked "blocked") ('timeout nil) (_ "idle")))
+              (clock 0))
+         (cl-letf (((symbol-function 'float-time) (lambda (&rest _) (setq clock (+ clock 20))))
+                   ((symbol-function 'sleep-for) #'ignore)
+                   ((symbol-function 'org-dispatch--pane-session)
+                    (lambda (&rest _) (error "no session reported"))))
+           (should-not (org-dispatch--launch task)))
+         (should-not (org-dispatch--states))
+         (should-not (seq-find (lambda (args) (equal (seq-take args 2) '("agent" "prompt"))) test-calls))
+         (org-dispatch--edit
+          (plist-get task :file) (plist-get task :id)
+          (lambda ()
+            (should (equal (org-get-todo-state) "HOLD"))
+            (should-not (org-get-tags nil t))
+            (should-not (org-dispatch--section-bounds "Sessions"))
+            (should (string-search (if (eq failure 'blocked) "blocked during startup" "failed during startup")
+                                   (org-dispatch--subtree-text)))))
+         (should-not (org-dispatch--eligible (org-dispatch--tasks) nil t)))))))
 
 (ert-deftest startup-dialog-holds-instead-of-launching-again ()
   (test-with-herdr

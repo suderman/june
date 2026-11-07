@@ -60,6 +60,8 @@ export type Config = {
 		readonly host?: string;
 		readonly agent?: string;
 		readonly agents?: readonly string[];
+		/** Executable overrides for AUTO workers, resolved on the launching host. */
+		readonly commands?: Readonly<Partial<Record<"pi" | "claude", string>>>;
 		readonly settle?: number;
 		readonly improve?: { readonly file: string; readonly agent?: string; readonly host?: string };
 	};
@@ -282,6 +284,11 @@ function dispatch(given: Partial<Config["dispatch"]> | undefined): Config["dispa
 			throw new Error("dispatch.agents must be a list of plain names");
 		if (given?.agent !== undefined && !agents.includes(given.agent)) throw new Error("dispatch.agent must be one of dispatch.agents");
 	}
+	const commands = given?.commands;
+	if (commands !== undefined && (!commands || typeof commands !== "object" || Array.isArray(commands) ||
+		Object.entries(commands).some(([agent, command]) => !["pi", "claude"].includes(agent) ||
+			typeof command !== "string" || !/^(?:[A-Za-z0-9_][A-Za-z0-9_.+-]*|\/[A-Za-z0-9_./+-]+)$/.test(command))))
+		throw new Error("dispatch.commands must map pi or claude to executable names or absolute paths, without arguments");
 	const improve = given?.improve;
 	if (improve !== undefined) {
 		if (!(typeof improve?.file === "string" && improve.file.endsWith(".org"))) throw new Error("dispatch.improve.file must be an Org file");
@@ -294,6 +301,7 @@ function dispatch(given: Partial<Config["dispatch"]> | undefined): Config["dispa
 		...(given?.host ? { host: given.host } : {}),
 		...(given?.agent ? { agent: given.agent } : {}),
 		...(agents ? { agents } : {}),
+		...(commands ? { commands } : {}),
 		...(given?.settle !== undefined ? { settle: given.settle } : {}),
 		...(improve ? { improve } : {}),
 	};

@@ -438,7 +438,7 @@ with NOTE, moving the Sessions links into it, then trim the log."
 (defvar org-dispatch--defaults nil)
 (defun org-dispatch--default (key fallback)
   "June's dispatch KEY, such as \"host\" or \"settle\", or FALLBACK when it
-has none of FALLBACK's type."
+has none of FALLBACK's type. A nil FALLBACK returns the untyped value."
   (unless org-dispatch--defaults
     (setq org-dispatch--defaults
           (or (ignore-errors
@@ -450,7 +450,21 @@ has none of FALLBACK's type."
   (let ((value (gethash key org-dispatch--defaults)))
     (cond ((and (stringp fallback) (stringp value) (not (string-empty-p value))) value)
           ((and (numberp fallback) (natnump value)) value)
+          ((null fallback) value)
           (t fallback))))
+
+(defun org-dispatch--command (agent)
+  "Executable override for AGENT, or nil for Herdr's native launcher."
+  (let ((commands (org-dispatch--default "commands" nil)))
+    (when commands
+      (unless (hash-table-p commands) (error "dispatch.commands must be an object"))
+      (maphash
+       (lambda (kind command)
+         (unless (and (member kind org-dispatch-launchable) (stringp command)
+                      (string-match-p "\\`\\(?:[A-Za-z0-9_][A-Za-z0-9_.+-]*\\|/[A-Za-z0-9_./+-]+\\)\\'" command))
+           (error "dispatch.commands must map pi or claude to executable names or absolute paths, without arguments")))
+       commands)
+      (gethash agent commands))))
 
 (defun org-dispatch--resolve (property known default)
   "The entry's PROPERTY: from its drawer, else the one tag among KNOWN on the
@@ -952,6 +966,26 @@ replaying the same key and spec; missing prerequisites block partial plans."
                        "--until" "blocked" "--until" "idle" "--until" "done"
                        "--timeout" "60000"))
 
+(defun org-dispatch--start-command (pane agent command args name)
+  "Launch COMMAND with ARGS in a new PANE and wait for the expected AGENT."
+  ;; Herdr's native launcher chooses its own executable. Use the pane shell
+  ;; for overrides, but do not claim or prompt until identity and readiness match.
+  (org-dispatch--herdr "pane" "run" pane
+                       (concat "command " (mapconcat #'shell-quote-argument (cons command args) " ")))
+  (let ((deadline (+ (float-time) 60)) ready)
+    (while (not ready)
+      (let* ((info (org-dispatch--get (org-dispatch--herdr "pane" "get" pane) 'result 'pane))
+             (kind (alist-get 'agent info))
+             (status (alist-get 'agent_status info)))
+        (when (and kind (not (equal kind agent)))
+          (error "%s started %s instead of %s" command kind agent))
+        (when (equal status "blocked") (error "%s is blocked during startup" command))
+        (setq ready (and (equal kind agent) (member status '("idle" "done")))))
+      (unless ready
+        (when (>= (float-time) deadline) (error "%s did not become ready within 60 seconds" command))
+        (sleep-for 0.5))))
+  (org-dispatch--herdr "agent" "rename" pane name))
+
 (defun org-dispatch--launch (task)
   "Start or resume TASK's agent in Herdr and claim it. Return non-nil on success."
   ;; Eligibility is only a snapshot. Recheck before opening any Herdr tab.
@@ -966,6 +1000,7 @@ replaying the same key and spec; missing prerequisites block partial plans."
              (agent (plist-get task :agent))
              (resume (plist-get task :session))
              (pane (and resume (org-dispatch--live-pane resume agent)))
+             (command (unless pane (org-dispatch--command agent)))
              (tab nil)
              (label (truncate-string-to-width (concat "auto · " (plist-get task :heading)) 60))
              (state (list :id id :file (plist-get task :file) :heading (plist-get task :heading)
@@ -983,19 +1018,23 @@ replaying the same key and spec; missing prerequisites block partial plans."
                                 (file-name-base (plist-get task :file)))))
                   (setq pane (alist-get 'pane_id created)
                         tab (alist-get 'tab_id created)))
-                (apply #'org-dispatch--herdr "agent" "start"
-                       (format "auto-%s-%s"
-                               (substring (replace-regexp-in-string "[^0-9a-f]" "" id) 0 8)
-                               (format-time-string "%H%M%S"))
-                       "--kind" agent "--pane" pane "--timeout" "60000" "--"
-                       (append
-                        (list (if (equal agent "claude") "--dangerously-skip-permissions" "--no-approve")
-                              "--name" label)
-                        (when (plist-get task :model) (list "--model" (plist-get task :model)))
-                        (when resume
-                          (if (equal agent "claude")
-                              (list "--resume" resume)
-                            (list "--session" (or (org-dispatch--session-file resume) resume)))))))
+                (let ((name (format "auto-%s-%s"
+                                    (substring (replace-regexp-in-string "[^0-9a-f]" "" id) 0 8)
+                                    (format-time-string "%H%M%S")))
+                      (args (append
+                             (list (if (equal agent "claude") "--dangerously-skip-permissions" "--no-approve")
+                                   "--name" label)
+                             (when (plist-get task :model) (list "--model" (plist-get task :model)))
+                             ;; A custom launcher may choose another account with a separate
+                             ;; session store. Closed sessions restart from the Org record.
+                             (when (and resume (not command))
+                               (if (equal agent "claude")
+                                   (list "--resume" resume)
+                                 (list "--session" (or (org-dispatch--session-file resume) resume)))))))
+                  (if command
+                      (org-dispatch--start-command pane agent command args name)
+                    (apply #'org-dispatch--herdr "agent" "start" name
+                           "--kind" agent "--pane" pane "--timeout" "60000" "--" args))))
               (let ((session (org-dispatch--pane-session pane agent)))
                 (org-dispatch--claim task pane session)
                 (setq state (plist-put state :pane pane))
@@ -1007,21 +1046,29 @@ replaying the same key and spec; missing prerequisites block partial plans."
                 (condition-case err
                     (org-dispatch--prompt
                      pane (org-dispatch--render
-                           "task" task `(("DIALOG" . ,(org-dispatch--dialog-block task resume)))))
+                           "task" task `(("DIALOG" . ,(concat
+                                                      (when (and command resume)
+                                                        "This is a fresh session, not a native resume. Read the whole Org task and Dialog before continuing.\n\n")
+                                                      (org-dispatch--dialog-block task resume))))))
                   (error (org-dispatch--log "prompt failed for %s: %s" id (error-message-string err))))
-                (org-dispatch--log "%s %s: %s in %s" (if resume "resumed" "launched")
+                (org-dispatch--log "%s %s: %s in %s" (cond ((and command resume) "restarted") (resume "resumed") (t "launched"))
                                    id (plist-get task :heading) pane)
                 t))
           (error
-           ;; Trust or login dialogs may block before the agent reports a session.
-           ;; Hold the task for Jon instead of opening another blocked tab each tick.
-           (if (and pane (equal (org-dispatch--agent-status pane) "blocked"))
-               (progn
-                 (org-dispatch--claim task pane nil)
-                 (org-dispatch--hold
-                  state (format "%s is blocked during startup in Herdr pane %s. Inspect it with herdr agent read %s and resolve the prompt before resuming."
-                                agent pane pane)))
-             (org-dispatch--drop-state id))
+           ;; Blocked dialogs and failed custom launchers need attention, not
+           ;; another tab every tick when quota is exhausted or a command is wrong.
+           (cond
+            ((and pane (equal (org-dispatch--agent-status pane) "blocked"))
+             (org-dispatch--claim task pane nil)
+             (org-dispatch--hold
+              state (format "%s is blocked during startup in Herdr pane %s. Inspect it with herdr agent read %s and resolve the prompt before resuming."
+                            agent pane pane)))
+            ((and pane command)
+             (org-dispatch--claim task pane nil)
+             (org-dispatch--hold
+              state (format "%s failed during startup in Herdr pane %s: %s. Inspect it with herdr pane read %s before resuming."
+                            command pane (error-message-string err) pane)))
+            (t (org-dispatch--drop-state id)))
            (org-dispatch--log "launch failed for %s: %s"
                               (plist-get task :heading) (error-message-string err))
            nil))))))
