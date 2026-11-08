@@ -630,10 +630,11 @@ export function aimTail(box, mouth, face, side, obstacles = [], stacked = false)
 		const at = clamp(mouth.y - box.y, r + base / 2, box.h - r - base / 2);
 		candidates.push({ edge: side, at, base, bx: side === "left" ? box.x : box.x + box.w, by: box.y + at });
 	}
-	// The top or bottom edge, near her side, when it has a straight run wide enough for a base.
+	// The top or bottom edge, near her side, when it has a straight run wide enough for a base, and only when her mouth
+	// lies beyond it: an edge that does not face her would send its tail out of the panel, away from her.
 	const across = box.w - 2 * r;
-	if (across >= 12) {
-		const vertical = mouth.y >= box.y + box.h ? "bottom" : "top";
+	const vertical = mouth.y >= box.y + box.h ? "bottom" : mouth.y <= box.y ? "top" : null;
+	if (across >= 12 && vertical !== null) {
 		const base = Math.min(TAIL_BASE, across - 2);
 		// Stacked, the tail leaves the top under her mouth; otherwise near her side.
 		const at = stacked ? clamp(mouth.x - box.x, r + base / 2, box.w - r - base / 2) : side === "left" ? r + base / 2 : box.w - r - base / 2;

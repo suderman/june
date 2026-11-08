@@ -927,6 +927,18 @@ test("a tail never crosses what her hands are doing, unless it is at her mouth",
 	assert.equal(plan({ width: 411, side: "left", pose: sip, elements }).elements[0].tail?.edge, "top");
 });
 
+test("a tail leaves only an edge that faces her mouth, so one that cannot reach her never points out of the panel", () => {
+	const face = { x: 500, y: 20, w: 120, h: 110 };
+	const mouth = { x: 560, y: 100 };
+	const beside = { x: 40, y: 20, w: 420, h: 130 };
+	// Beside her face the side facing her is used.
+	assert.equal(aimTail(beside, mouth, face, "right")?.edge, "right");
+	// Her raised hand right at that side: no tail, rather than one up from the top edge, away from her mouth below it.
+	assert.equal(aimTail(beside, mouth, face, "right", [{ x: 462, y: 20, w: 40, h: 150 }]), null);
+	// Above her mouth entirely, the bottom edge still serves.
+	assert.equal(aimTail({ x: 40, y: 20, w: 420, h: 80 }, { x: 560, y: 200 }, { x: 500, y: 110, w: 120, h: 130 }, "right", [{ x: 462, y: 20, w: 40, h: 90 }])?.edge, "bottom");
+});
+
 test("the strip is composed the same way on every client: sides and poses kept once chosen", () => {
 	const poses = readPoses(manifest, "");
 	const items = [
