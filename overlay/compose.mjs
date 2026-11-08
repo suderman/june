@@ -816,6 +816,14 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 	}
 
 	const out = placed.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y), w: p.w, h: p.h }));
+	// What her hands are doing (the pose's gestures, as gestureShown places them) is no place for a tail: a tail across
+	// the mug she holds hides the action the art is for. A gesture at her mouth, such as a sip, cannot be avoided, and
+	// stays open to tails.
+	const held = art && mouth
+		? (pose.gestures ?? [])
+				.map((g) => ({ x: art.x + (mirror ? 1 - g.box.x - g.box.w : g.box.x) * art.w, y: art.y + g.box.y * art.h, w: g.box.w * art.w, h: g.box.h * art.h }))
+				.filter((g) => !(mouth.x >= g.x && mouth.x <= g.x + g.w && mouth.y >= g.y && mouth.y <= g.y + g.h))
+		: [];
 	if (mouth) {
 		// Consecutive balloons are one speech: each beside her face gets its own tail; otherwise only the one nearest her
 		// mouth does, so tails never stack up across a run of balloons.
@@ -824,7 +832,7 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 		let run = [];
 		const close = () => {
 			const tailed = run.some((i) => beside(out[i])) ? run.filter((i) => beside(out[i])) : run.length > 0 ? [run.reduce((a, b) => (distance(out[b]) < distance(out[a]) ? b : a))] : [];
-			for (const i of tailed) out[i].tail = aimTail(out[i], mouth, face, side, out.filter((_, j) => j !== i), m.stacked);
+			for (const i of tailed) out[i].tail = aimTail(out[i], mouth, face, side, [...out.filter((_, j) => j !== i), ...held], m.stacked);
 			run = [];
 		};
 		// Tool chips, status cards, and thoughts are narration inside her speech, so they do not end a run; the user's

@@ -914,6 +914,19 @@ test("in a stacked panel a tail leaves the top under her mouth, or there is none
 	assert.ok(laid.face.y + laid.face.h <= balloon.y, "her face stays clear of it");
 });
 
+test("a tail never crosses what her hands are doing, unless it is at her mouth", () => {
+	const base = { width: 1000, height: 1300, face: { x: 0.35, y: 0.196, w: 0.3, h: 0.269 }, mouth: { x: 0.5, y: 0.412 }, facing: "front", mirror: true, framings: ["close-up", "head", "bust", "waist"], marks: [] };
+	const elements = [{ kind: "june", w: 380, h: 110 }];
+	assert.equal(plan({ width: 411, side: "left", pose: base, elements }).elements[0].tail?.edge, "top", "without a gesture, the tail goes up to her mouth");
+	// Both hands around a mug under her chin, between her mouth and the balloon under her band: no tail across it.
+	const mug = { ...base, gestures: [{ name: "mug-and-both-hands", box: { x: 0.27, y: 0.47, w: 0.47, h: 0.21 }, primary: true }] };
+	const laid = plan({ width: 411, side: "left", pose: mug, elements });
+	assert.equal(laid.elements[0].tail, null, "no tail rather than one over the mug");
+	// A sip, with the mug at her mouth, cannot be avoided: the tail goes to her mouth as before.
+	const sip = { ...base, gestures: [{ name: "sip", box: { x: 0.4, y: 0.38, w: 0.2, h: 0.1 }, primary: true }] };
+	assert.equal(plan({ width: 411, side: "left", pose: sip, elements }).elements[0].tail?.edge, "top");
+});
+
 test("the strip is composed the same way on every client: sides and poses kept once chosen", () => {
 	const poses = readPoses(manifest, "");
 	const items = [
