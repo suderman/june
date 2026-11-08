@@ -688,6 +688,7 @@ private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONO
                 }
             }
         }
+        if (clip.optBoolean("inset")) Box(Modifier.offset(clip.getDouble("x").dp, clip.getDouble("y").dp).size(clip.getDouble("w").dp, clip.getDouble("h").dp).border(2.dp, Look.ink))
         scene?.optJSONObject("desk")?.let { DeskView(it) }
         // Marks that reinforce her pose, beside her face, under the words (compose.mjs MARK_SHAPES).
         val marks = l.optJSONArray("marks")
@@ -741,6 +742,9 @@ private fun SceneView(scene: JSONObject, avatar: Avatar, seed: Int) {
     }
     val room = scene.optJSONObject("room")
     if (room != null) {
+        // An inset has its own room, in the inset's coordinates.
+        val inset = scene.optJSONObject("inset")
+        Box(if (inset != null) Modifier.offset(inset.getDouble("x").dp, inset.getDouble("y").dp).size(inset.getDouble("w").dp, inset.getDouble("h").dp).clipToBounds() else Modifier.fillMaxSize()) {
         val place = room.getJSONObject("place")
         val win = scene.optJSONObject("window")
         val sky = scene.getJSONObject("sky")
@@ -795,6 +799,7 @@ private fun SceneView(scene: JSONObject, avatar: Avatar, seed: Int) {
             }
             // The hour's grade over the whole room, as one print under coloured light.
             if (amount > 0) drawRect(grade.copy(alpha = amount), blendMode = BlendMode.SrcAtop)
+        }
         }
     }
     val lamp = scene.optDouble("lamp", 0.0).toFloat()

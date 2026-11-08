@@ -764,6 +764,20 @@ test("props come out by holiday, weather, and temperature, holidays first, never
 	assert.ok(!ids({ date: new Date(2026, 6, 15), weather: null }).includes("fan"), "without the weather, no weather props");
 });
 
+test("an inset has its own room, covering the inset, and the panel around it has none", () => {
+	const study = scenery.rooms.find((r) => r.id === "study");
+	const pose = { setting: "desk", id: "p" };
+	const panel = { id: "p", side: "right", elements: [] };
+	const clip = { x: 500, y: 18, w: 240, h: 300, inset: true };
+	const layout = { height: 700, framing: "bust", clip, face: { x: 560, y: 60, w: 90, h: 110 }, elements: [{ x: 18, y: 18, w: 460, h: 660 }] };
+	const scene = panelScene({ panel, layout, pose, sizes: [{ w: 460, h: 660 }], width: 760, now: Date.UTC(2026, 10, 8, 18), hourOverride: 12, scenery: { rooms: [study], plates: [], props: scenery.props } });
+	assert.equal(scene.inset, clip);
+	assert.ok(scene.room, "a room even where a long panel would have a flat ground");
+	const place = scene.roomPlace;
+	assert.ok(place.x <= 0.01 && place.y <= 0.01 && place.x + place.w >= clip.w - 0.01 && place.y + place.h >= clip.h - 0.01, "the room covers the inset, in its coordinates");
+	assert.deepEqual(scene.props, [], "no props in so small a picture");
+});
+
 test("a room covers the panel with its window on the open side, and props stand at its spots clear of her face and the words", () => {
 	const study = scenery.rooms.find((r) => r.id === "study");
 	for (const side of ["left", "right"]) {

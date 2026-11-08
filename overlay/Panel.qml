@@ -78,7 +78,7 @@ Item {
 
   Scenery {
     anchors.fill: parent
-    visible: panel.roomPlace !== null
+    visible: panel.roomPlace !== null && !panel.scene.inset
     room: panel.room
     place: panel.roomPlace
     plate: panel.scene.plate
@@ -190,7 +190,19 @@ Item {
     width: panel.layout.clip.w
     height: panel.layout.clip.h
     clip: true
-    Rectangle { anchors.fill: parent; visible: panel.layout.clip.inset; color: Light.graded(Qt.darker(Theme.tint(panel.p.id), 1.06).toString(), panel.light) }
+    Rectangle { anchors.fill: parent; visible: panel.layout.clip.inset; color: Light.graded(Theme.tint(panel.p.id), panel.light) }
+    // An inset's own room, like a small panel set into the page.
+    Scenery {
+      anchors.fill: parent
+      visible: panel.scene.inset !== null && panel.roomPlace !== null
+      room: panel.room
+      place: panel.roomPlace
+      plate: panel.scene.plate
+      sky: panel.scene.sky
+      light: panel.light
+      seed: panel.seed
+      blur: panel.scene.blur
+    }
     // Her two layers, drawn once into a texture so the hour can grade them together and the key light can follow her
     // outline. She takes the room's grade more gently, so her face stays readable at any hour.
     Item {

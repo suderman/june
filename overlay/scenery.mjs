@@ -211,15 +211,17 @@ export function panelScene({ panel, layout, pose, sizes, width, now, hourOverrid
 	const faceCentre = layout.face ? { x: layout.face.x + layout.face.w / 2, y: layout.face.y + layout.face.h / 2 } : null;
 	const seed = hash(panel.id) % 997;
 	const rooms = scenery ? scenery.rooms : [];
-	const room = back.kind === "room" && pose ? chooseRoom(rooms, pose.setting, seed) : null;
-	const roomPlace = room && width > 0 && layout.height > 0 ? placeRoom(room, width, layout.height, panel.side) : null;
+	// An inset is a small picture of its own, as in a comic: it has its own room, placed in the inset's coordinates.
+	const inset = layout.clip && layout.clip.inset ? layout.clip : null;
+	const room = (back.kind === "room" || inset) && pose ? chooseRoom(rooms, pose.setting, seed) : null;
+	const roomPlace = room && width > 0 && layout.height > 0 ? placeRoom(room, inset ? inset.w : width, inset ? inset.h : layout.height, panel.side) : null;
 	const weather = sky && sky.condition && Math.abs(now - when) < WEATHER_MS ? sky : null;
 	const plate = room ? choosePlate(scenery.plates, season(new Date(when)), seed) : null;
 	// Her words and face, which a prop or a cutaway's pieces keep clear of.
 	const clear = layout.elements.filter((e) => e !== null && e !== undefined);
 	if (layout.face) clear.push(layout.face);
 	let props = [];
-	if (roomPlace) {
+	if (roomPlace && !inset) {
 		const chosen = chooseProps(scenery.props, { date: new Date(when), weather, room, seed });
 		props = placeProps(chosen, room, roomPlace, width, layout.height, clear);
 	}
@@ -231,6 +233,7 @@ export function panelScene({ panel, layout, pose, sizes, width, now, hourOverrid
 		seed,
 		room,
 		roomPlace,
+		inset,
 		weather,
 		plate,
 		props,

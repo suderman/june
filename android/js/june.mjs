@@ -100,6 +100,7 @@ function scene(panel, laid, pose, sizes, width, now, hourOverride, sky) {
 		ground,
 		pattern: pattern ? { path: light.patternPath(back.pattern, width, laid.height, sc.faceCentre, sc.seed), stroke: g(pattern.stroke), fill: g(pattern.fill), width: pattern.width, opacity: pattern.opacity } : null,
 		room: sc.roomPlace ? { url: sc.room.url, place: sc.roomPlace } : null,
+		inset: sc.inset,
 		window: win,
 		sky: sc.sky,
 		falling: win && sc.sky.falling ? light.fallingPath(sc.sky.falling, win.w, win.h, sc.seed) : "",
