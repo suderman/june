@@ -145,11 +145,13 @@ test("a pose whose hair would touch the top sits lower, and says so", () => {
 });
 
 test("a crown the drawing cuts starts the canvas at the cut, and drawn legs grow it down", () => {
-	const figure = { x: 50, y: 0, w: 400, h: 900 };
+	const figure = { x: 50, y: 0, w: 400, h: 900, cutTop: true };
 	const place = placePose("pose", figure, { x: 175, y: 60, w: 150, h: 175 });
 	assert.equal(place.y, 0, "no empty canvas above a flat cut in her hair");
 	assert.match(place.problems.join(), /cuts off her crown/);
 	assert.equal(place.size[1], Math.ceil(figure.h * place.scale), "every drawn pixel below her waist is kept");
+	const stray = placePose("pose", { ...figure, cutTop: false }, { x: 175, y: 60, w: 150, h: 175 });
+	assert.ok(stray.y > 0, "a stray pixel at the top edge is not a cut crown");
 });
 
 test("a pose that stops short of the bottom is reported", () => {

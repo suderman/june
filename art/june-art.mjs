@@ -24,7 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseManifest } from "../src/avatar.ts";
 import { FRAMINGS, frame, framingsShowing, readPoses } from "../overlay/compose.mjs";
-import { gesturePreservation, kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "./layout.mjs";
+import { CROWN_CUT_SHARE, gesturePreservation, kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "./layout.mjs";
 
 const SECTIONS = ["poses", "chibi", "rooms", "plates", "props"];
 const BACKGROUND = ["rooms", "plates", "props"];
@@ -87,6 +87,11 @@ function alphaBox(file, holes = false) {
 	return box ? { x: box.x - 1, y: box.y - 1, w: box.w, h: box.h } : null;
 }
 
+/** The share of the top pixel row that is solid: a drawing cut by its top edge has a span of hair there, not a stray pixel. */
+function topSolidShare(file) {
+	return Number(magick(file, "-alpha", "extract", "-crop", "x1+0+0", "+repage", "-threshold", "50%", "-format", "%[fx:mean]", "info:"));
+}
+
 function size(file) {
 	const [w, h] = magick(file, "-format", "%w %h", "info:").split(" ").map(Number);
 	return { x: 0, y: 0, w, h };
@@ -117,6 +122,7 @@ function ingest(set, name, options) {
 		const whole = size(image);
 		const figure = alphaBox(image);
 		if (!figure) throw new Error(`${name}: the image is entirely see-through`);
+		figure.cutTop = topSolidShare(image) >= CROWN_CUT_SHARE;
 		const holes = alphaBox(image, true);
 		if (!holes) throw new Error(`${name}: nothing is see-through; give --key COLOUR for its flat background${section === "rooms" ? " or window" : section === "plates" ? " or sky" : ""}`);
 
