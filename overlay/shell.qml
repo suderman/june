@@ -171,11 +171,8 @@ ShellRoot {
     liveArt = art;
     chibiArt = chibi;
     scenery = Scenery.mergeScenery(ordered.map(s => s.scenery));
-    const seen = {};
-    const all = [];
-    for (const set of ordered)
-      for (const pose of set.poses) if (!seen[pose.id]) { seen[pose.id] = true; all.push(pose); }
-    poses = all;
+    // Real art only, once there is any: the base set's drawn placeholders are left out (Compose.mergePoses).
+    poses = Compose.mergePoses(ordered.map(s => s.poses));
     sync();
   }
 

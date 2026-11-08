@@ -165,7 +165,10 @@ export function loadManifest(paths: readonly string[], log: Logger): Manifest | 
 		catch (error) { log.warn("expression_manifest", { path, error: (error as Error).message }); }
 	}
 	if (!sets.length) return undefined;
-	return { ...sets[0]!, poses: Object.assign({}, ...sets.toReversed().map((s) => s.poses ?? {})), personal };
+	// Real art only, once there is any, as the clients merge it (mergePoses in overlay/compose.mjs): the base set's drawn
+	// placeholders never become a pick. The last path is the base set; without other art it is all she has.
+	const real = personal.length > 0 ? sets.slice(0, -1) : sets;
+	return { ...sets[0]!, poses: Object.assign({}, ...real.toReversed().map((s) => s.poses ?? {})), personal };
 }
 
 /** A tall pose may look out of the panel without being mirrored; other poses face the words. */

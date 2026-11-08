@@ -160,8 +160,10 @@ test("the daemon merges both inventories and resolves a concrete pose once at mi
 		writeFileSync(join(dir, "personal.json"), JSON.stringify(personal));
 		writeFileSync(join(dir, "base.json"), JSON.stringify(manifest));
 		const merged = loadManifest([join(dir, "personal.json"), join(dir, "base.json")], silentLogger)!;
-		assert.equal(Object.keys(merged.poses!).length, 2);
+		assert.deepEqual(Object.keys(merged.poses!), ["smug-chin-on-hand"], "the base set's drawn poses are left out once there is real art");
 		assert.equal(merged.poses!["smug-chin-on-hand"]!.description, "personal");
+		const bare = loadManifest([join(dir, "missing.json"), join(dir, "base.json")], silentLogger)!;
+		assert.equal(Object.keys(bare.poses!).length, 2, "without real art the base set is all she has");
 		const at = 1793880000123;
 		const poses = { ...manifest.poses, second: { ...manifest.poses!["smug-chin-on-hand"]!, added: new Date(at).toISOString() }, future: { ...manifest.poses!["smug-chin-on-hand"]!, added: new Date(at + 1).toISOString() } };
 		const pick = resolvePick({ expression: "smug" }, { ...manifest, poses }, say("x", "", { pose: "smug-chin-on-hand", side: "left" }) as Extract<ViewItem, { kind: "assistant" }>, at, () => 0.99);

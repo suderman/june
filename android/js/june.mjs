@@ -30,9 +30,8 @@ export function setArt(manifest, daemon) {
 		chibi: live.readChibi(m, prefix),
 		scenery: scenery.readScenery(m, prefix),
 	}));
-	const seen = {};
-	poses = [];
-	for (const set of sets) for (const pose of set.poses) if (!seen[pose.id]) { seen[pose.id] = true; poses.push(pose); }
+	// Real art only, once there is any: the base set's drawn placeholders are left out, as on the desktop.
+	poses = compose.mergePoses(sets.map((s) => s.poses));
 	rooms = scenery.mergeScenery(sets.map((s) => s.scenery));
 	liveArt = {};
 	chibiArt = {};

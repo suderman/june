@@ -131,6 +131,22 @@ export function readPoses(manifest, base) {
 }
 
 /**
+ * June's poses from her avatar sets, in order, the first set winning a shared name. The last is the package's base set:
+ * once any other set has art, its drawn stand-ins are left out, so the strip never shows a placeholder June. Her real
+ * poses cover what they lacked: a working panel without working art, or a face without its own pose, takes a real pose
+ * through the face's chain (choosePose), and a tall stand-in only real tall art (tallFor). Without real art the base set
+ * is all she has, and stays.
+ */
+export function mergePoses(sets) {
+	const real = sets.slice(0, -1).some((set) => set.length > 0);
+	const seen = {};
+	const out = [];
+	for (const set of real ? sets.slice(0, -1) : sets)
+		for (const pose of set) if (!seen[pose.id]) { seen[pose.id] = true; out.push(pose); }
+	return out;
+}
+
+/**
  * The pose for a request: the named pose; for an `activity`, a pose showing her doing it; otherwise one with the
  * requested expression or the next in its chain. A pose that shows an activity never answers an expression, so a
  * settled panel never shows her still at work. `avoid` is the previous panel's pose, skipped when another fits, and

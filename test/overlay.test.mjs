@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { activity, applyView, beats, caption, emptyView, fileSize, markup, panels, previewKind, readInput, status, noteText } from "../overlay/strip.mjs";
-import { ACTIVITIES, FALLBACK, aimTail, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, panelLayout, jagged, liveActivity, metrics, picked, plan, readPoses, selectionMoment, standIn, takeMenu, tallFor } from "../overlay/compose.mjs";
+import { ACTIVITIES, FALLBACK, aimTail, mergePoses, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, panelLayout, jagged, liveActivity, metrics, picked, plan, readPoses, selectionMoment, standIn, takeMenu, tallFor } from "../overlay/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
 import { CALM_GROUND, LONG_SHARE, PATTERNS, TIMES, WEATHER_MS, backdrop, cutaway, fallingPath, graded, hourOf, look, moment, patternPath, place, skyLook, sunFor, sunKeys, sunTimes } from "../overlay/light.mjs";
@@ -937,6 +937,18 @@ test("a tail leaves only an edge that faces her mouth, so one that cannot reach 
 	assert.equal(aimTail(beside, mouth, face, "right", [{ x: 462, y: 20, w: 40, h: 150 }]), null);
 	// Above her mouth entirely, the bottom edge still serves.
 	assert.equal(aimTail({ x: 40, y: 20, w: 420, h: 80 }, { x: 560, y: 200 }, { x: 500, y: 110, w: 120, h: 130 }, "right", [{ x: 462, y: 20, w: 40, h: 90 }])?.edge, "bottom");
+});
+
+test("placeholders give way to real art: a working panel without working art shows a real pose of her face", () => {
+	const real = readPoses({ poses: { calm: { file: "c.webp", size: [10, 13], expression: "serious", face: [0.3, 0.1, 0.4, 0.3], mouth: [0.5, 0.35] }, attentive: { file: "a.webp", size: [10, 13], expression: "idle", face: [0.3, 0.1, 0.4, 0.3], mouth: [0.5, 0.35] } } }, "personal/");
+	const base = readPoses(manifest, "");
+	const poses = mergePoses([real, base]);
+	assert.deepEqual(poses.map((p) => p.id), ["calm", "attentive"], "no packaged pose once there is real art");
+	assert.ok(poses.every((p) => !p.url.endsWith(".svg")));
+	assert.equal(choosePose(poses, { activity: "working", expression: "serious" }).id, "calm", "working, she shows the real pose of her face");
+	assert.equal(choosePose(poses, { activity: "working" }).id, "attentive", "or her idle one");
+	assert.equal(choosePose(poses, { pose: "working-typing-laptop", expression: "determined" }).id, "attentive", "a placeholder named by an old panel gives way through the chain");
+	assert.deepEqual(mergePoses([[], base]).map((p) => p.id), base.map((p) => p.id), "without real art the base set stays");
 });
 
 test("the strip is composed the same way on every client: sides and poses kept once chosen", () => {
