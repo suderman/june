@@ -162,6 +162,16 @@ FloatingWindow {
       anchors.margins: 16
       send: (text, followUp) => win.shell.submit(text, followUp)
       stop: () => win.shell.stopJune()
+      attachments: win.shell.outbox
+      unattach: index => win.shell.unattach(index)
+      paste: fallback => win.shell.pasteInto(fallback)
+      pick: () => win.shell.pick()
+    }
+    // Files dropped anywhere on the window go with the next message.
+    DropArea {
+      anchors.fill: parent
+      keys: ["text/uri-list"]
+      onDropped: drop => { win.shell.attachPaths(win.shell.pathsOf(drop.urls)); drop.accept(Qt.CopyAction); }
     }
   }
 

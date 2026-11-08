@@ -9,6 +9,7 @@
 // open, the full strip, hidden again; if she popped up by herself, the first press opens her note. Esc dismisses either. `toggle`, `open`, `close`, and `mini` reach each directly.
 // `window` opens the same strip in an ordinary window with this device's toggles (StripWindow.qml).
 import QtQuick
+import QtQuick.Dialogs
 import QtQml.Models
 import Quickshell
 import Quickshell.Io
@@ -20,6 +21,7 @@ import "live.mjs" as Live
 import "scenery.mjs" as Scenery
 import "console.mjs" as Console
 import "desktop.mjs" as Desktop
+import "attach.mjs" as Attach
 
 ShellRoot {
   id: root
@@ -441,6 +443,49 @@ ShellRoot {
   }
   function say(text) { toast = text; toastTimer.restart(); }
 
+  // Pictures and files waiting for the next message, shared by the overlay's balloon and the strip window's: pasted,
+  // dropped or picked, read by attach.sh, held to the daemon's limits by attach.mjs, and sent with the words.
+  property var outbox: []
+  property var pasteFallback: null
+  readonly property string attachScript: Quickshell.shellPath("attach.sh")
+  Process {
+    id: attacher
+    stdout: StdioCollector { onStreamFinished: root.attached(text) }
+    // Exit 1 from a paste: the clipboard holds words, so they go into the balloon as before.
+    onExited: (code, status) => { if (code !== 0 && root.pasteFallback) root.pasteFallback(); root.pasteFallback = null; }
+  }
+  function attachPaths(paths) {
+    if (attacher.running || paths.length === 0) return;
+    pasteFallback = null;
+    attacher.command = Attach.readCommand(attachScript, paths);
+    attacher.running = true;
+  }
+  function pasteInto(fallback) {
+    if (attacher.running) return;
+    pasteFallback = fallback;
+    attacher.command = Attach.pasteCommand(attachScript);
+    attacher.running = true;
+  }
+  function attached(text) {
+    const read = Attach.parse(text);
+    if (read.items.length === 0 && read.refused.length === 0) return;
+    pasteFallback = null;
+    const admitted = Attach.admit(outbox, read.items);
+    outbox = admitted.outbox;
+    const refused = read.refused.concat(admitted.refused);
+    if (refused.length > 0) say("not attached: " + refused.join("; "));
+  }
+  function unattach(index) { outbox = outbox.filter((_, i) => i !== index); }
+  // file:// URLs from a picker or a drop, as paths.
+  function pathsOf(urls) { return Array.from(urls).map(u => decodeURIComponent(String(u).replace(/^file:\/\//, ""))).filter(p => p.startsWith("/")); }
+  FileDialog {
+    id: picker
+    title: "Attach for June"
+    fileMode: FileDialog.OpenFiles
+    onAccepted: root.attachPaths(root.pathsOf(selectedFiles))
+  }
+  function pick() { picker.open(); }
+
   function receive(reply) {
     if (reply.type === "hello") {
       fetchArt(reply.avatar);
@@ -502,11 +547,19 @@ ShellRoot {
 
   function submit(text, followUp) {
     const input = Strip.readInput(text);
-    if (input.kind === "empty") return true;
+    if (input.kind === "empty" && outbox.length === 0) return true;
     if (input.kind === "refuse") { say(input.message); return false; }
     if (!linked) { say("not connected to June; your balloon is kept"); return false; }
     if (input.kind === "command") send({ op: "command", requestId: rid(), name: input.name, args: input.args });
-    else send({ op: "submit", requestId: rid(), text: input.text, source: "gui", whenBusy: followUp ? "followUp" : "steer" });
+    else {
+      const extra = Attach.payload(outbox);
+      // QML's JavaScript has no object spread, so the attachments are set one by one.
+      const request = { op: "submit", requestId: rid(), text: input.kind === "empty" ? "" : input.text, source: "gui", whenBusy: followUp ? "followUp" : "steer" };
+      if (extra.images.length > 0) request.images = extra.images;
+      if (extra.files.length > 0) request.files = extra.files;
+      send(request);
+      outbox = [];
+    }
     return true;
   }
 
@@ -547,6 +600,12 @@ ShellRoot {
       anchors.top: parent.top
       anchors.bottom: parent.bottom
       width: Math.min(Theme.stripWidth, parent.width - 32)
+      // Files dropped anywhere on the strip go with the next message.
+      DropArea {
+        anchors.fill: parent
+        keys: ["text/uri-list"]
+        onDropped: drop => { root.attachPaths(root.pathsOf(drop.urls)); drop.accept(Qt.CopyAction); }
+      }
       // The unfold in two overlapping beats: the input grows out of her card, then the strip fades in, rising a little.
       readonly property real inputPhase: Math.min(1, root.unfold / 0.4)
       readonly property real stripPhase: Math.max(0, Math.min(1, (root.unfold - 0.2) / 0.8))
@@ -651,6 +710,10 @@ ShellRoot {
         visible: width > 30
         send: (text, followUp) => root.submit(text, followUp)
         stop: () => root.stopJune()
+        attachments: root.outbox
+        unattach: index => root.unattach(index)
+        paste: fallback => root.pasteInto(fallback)
+        pick: () => root.pick()
       }
     }
 
