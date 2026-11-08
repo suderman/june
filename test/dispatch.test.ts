@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { Dispatch, insertAfterPreamble, renderTask, taskBody } from "../src/tools/dispatch.ts";
 import { Herdr } from "../src/tools/herdr.ts";
@@ -41,6 +42,7 @@ async function fixture() {
 			if (!(argv[2]! in stamps)) throw new Error(`not a date: ${argv[2]}`);
 			return `${stamps[argv[2]!]}\n`;
 		}
+		if (argv[0] === "org-edit" && argv[1] === "remove-dependencies") return JSON.stringify({ id: "resume123", title: "Existing thread", state: "HOLD", depends: ["id:keep"], written: true });
 		if (argv[0] === "org-edit") return JSON.stringify({ id: "resume123", title: "Existing thread", host: "kit", written: true });
 		if (argv[0] === "org-dispatch") {
 			const { projects } = await new Org(root).projects();
@@ -449,4 +451,178 @@ test("org-dispatch writes June's plan and holds the later task until the first i
 	const scan = execFileSync("org-dispatch", ["scan"], options);
 	assert.match(scan, /^Task a\t.*\tnew$/m);
 	assert.match(scan, /^Task b\t.*\twaiting on Task a \(AUTO\)$/m);
+});
+
+const removableTask = (state = "AUTO", depends = "id:drop id:keep") => `* ${state} Existing thread
+SCHEDULED: <2026-11-10 Tue>
+:PROPERTIES:
+:ID: resume123
+:HOST: kit
+:AGENT: pi
+:DEPENDS: ${depends}
+:END:
+Keep this scope. Wait for Drop before making art.
+
+** Sessions
+- [[herdr:kit/pi:01a1176c-3aa6-7717-a4c6-eaa0aa0a0833@w9:p1][old run]]
+
+** Dialog
+- Jon [2026-11-07 Sat 22:00] Wait for Drop.
+- Agent [2026-11-07 Sat 22:01] Paused for Drop.
+
+* TODO Keep
+:PROPERTIES:
+:ID: keep
+:END:
+* TODO Drop
+:PROPERTIES:
+:ID: drop
+:END:
+`;
+
+const removal = { file: request.file, heading: "id:resume123", expected: "AUTO" as const, remove: ["id:drop"], note: "Jon asked to remove Drop and lift the earlier Dialog wait for Drop; keep the remaining scope.", key: "inst:remove1" };
+const idleHerdr = { agents: async () => [] } as unknown as Herdr;
+
+test("selected removal passes a fresh revision and approval to org-edit, without kicking or resuming", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	await writeFile(f.project, removableTask());
+	const task = await new Org(f.root).read(request.file, "id:resume123");
+	const result = await f.dispatch.removeDependencies({ ...removal, revision: task.revision }, idleHerdr);
+	assert.deepEqual([result.state, result.depends], ["HOLD", ["id:keep"]]);
+	assert.deepEqual(f.runs, [["org-edit", "remove-dependencies", f.project, "id:resume123", "--expect", "AUTO", "--revision", task.revision, "--remove", "id:drop", "--request", removal.key, "--note", removal.note]]);
+	await writeFile(f.project, removableTask().replace("Wait for Drop.", "Wait for both prerequisites."));
+	await assert.rejects(f.dispatch.removeDependencies({ ...removal, revision: task.revision }, idleHerdr), /revision changed/);
+	assert.equal(f.runs.length, 1);
+});
+
+test("removal refuses active linked workers and malformed requests before org-edit", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	await writeFile(f.project, removableTask());
+	const { revision } = await new Org(f.root).read(request.file, removal.heading);
+	for (const status of ["working", "blocked"]) {
+		const busy = { agents: async () => [{ status, session: "01a1176c-3aa6-7717-a4c6-eaa0aa0a0833" }] } as unknown as Herdr;
+		await assert.rejects(f.dispatch.removeDependencies({ ...removal, revision }, busy), /active agent/);
+	}
+	for (const invalid of [{ remove: [] }, { remove: ["drop"] }, { heading: "Existing thread" }, { expected: "PROG" }, { note: "" }, { note: "a\nb" }])
+		await assert.rejects(f.dispatch.removeDependencies({ ...removal, revision, ...invalid } as Parameters<Dispatch["removeDependencies"]>[0], idleHerdr));
+	await assert.rejects(f.dispatch.removeDependencies({ ...removal, file: "asana.org", revision }, idleHerdr), /does not write asana/);
+	assert.equal(f.runs.length, 0);
+});
+
+let hasEmacs = false;
+try { execFileSync("emacs", ["--version"], { stdio: "ignore" }); hasEmacs = true; } catch { /* Real-org tests need Emacs; the tool-contract tests above do not. */ }
+
+// Always use this checkout and private state. No service, live Org file or real Herdr call is involved.
+async function removalFixture() {
+	const f = await fixture();
+	const init = join(f.dir, "init.el");
+	await writeFile(init, `(require 'org)\n(setq org-agenda-files (list ${JSON.stringify(f.project)}))\n`);
+	const bin = join(f.dir, "bin");
+	await mkdir(bin);
+	await writeFile(join(bin, "herdr"), '#!/bin/sh\nprintf \'%s\\n\' \'{"result":{"agents":[]}}\'\n', { mode: 0o755 });
+	const runtime = join(f.dir, "runtime");
+	await mkdir(runtime);
+	const options = { encoding: "utf8" as const, stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"], env: {
+		...process.env, HOME: f.dir, PATH: `${bin}:${process.env.PATH}`, ORG_DISPATCH_HOST: "kit", ORG_DISPATCH_ROOT: f.root,
+		ORG_DISPATCH_EMACS_INIT: init, ORG_EDIT_EL: fileURLToPath(new URL("../org/edit/org-edit.el", import.meta.url)),
+		ORG_DISPATCH_EL: fileURLToPath(new URL("../org/dispatch/org-dispatch.el", import.meta.url)),
+		XDG_STATE_HOME: join(f.dir, "state"), XDG_CONFIG_HOME: join(f.dir, "config"), XDG_RUNTIME_DIR: runtime,
+		JUNE_CONFIG_DIR: join(f.dir, "config", "june"),
+	} };
+	const edit = fileURLToPath(new URL("../org/edit/org-edit", import.meta.url));
+	const run = (argv: readonly string[]) => execFileSync("bash", [edit, ...argv.slice(1)], options);
+	const dispatch = new Dispatch(new Org(f.root), f.config, async (argv) => run(argv));
+	const revision = async () => (await new Org(f.root).read(request.file, removal.heading)).revision;
+	const remove = async (extra: Partial<Parameters<Dispatch["removeDependencies"]>[0]> = {}) => dispatch.removeDependencies({ ...removal, revision: await revision(), ...extra }, idleHerdr);
+	return { ...f, dispatch, options, run, remove, revision, init, runtime, bin };
+}
+
+test("real org-edit pauses AUTO in one save, preserves other edges and history, and replays without touching later work", { skip: !hasEmacs }, async (t) => {
+	const f = await removalFixture();
+	t.after(f.cleanup);
+	for (const state of ["TODO", "EVAL", "HOLD", "AUTO"] as const) {
+		await writeFile(f.project, removableTask(state));
+		const rev = await f.revision();
+		const result = await f.remove({ expected: state });
+		assert.equal(result.state, state === "AUTO" ? "HOLD" : state);
+		assert.deepEqual(result.depends, ["id:keep"]);
+		const text = await readFile(f.project, "utf8");
+		assert.match(text, /^SCHEDULED: <2026-11-10 Tue>$/m);
+		assert.match(text, /^:ID: *resume123$/m);
+		assert.match(text, /^:DEPENDS: *id:keep$/m);
+		assert.ok(text.includes("Keep this scope. Wait for Drop before making art."), "prose is not silently rewritten");
+		assert.ok(text.includes("- Jon [2026-11-07 Sat 22:00] Wait for Drop.\n- Agent [2026-11-07 Sat 22:01] Paused for Drop."));
+		assert.ok(text.includes(removal.note), "correction is a new Dialog entry");
+		assert.ok(text.endsWith(removableTask().split("* TODO Keep")[1]!.replace(/^/, "* TODO Keep")), "prerequisites stay byte-for-byte");
+		// A replay of a successful edit must not pause a subsequently resumed task or rewrite its newer Dialog.
+		const later = text.replace(/^\* (?:TODO|EVAL|HOLD) /, "* AUTO ").replace("** Dialog\n", "** Dialog\n- Jon: New instruction.\n");
+		await writeFile(f.project, later);
+		assert.equal((await f.remove({ expected: state, revision: rev })).written, false);
+		assert.equal(await readFile(f.project, "utf8"), later);
+	}
+	await writeFile(f.project, removableTask("AUTO", "id:drop").replace("Keep this scope.", "Keep this scope. Café 🌲."));
+	assert.deepEqual((await f.remove()).depends, []);
+	assert.doesNotMatch(await readFile(f.project, "utf8"), /^:DEPENDS:/m);
+});
+
+test("real removal refuses stale or unsafe tasks and repairs only explicitly selected dangling edges", { skip: !hasEmacs }, async (t) => {
+	const f = await removalFixture();
+	t.after(f.cleanup);
+	for (const [text, error] of [
+		[removableTask("PROG"), /expected AUTO, found PROG/],
+		[removableTask("DONE"), /expected AUTO, found DONE/],
+		[removableTask().replace(":HOST: kit", ":HOST: cog"), /dispatcher host/],
+		[removableTask(), /edge id:absent is absent/],
+		[removableTask("AUTO", "id:drop id:missing"), /Missing dependency ID missing/],
+		[removableTask().replace(":ID: keep", ":ID: resume123"), /duplicate task ID/],
+		[removableTask() + "* TODO Duplicate\n:PROPERTIES:\n:ID: keep\n:END:\n", /Duplicate dependency ID keep/],
+		[removableTask().replace(":ID: keep\n", ":ID: keep\n:DEPENDS: id:resume123\n"), /Dependency cycle/],
+	] as const) {
+		await writeFile(f.project, text);
+		await assert.rejects(f.remove({ remove: /absent/.test(error.source) ? ["id:absent"] : ["id:drop"] }), error);
+		assert.equal(await readFile(f.project, "utf8"), text);
+	}
+	await writeFile(f.project, removableTask("AUTO", "id:missing id:keep"));
+	assert.deepEqual((await f.remove({ remove: ["id:missing"] })).depends, ["id:keep"]);
+	await writeFile(f.project, removableTask());
+	await assert.rejects(f.remove({ heading: "id:gone" }), /heading/);
+	assert.equal(await readFile(f.project, "utf8"), removableTask());
+	const revision = await f.revision();
+	const edited = removableTask().replace(":DEPENDS: id:drop id:keep", ":DEPENDS: id:drop id:keep id:new");
+	const race = new Dispatch(new Org(f.root), f.config, async (argv) => { await writeFile(f.project, edited); return f.run(argv); });
+	await assert.rejects(race.removeDependencies({ ...removal, revision }, idleHerdr), /revision changed/);
+	assert.equal(await readFile(f.project, "utf8"), edited, "a concurrent edge edit is not overwritten");
+});
+
+test("real removal serializes against dispatch, refuses active state and Herdr, and detects writes during save", { skip: !hasEmacs }, async (t) => {
+	const f = await removalFixture();
+	t.after(f.cleanup);
+	await writeFile(f.project, removableTask().replace("** Dialog", "- [[herdr:kit/pi:01a1176c-3aa6-7717-a4c6-eaa0aa0a0088@w9:p2][newer idle run]]\n\n** Dialog"));
+	const before = await readFile(f.project, "utf8");
+	const locked = new Dispatch(new Org(f.root), f.config, async (argv) => execFileSync("flock", ["-n", join(f.runtime, "org-dispatch.lock"), "bash", fileURLToPath(new URL("../org/edit/org-edit", import.meta.url)), ...argv.slice(1)], f.options));
+	await assert.rejects(locked.removeDependencies({ ...removal, revision: await f.revision() }, idleHerdr), /dispatcher or dependency edit busy/);
+	assert.equal(await readFile(f.project, "utf8"), before);
+	const stateDir = join(f.dir, "state/org-dispatch");
+	await mkdir(stateDir, { recursive: true });
+	for (const status of ["starting", "running"]) {
+		await writeFile(join(stateDir, "resume123.json"), JSON.stringify({ status }));
+		await assert.rejects(f.remove(), /active dispatcher run/);
+		assert.equal(await readFile(f.project, "utf8"), before);
+	}
+	await writeFile(join(stateDir, "resume123.json"), JSON.stringify({ status: "finished" }));
+	await writeFile(join(f.bin, "herdr"), '#!/bin/sh\nprintf \'%s\\n\' \'{"result":{"agents":[{"agent_status":"working","agent_session":{"value":"01a1176c-3aa6-7717-a4c6-eaa0aa0a0833"}}]}}\'\n', { mode: 0o755 });
+	await assert.rejects(f.remove(), /active agent/);
+	assert.equal(await readFile(f.project, "utf8"), before);
+	const history = before.replace("** Sessions", "** Previous runs");
+	await writeFile(f.project, history);
+	await assert.rejects(f.remove(), /active agent/, "a live historical session is still a worker, even outside Sessions");
+	assert.equal(await readFile(f.project, "utf8"), history);
+	await writeFile(f.project, before);
+	await writeFile(join(f.bin, "herdr"), '#!/bin/sh\nprintf \'%s\\n\' \'{"result":{"agents":[]}}\'\n', { mode: 0o755 });
+	// Agenda discovery runs in a separate Emacs after the revision check. Simulate an external autosave there.
+	await writeFile(f.init, `(require 'org)\n(setq org-agenda-files (list ${JSON.stringify(f.project)}))\n(write-region "\\n* TODO Concurrent autosave\\n" nil ${JSON.stringify(f.project)} t 'silent)\n`);
+	await assert.rejects(f.remove(), /changed on disk/);
+	assert.equal(await readFile(f.project, "utf8"), `${before}\n* TODO Concurrent autosave\n`);
 });

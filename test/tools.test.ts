@@ -115,6 +115,22 @@ test("org read returns the subtree and its Herdr sessions without touching the f
 	assert.equal(await readFile(join(root, file), "utf8"), before);
 });
 
+test("org revisions cover full Unicode subtrees even when displayed text is truncated", async (t) => {
+	const { org, root, cleanup } = await orgFixture();
+	t.after(cleanup);
+	const file = "work/studio/portal/portal.org";
+	const text = `* AUTO Café 🌲\n:PROPERTIES:\n:ID: large-task\n:END:\n${"scope ".repeat(6000)}\n** Dialog\n- Jon: Keep waiting.\n`;
+	await writeFile(join(root, file), text);
+	const first = await org.read(file, "id:large-task");
+	assert.match(first.revision, /^[0-9a-f]{64}$/);
+	assert.match(first.text, /\[truncated; \d+ lines\]$/);
+	assert.equal((await org.read(file, "id:large-task")).revision, first.revision);
+	await writeFile(join(root, file), text.replace("Keep waiting.", "Lift this specific gate."));
+	const second = await org.read(file, "id:large-task");
+	assert.equal(second.text, first.text, "the changed Dialog is beyond the displayed slice");
+	assert.notEqual(second.revision, first.revision, "the revision still detects its change");
+});
+
 test("org paths cannot leave the Org root", async (t) => {
 	const { org, cleanup } = await orgFixture();
 	t.after(cleanup);

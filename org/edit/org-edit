@@ -26,10 +26,19 @@ if [[ -z ${TZDIR:-} && ! -d /usr/share/zoneinfo && -d /etc/zoneinfo ]]; then exp
 batch=(emacs -Q --batch -L "$(dirname "$ORG_DISPATCH_EL")" -l "$ORG_EDIT_EL")
 
 case ${1:-} in
+  remove-dependencies)
+    shift
+    # Same lock as org-dispatch run, held through read, validation and save. Never wait behind a launch.
+    flock -n -E 75 "${XDG_RUNTIME_DIR:-/tmp}/org-dispatch.lock" "${batch[@]}" -f org-edit-remove-dependencies "$@" || {
+      status=$?
+      if [[ $status == 75 ]]; then echo "dispatcher or dependency edit busy; read the task again before retrying" >&2; fi
+      exit "$status"
+    }
+    ;;
   todo | schedule | deadline | date)
     command=$1
     shift
     "${batch[@]}" -f "org-edit-$command" "$@" 2> >(grep -v -e '^Loading' -e 'state changed to' -e '^Scheduled to' -e '^Deadline on' -e '^Entry repeats' -e '^Note stored' >&2)
     ;;
-  *) echo "usage: org-edit todo|schedule|deadline FILE HEADING ARG, or org-edit date WHEN" >&2; exit 2 ;;
+  *) echo "usage: org-edit todo|schedule|deadline FILE HEADING ARG, org-edit date WHEN, or org-edit remove-dependencies FILE id:UUID --expect STATE --revision HASH --remove REFS --request KEY --note TEXT" >&2; exit 2 ;;
 esac

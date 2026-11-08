@@ -1,5 +1,6 @@
 // Read-only Org tools. Search runs ripgrep; context comes from heading lines alone. These tools never parse or write
 // Org structure themselves: changes go through org-edit and org-dispatch, which run Org in Emacs.
+import { createHash } from "node:crypto";
 import { readdir, readFile, realpath } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { arr, int, lit, obj, opt, str, union } from "@earendil-works/pi-schema";
@@ -266,6 +267,7 @@ export class Org {
 			line: start,
 			outline: outline(lines, start).map((h) => h.title).join(" / "),
 			herdrSessions: herdrLinks(text),
+			revision: createHash("sha256").update(text.replace(/\n+$/, "")).digest("hex"),
 			text: text.length > 30_000 ? `${text.slice(0, 30_000)}\n[truncated; ${end - start + 1} lines]` : text,
 		};
 	}
@@ -383,7 +385,7 @@ export function createOrgExtension(config: Config, org = new Org(config.org.root
 			defineTool({
 				name: "org_read_task",
 				description:
-					"Read one Org heading with its whole subtree: scope, checklist, dialog, and linked Herdr sessions. Name it by line number, exact title, or id:UUID.",
+					"Read one Org heading with scope, checklist, dialog, linked Herdr sessions and a revision for guarded dependency removal. Text is capped at 30000 characters; revision covers the full subtree. Read any truncated scope or Dialog before editing. Name it by line number, exact title, or id:UUID.",
 				parameters: obj({
 					file: str({ description: "Path under ~/org, as org_search returns it" }),
 					heading: union([int({ minimum: 1 }), str()]),

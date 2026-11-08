@@ -3,6 +3,7 @@
 ;; Batch entry points, run through the org-edit wrapper:
 ;;   org-edit-todo      FILE HEADING STATE [--expect STATE] [--headline LINE]
 ;;                      [--request KEY --host HOST [--agent AGENT] [--depends REFS] --note TEXT]
+;;   org-edit-remove-dependencies FILE id:UUID --expect STATE --revision HASH --remove REFS --request KEY --note TEXT
 ;;   org-edit-schedule  FILE HEADING WHEN
 ;;   org-edit-deadline  FILE HEADING WHEN
 ;;   org-edit-date      WHEN
@@ -227,6 +228,104 @@ Coding workers must not set AUTO; that permission lives in instructions."
                           (written . ,(if replay :false t)))))))
      request)
     (when request (princ (concat (json-serialize result) "\n")))))
+
+(defun org-edit-remove-dependencies ()
+  "Remove selected edges on this host, pausing AUTO before a separate resume.
+The wrapper holds the dispatcher's lock. Compare the whole task revision,
+keep Dialog append-only, and never change prose or launch a worker here."
+  (let* ((args command-line-args-left)
+         (file (pop args)) (heading (pop args))
+         expected revision refs request note result
+         ;; Cooperate with interactive Emacs and replace the file atomically.
+         (create-lockfiles t) (file-precious-flag t))
+    (setq command-line-args-left nil)
+    (unless (and file heading (string-match-p "\\`id:[[:alnum:]][[:alnum:]-]*\\'" heading))
+      (error "remove-dependencies needs FILE and id:UUID"))
+    (while args
+      (let ((flag (pop args)) (value (pop args)))
+        (unless (and value (not (string-empty-p value))) (error "missing value for %s" flag))
+        (pcase flag
+          ("--expect" (setq expected value))
+          ("--revision" (setq revision value))
+          ("--remove" (setq refs (delete-dups (split-string value))))
+          ("--request" (setq request value))
+          ("--note" (setq note value))
+          (_ (error "unknown option %s" flag)))))
+    (unless (and (member expected '("TODO" "EVAL" "HOLD" "AUTO"))
+                 revision (string-match-p "\\`[0-9a-f]\\{64\\}\\'" revision)
+                 refs request note (not (string-empty-p (string-trim note)))
+                 (not (string-match-p "[\n\r]" (concat request note))))
+      (error "need --expect TODO|EVAL|HOLD|AUTO, --revision SHA256, --remove REFS, --request KEY and one-line --note"))
+    (dolist (ref refs)
+      (unless (string-match-p "\\`id:[[:alnum:]][[:alnum:]-]*\\'" ref)
+        (error "--remove takes id:UUID references, not %s" ref)))
+    (when (directory-files (file-name-directory (expand-file-name file)) nil
+                           (concat "\\`" (regexp-quote (file-name-base file)) "\\.sync-conflict-.*\\.org\\'"))
+      (error "resolve the file's Syncthing conflict copies first"))
+    (org-edit--at
+     file heading
+     (lambda ()
+       (let* ((id (org-entry-get nil "ID"))
+              (replay (equal request (org-entry-get nil "JUNE_DEPENDENCY_EDIT")))
+              (task (org-dispatch--task))
+              (old (plist-get task :depends))
+              (remaining (seq-remove (lambda (ref) (member ref refs)) old)))
+         (unless replay
+           (unless (equal expected (org-get-todo-state))
+             (error "expected %s, found %s; read the task again" expected (org-get-todo-state)))
+           (unless (equal revision (secure-hash 'sha256 (encode-coding-string
+                                  (replace-regexp-in-string "\n+\\'" "" (org-dispatch--subtree-text)) 'utf-8)))
+             (error "task revision changed; read the task and Dialog again"))
+           ;; A remote dispatcher cannot be locked by this process.
+           (when (or (plist-get task :problem) (not (equal (plist-get task :host) org-dispatch-host)))
+             (error "dependency removal must run on the task's dispatcher host"))
+           (let ((state-file (org-dispatch--state-file id)))
+             (when (file-exists-p state-file)
+               (let ((state (with-temp-buffer (insert-file-contents state-file)
+                                             (json-parse-buffer :object-type 'plist))))
+                 (when (member (plist-get state :status) '("starting" "running"))
+                   (error "task still has an active dispatcher run; wait for it to finish")))))
+           ;; Recheck every local linked session under the launch lock, including historical runs.
+           ;; June checks remote sessions before invoking us.
+           (let ((end (save-excursion (org-end-of-subtree t t) (point))) sessions)
+             (save-excursion
+               (while (re-search-forward (format "herdr:%s/[^: \n]+:\\([0-9a-f-]+\\)"
+                                                (regexp-quote org-dispatch-host)) end t)
+                 (push (match-string 1) sessions)))
+             (when sessions
+               (let ((response (org-dispatch--herdr "agent" "list")))
+                 (unless (assq 'agents (org-dispatch--get response 'result))
+                   (error "Herdr did not return agent status; dependency removal refused"))
+                 (seq-doseq (agent (org-dispatch--get response 'result 'agents))
+                   (when (and (seq-some (lambda (session) (string-search session
+                                          (or (org-dispatch--get agent 'agent_session 'value) ""))) sessions)
+                              (member (org-dispatch--get agent 'agent_status) '("working" "blocked")))
+                     (error "task still has an active agent; wait for it to finish"))))))
+           (let* ((index (org-dispatch--dependency-index)) (node (gethash id index)))
+             (unless node (error "task ID %s is missing from the agenda" id))
+             (when (plist-get node :duplicate) (error "duplicate task ID %s" id))
+             (dolist (ref refs)
+               (unless (member ref old) (error "dependency edge %s is absent; read the task again" ref)))
+             ;; An explicitly removed dangling ID is repairable. Every remaining edge must still resolve.
+             (puthash id (list :id id :depends remaining) index)
+             (org-dispatch--validate-graph (list id) index))
+           (if remaining (org-entry-put nil "DEPENDS" (string-join remaining " "))
+             (org-entry-delete nil "DEPENDS"))
+           (org-entry-put nil "JUNE_DEPENDENCY_EDIT" request)
+           (when (equal expected "AUTO")
+             (org-dispatch--headline nil "HOLD")
+             (org-todo "HOLD"))
+           (org-dispatch--append "Dialog" (org-dispatch--entry
+             "June" (format "Removed DEPENDS edges %s. %s%s Other instructions remain in force."
+                            (string-join refs " ") note
+                            (if (equal expected "AUTO")
+                                " Paused AUTO at HOLD; re-read scope and Dialog before explicitly resuming." "")))))
+         (setq result `((id . ,id) (title . ,(org-get-heading t t t t))
+                        (state . ,(org-get-todo-state))
+                        (depends . ,(vconcat (split-string (or (org-entry-get nil "DEPENDS") ""))))
+                        (written . ,(if replay :false t))))))
+     t)
+    (princ (concat (json-serialize result) "\n"))))
 
 (defun org-edit--planning (keyword usage)
   "Set or remove the KEYWORD planning date: FILE HEADING WHEN, or none."

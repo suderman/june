@@ -206,6 +206,16 @@ export type ResumeRequest = {
 	key: string;
 };
 
+export type RemoveDependenciesRequest = {
+	file: string;
+	heading: string;
+	expected: "TODO" | "EVAL" | "HOLD" | "AUTO";
+	revision: string;
+	remove: readonly string[];
+	note: string;
+	key: string;
+};
+
 export class Dispatch {
 	readonly #org: Org;
 	readonly #config: Config;
@@ -431,6 +441,41 @@ export class Dispatch {
 		}
 	}
 
+	/** Remove selected edges without launching work. A queued task is paused for a separate, reviewed resume. */
+	async removeDependencies(request: RemoveDependenciesRequest, herdr: Herdr) {
+		if (!/^id:[0-9A-Za-z][0-9A-Za-z-]{0,63}$/.test(request.heading)) throw new Error("heading must be id:UUID of the existing task");
+		if (!["TODO", "EVAL", "HOLD", "AUTO"].includes(request.expected)) throw new Error("Only TODO, EVAL, HOLD, or AUTO tasks allow dependency removal");
+		if (!/^[0-9a-f]{64}$/.test(request.revision)) throw new Error("revision must be the SHA256 returned by org_read_task");
+		if (!request.remove.length || request.remove.some((ref) => !/^id:[0-9A-Za-z][0-9A-Za-z-]{0,63}$/.test(ref))) throw new Error("remove needs selected id:UUID dependency edges");
+		if (!request.note.trim() || /[\n\r]/.test(request.note)) throw new Error(`note must be one non-empty line recording ${user()}'s instruction and any prose gate lifted`);
+		const path = await this.#target(request.file);
+		const task = await this.#org.read(request.file, request.heading);
+		const properties = task.text.split(/\n\*+ /, 1)[0]!;
+		const replay = properties.split("\n").some((line) => line.trim() === `:JUNE_DEPENDENCY_EDIT: ${request.key}`);
+		if (!replay) {
+			if (task.revision !== request.revision) throw new Error("task revision changed; read the task and Dialog again");
+			for (const host of new Set(task.herdrSessions.map((session) => session.host))) {
+				const agents = await herdr.agents(host);
+				if (agents.some((agent) => ["working", "blocked"].includes(agent.status) && task.herdrSessions.some((session) => session.host === host && session.session === agent.session)))
+					throw new Error(`The task still has an active agent on ${host}; wait for it to finish`);
+			}
+		}
+		const out = await this.#run([
+			"org-edit", "remove-dependencies", path, request.heading, "--expect", request.expected,
+			"--revision", request.revision, "--remove", request.remove.join(" "), "--request", request.key, "--note", request.note.trim(),
+		], 120_000).catch((error: Error) => {
+			if (/usage: org-edit todo\|schedule\|deadline/.test(error.message))
+				throw new Error(`The installed org-edit cannot remove dependencies yet and wrote nothing; ${user()} needs to update June's Nix input and rebuild. Do not edit DEPENDS by hand on an AUTO task.`);
+			throw error;
+		});
+		try {
+			const result = JSON.parse(out.trim().split("\n").at(-1)!) as { id: string; title: string; state: string; depends: string[]; written: boolean };
+			return { ...result, file: this.#org.rel(path) };
+		} catch (cause) {
+			throw new Error("org-edit did not return a dependency removal result; re-read the task before retrying", { cause });
+		}
+	}
+
 	/** Close a task June created, after she reviews its outcome. Org supplies CLOSED and logging. */
 	async complete(file: string, heading: string) {
 		const path = await this.#target(file);
@@ -631,7 +676,7 @@ export function createDispatchExtension(
 			})]),
 			defineTool({
 				name: "org_resume_task",
-				description: `When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and deploy off, and select one host. Refuse an active agent. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work. To resume it later rather than now, first set its SCHEDULED with org_set_date while it is still TODO, EVAL, or HOLD, then resume: the dispatcher holds it until then. Never date a task that is already AUTO. When ${user()} wants it to wait for other tasks, pass their IDs in depends: org-edit adds them to :DEPENDS: in the same save that sets AUTO, after refusing missing or duplicate IDs, the task itself, and cycles, so it never launches early. The dispatcher then launches it only once every prerequisite is DONE, never at EVAL, and waiting costs nothing. Edges the task already has are kept; this cannot remove one, so ask ${user()} to edit :DEPENDS: by hand for that.${agentNote}`,
+				description: `When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and deploy off, and select one host. Refuse an active agent. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work. To resume it later rather than now, first set its SCHEDULED with org_set_date while it is still TODO, EVAL, or HOLD, then resume: the dispatcher holds it until then. Never date a task that is already AUTO. When ${user()} wants it to wait for other tasks, pass their IDs in depends: org-edit adds them to :DEPENDS: in the same save that sets AUTO, after refusing missing or duplicate IDs, the task itself, and cycles, so it never launches early. The dispatcher then launches it only once every prerequisite is DONE, never at EVAL, and waiting costs nothing. Edges the task already has are kept. To remove selected edges, first use org_remove_dependencies, which pauses AUTO at HOLD; re-read scope and Dialog and resolve any prose gates before resuming.${agentNote}`,
 				parameters: obj({
 					file: str({ description: "Org agenda file under ~/org" }),
 					heading: str({ description: "Exact title or id:UUID, as org_read_task accepts" }),
@@ -658,6 +703,23 @@ export function createDispatchExtension(
 						: " That host's dispatcher will pick it up on its timer.";
 					const waits = result.depends.length ? ` It waits until ${result.depends.map((id) => `id:${id}`).join(", ")} ${result.depends.length === 1 ? "is" : "are"} DONE; tell the user what it waits on.` : "";
 					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\nYou are following this task and will get [follow] reports.${started}${waits} Tell the user you will report back. Existing SCHEDULED dates still apply.` }] };
+				},
+			}),
+			defineTool({
+				name: "org_remove_dependencies",
+				description: `When ${user()} explicitly asks to remove prerequisites from an existing task, remove only those DEPENDS edges through org-edit. Read the whole task and Dialog first and pass its revision. Refuse PROG, DONE, active agents, stale reads, absent edges, ambiguous IDs and invalid remaining graphs. Run only on the task's dispatcher host; a remote task needs that host's June or ${user()}. AUTO becomes HOLD in the same locked save, so removing a gate never launches work. Other states stay unchanged. Keep identity, schedules, unrelated edges and history. note must record ${user()}'s approval and explicitly identify any older prose gate it supersedes; never rewrite Dialog or silently waive other instructions. Afterward re-read the task, reconcile any remaining scope conflicts, then use org_resume_task only if ${user()} authorized starting it. No dispatcher kick or resume occurs here.`,
+				parameters: obj({
+					file: str({ description: "Org agenda file under ~/org" }),
+					heading: str({ description: "id:UUID of the existing task, from org_read_task" }),
+					expected: union([lit("TODO"), lit("EVAL"), lit("HOLD"), lit("AUTO")], { description: "State just read; AUTO will be paused at HOLD" }),
+					revision: str({ description: "Exact revision returned by org_read_task; a changed task is refused" }),
+					remove: arr(str(), { description: "Selected id:UUID edges already in this task's DEPENDS; unrelated edges are preserved" }),
+					note: str({ description: `One line recording ${user()}'s approval and specifically which earlier prose gate, if any, is lifted; other instructions remain in force` }),
+				}),
+				replay: "safe",
+				execute: async (args, api) => {
+					const result = await dispatch.removeDependencies({ ...args, key: `${instance}:${api.taskId}` }, herdr);
+					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\nNo work was started. Re-read scope and Dialog before a separate authorized org_resume_task.` }] };
 				},
 			}),
 			defineTool({
