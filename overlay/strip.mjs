@@ -224,7 +224,8 @@ export function markup(text, style = {}) {
 	};
 	const lines = [];
 	let block = false;
-	for (const raw of text.split("\n")) {
+	// Missing words read as none: a slot changing kind can ask before its words arrive.
+	for (const raw of String(text ?? "").split("\n")) {
 		if (!block && /^\s*(#\+begin_(src|example)\b|```)/i.test(raw)) block = true;
 		else if (block && /^\s*(#\+end_(src|example)\b|```)/i.test(raw)) block = false;
 		else if (block) lines.push(`<span style="${code}">${pad}${escape(raw).replace(/^ +/, (lead) => "&nbsp;".repeat(lead.length))}${pad}</span>`);

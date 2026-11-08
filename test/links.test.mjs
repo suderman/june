@@ -42,3 +42,8 @@ test("code in a balloon can read as a terminal, padded inside its dark backgroun
 	assert.equal(markup("edit =/etc/nixos/flake.nix= now", { code: "T", codePad: true }), 'edit <span style="T">&nbsp;/etc/nixos/flake.nix&nbsp;</span> now');
 	assert.equal(markup("edit =/etc/nixos/flake.nix= now", { code: "T" }), 'edit <span style="T">/etc/nixos/flake.nix</span> now', "no padding unless asked");
 });
+
+test("markup of no words is nothing, not an error", () => {
+	assert.equal(markup(undefined), "");
+	assert.equal(markup(null), "");
+});

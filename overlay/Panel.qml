@@ -315,10 +315,13 @@ Item {
       y: box ? box.y : 0
       visible: box !== null
       sourceComponent: kind === "user" ? note : kind === "shown" ? shownCard : kind === "june" ? speech : kind === "thought" ? thought : kind === "chip" ? chip : kind === "card" ? card : kind === "burst" ? burst : null
-      onLoaded: Qt.callLater(panel.measure)
+      // The kind the loaded component draws. A slot's element can change kind before the Loader swaps components, so
+      // the element reaches the component only while they agree: a balloon never sees a tool call, which has no words.
+      property string loadedKind: ""
+      onLoaded: { loadedKind = kind; Qt.callLater(panel.measure); }
       onKindChanged: Qt.callLater(panel.measure)
-      Binding { target: slot.item; property: "element"; value: slot.element; when: slot.status === Loader.Ready }
-      Binding { target: slot.item; property: "box"; value: slot.box; when: slot.status === Loader.Ready }
+      Binding { target: slot.item; property: "element"; value: slot.element; when: slot.status === Loader.Ready && slot.loadedKind === slot.kind }
+      Binding { target: slot.item; property: "box"; value: slot.box; when: slot.status === Loader.Ready && slot.loadedKind === slot.kind }
       Connections {
         target: slot.item
         ignoreUnknownSignals: true
