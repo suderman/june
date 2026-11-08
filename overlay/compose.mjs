@@ -341,6 +341,8 @@ export const GESTURE_FACE = 0.75;
 // Jon approved a standing portrait with 47% of the board visible. Cropped standing art keeps a recognisable part
 // of its gesture, without sacrificing the face to show the whole prop. Full-action and other portraits stay stricter.
 export const STANDING_CROP_SHOWN = 0.4;
+/** The least face height, in px, that reads in a panel; below it art zooms in, unless it shows her doing something. */
+export const READABLE_FACE = 90;
 
 /**
  * How much of the primary gesture of `pose` (or its gesture at `index`), as framed by `layout`, is seen: inside the
@@ -415,9 +417,13 @@ export function panelLayout({ panel, width, sizes }) {
 	// the words (above them on a narrow panel).
 	if (!panel.framing && !pose.special && restricted && pose.gestures.length > 0 && (pose.activity || pose.framings.every((f) => f === "waist"))) {
 		const illustration = plan({ width, side: panel.side, pose, elements: sizes, illustration: true });
-		if (illustration.face.h >= 48 && pose.gestures.every((_, i) => gestureShown(illustration, pose, i) >= 0.95)) return { layout: illustration, pose };
+		const shows = pose.activity ? illustration.face.h >= 48 : illustration.face.h >= READABLE_FACE && !illustration.metrics.stacked;
+		if (shows && pose.gestures.every((_, i) => gestureShown(illustration, pose, i) >= 0.95)) return { layout: illustration, pose };
 	}
-	return { layout: pose.special ? Object.assign({}, first, { cropped: gestureShown(first, pose) < GESTURE_SHOWN }) : first, pose };
+	if (pose.special) return { layout: Object.assign({}, first, { cropped: gestureShown(first, pose) < GESTURE_SHOWN }), pose };
+	// Too small to read: zoom in on her face, whatever crops the pose names for its gesture (Jon, 2026-11-08).
+	if (!panel.framing && first.face.h < READABLE_FACE) return { layout: plan({ width, side: panel.side, pose, elements: sizes, zoom: true }), pose };
+	return { layout: first, pose };
 }
 
 /**
@@ -655,7 +661,7 @@ export function aimTrail(box, face, obstacles = []) {
  * balloon after it), `card` (several tools, beside the next balloon when both fit), and `burst`. The panel's height
  * follows the words; the art is framed into it, or into an inset at the top when the words run long.
  */
-export function plan({ width, side, pose, elements, framing: hint, mirror: allowMirror = true, illustration = false }) {
+export function plan({ width, side, pose, elements, framing: hint, mirror: allowMirror = true, illustration = false, zoom = false }) {
 	const m = metrics(width);
 	const column = m.artZone - m.overlap + m.pad - m.gap - 4;
 	if (illustration && pose && !m.stacked && column * pose.height / pose.width * pose.face.h < 48) {
@@ -785,9 +791,9 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 				const w = Math.round(side === "left" ? textLeft - m.pad - 6 : width - textRight - m.pad - 6);
 				clip = { x: side === "left" ? m.pad : width - m.pad - w, y: m.pad, w, h: Math.round(Math.min(m.maxArt * 0.75, w * 1.25)), inset: true };
 			}
-			// Standing art names only its wide crops; a phone's band zooms in on her face, as with any portrait.
+			// A pose's named crops keep its gesture in view; a phone's band, or a zoom, goes in on her face regardless.
 			const kept = pose.framings.filter((f) => f !== "full");
-			const zoomed = m.stacked && pose.framings.includes("full") ? ["close-up", "head", ...kept] : kept;
+			const zoomed = (m.stacked || zoom) && !pose.special ? USUAL : kept;
 			framing = chooseFraming(width, (area ?? clip).h, Object.assign({}, pose, { framings: zoomed.length > 0 ? zoomed : USUAL }), m.stacked ? (hint ?? "close-up") : hint);
 			framed = frame(pose, area ?? clip, side, edgeOf(area ?? clip), framing, mirror);
 			// Framed in her band, but seen on down behind her first balloon under it, so her body runs on behind the words

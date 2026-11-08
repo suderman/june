@@ -1201,12 +1201,24 @@ test("restricted action art gets an illustration before losing its performance",
 		const out = panelLayout({ panel, width, sizes, poses });
 		assert.equal(out.pose.id, pose.id, `${pose.id}, ${width}, ${side}, ${h}: keep the requested action`);
 		assert.ok(out.layout.face.h >= 48, "the contained action still has a readable face");
-		for (let i = 0; i < pose.gestures.length; i++) assert.ok(gestureShown(out.layout, pose, i) >= (out.layout.illustration ? 0.95 : 0.7), `${pose.id} ${width} ${side} ${h}: both hands and props stay clear`);
+		if (out.layout.illustration) for (let i = 0; i < pose.gestures.length; i++) assert.ok(gestureShown(out.layout, pose, i) >= 0.95, `${pose.id} ${width} ${side} ${h}: both hands and props stay clear`);
 		assert.equal(out.layout.mirror, false, "never flip the non-mirrorable source");
 		assert.equal(out.layout.side, side, "layout never changes the panel's side");
 		assert.deepEqual(panelLayout({ panel, width, sizes, poses }), out, "repeated measurement is stable");
 		for (const e of out.layout.elements) assert.ok(e.x >= 0 && e.x + e.w <= width && e.y + e.h <= out.layout.height, "dialogue stays inside the panel");
 	}
+	// Performance art zooms to her face rather than shrink; art of her doing something keeps its hands.
+	const words = (width) => [{ kind: "june", w: Math.min(300, metrics(width).textWidth), h: 400 }];
+	const folded = poses.find((p) => p.id === "folded-warm");
+	for (const width of [360, 460, 480, 600]) {
+		const out = panelLayout({ panel: { id: "zoom", side: "right", pose: folded, elements: [] }, width, sizes: words(width) });
+		assert.equal(out.layout.illustration, false, `${width}: not contained`);
+		assert.ok(out.layout.face.h >= 80, `${width}: zoomed as far as her column allows, ${out.layout.face.h}`);
+		assert.equal(out.pose.id, folded.id);
+	}
+	const wide = panelLayout({ panel: { id: "zoom", side: "right", pose: folded, elements: [] }, width: 1040, sizes: words(1040) });
+	assert.equal(wide.layout.illustration, true, "with room to spare she is contained whole");
+	assert.ok(panelLayout({ panel: { id: "zoom", side: "right", pose: poses[0], elements: [] }, width: 360, sizes: words(360) }).layout.illustration, "typing keeps its hands on a phone");
 	const typing = poses[0], sizes = [{ kind: "june", w: 300, h: 70 }];
 	const bustOnly = { ...typing, framings: ["bust"] };
 	const contained = panelLayout({ panel: { id: "bust", side: "right", pose: bustOnly, elements: [] }, width: 360, sizes, poses });
