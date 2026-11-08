@@ -21,6 +21,8 @@ export const MARGIN = 0.04;
 /** How wide a pose's canvas may grow for a wide gesture (Jon, 2026-11-05: a starting limit, not a contract), and the step. */
 export const MAX_WIDTH = 3072;
 export const WIDTH_STEP = 128;
+/** A figure this close to its source's top edge, in source pixels, has been cut off by it. */
+export const CROWN_CUT = 1;
 
 const round = (n, places = 3) => Math.round(n * 10 ** places) / 10 ** places;
 
@@ -37,8 +39,9 @@ export function kindOf(section, entry) {
 /**
  * A pose on its canvas: scaled so her face (`face`, in source pixels) is the kind's height, centred across and at the
  * kind's height, then moved to keep the figure (`figure`, the source's opaque box) clear of the sides and the top. A
- * figure may run off the bottom, where a waist-up or knee-length pose is cut. Returns the scale, where the source's
- * corner lands, the face as canvas fractions, and any problem a person should look at.
+ * figure that runs past the canvas's bottom grows the canvas down, so no drawn pixel of her is lost; a drawing that
+ * cuts off her crown starts the canvas at that cut. Returns the scale, where the source's corner lands, the size, the
+ * face as canvas fractions, and any problem a person should look at.
  */
 export function placePose(kind, figure, face, { maxWidth = MAX_WIDTH } = {}) {
 	let [W, H] = CANVAS[kind];
@@ -63,11 +66,16 @@ export function placePose(kind, figure, face, { maxWidth = MAX_WIDTH } = {}) {
 	if (left() < W * m) x += W * m - left();
 	else if (right() > W * (1 - m)) x -= right() - W * (1 - m);
 	const top = y + figure.y * scale;
-	if (top < H * m) {
+	if (figure.y <= CROWN_CUT) {
+		y = 0 - figure.y * scale;
+		problems.push("the drawing cuts off her crown, so the canvas starts at that cut");
+	} else if (top < H * m) {
 		y += H * m - top;
 		problems.push("her hair was near the top, so she sits lower than the other poses");
 	}
-	if (kind === "pose" && y + (figure.y + figure.h) * scale < H * (1 - m)) problems.push("the figure stops above the canvas bottom, so a waist framing may show her floating");
+	const bottom = y + (figure.y + figure.h) * scale;
+	if (bottom > H) H = Math.ceil(bottom);
+	else if (kind === "pose" && bottom < H * (1 - m)) problems.push("the figure stops above the canvas bottom, so a waist framing may show her floating");
 	const faceOut = [round((x + face.x * scale) / W), round((y + face.y * scale) / H), round((face.w * scale) / W), round((face.h * scale) / H)];
 	return { scale, x, y, size: [W, H], face: faceOut, problems };
 }

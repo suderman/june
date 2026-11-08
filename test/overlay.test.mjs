@@ -1163,19 +1163,18 @@ test("a gesture stays whole in a panel: seen past the words, framed wider, or an
 	const short = [{ kind: "user", w: 120, h: 44 }, { kind: "june", w: 300, h: 70 }];
 	const long = [{ kind: "user", w: 120, h: 44 }, { kind: "june", w: 300, h: 160 }, { kind: "june", w: 300, h: 160 }];
 	const narrow = panelLayout({ panel, width: 360, sizes: short, poses });
-	assert.equal(narrow.pose.id, "gentle-palm-high", "on a phone, another pose with the same performance before any other");
-	assert.ok(gestureShown(narrow.layout, narrow.pose) >= 0.7);
+	assert.equal(narrow.pose.id, panelLayout({ panel, width: 820, sizes: short, poses }).pose.id, "a phone shows the art a desktop panel chooses");
 	assert.equal(panelLayout({ panel, width: 360, sizes: short, poses }).pose.id, narrow.pose.id, "the same choice every time");
 	assert.equal(panelLayout({ panel, width: 820, sizes: long, poses }).pose.id, "gentle-palm", "where the panel shows her to the waist, the palm itself");
 
 	// History stays put: a pose added after the panel is never its fallback.
 	const later = readPoses({ poses: { ...manifest.poses, "gentle-palm-high": { ...manifest.poses["gentle-palm-high"], added: new Date(at + 1000).toISOString() } } }, "");
 	assert.equal(availableAt(later[1], at), false);
-	assert.equal(panelLayout({ panel, width: 360, sizes: short, poses: later }).pose.id, "gentle-plain", "the newer open palm is not offered to an older panel");
+	assert.equal(panelLayout({ panel: { ...panel, side: "right" }, width: 360, sizes: short, poses: later }).pose.id, "gentle-plain", "the newer open palm is not offered to an older panel");
 	const newer = composeStrip(panels(items.map((i) => ({ ...i, at: at + 5000 }))), { running: false }, later, { sides: {}, poseIds: {}, livePoses: {} });
-	assert.equal(panelLayout({ panel: newer[0], width: 360, sizes: short, poses: later }).pose.id, "gentle-palm-high", "a newer panel may use it");
+	assert.equal(panelLayout({ panel: { ...newer[0], side: "right" }, width: 360, sizes: short, poses: later }).pose.id, "gentle-palm-high", "a newer panel may use it");
 	const retaken = composeStrip(panels(items.map((i) => i.kind === "assistant" ? { ...i, expressionAt: at + 5000 } : i)), {}, later, { sides: {}, poseIds: {}, livePoses: {} });
-	assert.equal(panelLayout({ panel: retaken[0], width: 360, sizes: short, poses: later }).pose.id, "gentle-palm-high", "a retake may use art added after the words were written");
+	assert.equal(panelLayout({ panel: { ...retaken[0], side: "right" }, width: 360, sizes: short, poses: later }).pose.id, "gentle-palm-high", "a retake may use art added after the words were written");
 	assert.equal(moment(retaken[0]), at, "choosing newer art never relights the words");
 
 	// A drawn special is never swapped: framed wider when that shows it, else kept and marked cropped.
@@ -1285,24 +1284,21 @@ test("a long panel admits tall art only where her action, face, and boots read, 
 		// The approved primary-gesture allowance admits the compact drawing at this narrow report size too.
 		for (const side of ["left", "right"]) {
 			const narrow = standingLayout(pool, "report-front", side, 3, 480, id);
-			assert.equal(narrow.pose.id, "clipboard-left", `${id} ${side}/480`);
-			assert.equal(narrow.layout.framing, "full");
-			assert.ok(gestureShownAt(narrow, 0) >= 0.8 && gestureShownAt(narrow, 1) >= 0.5);
+			assert.equal(narrow.pose.id, standingLayout(pool, "report-front", side, 3, 820, id).pose.id, `${id} ${side}/480 shows the same art as a desktop panel`);
 		}
 		// Six paragraphs still need a readable primary gesture and supporting grip at both widths.
-		for (const width of [700, 820]) {
-			const six = standingLayout(pool, "report-front", "right", 6, width, id);
-			assert.ok(["clipboard-front", "clipboard-left"].includes(six.pose.id));
-			assert.equal(six.layout.framing, "full");
-			assert.ok(gestureShownAt(six, 0) >= 0.75 && gestureShownAt(six, 1) >= 0.5);
-		}
+		const six = standingLayout(pool, "report-front", "right", 6, 820, id);
+		assert.ok(["clipboard-front", "clipboard-left"].includes(six.pose.id));
+		assert.equal(six.layout.framing, "full");
+		assert.ok(gestureShownAt(six, 0) >= 0.75 && gestureShownAt(six, 1) >= 0.5);
+		assert.equal(standingLayout(pool, "report-front", "right", 6, 700, id).pose.id, six.pose.id, "the same art at 700");
 		// A short panel is untouched.
 		assert.equal(standingLayout(pool, "report-front", "right", 1, 820, id).pose.id, "report-front");
 	}
-	// With only the front board, which the words would cover, and no placeholder: her own pose, not a half-hidden board.
+	// With only the front board, which the words at 480 would cover: the art a desktop panel chose, framed in the inset.
 	const frontOnly = readPoses({ poses: Object.fromEntries(Object.entries(STANDING).filter(([k]) => k !== "clipboard-left")) }, "file:///personal/");
 	const left = standingLayout(frontOnly, "report-front", "left", 3, 480);
-	assert.equal(left.pose.id, "report-front");
+	assert.equal(left.pose.id, standingLayout(frontOnly, "report-front", "left", 3, 820).pose.id);
 	assert.equal(left.layout.clip.inset, true);
 });
 
@@ -1439,11 +1435,21 @@ test("a named tall pose that cannot stand is judged against the inset, not its o
 	// The director named the front clipboard; at 480 its board fails, while the compact drawing is clear enough.
 	for (const side of ["left", "right"]) {
 		const out = standingLayout(pool, "clipboard-front", side, 3, 480);
-		assert.equal(out.pose.id, "clipboard-left", side);
-		assert.equal(out.layout.framing, "full");
-		assert.ok(gestureShownAt(out, 0) >= 0.8 && gestureShownAt(out, 1) >= 0.5);
+		assert.equal(out.pose.id, standingLayout(pool, "clipboard-front", side, 3, 820).pose.id, `${side}: the same art as a desktop panel`);
 	}
 	assert.equal(standingLayout(pool, "clipboard-front", "right", 3, 820).pose.id, "clipboard-front", "where it reads, the named pose itself");
+});
+
+test("a panel keeps one drawing at every width, zooming to her face on a phone", () => {
+	const pool = standingPool();
+	for (const id of ["a", "b", "c", "d"]) for (const side of ["left", "right"]) {
+		const desktop = standingLayout(pool, "report-front", side, 3, 820, id);
+		assert.ok(desktop.pose.framings.includes("full"), "a long desktop panel stands her in tall art");
+		for (const width of [480, 560, 700]) assert.equal(standingLayout(pool, "report-front", side, 3, width, id).pose.id, desktop.pose.id, `${id} ${side}/${width}`);
+		const phone = panelLayout({ panel: { id, side, pose: pool.find((p) => p.id === "report-front"), elements: [] }, width: 360, sizes: [{ kind: "june", w: 336, h: 1310 }], poses: pool });
+		assert.equal(phone.pose.id, desktop.pose.id, `${id} ${side}/360`);
+		assert.ok(["close-up", "head"].includes(phone.layout.framing), `the phone zooms in, framed ${phone.layout.framing}`);
+	}
 });
 
 test("tall art added after a panel never changes it", () => {

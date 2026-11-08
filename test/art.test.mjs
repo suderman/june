@@ -61,7 +61,7 @@ test("ingest records where her drawn figure lies, and figure measures a finished
 	assert.throws(() => run("figure", set, "missing"), /no such pose/);
 });
 
-test("ingest refuses a low hand before writing an asset or clamping its gesture box", (t) => {
+test("ingest grows the canvas to keep a low hand, rather than refusing or cutting it", (t) => {
 	const set = mkdtempSync(join(tmpdir(), "june-art-gesture-"));
 	t.after(() => rmSync(set, { recursive: true, force: true }));
 	mkdirSync(join(set, "incoming"));
@@ -69,11 +69,12 @@ test("ingest refuses a low hand before writing an asset or clamping its gesture 
 	execFileSync("magick", ["-size", "1600x3000", "xc:none", "-fill", "#cc9966", "-draw", "rectangle 100,100 1500,2980", source]);
 	const metadata = { section: "poses", expression: "skeptical", facing: "left", faceBox: [600, 200, 400, 800], gestureBoxes: [{ name: "hip-hand", box: [200, 2500, 100, 300], primary: true }] };
 	writeFileSync(join(set, "incoming", "synthetic.json"), JSON.stringify(metadata));
-	assert.throws(() => execFileSync(process.execPath, [new URL("../art/june-art.mjs", import.meta.url).pathname, "ingest", set, "synthetic", "--file", source], { stdio: "pipe" }), /hip-hand.*source pixels.*outside/);
-	assert.equal(existsSync(join(set, "manifest.json")), false);
-	assert.equal(existsSync(join(set, "poses", "synthetic.webp")), false);
-	assert.equal(existsSync(join(set, "source")), false);
-	assert.equal(existsSync(join(set, "incoming", "synthetic.json")), true);
+	execFileSync(process.execPath, [new URL("../art/june-art.mjs", import.meta.url).pathname, "ingest", set, "synthetic", "--file", source], { stdio: "pipe" });
+	const entry = JSON.parse(readFileSync(join(set, "manifest.json"), "utf8")).poses.synthetic;
+	assert.ok(entry.size[1] > CANVAS.pose[1], `the canvas grew down, to ${entry.size[1]}`);
+	const [, y, , h] = entry.gestures[0].box;
+	assert.ok(y + h <= 1, "the hand is on the canvas whole");
+	assert.ok(entry.figure[1] + entry.figure[3] >= 0.999, "the drawn figure reaches the grown canvas's bottom");
 });
 
 test("a fully visible surviving box cannot certify source-gesture preservation", () => {
@@ -92,7 +93,7 @@ test("a fully visible surviving box cannot certify source-gesture preservation",
 
 test("a pose's face lands at its kind's size and height, centred across", () => {
 	// A 500 × 650 source, the figure inside a margin, the face 150 × 175 at (175, 127).
-	const place = placePose("pose", { x: 58, y: 104, w: 384, h: 546 }, { x: 175, y: 127, w: 150, h: 175 });
+	const place = placePose("pose", { x: 58, y: 104, w: 384, h: 530 }, { x: 175, y: 127, w: 150, h: 175 });
 	assert.deepEqual(place.size, CANVAS.pose);
 	close(place.face[3], FACE.pose.h);
 	close(place.face[1] + place.face[3] / 2, FACE.pose.cy);
@@ -125,20 +126,30 @@ test("a wide gesture widens the canvas at the same height and face size, keeping
 	const figure = { x: 120, y: 60, w: 847, h: 1284 };
 	const place = placePose("pose", figure, face);
 	assert.equal(place.refused, undefined);
-	assert.deepEqual(place.size, [2560, CANVAS.pose[1]], "the next 128 px step past the 2479 px it needs");
-	assert.equal(place.face[3], 0.27, "her face keeps its height");
+	assert.equal(place.size[0], 2560, "the next 128 px step past the 2479 px it needs");
+	assert.ok(Math.abs(place.face[3] * place.size[1] - 0.27 * CANVAS.pose[1]) < 2, "her face keeps its size");
+	assert.ok(place.y + (figure.y + figure.h) * place.scale <= place.size[1] + 0.5, "the canvas grew down to keep the whole figure");
 	const left = place.x + figure.x * place.scale;
 	const right = place.x + (figure.x + figure.w) * place.scale;
 	assert.ok(left >= 2560 * MARGIN - 0.5 && right <= 2560 * (1 - MARGIN) + 0.5, "the whole figure inside the margins");
 	assert.match(place.problems.join(), /widened to 2560 px/);
-	const fits = placePose("pose", { x: 58, y: 104, w: 384, h: 546 }, { x: 175, y: 127, w: 150, h: 175 });
+	const fits = placePose("pose", { x: 58, y: 104, w: 384, h: 530 }, { x: 175, y: 127, w: 150, h: 175 });
 	assert.deepEqual(fits.size, CANVAS.pose, "a pose that fits keeps the standard canvas");
 });
 
 test("a pose whose hair would touch the top sits lower, and says so", () => {
-	const place = placePose("pose", { x: 50, y: 0, w: 400, h: 900 }, { x: 175, y: 300, w: 150, h: 175 });
-	assert.ok(place.y >= CANVAS.pose[1] * MARGIN - 0.5);
+	const figure = { x: 50, y: 12, w: 400, h: 900 };
+	const place = placePose("pose", figure, { x: 175, y: 300, w: 150, h: 175 });
+	assert.ok(place.y + figure.y * place.scale >= CANVAS.pose[1] * MARGIN - 0.5);
 	assert.match(place.problems.join(), /lower/);
+});
+
+test("a crown the drawing cuts starts the canvas at the cut, and drawn legs grow it down", () => {
+	const figure = { x: 50, y: 0, w: 400, h: 900 };
+	const place = placePose("pose", figure, { x: 175, y: 60, w: 150, h: 175 });
+	assert.equal(place.y, 0, "no empty canvas above a flat cut in her hair");
+	assert.match(place.problems.join(), /cuts off her crown/);
+	assert.equal(place.size[1], Math.ceil(figure.h * place.scale), "every drawn pixel below her waist is kept");
 });
 
 test("a pose that stops short of the bottom is reported", () => {

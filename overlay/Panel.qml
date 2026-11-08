@@ -263,7 +263,9 @@ Item {
       opacity: panel.light.keyStrength * 0.4
       maskEnabled: true
       maskSource: figure
-      maskThresholdMin: 0.02
+      // With a spread, the mask opens from min * (1 + spread) - spread: below min = spread / (1 + spread) that goes negative
+      // and lights the transparent canvas too, showing as a pale rectangle around her.
+      maskThresholdMin: 0.17
       maskSpreadAtMin: 0.2
     }
   }

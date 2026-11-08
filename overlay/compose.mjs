@@ -93,6 +93,9 @@ function readBox(b) {
 /** Where her drawn figure ends, as a share of the image's height: the canvas bottom unless the manifest says otherwise. */
 const feetOf = (pose) => (pose.figure ? pose.figure.y + pose.figure.h : 1);
 
+/** Whether the drawing itself cuts off her crown: ingest then starts the image at the cut. It must meet an edge, never float. */
+const crownCut = (pose) => pose.figure !== null && pose.figure !== undefined && pose.figure.y <= 0.002;
+
 /**
  * The usable poses of one avatar set, with image URLs under `base`. Lenient where src/avatar.ts is strict: a pose the
  * overlay cannot place is skipped, so one bad entry never blanks the strip.
@@ -453,9 +456,10 @@ export function standsTall(layout, pose, inset) {
  * from the panel, its pose, the layout, and the set, so a panel keeps its art. A drawn special (=special=) is never
  * replaced: framed wider if that shows it, else kept, with =cropped= set so a client can offer it whole. Returns the
  * layout and the pose it framed. Personal art precedes base stand-ins; standing crops may retain a partial gesture
- * (STANDING_CROP_SHOWN). These placement rules apply to existing replies too.
+ * (STANDING_CROP_SHOWN). These placement rules apply to existing replies too. With `settled`, the art is already
+ * chosen: only its framing is decided here.
  */
-export function panelLayout({ panel, width, sizes, poses }) {
+function arrange({ panel, width, sizes, poses, settled = false }) {
 	const time = selectionMoment(panel);
 	const usable = poses.filter((p) => availableAt(p, time));
 	const ownSet = poses[0]?.set;
@@ -465,7 +469,7 @@ export function panelLayout({ panel, width, sizes, poses }) {
 		if (!pose || (first.framing !== "full" && !first.clip.inset)) return { layout: first, pose };
 		// A long panel. Her own pose in its inset is the fallback, and the yardstick for her face.
 		const inset = first.framing === "full" ? at(Object.assign({}, pose, { framings: pose.framings.filter((f) => f !== "full") })) : first;
-		const candidates = pose.special ? [pose].filter((p) => p.framings.includes("full")) : tallCandidates(usable, pose, panel.id ?? "");
+		const candidates = pose.special || settled ? [pose].filter((p) => p.framings.includes("full")) : tallCandidates(usable, pose, panel.id ?? "");
 		const prefer = !placeholders && !pose.special && usable.some((p) => p.set === ownSet && p.expression === pose.expression && !p.activity);
 		for (const tall of candidates) {
 			// Try personal portrait fallbacks before letting a packaged full figure take over the panel.
@@ -482,7 +486,7 @@ export function panelLayout({ panel, width, sizes, poses }) {
 	const first = lay(panel.pose);
 	const pose = first.pose;
 	if (!pose) return first;
-	const base = pose.set !== ownSet && !pose.activity && !pose.special && usable.some((p) => p.set === ownSet && p.expression === pose.expression && !p.activity && !p.special);
+	const base = !settled && pose.set !== ownSet && !pose.activity && !pose.special && usable.some((p) => p.set === ownSet && p.expression === pose.expression && !p.activity && !p.special);
 	// Her face's size and the crop this panel would give any pose: the yardstick for how far out she may be framed. Full
 	// counts only when she stands tall here; a tall pose that did not is judged against the inset.
 	const reach = [...new Set([...USUAL, ...pose.framings])].filter((f) => f !== "full" || first.layout.framing === "full");
@@ -505,6 +509,7 @@ export function panelLayout({ panel, width, sizes, poses }) {
 		if (illustration.face.h >= 48 && pose.gestures.every((_, i) => gestureShown(illustration, pose, i) >= 0.95)) return { layout: illustration, pose };
 	}
 	if (pose.special) return { layout: Object.assign({}, first.layout, { cropped: gestureShown(first.layout, pose) < GESTURE_SHOWN }), pose };
+	if (settled) return first;
 	const others = usable.filter((p) => p.id !== pose.id && !p.activity && !p.special && p.expression === pose.expression);
 	const gesture = pose.gestures?.[0]?.name;
 	const alike = others.filter((p) => p.gestures?.[0]?.name === gesture);
@@ -517,6 +522,33 @@ export function panelLayout({ panel, width, sizes, poses }) {
 			if (fits(tried)) return tried;
 		}
 	return base ? lay(pose, undefined, true) : first;
+}
+
+// The width whose layout decides a panel's art. Her words wrap differently in every window and on the phone; the art
+// must not: Jon, 2026-11-08, a narrow panel reframes and zooms the same drawing, it does not change her face.
+const REFERENCE_WIDTH = 820;
+// A balloon's padding around its text, so re-wrapping scales only the words.
+const BALLOON_PAD = { w: 44, h: 28 };
+
+/** `sizes`, measured for a panel `width` wide, as those balloons would wrap at the reference width. */
+function rewrapped(sizes, width) {
+	const from = metrics(width).textWidth;
+	const to = metrics(REFERENCE_WIDTH).textWidth;
+	return sizes.map((s) => {
+		if (s.w < from - 1 && s.w <= to) return s;
+		const words = Math.max(0, s.w - BALLOON_PAD.w) * Math.max(0, s.h - BALLOON_PAD.h);
+		return Object.assign({}, s, { w: to, h: Math.round(BALLOON_PAD.h + words / (to - BALLOON_PAD.w)) });
+	});
+}
+
+/**
+ * Lay out a composed panel: choose its art as the reference width would, then frame that same drawing for this width.
+ * See arrange for how the art is chosen and framed.
+ */
+export function panelLayout({ panel, width, sizes, poses }) {
+	if (width === REFERENCE_WIDTH) return arrange({ panel, width, sizes, poses });
+	const chosen = arrange({ panel, width: REFERENCE_WIDTH, sizes: rewrapped(sizes, width), poses }).pose;
+	return arrange({ panel: chosen ? Object.assign({}, panel, { pose: chosen }) : panel, width, sizes, poses, settled: true });
 }
 
 /**
@@ -565,6 +597,8 @@ const FACE_GAP = 26;
 // hair and the top of her shoulders in frame, as a comic close-up does.
 const FACE_SHARE = { "close-up": 0.6, head: 0.46, bust: 0.34, waist: 0.25, full: 0.15 };
 const FACE_Y = { "close-up": 0.5, head: 0.44, bust: 0.38, waist: 0.3, full: 0.15 };
+// An illustration contains her to this many face heights below her face's centre: the waist-up view the art was framed for.
+const ILLUSTRATION_BELOW_FACE = 2.5;
 
 /** The framing for an art area `height` tall in a panel `width` wide, honouring a hint and what the pose supports. */
 export function chooseFraming(width, height, pose, hint) {
@@ -607,6 +641,7 @@ export function frame(pose, area, side, edge, framing, mirror) {
 	let y = centerY - fcy * h;
 	// Still short of the bottom: move her down to meet it, but never so far that her chin leaves the area.
 	if (y + feet * h < area.y + area.h) y = Math.max(y, Math.min(area.y + area.h - feet * h, area.y + area.h - 4 - (pose.face.y + pose.face.h) * h));
+	if (crownCut(pose) && y > area.y) y = area.y;
 	const face = { x: x + fx * w, y: y + pose.face.y * h, w: faceW, h: faceH };
 	return { image: { x, y, w, h }, face, mouth: { x: x + mx * w, y: y + pose.mouth.y * h } };
 }
@@ -753,8 +788,12 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 	// Keep the complete measured canvas in its own space. This does not invent a full-body framing or change face
 	// measurements. The narrow band grows; the wide text column keeps its measured width and position.
 	const room = m.stacked ? width - 8 : (side === "left" ? textLeft : width - textRight) - m.gap - 4;
-	const imageH = illustration && pose ? Math.min(m.maxArt, room * pose.height / pose.width) : 0;
-	const imageW = pose ? imageH * pose.width / pose.height : 0;
+	// How much of the canvas to contain: down to her waist. Ingest keeps whatever is drawn below that, which runs on
+	// past this window rather than making her smaller.
+	const contained = pose ? Math.min(1, pose.face.y + pose.face.h * (0.5 + ILLUSTRATION_BELOW_FACE)) : 1;
+	const windowRatio = pose ? contained * pose.height / pose.width : 1;
+	const imageH = illustration && pose ? Math.min(m.maxArt, room * windowRatio) : 0;
+	const imageW = pose ? imageH / windowRatio : 0;
 	if (imageH && m.stacked) m.band = Math.ceil(imageH + 8);
 	const placed = [];
 	// Stacked, everything before her first balloon (the user's note, the tools she ran, her thought) sits above her
@@ -816,14 +855,24 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 		let framed = null;
 		if (imageH) {
 			framing = pose.framings.includes("waist") ? "waist" : "bust";
-			clip = { x: side === "left" ? 4 : width - imageW - 4, y: (m.stacked ? bandTop : 0) + 4, w: imageW, h: imageH, inset: false };
-			if (m.stacked) band = { y: bandTop, h: m.band };
+			const edge = crownCut(pose) ? 0 : 4;
+			clip = { x: side === "left" ? 4 : width - imageW - 4, y: (m.stacked ? bandTop : 0) + edge, w: imageW, h: imageH, inset: false };
+			const artH = imageH / contained;
+			const drawnTo = clip.y + feetOf(pose) * artH;
+			if (m.stacked) {
+				band = { y: bandTop, h: m.band };
+				// Her body runs on behind her first balloon, as it does in a band, rather than stopping in the gap above it.
+				const under = placed.find((e) => e.y >= bandTop + m.band);
+				if (under) clip.h = Math.max(clip.h, Math.min(under.y + under.h, drawnTo) - clip.y);
+			} else if (drawnTo >= height - 1) clip.h = height - clip.y;
+			// A drawing that ends above the panel's bottom would float; a framed inset makes its edge deliberate.
+			else if (height > clip.y + imageH + m.pad) clip.inset = true;
 			const fx = mirror ? 1 - pose.face.x - pose.face.w : pose.face.x;
 			const mx = mirror ? 1 - pose.mouth.x : pose.mouth.x;
 			framed = {
-				image: { x: clip.x, y: clip.y, w: imageW, h: imageH },
-				face: { x: clip.x + fx * imageW, y: clip.y + pose.face.y * imageH, w: pose.face.w * imageW, h: pose.face.h * imageH },
-				mouth: { x: clip.x + mx * imageW, y: clip.y + pose.mouth.y * imageH },
+				image: { x: clip.x, y: clip.y, w: imageW, h: artH },
+				face: { x: clip.x + fx * imageW, y: clip.y + pose.face.y * artH, w: pose.face.w * imageW, h: pose.face.h * artH },
+				mouth: { x: clip.x + mx * imageW, y: clip.y + pose.mouth.y * artH },
 			};
 		} else if (tall && pose.framings.includes("full")) {
 			// Long words and a pose drawn tall: June down the whole panel, kept only if her figure fills it.
@@ -844,8 +893,10 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 				const w = Math.round(side === "left" ? textLeft - m.pad - 6 : width - textRight - m.pad - 6);
 				clip = { x: side === "left" ? m.pad : width - m.pad - w, y: m.pad, w, h: Math.round(Math.min(m.maxArt * 0.75, w * 1.25)), inset: true };
 			}
+			// Standing art names only its wide crops; a phone's band zooms in on her face, as with any portrait.
 			const kept = pose.framings.filter((f) => f !== "full");
-			framing = chooseFraming(width, clip.h, Object.assign({}, pose, { framings: kept.length > 0 ? kept : USUAL }), m.stacked ? (hint ?? "close-up") : hint);
+			const zoomed = m.stacked && pose.framings.includes("full") ? ["close-up", "head", ...kept] : kept;
+			framing = chooseFraming(width, clip.h, Object.assign({}, pose, { framings: zoomed.length > 0 ? zoomed : USUAL }), m.stacked ? (hint ?? "close-up") : hint);
 			framed = frame(pose, clip, side, edgeOf(clip), framing, mirror);
 			// Framed in her band, but seen on down behind her first balloon under it, so her body runs on behind the words
 			// rather than stopping at a gap above them, and up to the panel's top behind any notes over the band, so her hair
