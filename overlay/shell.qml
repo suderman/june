@@ -450,7 +450,7 @@ ShellRoot {
   readonly property string attachScript: Quickshell.shellPath("attach.sh")
   Process {
     id: attacher
-    stdout: StdioCollector { onStreamFinished: root.attached(text) }
+    stdout: StdioCollector { onStreamFinished: root.attachRead(text) }
     // Exit 1 from a paste: the clipboard holds words, so they go into the balloon as before.
     onExited: (code, status) => { if (code !== 0 && root.pasteFallback) root.pasteFallback(); root.pasteFallback = null; }
   }
@@ -466,7 +466,8 @@ ShellRoot {
     attacher.command = Attach.pasteCommand(attachScript);
     attacher.running = true;
   }
-  function attached(text) {
+  // Not `attached`, which already names where the daemon serves what messages brought.
+  function attachRead(text) {
     const read = Attach.parse(text);
     if (read.items.length === 0 && read.refused.length === 0) return;
     pasteFallback = null;
@@ -478,13 +479,6 @@ ShellRoot {
   function unattach(index) { outbox = outbox.filter((_, i) => i !== index); }
   // file:// URLs from a picker or a drop, as paths.
   function pathsOf(urls) { return Array.from(urls).map(u => decodeURIComponent(String(u).replace(/^file:\/\//, ""))).filter(p => p.startsWith("/")); }
-  FileDialog {
-    id: picker
-    title: "Attach for June"
-    fileMode: FileDialog.OpenFiles
-    onAccepted: root.attachPaths(root.pathsOf(selectedFiles))
-  }
-  function pick() { picker.open(); }
 
   function receive(reply) {
     if (reply.type === "hello") {
@@ -600,6 +594,13 @@ ShellRoot {
       anchors.top: parent.top
       anchors.bottom: parent.bottom
       width: Math.min(Theme.stripWidth, parent.width - 32)
+      // A picker for +, inside this window: a dialog needs a window to open in.
+      FileDialog {
+        id: overlayPicker
+        title: "Attach for June"
+        fileMode: FileDialog.OpenFiles
+        onAccepted: root.attachPaths(root.pathsOf(selectedFiles))
+      }
       // Files dropped anywhere on the strip go with the next message.
       DropArea {
         anchors.fill: parent
@@ -713,7 +714,7 @@ ShellRoot {
         attachments: root.outbox
         unattach: index => root.unattach(index)
         paste: fallback => root.pasteInto(fallback)
-        pick: () => root.pick()
+        pick: () => overlayPicker.open()
       }
     }
 

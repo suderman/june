@@ -1,6 +1,7 @@
 // The user's balloon: Enter steers, Shift+Enter queues, Alt+Enter adds a line, Ctrl+C with nothing selected stops June.
 // `send(text, followUp)` returns whether the words went (or were dropped as empty); the balloon clears only then.
-// Pictures and files ride along (attach.mjs): Ctrl+V attaches a screenshot or copied files, else pastes words; + picks
+// Pictures and files ride along (attach.mjs): Ctrl+V or Shift+Insert attaches a screenshot or copied files, else pastes
+// words; + picks
 // files; what is attached shows above the words, each removed with a click.
 import QtQuick
 import QtQuick.Controls
@@ -89,7 +90,7 @@ Rectangle {
     anchors.bottomMargin: 10
     TextArea {
       id: input
-      placeholderText: Theme.consoleLook ? "› message june" : "your balloon…"
+      placeholderText: Theme.consoleLook ? "› message june" : "to june…"
       wrapMode: TextEdit.Wrap
       font.family: Theme.lettering
       font.pixelSize: Theme.consoleLook ? 15 : 19
@@ -102,7 +103,8 @@ Rectangle {
           event.accepted = true;
           return;
         }
-        if (event.key === Qt.Key_V && (event.modifiers & Qt.ControlModifier)) {
+        // Ctrl+V, or Shift+Insert (keyd sends it for Super+V on Jon's desktops).
+        if ((event.key === Qt.Key_V && (event.modifiers & Qt.ControlModifier)) || (event.key === Qt.Key_Insert && (event.modifiers & Qt.ShiftModifier))) {
           composer.paste(() => input.paste());
           event.accepted = true;
           return;

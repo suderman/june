@@ -2,6 +2,7 @@
 // toggles for this device's state (nothing written to config). Narrowed below 480 px it shows the strip's stacked
 // layout, the phone's. Ctrl+N and Ctrl+P page, Ctrl+R refreshes, Ctrl+W closes. See "The windowed strip" in docs/interfaces.org.
 import QtQuick
+import QtQuick.Dialogs
 import QtQuick.Controls
 import Quickshell
 import "desktop.mjs" as Desktop
@@ -165,7 +166,14 @@ FloatingWindow {
       attachments: win.shell.outbox
       unattach: index => win.shell.unattach(index)
       paste: fallback => win.shell.pasteInto(fallback)
-      pick: () => win.shell.pick()
+      pick: () => windowPicker.open()
+    }
+    // A picker for +, inside this window: a dialog needs a window to open in.
+    FileDialog {
+      id: windowPicker
+      title: "Attach for June"
+      fileMode: FileDialog.OpenFiles
+      onAccepted: win.shell.attachPaths(win.shell.pathsOf(selectedFiles))
     }
     // Files dropped anywhere on the window go with the next message.
     DropArea {
