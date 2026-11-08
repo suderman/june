@@ -9,6 +9,7 @@
 // open, the full strip, hidden again; if she popped up by herself, the first press opens her note. Esc dismisses either. `toggle`, `open`, `close`, and `mini` reach each directly.
 // `window` opens the same strip in an ordinary window with this device's toggles (StripWindow.qml).
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQml.Models
 import Quickshell
@@ -594,11 +595,12 @@ ShellRoot {
       anchors.top: parent.top
       anchors.bottom: parent.bottom
       width: Math.min(Theme.stripWidth, parent.width - 32)
-      // A picker for +, inside this window: a dialog needs a window to open in.
+      // A picker for +, drawn inside the overlay: as a window of its own it would open under the overlay's layer.
       FileDialog {
         id: overlayPicker
         title: "Attach for June"
         fileMode: FileDialog.OpenFiles
+        popupType: Popup.Item
         onAccepted: root.attachPaths(root.pathsOf(selectedFiles))
       }
       // Files dropped anywhere on the strip go with the next message.
