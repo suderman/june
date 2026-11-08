@@ -116,6 +116,7 @@ Keys of =config.json=, with their defaults:
 - =heartbeat= enables a private look every =everyMinutes= in waking hours; the user counts as chatting if they wrote within =chattingMinutes=.
 - =looseEnds= enables June's evening look for loose ends, once a day from =at= (local =HH:MM=) until =rhythm.quiet=.
 - =conflicts= enables June's nightly Syncthing check, once a day from =at= (local =HH:MM=) until =rhythm.quiet=.
+- =ntfy.url=, an ntfy topic's address such as =https://ntfy.example.com/june=, pushes each finished reply meant for the phone (one answering a phone message, or a notice routed there) to that topic while the June app does not have the conversation open; a tap opens the app on it (=june://conversation=). Off without it.
 - =mail= gives each heartbeat the new mail matching =query= in notmuch since the last look; =accounts= names each top-level maildir folder, such as ={"personal": "home"}=.
 - =watch= tells June about dispatched tasks she did not queue on =dispatch.hosts=, in waking hours and at most every =gapMinutes=.
 - =situation= feeds the =now= section: =calendars= are Org files read for today and tomorrow, =homeAssistant.people= are =person.*= entities, =homeAssistant.weather= a =weather.*= entity, polled every =pollSeconds= when =HASS_URL= and =HASS_TOKEN= are set.

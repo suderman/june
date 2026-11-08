@@ -137,7 +137,8 @@ class Link(private val context: Context) {
                             status = LinkStatus.Linked(reply.optString("device"))
                             avatarPath = reply.optString("avatar").takeIf { it.isNotEmpty() }
                             attachedPath = reply.optString("attached").takeIf { it.isNotEmpty() }
-                            webSocket.send(JSONObject().put("op", "attach").put("requestId", requestId()).toString())
+                            // As the app's own view, so a reply shown here is not also pushed to this phone (src/ntfy.ts).
+                            webSocket.send(JSONObject().put("op", "attach").put("requestId", requestId()).put("client", "apk").toString())
                         }
                         "view" -> {
                             items = if (reply.optBoolean("reset")) parseItems(reply.getJSONArray("items")) else applyChanges(items, reply.optJSONArray("changes") ?: org.json.JSONArray())

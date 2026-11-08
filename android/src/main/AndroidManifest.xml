@@ -38,6 +38,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- A tap on June's ntfy notification opens the conversation (src/ntfy.ts). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="june" android:host="conversation" />
+            </intent-filter>
         </activity>
 
         <!-- The invisible step to the photo picker, file picker, or camera (AttachActivity.kt). -->

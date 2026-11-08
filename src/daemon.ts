@@ -35,6 +35,7 @@ import { createKeptImagesExtension, startImageExpiry } from "./kept-images.ts";
 import { Hidden, KINDS, Timeline } from "./timeline.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
 import { createGreeting } from "./greeting.ts";
+import { createNtfy } from "./ntfy.ts";
 import { createConflicts } from "./conflicts.ts";
 import { createLooseEnds } from "./loose.ts";
 import { createReflection } from "./reflect.ts";
@@ -305,7 +306,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		let remoteError: string | undefined;
 		const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
 		const follows = pollFollowing(() => harness.commit((tx) => listFollowing(tx), BG), options.followingMs ?? 15_000, log);
-		const scope: Scope = { harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, ...(expressions ? { expressions } : {}) };
+		// How many connections have the phone app's conversation open (ntfy.ts pushes only while none does).
+		const apkViews = { count: 0 };
+		const scope: Scope = { apkViews, harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, ...(expressions ? { expressions } : {}) };
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
@@ -322,6 +325,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			}
 		}
 		log.info("june_started", { pid: process.pid, socket: paths.socket, conversation: root.id, ...(remote ? { remote: remote.port } : {}) });
+		// Replies meant for the phone, pushed through ntfy while its app is closed.
+		const ntfy = config.ntfy ? createNtfy({ url: config.ntfy.url, state: `${paths.state}/ntfy.json`, viewing: () => apkViews.count > 0, log }) : undefined;
+		const ntfyView = ntfy ? await attachView(root, BG, (reply) => ntfy.onView(reply), "ntfy", { hidden }) : undefined;
 
 		let closing: Promise<void> | undefined;
 		const close = () =>
@@ -341,6 +347,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				stopHeartbeat?.();
 				stopLooseEnds?.();
 				stopConflicts?.();
+				await ntfyView?.stop();
 				await stopWatch?.();
 				stopInbox();
 				stopImages();
@@ -368,7 +375,7 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 	});
 }
 
-type Scope = CommandScope & { timeline: Timeline; hidden: Hidden; log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; expressions?: ReturnType<typeof startExpressions> };
+type Scope = CommandScope & { apkViews: { count: number }; timeline: Timeline; hidden: Hidden; log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; expressions?: ReturnType<typeof startExpressions> };
 /** The sky a view sends with its state, and how it learns of a change. */
 type SkySource = Pick<Situation, "sky" | "onSky">;
 /** How many followed tasks are still going, and how a view learns of a change. */
@@ -434,6 +441,7 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 	let withdraw: (() => void) | undefined;
 	const context = withAbortSignal(abort.signal, BG);
 	let view: View | undefined;
+	let viewingApp = false;
 
 	async function handle(request: Request): Promise<void> {
 		switch (request.op) {
@@ -442,6 +450,10 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 			case "attach": {
 				// A second attach on one connection starts the view over.
 				await view?.stop();
+				// The phone app's view, while open, already shows what June says there: nothing is pushed then (ntfy.ts).
+				const app = !local && request.client === "apk";
+				if (app !== viewingApp) scope.apkViews.count += app ? 1 : -1;
+				viewingApp = app;
 				view = await attachView(scope.root, context, send, request.requestId, { detail: request.detail === true, hidden: scope.hidden, ...(scope.sky ? { sky: scope.sky } : {}), ...(scope.follows ? { follows: scope.follows } : {}) });
 				// The connection closed while the view was starting.
 				if (abort.signal.aborted) void view.stop();
@@ -576,6 +588,8 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 		close() {
 			abort.abort();
 			withdraw?.();
+			if (viewingApp) scope.apkViews.count--;
+			viewingApp = false;
 			void view?.stop();
 		},
 	};

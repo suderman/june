@@ -35,7 +35,8 @@ export function parseCommand(text: string): { name: string; args: string } | und
 export type Request =
 	| { op: "status"; requestId: string }
 	/** `detail` asks for the complete view; it is the connection's until a `detail` request changes it. */
-	| { op: "attach"; requestId: string; detail?: boolean }
+	/** `client: "apk"` marks the phone app's own view, so a reply it already shows is not also pushed to the phone. */
+	| { op: "attach"; requestId: string; detail?: boolean; client?: string }
 	/** Turn the complete view on or off; answered with a reset. */
 	| { op: "detail"; requestId: string; on: boolean }
 	/** Entries without a view: those since `since` (epoch ms), the newest `limit` of them. */

@@ -114,6 +114,8 @@ export type Config = {
 	readonly mail: { readonly enabled: boolean; readonly query: string; readonly accounts: Readonly<Record<string, string>> };
 	/** Dispatched tasks June did not queue, on `dispatch.hosts`: news reaches her in waking hours, at most every `gapMinutes`. */
 	readonly watch: { readonly enabled: boolean; readonly gapMinutes: number };
+	/** Replies meant for the phone, pushed to this ntfy topic's URL while the app is closed (src/ntfy.ts); off without one. */
+	readonly ntfy?: { readonly url: string };
 	/** The "now" prompt section: calendars read for today and tomorrow, and Home Assistant people (with HASS_URL and HASS_TOKEN). */
 	readonly situation: {
 		readonly calendars: readonly string[];
@@ -235,6 +237,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 		conflicts: daily("conflicts", { ...DEFAULTS.conflicts, ...raw.conflicts }),
 		mail: mail({ ...DEFAULTS.mail, ...raw.mail }),
 		watch: watch({ ...DEFAULTS.watch, ...raw.watch }),
+		...(raw.ntfy !== undefined ? { ntfy: ntfy(raw.ntfy) } : {}),
 		patter: patterTiming({ ...DEFAULTS.patter, ...raw.patter }),
 		situation: situation(raw.situation ?? {}),
 		// Telegram is on where the module names who may use it; the token sits beside the ids in June's secret.
@@ -313,6 +316,12 @@ function dispatch(given: Partial<Config["dispatch"]> | undefined): Config["dispa
 		...(given?.settle !== undefined ? { settle: given.settle } : {}),
 		...(improve ? { improve } : {}),
 	};
+}
+
+function ntfy(given: unknown): NonNullable<Config["ntfy"]> {
+	const url = (given as { url?: unknown } | null)?.url;
+	if (typeof url !== "string" || !/^https?:\/\/[^\s/]+\/[\w-]+$/.test(url)) throw new Error("ntfy.url must be a topic's address, such as https://ntfy.example.com/june");
+	return { url };
 }
 
 function watch(given: Config["watch"]): Config["watch"] {
