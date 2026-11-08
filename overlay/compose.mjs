@@ -497,6 +497,13 @@ export function panelLayout({ panel, width, sizes, poses }) {
 		const wider = lay(pose, framing);
 		if (wider.pose === pose && fits(wider)) return wider;
 	}
+	// Restricted activity and waist-only gestures need their low hands, not a different pose's portrait. When
+	// ordinary framing fails, contain the unchanged canvas beside the words (above them on a narrow panel).
+	const restricted = pose.framings.every((f) => f === "bust" || f === "waist");
+	if (!panel.framing && !pose.special && restricted && pose.gestures.length > 0 && (pose.activity || pose.framings.every((f) => f === "waist"))) {
+		const illustration = plan({ width, side: panel.side, pose, elements: sizes, illustration: true });
+		if (illustration.face.h >= 48 && pose.gestures.every((_, i) => gestureShown(illustration, pose, i) >= 0.95)) return { layout: illustration, pose };
+	}
 	if (pose.special) return { layout: Object.assign({}, first.layout, { cropped: gestureShown(first.layout, pose) < GESTURE_SHOWN }), pose };
 	const others = usable.filter((p) => p.id !== pose.id && !p.activity && !p.special && p.expression === pose.expression);
 	const gesture = pose.gestures?.[0]?.name;
@@ -734,10 +741,21 @@ export function aimTrail(box, face, obstacles = []) {
  * balloon after it), `card` (several tools, beside the next balloon when both fit), and `burst`. The panel's height
  * follows the words; the art is framed into it, or into an inset at the top when the words run long.
  */
-export function plan({ width, side, pose, elements, framing: hint, mirror: allowMirror = true }) {
+export function plan({ width, side, pose, elements, framing: hint, mirror: allowMirror = true, illustration = false }) {
 	const m = metrics(width);
+	const column = m.artZone - m.overlap + m.pad - m.gap - 4;
+	if (illustration && pose && !m.stacked && column * pose.height / pose.width * pose.face.h < 48) {
+		m.stacked = true;
+		m.textWidth = width - 2 * m.pad;
+	}
 	const textLeft = side === "left" && !m.stacked ? m.artZone - m.overlap + m.pad : m.pad;
 	const textRight = textLeft + m.textWidth;
+	// Keep the complete measured canvas in its own space. This does not invent a full-body framing or change face
+	// measurements. The narrow band grows; the wide text column keeps its measured width and position.
+	const room = m.stacked ? width - 8 : (side === "left" ? textLeft : width - textRight) - m.gap - 4;
+	const imageH = illustration && pose ? Math.min(m.maxArt, room * pose.height / pose.width) : 0;
+	const imageW = pose ? imageH * pose.width / pose.height : 0;
+	if (imageH && m.stacked) m.band = Math.ceil(imageH + 8);
 	const placed = [];
 	// Stacked, everything before her first balloon (the user's note, the tools she ran, her thought) sits above her
 	// band, and her words below it, so the panel reads in order and her balloon is right under her, its tail up to
@@ -781,7 +799,7 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 	const bandLast = bandTop < 0;
 	if (bandLast) placeBand();
 	const contentBottom = placed.length > 0 && !bandLast ? y - m.gap : m.pad;
-	const height = Math.round(m.stacked ? (bandLast ? bandTop + m.band : Math.max(bandTop + m.band + 60, contentBottom + m.pad + 6)) : Math.max(m.minHeight, contentBottom + m.pad + 6));
+	const height = Math.round(m.stacked ? (bandLast ? bandTop + m.band : Math.max(bandTop + m.band + 60, contentBottom + m.pad + 6)) : Math.max(m.minHeight, contentBottom + m.pad + 6, imageH + 8));
 
 	let art = null;
 	let clip = { x: 0, y: 0, w: width, h: height, inset: false };
@@ -796,7 +814,18 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 		const tall = !m.stacked && height > m.maxArt + m.pad;
 		const edgeOf = (area) => (m.stacked ? (side === "left" ? width * 0.62 : width * 0.38) : side === "left" ? Math.min(textLeft, area.x + area.w) : Math.max(textRight, area.x));
 		let framed = null;
-		if (tall && pose.framings.includes("full")) {
+		if (imageH) {
+			framing = pose.framings.includes("waist") ? "waist" : "bust";
+			clip = { x: side === "left" ? 4 : width - imageW - 4, y: (m.stacked ? bandTop : 0) + 4, w: imageW, h: imageH, inset: false };
+			if (m.stacked) band = { y: bandTop, h: m.band };
+			const fx = mirror ? 1 - pose.face.x - pose.face.w : pose.face.x;
+			const mx = mirror ? 1 - pose.mouth.x : pose.mouth.x;
+			framed = {
+				image: { x: clip.x, y: clip.y, w: imageW, h: imageH },
+				face: { x: clip.x + fx * imageW, y: clip.y + pose.face.y * imageH, w: pose.face.w * imageW, h: pose.face.h * imageH },
+				mouth: { x: clip.x + mx * imageW, y: clip.y + pose.mouth.y * imageH },
+			};
+		} else if (tall && pose.framings.includes("full")) {
 			// Long words and a pose drawn tall: June down the whole panel, kept only if her figure fills it.
 			framing = "full";
 			framed = frame(pose, clip, side, edgeOf(clip), framing, mirror);
@@ -872,7 +901,7 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 		}
 	}
 
-	return { width, height, side, framing, mirror, clip, band, art, face, mouth, elements: out, marks, metrics: m };
+	return { width, height, side, framing, mirror, clip, band, art, face, mouth, elements: out, marks, metrics: m, illustration: imageH > 0 };
 }
 
 /**

@@ -1188,6 +1188,42 @@ test("a gesture stays whole in a panel: seen past the words, framed wider, or an
 	assert.equal(longSpecial.pose.id, "gentle-palm", "an inset must not replace a special with a generic tall pose");
 });
 
+test("restricted action art gets an illustration before losing its performance", async () => {
+	const { gestureShown } = await import("../overlay/compose.mjs");
+	// Measured canvases and gesture boxes from accepted 2026-11-08 art, not enlarged face boxes or deleted hands.
+	const entry = (size, face, mouth, gestures, extra = {}) => ({ file: "action.webp", expression: "determined", size, face, mouth, mirror: false, framings: ["waist"], gestures: gestures.map((box, i) => ({ name: `part-${i}`, box, primary: i === 0 })), ...extra });
+	const entries = {
+		typing: entry([2432, 2662], [0.382, 0.198, 0.276, 0.27], [0.497, 0.423], [[0.145, 0.657, 0.373, 0.16], [0.04, 0.506, 0.548, 0.373]], { activity: "working", facing: "left", framings: ["bust", "waist"] }),
+		folded: entry([2304, 2662], [0.35, 0.195, 0.301, 0.27], [0.494, 0.406], [[0.258, 0.824, 0.612, 0.169]], { expression: "wry" }),
+		"folded-warm": entry([2048, 2662], [0.359, 0.195, 0.282, 0.27], [0.519, 0.416], [[0.216, 0.791, 0.63, 0.15]], { expression: "wry" }),
+		sleeve: entry([2688, 2662], [0.455, 0.216, 0.226, 0.27], [0.558, 0.429], [[0.195, 0.727, 0.196, 0.258], [0.035, 0.416, 0.2, 0.21]]),
+		plain: entry([2048, 2662], [0.35, 0.195, 0.28, 0.27], [0.5, 0.42], [], { framings: ["close-up", "head", "bust", "waist"] }),
+		"plain-wry": entry([2048, 2662], [0.35, 0.195, 0.28, 0.27], [0.5, 0.42], [], { expression: "wry", framings: ["close-up", "head", "bust", "waist"] }),
+	};
+	const poses = readPoses({ poses: entries }, "file:///art/");
+	for (const pose of poses.slice(0, 4)) for (const width of [360, 480, 820]) for (const side of ["left", "right"]) for (const h of [70, 1500]) {
+		const sizes = [{ kind: "user", w: 120, h: 44 }, { kind: "june", w: Math.min(300, metrics(width).textWidth), h }];
+		const panel = { id: "action", side, pose, elements: [] };
+		const out = panelLayout({ panel, width, sizes, poses });
+		assert.equal(out.pose.id, pose.id, `${pose.id}, ${width}, ${side}, ${h}: keep the requested action`);
+		assert.ok(out.layout.face.h >= 48, "the contained action still has a readable face");
+		for (let i = 0; i < pose.gestures.length; i++) assert.ok(gestureShown(out.layout, pose, i) >= 0.95, "both hands and props stay clear");
+		assert.equal(out.layout.mirror, false, "never flip the non-mirrorable source");
+		assert.equal(out.layout.side, side, "layout never changes the panel's side");
+		assert.deepEqual(panelLayout({ panel, width, sizes, poses }), out, "repeated measurement is stable");
+		for (const e of out.layout.elements) assert.ok(e.x >= 0 && e.x + e.w <= width && e.y + e.h <= out.layout.height, "dialogue stays inside the panel");
+	}
+	const typing = poses[0], sizes = [{ kind: "june", w: 300, h: 70 }];
+	const bustOnly = { ...typing, framings: ["bust"] };
+	const contained = panelLayout({ panel: { id: "bust", side: "right", pose: bustOnly, elements: [] }, width: 360, sizes, poses });
+	assert.equal(contained.pose.id, typing.id);
+	assert.equal(contained.layout.framing, "bust", "illustration does not invent an unsupported framing");
+	const hinted = panelLayout({ panel: { id: "hint", side: "right", pose: typing, elements: [], framing: "bust" }, width: 820, sizes, poses });
+	assert.ok(!hinted.layout.illustration, "an explicit framing request does not opt into illustration");
+	const special = { ...typing, special: true };
+	assert.ok(!panelLayout({ panel: { id: "special", side: "right", pose: special, elements: [] }, width: 360, sizes, poses }).layout.illustration, "special artwork keeps its own framing contract");
+});
+
 // Tall standing art, modelled on real staged studies (2026-11-07): face, mouth, gesture boxes and measured figure bounds
 // as fractions, with the text sizes QML measured for one, three and six paragraphs of a report.
 const flatPose = (expression, extra = {}) => ({ file: "f.webp", size: [2176, 2662], expression, face: [0.363, 0.195, 0.274, 0.27], mouth: [0.508, 0.407], facing: "front", mirror: false, framings: ["close-up", "head", "bust"], ...extra });
