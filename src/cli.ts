@@ -25,6 +25,9 @@ const USAGE = `usage:
                           kinds are user, june, patter, action, note
   june transcript --around ID [--before N] [--after N] [--json]
                           the timeline around entry ID, from a search result
+  june usage [--since WHEN] [--json]
+                          what June uses (tools, skills, her journal) and the director's art picks, since WHEN (7 days
+                          by default), with where more art would help
   june transcript --hide ID[-ID] | --unhide ID[-ID] | --hidden
                           leave entries out of the timeline, transcripts, and views (they stay in the database)
   june device add NAME    allow a device on the WebSocket and print its token, once
@@ -41,7 +44,7 @@ async function main(argv: string[]): Promise<number> {
 	const json = rest.includes("--json");
 	const args = rest.filter((a) => a !== "--json");
 	const p = paths();
-	if (["tui", "ask", "status", "transcript", "device"].includes(command)) {
+	if (["tui", "ask", "status", "transcript", "device", "usage"].includes(command)) {
 		const remote = remoteHost(p);
 		if (remote !== undefined) return overSsh(remote, command, argv);
 	}
@@ -63,6 +66,8 @@ async function main(argv: string[]): Promise<number> {
 			return status(p.socket, json);
 		case "transcript":
 			return transcript(p, args, json);
+		case "usage":
+			return usageReport(p, args, json);
 		case "device":
 			return device(p.socket, args, json);
 		case "doctor":
@@ -173,6 +178,28 @@ async function ask(socket: string, args: string[], json: boolean): Promise<numbe
 	else if (result.status === "done") console.log(result.text ?? "");
 	else console.error(`unanswered: ${result.reason}`);
 	return result.status === "done" ? 0 : 1;
+}
+
+/** What June uses (tools, skills, journal) and the director's art picks, since WHEN (7 days by default). */
+async function usageReport(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {
+	const at = args.indexOf("--since");
+	const since = at >= 0 ? parseSince(args[at + 1] ?? "") : Date.now() - 7 * 24 * 60 * 60_000;
+	if (since === undefined) {
+		console.error("--since takes 30m, 2h, 3d, 16:20, or a date");
+		return 2;
+	}
+	const { readRows, renderUsage, summarize } = await import("./usage.ts");
+	const { loadManifest } = await import("./expression.ts");
+	const { TEMPLATES } = await import("./init.ts");
+	// Her tools and her conversation from the daemon when it runs; the report still reads without them.
+	const client = await Client.open(p.socket).catch(() => undefined);
+	const reply = client ? await client.request({ op: "status", requestId: randomUUID() }).catch(() => undefined) : undefined;
+	client?.close();
+	const status = reply?.type === "status" ? (reply.status as { tools?: string[]; conversation?: number }) : undefined;
+	const pool = loadManifest([`${p.data}/avatar/manifest.json`, `${TEMPLATES}avatar/manifest.json`], createLogger({ sink: () => {} }));
+	const report = summarize(readRows(p.database), since, status?.tools ?? [], pool, status?.conversation ?? 1);
+	console.log(json ? JSON.stringify(report) : renderUsage(report));
+	return 0;
 }
 
 async function transcript(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {

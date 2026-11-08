@@ -38,12 +38,12 @@ ${vocabulary}
 ${poses ? `\nPoses, each with its expression:\n${poses}\n` : ""}
 Rules:
 - Pick the expression that fits the whole panel: ${user()}'s message, what June did while answering, her asides, and her reply as a whole, not a single word in it.
-- Common faces are the default. Occasional ones need a clear reason in the panel. Rare ones only when it plainly earns it: a real win, a real compliment, a theatrical huff.
+- All of the common and occasional faces are her everyday range: an occasional face is right whenever the panel shows that feeling (she was proved right, something is genuinely funny, a surprise, a muddle), not only when it is unmistakable. Rare ones when the panel plainly earns it: a real win, a real compliment, a theatrical huff.
 - Idle is for a panel with no feeling in it at all. When the panel shows any reaction, even a mild one (care, amusement, interest, concern, quiet satisfaction at a finished job, resolve), choose the common face that shows it instead.
-- Faces of the earlier panels are shown. When the last two were the same face and another fits nearly as well, choose the other; never trade the right face for variety.
+- Faces of the earlier panels are shown, and how often she has shown each face lately. A strip that keeps the same few faces reads flat: when a face she has not shown lately fits the panel as well as a frequent one, choose it. Never trade the right face for variety.
 ${poses ? "- Never pick the pose the panel just before had when another pose of the face you chose fits; one picture twice in a row reads as a stuck strip.\n" : ""}- Pout is for when ${user()} wins a joke or an argument, not when June does.
 - When her reply drops the teasing (bad news, worry, serious or family matters), choose serious or gentle, never wry, smug, or pout.
-${poses ? "- Optionally pick one pose whose expression matches; null when none fits well.\n" : ""}Reply with JSON only: {"expression": "<name>"${poses ? ', "pose": "<name>" or null' : ""}}`;
+${poses ? "- Optionally pick one pose whose expression matches, when its action fits the panel (a mug, a pen, a pointing hand); null otherwise, and the strip rotates her poses itself.\n" : ""}Reply with JSON only: {"expression": "<name>"${poses ? ', "pose": "<name>" or null' : ""}}`;
 }
 
 /** The model's answer as a pick: a known expression, and a pose only when the set has it. Null for anything else. */
@@ -123,12 +123,32 @@ function doingBetween(items: readonly ViewItem[], from: number, to: number): Doi
 	return { tools: tools.slice(-DOING), asides: asides.slice(-3) };
 }
 
+/** The faces and poses of up to `count` replies before index `end` that have one, oldest first. */
+export function recentPicks(items: readonly ViewItem[], end: number, count = RECENT): { faces: string[]; poses: string[] } {
+	const picked = items.slice(0, Math.max(0, end)).filter((item): item is Assistant => item.kind === "assistant" && !item.private && !!item.expression).slice(-count);
+	return { faces: picked.map((item) => item.expression!), poses: picked.flatMap((item) => (item.pose ? [item.pose] : [])) };
+}
+
+/** How many recent panels the pass hears about, and how many of them make a pose too recent to name again. */
+const RECENT = 20;
+const TIRED = 6;
+
+/** Her recent faces for the pass: each with how often, most first, then the faces of her range she has not shown. */
+export function rangeNote(faces: readonly string[]): string {
+	if (faces.length === 0) return "";
+	const counts = new Map<string, number>();
+	for (const face of faces) counts.set(face, (counts.get(face) ?? 0) + 1);
+	const shown = [...counts].sort((a, b) => b[1] - a[1]).map(([face, n]) => `${face} ${n}`).join(", ");
+	const unshown = Object.entries(EXPRESSIONS).filter(([face, e]) => e.frequency !== "rare" && !counts.has(face)).map(([face]) => face);
+	return `\n\nHer faces over her last ${faces.length} panels: ${shown}.${unshown.length ? ` Not shown lately: ${unshown.join(", ")}.` : ""}`;
+}
+
 /** The words of one pick request: the earlier exchanges for context, then the panel to read: the message, what June did, her asides, and her reply. */
-export function pickRequest(said: string, reply: string, earlier: readonly Exchange[], doing?: Doing): string {
+export function pickRequest(said: string, reply: string, earlier: readonly Exchange[], doing?: Doing, faces: readonly string[] = []): string {
 	const before = earlier.map((e) => `${user()}: ${e.said}\nJune${e.face ? ` (face: ${e.face}${e.pose ? `, pose: ${e.pose}` : ""})` : ""}: ${e.replied}`).join("\n\n");
 	const did = doing?.tools.length ? `\n\nWhile answering, June used: ${doing.tools.join("; ")}` : "";
 	const asides = doing?.asides.length ? `\n\nHer asides meanwhile: ${doing.asides.join(" / ")}` : "";
-	return `${before ? `Earlier, for context only:\n${before}\n\nNow, the panel to choose for.\n` : ""}${user()} wrote:\n${said || "(nothing: June spoke first)"}${did}${asides}\n\nJune replied:\n${reply}`;
+	return `${before ? `Earlier, for context only:\n${before}${rangeNote(faces)}\n\nNow, the panel to choose for.\n` : rangeNote(faces) ? `${rangeNote(faces).trim()}\n\nNow, the panel to choose for.\n` : ""}${user()} wrote:\n${said || "(nothing: June spoke first)"}${did}${asides}\n\nJune replied:\n${reply}`;
 }
 
 /** The same merged inventory the clients see: the personal set wins names and the base fills the rest. */
@@ -160,7 +180,7 @@ function standsOn(pose: Pose, side: "left" | "right"): boolean {
  * stand on that side win; an explicit valid pose that cannot gives way to one of its expression that can, and only
  * when none can does the side follow the pose.
  */
-export function resolvePick(pick: FacePick, manifest: Manifest | undefined, previous?: Assistant, selectedAt = Date.now(), random = Math.random, held?: "left" | "right"): FacePick & { side: "left" | "right"; selectedAt: number } {
+export function resolvePick(pick: FacePick, manifest: Manifest | undefined, previous?: Assistant, selectedAt = Date.now(), random = Math.random, held?: "left" | "right", recent: readonly string[] = []): FacePick & { side: "left" | "right"; selectedAt: number } {
 	let side: "left" | "right" = held ?? (previous?.side === "left" ? "right" : "left");
 	const poses = Object.entries(manifest?.poses ?? {}).filter(([, p]) => !p.activity && (p.added === undefined || Date.parse(p.added) <= selectedAt));
 	const preferred = poses.filter(([id]) => manifest?.personal?.includes(id));
@@ -169,7 +189,10 @@ export function resolvePick(pick: FacePick, manifest: Manifest | undefined, prev
 	// A packaged tall request still asks for a standing performance. Try personal standing art before portraits.
 	const standingArt = requested?.[1].framings?.includes("full") ? personal.filter(([, p]) => p.framings?.includes("full")) : [];
 	const explicit = requested && (!personal.length || manifest?.personal?.includes(requested[0])) ? requested : undefined;
-	let named = explicit && standsOn(explicit[1], side) ? explicit : undefined;
+	// A pose the pass names that she has shown in her last few panels gives way to her other poses of that face: the
+	// pass tends to name the same favourite, and one picture over and over reads as a stuck strip.
+	const tired = explicit !== undefined && recent.slice(-TIRED).includes(explicit[0]) && personal.some(([id, p]) => id !== explicit[0] && standsOn(p, side));
+	let named = explicit && !tired && standsOn(explicit[1], side) ? explicit : undefined;
 	let expression: string | undefined = named ? undefined : requested?.[1].expression ?? pick.expression;
 	while (!named && expression) {
 		const own = preferred.filter(([, p]) => p.expression === expression);
@@ -178,7 +201,11 @@ export function resolvePick(pick: FacePick, manifest: Manifest | undefined, prev
 		const choices = standing.length ? standing : explicit ? [explicit] : fitting;
 		const fresh = choices.filter(([id]) => id !== previous?.pose);
 		const pool = fresh.length ? fresh : choices;
-		if (pool.length) named = pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
+		// The pose she has gone longest without, at random among those tied: one never shown lately before all.
+		const last = (id: string) => recent.lastIndexOf(id);
+		const oldest = pool.length ? Math.min(...pool.map(([id]) => last(id))) : -1;
+		const due = pool.filter(([id]) => last(id) === oldest);
+		if (due.length) named = due[Math.min(due.length - 1, Math.floor(random() * due.length))];
 		expression = (EXPRESSIONS[expression as keyof typeof EXPRESSIONS] as { fallback?: string }).fallback;
 	}
 	if (named && !standsOn(named[1], side)) side = side === "left" ? "right" : "left";
@@ -222,7 +249,7 @@ export function startExpressions(options: {
 		applyArt(reply, data, data.revision);
 	};
 
-	const pick = async (said: string, reply: string, earlier: readonly Exchange[], prior: readonly ArtTake[] = [], doing?: Doing): Promise<FacePick | null> => {
+	const pick = async (said: string, reply: string, earlier: readonly Exchange[], prior: readonly ArtTake[] = [], doing?: Doing, faces: readonly string[] = []): Promise<FacePick | null> => {
 		const model = models.getModel(options.model.provider, options.model.modelId);
 		if (model === undefined) throw new Error(`Unknown expression model ${options.model.provider}/${options.model.modelId}`);
 		const soul = options.files().soulFile;
@@ -231,7 +258,7 @@ export function startExpressions(options: {
 		const request: ModelContext = {
 			messages: [
 				{ role: "system", content: `${soul && existsSync(soul) ? readFileSync(soul, "utf8") : ""}\n\n${expressionRules(manifest)}`, timestamp: now } as Message,
-				{ role: "user", content: pickRequest(said, reply, earlier, doing) + (prior.length ? `\n\nEarlier takes were not right. Read the reply again and choose a better performance, rather than rerolling blindly:\n${JSON.stringify(prior.map(({ expression, pose }) => ({ expression, pose })))}` : ""), timestamp: now } as Message,
+				{ role: "user", content: pickRequest(said, reply, earlier, doing, faces) + (prior.length ? `\n\nEarlier takes were not right. Read the reply again and choose a better performance, rather than rerolling blindly:\n${JSON.stringify(prior.map(({ expression, pose }) => ({ expression, pose })))}` : ""), timestamp: now } as Message,
 			],
 		};
 		const thinking = options.model.thinkingLevel === "off" ? {} : { reasoning: options.model.thinkingLevel as never };
@@ -251,11 +278,12 @@ export function startExpressions(options: {
 		done.add(next.reply.id);
 		const started = Date.now();
 		try {
-			const chosen = await pick(next.said, next.reply.text, next.earlier, [], next.doing);
+			const recent = recentPicks(items, items.indexOf(next.reply));
+			const chosen = await pick(next.said, next.reply.text, next.earlier, [], next.doing, recent.faces);
 			if (chosen === null) log.warn("expression_unparsed", { reply: next.reply.id });
 			else if (!stopped && target(next.reply.id)?.artVersion === next.reply.artVersion && target(next.reply.id)?.text === next.reply.text) {
 				const previous = items.slice(0, items.indexOf(next.reply)).findLast((i): i is Assistant => i.kind === "assistant" && !!i.pose);
-				await write(target(next.reply.id)!, { ...resolvePick(chosen, options.manifest(), previous), take: 0 }, { said: next.said, earlier: next.earlier });
+				await write(target(next.reply.id)!, { ...resolvePick(chosen, options.manifest(), previous, Date.now(), Math.random, undefined, recent.poses), take: 0 }, { said: next.said, earlier: next.earlier });
 				log.info("expression", { reply: next.reply.id, expression: chosen.expression, ...(chosen.pose ? { pose: chosen.pose } : {}), ms: Date.now() - started });
 			}
 		} catch (error) {
@@ -316,12 +344,13 @@ export function startExpressions(options: {
 					if (!adjacent) throw new Error(op === "restore" ? "No earlier take for this panel" : "No later take for this panel");
 					choice = adjacent;
 				} else {
-					const picked = await pick(context.said, reply.text, context.earlier, takes);
+					const recent = recentPicks(items, items.indexOf(reply));
+					const picked = await pick(context.said, reply.text, context.earlier, takes, undefined, recent.faces);
 					if (!picked) throw new Error("June could not choose another face");
 					// Another take keeps the side the panel has shown: its own, or for an unpicked reply the one the clients derive.
 					const before = items.slice(0, items.indexOf(reply)).findLast((i): i is Assistant => i.kind === "assistant" && !!i.pose);
 					const side = reply.side ?? (before?.side === "left" ? "right" : "left");
-					choice = { ...resolvePick(picked, options.manifest(), reply, Date.now(), Math.random, side), take: Math.max(...takes.map((t) => t.take)) + 1, previous: current.take };
+					choice = { ...resolvePick(picked, options.manifest(), reply, Date.now(), Math.random, side, recent.poses), take: Math.max(...takes.map((t) => t.take)) + 1, previous: current.take };
 				}
 				const live = target(id);
 				if (stopped || !live || (live.artVersion ?? "") !== revision || live.text !== reply.text) throw new Error("That panel changed while June chose its face");

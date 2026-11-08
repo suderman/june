@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Manifest } from "../src/avatar.ts";
-import { EXPRESSION, expressionRules, loadManifest, parsePick, pickRequest, replyToPick, resolvePick, startExpressions } from "../src/expression.ts";
+import { EXPRESSION, expressionRules, loadManifest, parsePick, pickRequest, rangeNote, recentPicks, replyToPick, resolvePick, startExpressions } from "../src/expression.ts";
 import type { Reply } from "../src/protocol.ts";
 import { silentLogger } from "../src/runtime.ts";
 import { fold, type ViewItem, type ViewState } from "../src/transcript.ts";
@@ -331,4 +331,28 @@ test("failed and stale retakes leave the art and conversation alone; a later pic
 	assert.equal(item.side, undefined);
 	assert.equal(item.expressionAt, 1793880000999);
 	await other.pass.stop();
+});
+
+test("poses of a face take turns: the one she has gone longest without, and a named favourite gives way once it is recent", () => {
+	const wry = (id: string) => [id, { file: `p/${id}.webp`, size: [10, 10], expression: "wry", description: id, face: [0.3, 0.1, 0.4, 0.3], mouth: [0.5, 0.35], facing: "front" }] as const;
+	const set: Manifest & { personal: string[] } = { ...manifest, poses: Object.fromEntries([wry("knowing"), wry("mug"), wry("wink")]) as unknown as Manifest["poses"], personal: ["knowing", "mug", "wink"] };
+	const at = 1793880000000;
+	// None shown lately: any of them; then the one never shown in the recent run.
+	assert.equal(resolvePick({ expression: "wry" }, set, undefined, at, () => 0, undefined, ["knowing", "mug"]).pose, "wink");
+	// All shown: the one longest ago, not a draw that keeps landing on the same picture.
+	assert.equal(resolvePick({ expression: "wry" }, set, undefined, at, () => 0.99, undefined, ["mug", "knowing", "wink", "knowing"]).pose, "mug");
+	// The pass names its favourite again: honoured when it is not recent, set aside when it is.
+	assert.equal(resolvePick({ expression: "wry", pose: "knowing" }, set, undefined, at, () => 0, undefined, ["mug", "wink"]).pose, "knowing");
+	assert.equal(resolvePick({ expression: "wry", pose: "knowing" }, set, undefined, at, () => 0, undefined, ["wink", "knowing", "mug"]).pose, "wink");
+});
+
+test("the pass hears which faces she has shown lately and which of her range she has not", () => {
+	const items = [say("1", "a", { expression: "wry", pose: "p1" }), say("2", "b", { expression: "wry" }), say("3", "c", { expression: "serious", pose: "p3" }), say("4", "now")];
+	assert.deepEqual(recentPicks(items, 3), { faces: ["wry", "wry", "serious"], poses: ["p1", "p3"] });
+	const note = rangeNote(["wry", "wry", "serious"]);
+	assert.match(note, /last 3 panels: wry 2, serious 1\./);
+	assert.match(note, /Not shown lately: .*smug.*laughing.*surprised/);
+	assert.doesNotMatch(note, /cheering|indignant/, "rare faces are not asked for");
+	assert.match(pickRequest("hi", "hello", [], undefined, ["wry", "wry", "serious"]), /Her faces over her last 3 panels/);
+	assert.equal(rangeNote([]), "");
 });
