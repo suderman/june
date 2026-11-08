@@ -103,7 +103,8 @@ function ingest(set, name, options) {
 	const planned = readJson(join(set, "planned.json"), {});
 	const { section, entry, faceBox, gestureBoxes, from } = findEntry(set, name, manifest, planned);
 	const key = keyFor(section, name);
-	const kind = kindOf(section, entry);
+	// Portrait art extended to her feet lists `full` but keeps a portrait's face size, so its close-ups stay sharp.
+	const kind = options.portrait && section === "poses" ? "pose" : kindOf(section, entry);
 	const source = options.file ?? join(set, "incoming", `${name}.png`);
 	if (!existsSync(source)) throw new Error(`${source}: no such file`);
 	const dir = { poses: "poses", chibi: "chibi", rooms: "backgrounds/rooms", plates: "backgrounds/plates", props: "backgrounds/props" }[section];
@@ -348,6 +349,7 @@ function main(argv) {
 			if (!gname || parts.length !== 4) throw new Error("--gesture takes NAME,X,Y,W,H in source pixels");
 			(options.gestures ??= []).push({ name: gname, box: parseNumbers(parts.join(","), 4) });
 		} else if (arg === "--max-width") options.maxWidth = Number(rest[++i]);
+		else if (arg === "--portrait") options.portrait = true;
 		else if (arg === "--key") options.key = rest[++i];
 		else if (arg === "--fuzz") options.fuzz = Number(rest[++i]);
 		else positional.push(arg);
@@ -356,7 +358,7 @@ function main(argv) {
 	if (command === "ingest" && set && name) return ingest(set, name, options);
 	if (command === "sheet" && set && name) return sheet(set, name, positional[0]);
 	if (command === "figure" && set && name) return measureFigures(set, [name, ...positional]);
-	console.error("usage: june-art status SET | ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--gesture NAME,X,Y,W,H]... [--max-width PX] [--key COLOUR] [--fuzz PERCENT] | sheet SET NAME [OUT] | figure SET NAME...");
+	console.error("usage: june-art status SET | ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--gesture NAME,X,Y,W,H]... [--max-width PX] [--portrait] [--key COLOUR] [--fuzz PERCENT] | sheet SET NAME [OUT] | figure SET NAME...");
 	process.exit(2);
 }
 

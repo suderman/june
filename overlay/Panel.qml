@@ -34,9 +34,7 @@ Item {
   readonly property var m: Compose.metrics(width)
   // Measured sizes, in element order, as the layout engine reads them.
   property var sizes: []
-  // Planned with the panel's pose first; if the words run long enough to need an inset, a pose of the same expression
-  // drawn tall takes over and she fills the panel instead (see panelLayout in compose.mjs).
-  readonly property var laid: Compose.panelLayout({ panel: p, width: width, sizes: sizes, poses: poses })
+  readonly property var laid: Compose.panelLayout({ panel: p, width: width, sizes: sizes })
   readonly property var pose: laid.pose
   readonly property var layout: laid.layout
 
@@ -268,6 +266,19 @@ Item {
       maskThresholdMin: 0.17
       maskSpreadAtMin: 0.2
     }
+  }
+  // The desk or counter she stands behind on a long panel, when her drawing ends at her hips.
+  Item {
+    readonly property var desk: panel.layout.desk
+    visible: desk !== null
+    x: 0
+    y: desk ? desk.y : 0
+    width: panel.width
+    height: desk ? desk.h : 0
+    Rectangle { anchors.fill: parent; color: parent.desk ? Light.graded(parent.desk.front, panel.light) : "transparent" }
+    Rectangle { width: parent.width; height: 12; color: parent.desk ? Light.graded(parent.desk.top, panel.light) : "transparent" }
+    Rectangle { width: parent.width; height: Theme.line; color: Theme.ink }
+    Rectangle { y: 12; width: parent.width; height: Theme.line; color: Theme.ink }
   }
   Rectangle {
     visible: panel.layout.clip.inset

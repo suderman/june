@@ -77,6 +77,19 @@ test("ingest grows the canvas to keep a low hand, rather than refusing or cuttin
 	assert.ok(entry.figure[1] + entry.figure[3] >= 0.999, "the drawn figure reaches the grown canvas's bottom");
 });
 
+test("--portrait keeps a portrait's face size on art extended to her feet", (t) => {
+	const set = mkdtempSync(join(tmpdir(), "june-art-portrait-"));
+	t.after(() => rmSync(set, { recursive: true, force: true }));
+	mkdirSync(join(set, "incoming"));
+	const source = join(set, "synthetic.png");
+	execFileSync("magick", ["-size", "1600x3000", "xc:none", "-fill", "#cc9966", "-draw", "rectangle 100,100 1500,2980", source]);
+	writeFileSync(join(set, "incoming", "synthetic.json"), JSON.stringify({ section: "poses", expression: "idle", facing: "front", faceBox: [600, 200, 400, 800], framings: ["bust", "waist", "full"] }));
+	execFileSync(process.execPath, [new URL("../art/june-art.mjs", import.meta.url).pathname, "ingest", set, "synthetic", "--file", source, "--portrait"], { stdio: "pipe" });
+	const entry = JSON.parse(readFileSync(join(set, "manifest.json"), "utf8")).poses.synthetic;
+	close(entry.face[3] * entry.size[1], FACE.pose.h * CANVAS.pose[1], 3);
+	assert.ok(entry.framings.includes("full"));
+});
+
 test("a fully visible surviving box cannot certify source-gesture preservation", () => {
 	const source = { w: 10, h: 10, alpha: new Uint8Array(100).fill(255) };
 	const place = { size: [10, 10], scale: 1, x: 0, y: 3 };

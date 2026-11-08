@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
@@ -687,6 +688,7 @@ private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONO
                 }
             }
         }
+        scene?.optJSONObject("desk")?.let { DeskView(it) }
         // Marks that reinforce her pose, beside her face, under the words (compose.mjs MARK_SHAPES).
         val marks = l.optJSONArray("marks")
         if (marks != null && marks.length() > 0) MarksView(marks, l.optJSONObject("markShapes"))
@@ -698,6 +700,21 @@ private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONO
             }
         }
         Box(Modifier.matchParentSize().border(3.dp, Look.ink))
+    }
+}
+
+/** The desk or counter she stands behind on a long panel, as Panel.qml draws it. */
+@Composable
+private fun DeskView(desk: JSONObject) {
+    Canvas(Modifier.fillMaxSize()) {
+        val y = desk.getDouble("y").toFloat() * density
+        val h = desk.getDouble("h").toFloat() * density
+        val lip = 12f * density
+        val line = 2f * density
+        drawRect(Look.color(desk.getString("front")), Offset(0f, y), Size(size.width, h))
+        drawRect(Look.color(desk.getString("top")), Offset(0f, y), Size(size.width, lip))
+        drawRect(Look.ink, Offset(0f, y), Size(size.width, line))
+        drawRect(Look.ink, Offset(0f, y + lip), Size(size.width, line))
     }
 }
 

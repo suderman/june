@@ -6,7 +6,7 @@ Current syntax, from repository root:
 
 #+begin_example
 nix run .#art -- status SET
-nix run .#art -- ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--gesture NAME,X,Y,W,H]... [--max-width PX] [--key COLOUR] [--fuzz PERCENT]
+nix run .#art -- ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--gesture NAME,X,Y,W,H]... [--max-width PX] [--portrait] [--key COLOUR] [--fuzz PERCENT]
 nix run .#art -- sheet SET NAME [OUT]
 #+end_example
 
@@ -90,7 +90,7 @@ An incoming metadata file is a flat entry plus =section= and optionally source =
 }
 #+end_example
 
-Other pose fields include =setting= (desk/couch/kitchen/standing, default desk), optional =activity=, =props= and application-drawn =marks=. Omit =marks= when none; an empty =marks:[]= fails the nonempty-list validator. =props:[]= is allowed. Do not include =full= framing for a standard source: =kindOf= uses that field to choose the tall canvas. Keep a =NAME.txt= sidecar with exact prompts, seeds, models/hashes, sampler/adapter settings, input identity, alpha method and approval state. PNG metadata is also retained, not replaced by prose.
+Other pose fields include =setting= (desk/couch/kitchen/standing, default desk), optional =activity=, =props= and application-drawn =marks=. Omit =marks= when none; an empty =marks:[]= fails the nonempty-list validator. =props:[]= is allowed. Do not include =full= framing for a standard source: =kindOf= uses that field to choose the tall canvas. A portrait extended to her feet lists =full= and is ingested with =--portrait=, which keeps the portrait face size and grows the canvas down. Keep a =NAME.txt= sidecar with exact prompts, seeds, models/hashes, sampler/adapter settings, input identity, alpha method and approval state. PNG metadata is also retained, not replaced by prose.
 
 Metadata precedence is incoming sidecar merged over existing/planned entry, then existing manifest, then optional =planned.json=. A new set can start with sidecar only; ingester creates minimal version-1 manifest. =status= counts finished manifest entries and optional planned catalogue, not the Org inventory. Production currently has no =planned.json=; zero planned and empty incoming do not mean the 105-piece library is finished. Count finished entries in the current manifest rather than copying an earlier task's total. Runtime reads finished manifests and merges fallback sets; it does not need a catalogue of every unproduced item.
 

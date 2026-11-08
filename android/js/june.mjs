@@ -67,7 +67,7 @@ function tint(id) {
  * behind her (`scene`, below) at `now` under the daemon's `sky`.
  */
 export function layout(panel, width, sizes, now, hourOverride, sky) {
-	const laid = compose.panelLayout({ panel, width, sizes, poses });
+	const laid = compose.panelLayout({ panel, width, sizes });
 	const elements = laid.layout.elements.map((e, i) => {
 		const kind = sizes[i] ? sizes[i].kind : "";
 		if (!e) return e;
@@ -110,6 +110,7 @@ function scene(panel, laid, pose, sizes, width, now, hourOverride, sky) {
 		gradeAmount: L.gradeAmount,
 		figure: { grade: L.figureGrade, brightness: L.figureBrightness, saturation: L.figureSaturation },
 		key: { colour: L.key, strength: L.keyStrength },
+		desk: laid.desk ? { y: laid.desk.y, h: laid.desk.h, top: g(laid.desk.top), front: g(laid.desk.front) } : null,
 		lamp: back.kind === "cutaway" || !sc.faceCentre ? 0 : L.lampOn,
 		faceCentre: sc.faceCentre,
 	};
