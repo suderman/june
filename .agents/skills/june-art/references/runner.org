@@ -1,0 +1,37 @@
+* Run ComfyUI jobs with june-art run
+** Use this instead of writing a harness
+=art/runner.mjs= is the tested way to run an art job. It submits graphs, waits, downloads outputs, keeps a ledger, enforces a budget and refuses bad graphs. Do not write another submit script. If it lacks something you need, add it to the runner with a test and commit it, so the next session has it. =nix run .#art -- run= prints its usage.
+
+** Pipelines
+A pipeline is =art/pipelines/NAME/=: =pipeline.json= (status, summary, parameters, main output node, what proved it) and =graph.json= (an API-format graph with =${name}= placeholders). =${prefix}= is supplied by the run. List them with =run pipelines=.
+
+| Status | Meaning |
+|--------+---------|
+| =proven= | Jon approved real results from it. =pipeline.json= says which. |
+| =experimental= | Works technically, not yet approved. |
+| =failed= | Kept so nobody retries it. Its lessons say why. |
+
+Export new graphs from ComfyUI with Export (API). Set a pipeline to =proven= only after Jon has approved results by eye.
+
+** A job
+#+begin_src sh
+RUN=~/.local/state/org-work/DOMAIN/PROJECT/YYYY-MM-DD-slug/run
+art() { nix run ~/src/suderman/june#art -- run "$@"; }
+
+art init "$RUN" --budget 12 --group-limit 4 --watch ~/org/june/avatar
+art validate character --set seed=1 --set positive=@prompt.txt --set negative=@negative.txt
+art submit "$RUN" pose-s9001 --pipeline character --group pose --set seed=9001 --set positive=@prompt.txt --set negative=@negative.txt
+NAME=$(art upload "$RUN" "$RUN/pose-s9001/node-11-0.png")
+art submit "$RUN" pose-s9001-alpha --pipeline alpha-toonout --set image="$NAME"
+art sheet "$RUN" review.png pose-s9001-alpha
+art status "$RUN"
+#+end_src
+
+** What it enforces
+- A run's directory cannot be inside a Git repository or =~/org=. Put contact sheets for review in the task directory yourself.
+- Only graphs with a sampler spend the budget. Cutting out or compositing is free. A graph ComfyUI rejects costs nothing; one that fails or hangs does.
+- A label is never reused, and a job is refused while ComfyUI's shared queue is busy.
+- Graphs are checked against the live =/object_info=, including that =ImageCompositeMasked= has its mask connected.
+- =raise= and =resume= need =--by WHO=, and record it. Only do them with that person's approval.
+- =status= reports any file under =--watch= that changed since the run began. Watch production art.
+- =unchanged A B --region X,Y,W,H= compares pixels exactly and exits non-zero if they differ. Use it to prove protected art was not touched.

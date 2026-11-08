@@ -12,7 +12,8 @@ Generate coherent June characters from fresh noise with reference conditioning, 
 1. Resolve the checkout with `git rev-parse --show-toplevel`. Read the matching Org project and current authorization before work. On Jon's host the project is `~/org/work/suderman/june/june.org`.
 2. Read `references/identity-and-records.org`. Locate the canonical sheet and the exact inventory entry, not a similar-looking experimental image. Inspect the images yourself.
 3. Read `references/environment.org`; check the live service, model hashes, required node schemas and saved workflow before selecting settings. Do not install or restart things merely because an endpoint or optional node fails.
-4. Read only the task's next reference below. Keep generated artwork and weights outside this skill and repository. Store fresh machine records under host-local state, not synced Org.
+4. Read `lessons/general.org` and the lessons for your pipeline. Before setting EVAL, add what this job taught you, including what failed. Use `june-art run` (`references/runner.org`) rather than writing a submit script.
+5. Read only the task's next reference below. Keep generated artwork and weights outside this skill and repository. Store fresh machine records under host-local state, not synced Org.
 
 This is Jon's personal June art skill. `~/org/work/` is synchronized across his workstations; **kit** is the designated ComfyUI host with the NVIDIA GPU. Read synced records elsewhere, but run ComfyUI/GPU operations on kit. Portability to unrelated environments is not a goal.
 
@@ -25,6 +26,7 @@ All bundled paths below are relative to this skill directory. External paths in 
 | Measure, stage, ingest, promote or inspect manifest | `references/ingestion.org` |
 | Crop sheet or actual desktop/narrow panel proof | `references/preview.org` |
 | Diagnose visual, node, API or integration failures | `references/troubleshooting.org` |
+| Run anything through ComfyUI, or add a pipeline | `references/runner.org` |
 
 ## Proven starting point
 

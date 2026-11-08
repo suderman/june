@@ -7,6 +7,7 @@
   nodejs_22,
   imagemagick,
   realesrgan-ncnn-vulkan,
+  dejavu_fonts,
 }: let
   src = lib.fileset.toSource {
     root = ../.;
@@ -16,6 +17,9 @@ in
   writeShellApplication {
     name = "june-art";
     runtimeInputs = [nodejs_22 imagemagick realesrgan-ncnn-vulkan];
-    text = ''exec node --disable-warning=ExperimentalWarning ${src}/art/june-art.mjs "$@"'';
+    text = ''
+      export JUNE_ART_FONT=${dejavu_fonts}/share/fonts/truetype/DejaVuSans.ttf
+      exec node --disable-warning=ExperimentalWarning ${src}/art/june-art.mjs "$@"
+    '';
     meta.description = "Finish generated art into June's avatar set";
   }

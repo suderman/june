@@ -1,0 +1,153 @@
+{
+ "1": {
+  "inputs": {
+   "unet_name": "anima-base-v1.0.safetensors",
+   "weight_dtype": "default"
+  },
+  "class_type": "UNETLoader"
+ },
+ "2": {
+  "inputs": {
+   "clip_name": "qwen_3_06b_base.safetensors",
+   "type": "stable_diffusion",
+   "device": "default"
+  },
+  "class_type": "CLIPLoader"
+ },
+ "3": {
+  "inputs": {
+   "vae_name": "qwen_image_vae.safetensors"
+  },
+  "class_type": "VAELoader"
+ },
+ "4": {
+  "inputs": {
+   "image": "${reference_body}"
+  },
+  "class_type": "LoadImage"
+ },
+ "5": {
+  "inputs": {
+   "lora_name": "anima_ref_adapter_v2_r64.safetensors",
+   "ref_guidance": 2.5,
+   "correction": "apg",
+   "strength": 1.0,
+   "ref_end": 1.0,
+   "ref_megapixels": 1.0,
+   "model": [
+    "1",
+    0
+   ],
+   "vae": [
+    "3",
+    0
+   ],
+   "image": [
+    "13",
+    0
+   ]
+  },
+  "class_type": "AnimaRefAdapter"
+ },
+ "6": {
+  "inputs": {
+   "width": "${width}",
+   "height": "${height}",
+   "batch_size": 1
+  },
+  "class_type": "EmptyLatentImage"
+ },
+ "7": {
+  "inputs": {
+   "text": "${positive}",
+   "clip": [
+    "2",
+    0
+   ]
+  },
+  "class_type": "CLIPTextEncode"
+ },
+ "8": {
+  "inputs": {
+   "text": "${negative}",
+   "clip": [
+    "2",
+    0
+   ]
+  },
+  "class_type": "CLIPTextEncode"
+ },
+ "9": {
+  "inputs": {
+   "seed": "${seed}",
+   "steps": 30,
+   "cfg": 4.5,
+   "sampler_name": "er_sde",
+   "scheduler": "simple",
+   "denoise": 1.0,
+   "model": [
+    "5",
+    0
+   ],
+   "positive": [
+    "7",
+    0
+   ],
+   "negative": [
+    "8",
+    0
+   ],
+   "latent_image": [
+    "6",
+    0
+   ]
+  },
+  "class_type": "KSampler"
+ },
+ "10": {
+  "inputs": {
+   "samples": [
+    "9",
+    0
+   ],
+   "vae": [
+    "3",
+    0
+   ]
+  },
+  "class_type": "VAEDecode"
+ },
+ "11": {
+  "inputs": {
+   "filename_prefix": "${prefix}",
+   "images": [
+    "10",
+    0
+   ]
+  },
+  "class_type": "SaveImage"
+ },
+ "12": {
+  "inputs": {
+   "image": "${reference_face}"
+  },
+  "class_type": "LoadImage"
+ },
+ "13": {
+  "inputs": {
+   "direction": "right",
+   "match_image_size": false,
+   "spacing_width": 24,
+   "spacing_color": "white",
+   "image1": [
+    "4",
+    0
+   ],
+   "image2": [
+    "12",
+    0
+   ]
+  },
+  "class_type": "ImageStitch"
+ }
+}

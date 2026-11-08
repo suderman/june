@@ -1,0 +1,27 @@
+{
+ "status": "proven",
+ "summary": "A new figure on a plain background, from fresh noise, conditioned on a character's reference pair.",
+ "graph": "graph.json",
+ "main": "11",
+ "ingest": "poses",
+ "parameters": {
+  "seed": {
+   "type": "number"
+  },
+  "positive": {},
+  "negative": {},
+  "width": {
+   "default": 1024
+  },
+  "height": {
+   "default": 1344
+  },
+  "reference_body": {
+   "default": "june-canonical-fullbody.png"
+  },
+  "reference_face": {
+   "default": "june-canonical-face.png"
+  }
+ },
+ "proven": "The production idle-attentive portrait, seed 4002. example-idle-attentive.json reproduces its parameters."
+}

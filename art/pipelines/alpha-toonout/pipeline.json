@@ -1,0 +1,10 @@
+{
+ "status": "proven",
+ "summary": "Cut a finished RGB image out of its plain background with ToonOut, keeping its RGB.",
+ "graph": "graph.json",
+ "main": "8",
+ "parameters": {
+  "image": {}
+ },
+ "proven": "June - Production alpha ToonOut, the production method for the pose library. Upload the RGB first; image is the name upload prints."
+}

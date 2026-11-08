@@ -1,0 +1,14 @@
+* Lessons for every art job
+Rules learned from real runs, each with its evidence. Read this and the lessons for your pipeline before starting. Before setting EVAL, add what this job taught you, including what failed, and remove a rule that a later result disproved. Keep each to a rule and its evidence; the Org thread holds the story.
+
+** If the same fault appears across seeds, change the method
+Seeds vary a composition; they do not repair a method. Evidence: all four first-step seeds of the idle outpaint pilot (2026-11-08) failed at the join.
+
+** A technical pass is not an art pass
+Pixel checks prove protected art survived, not that the new art is good. Look at the actual image at full size against the canon. Evidence: the bashful crown repair completed cleanly and invented a floating cap.
+
+** Check the graph that ran, not the one you meant
+A positional connection silently left =ImageCompositeMasked= without its mask, and five outputs used the whole decoded image. =june-art run= now refuses this graph.
+
+** Give the model a whole subject to continue
+Evidence, not yet isolated from other causes: idle outpaint windows that showed only 448 px of belt and skirt produced three legs (81002) and two lower bodies (81003).

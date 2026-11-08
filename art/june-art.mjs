@@ -7,6 +7,7 @@
 //   june-art sheet SET NAME [OUT] a contact sheet: the piece, its face box and mouth, and its crop at every framing
 //   june-art figure SET NAME...   record where finished poses' drawn figures lie (`figure`), for poses ingested before
 //                                 ingest wrote it; a tall panel stands her on the panel's bottom by it
+//   june-art run VERB ...         drive ComfyUI: pipelines, budgets, a ledger of every job, pixel checks (runner.mjs)
 //
 // ingest options: --file PATH (instead of incoming/NAME.png), --face X,Y,W,H and --mouth X,Y in source pixels,
 // --gesture NAME,X,Y,W,H (repeatable, the first primary) for a gesture away from her face, --max-width PX for how wide
@@ -24,6 +25,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseManifest } from "../src/avatar.ts";
 import { FRAMINGS, frame, framingsShowing, readPoses } from "../overlay/compose.mjs";
+import { FONT, runCommand } from "./runner.mjs";
 import { CROWN_CUT_SHARE, gesturePreservation, kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "./layout.mjs";
 
 const SECTIONS = ["poses", "chibi", "rooms", "plates", "props"];
@@ -306,7 +308,7 @@ function sheet(set, name, outPath) {
 				"(", "-size", `${w}x${h}`, "xc:#f4efe6",
 				"(", path, "-resize", `${Math.round(r.w)}x${Math.round(r.h)}!`, ")",
 				"-geometry", `${offset(r.x)}${offset(r.y)}`, "-composite",
-				"-fill", "#333", "-pointsize", "16", "-gravity", "southwest", "-annotate", "+6+4", framing, "-gravity", "northwest",
+				"-font", FONT, "-fill", "#333", "-pointsize", "16", "-gravity", "southwest", "-annotate", "+6+4", framing, "-gravity", "northwest",
 				"-bordercolor", "#333", "-border", "2", ")",
 			]);
 		}
@@ -336,6 +338,7 @@ function sheet(set, name, outPath) {
 }
 
 function main(argv) {
+	if (argv[0] === "run") return runCommand(argv.slice(1));
 	const [command, set, name, ...rest] = argv;
 	const options = {};
 	const positional = [];
@@ -362,9 +365,9 @@ function main(argv) {
 	process.exit(2);
 }
 
-try {
-	main(process.argv.slice(2));
-} catch (error) {
-	console.error(`june-art: ${error instanceof Error ? error.message : error}`);
-	process.exit(1);
-}
+Promise.resolve()
+	.then(() => main(process.argv.slice(2)))
+	.catch((error) => {
+		console.error(`june-art: ${error instanceof Error ? error.message : error}`);
+		process.exit(1);
+	});

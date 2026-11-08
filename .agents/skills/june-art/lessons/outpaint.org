@@ -1,0 +1,21 @@
+* Lessons for extending existing art
+** Status
+No method for extending a body is proven yet. Crown repair works.
+
+** Hair extends; limbs do not join
+=June - Crown outpaint protected v2.json= repaired the crowns on curious, indignant and pout, because hair is forgiving at a seam. Arms and legs have hard edges that must line up.
+
+** VAEEncodeForInpaint at denoise 1 draws the new area nearly independently
+Anima has no inpainting channel, so kept pixels are only pinned at each step. Evidence: the idle pilot's raw decode (seeds 81001 to 81004 and 81101) shows forearms starting about 50 px from the original arm, and calves wider than knees, before any alpha or panel work.
+
+** Do not build a body around a protected head crop
+=June - Locked face full-body outpaint.json= gave a rectangular head seam, a duplicate headset and a body that was not June's.
+
+** Protect only what must survive
+A mask that locked the fly and crotch made a continuous skirt impossible. Cutting the source back to y1008 and feathering y912 to y1008 let the skirt pass while keeping the face, hair, blouse and belt exact.
+
+** Do not cue an ending in a window's prompt
+Asking for boots in a first window ended the legs early and compressed them. Prompt only for what the window should contain.
+
+** Open
+Soft-mask seam repair (plain =VAEEncode=, =SetLatentNoiseMask=, =DifferentialDiffusion= after =AnimaRefAdapter=) is under test on the idle candidate. Record its result here, whichever way it goes.
