@@ -5,6 +5,8 @@
 ** Pipelines
 A pipeline is =art/pipelines/NAME/=: =pipeline.json= (status, summary, parameters, main output node, what proved it) and =graph.json= (an API-format graph with =${name}= placeholders). =${prefix}= is supplied by the run. List them with =run pipelines=.
 
+Each =example-*.json= beside a pipeline holds the exact parameters of a good result. Start a new piece from the closest one.
+
 | Status | Meaning |
 |--------+---------|
 | =proven= | Jon approved real results from it. =pipeline.json= says which. |

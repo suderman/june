@@ -1,12 +1,18 @@
 * Lessons for extending existing art
 ** Status
-No method for extending a body is proven yet. Crown repair works.
+Do not extend portraits to full figures. The idle pilot (2026-11-08) failed review after 12 samplers across two methods. Draw new poses tall instead, with the =character= pipeline. Crown repair works, and =masked-repair= removes hard joins.
 
 ** Hair extends; limbs do not join
 =June - Crown outpaint protected v2.json= repaired the crowns on curious, indignant and pout, because hair is forgiving at a seam. Arms and legs have hard edges that must line up.
 
 ** VAEEncodeForInpaint at denoise 1 draws the new area nearly independently
-Anima has no inpainting channel, so kept pixels are only pinned at each step. Evidence: the idle pilot's raw decode (seeds 81001 to 81004 and 81101) shows forearms starting about 50 px from the original arm, and calves wider than knees, before any alpha or panel work.
+Anima has no inpainting channel, so kept pixels are only pinned at each step. Evidence: the idle pilot's raw decode (seeds 81001 to 81004 and 81101) shows forearms starting about 50 px from the original arm, and calves wider than knees, before any alpha or panel work. More seeds did not help.
+
+** A soft mask removes joins, but cannot change what it does not cover
+Plain =VAEEncode=, =SetLatentNoiseMask= and =DifferentialDiffusion= after =AnimaRefAdapter= (the =masked-repair= pipeline), with a mask that rises from zero, removed the rectangular forearm and knee cuts: seed 82003 at denoise 0.55 and 82102 at 0.75. At denoise 0.4 the cut stayed; at 0.6 and 0.7 arms grew ghosts, open palms or jewellery. The figure still failed, because stance, knee shape and boots came from the first generation. Repair a good drawing; do not use repair to rescue a bad one. No control without =DifferentialDiffusion= was run.
+
+** Check a generation's whole figure before repairing it
+Judge the stance, proportions and outfit of an extension before spending anything on its joins. The pilot's candidate had flared arms, inward knees, oversized boots and a navy skirt where canon is brown.
 
 ** Do not build a body around a protected head crop
 =June - Locked face full-body outpaint.json= gave a rectangular head seam, a duplicate headset and a body that was not June's.
@@ -16,6 +22,3 @@ A mask that locked the fly and crotch made a continuous skirt impossible. Cuttin
 
 ** Do not cue an ending in a window's prompt
 Asking for boots in a first window ended the legs early and compressed them. Prompt only for what the window should contain.
-
-** Open
-Soft-mask seam repair (plain =VAEEncode=, =SetLatentNoiseMask=, =DifferentialDiffusion= after =AnimaRefAdapter=) is under test on the idle candidate. Record its result here, whichever way it goes.

@@ -107,6 +107,14 @@ test("the proven pipelines load, render completely, and record what proved them"
 	assert.equal(seedsOf(character)[0], 4002);
 	assert.ok(!JSON.stringify(character).includes("${"), "nothing left unfilled");
 	assert.ok(!JSON.stringify(renderPipeline(loadPipeline("alpha-toonout"), { image: "a.png" }, { prefix: "o" })).includes("${"));
+	const repair = renderPipeline(loadPipeline("masked-repair"), { seed: "5", positive: "p", negative: "n", image: "i.png", mask: "m.png", denoise: "0.6" }, { prefix: "o" });
+	assert.equal(repair["9"].inputs.denoise, 0.6);
+	assert.deepEqual(repair["17"].inputs.mask, ["15", 0], "the mask stays connected");
+	assert.ok(!JSON.stringify(repair).includes("${"));
+	for (const example of ["example-idle-attentive", "example-tall-standing-mug"]) {
+		const values = JSON.parse(readFileSync(new URL(`../art/pipelines/character/${example}.json`, import.meta.url), "utf8"));
+		assert.ok(renderPipeline(loadPipeline("character"), values, { prefix: "o" })["9"].inputs.seed > 0, `${example} fills the pipeline`);
+	}
 });
 
 test("a run records the job, downloads its outputs and counts it against the budget", async (t) => {

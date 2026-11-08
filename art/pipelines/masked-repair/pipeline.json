@@ -1,0 +1,26 @@
+{
+ "status": "experimental",
+ "summary": "Redraw a soft-masked region of an existing image, keeping every unmasked pixel. Removes hard joins; cannot change anatomy outside its mask.",
+ "graph": "graph.json",
+ "main": "11",
+ "parameters": {
+  "seed": {
+   "type": "number"
+  },
+  "positive": {},
+  "negative": {},
+  "denoise": {
+   "default": 0.55,
+   "type": "number"
+  },
+  "image": {},
+  "mask": {},
+  "reference_body": {
+   "default": "june-canonical-fullbody.png"
+  },
+  "reference_face": {
+   "default": "june-canonical-face.png"
+  }
+ },
+ "evidence": "2026-11-08 idle outpaint pilot, seeds 82003 and 82102: hard forearm and knee joins removed at denoise 0.55 and 0.75. The figure failed review, so no result is approved. Mask is a white-on-black image, zero at its edges, and image and mask must be the same size, within about 1 MP."
+}

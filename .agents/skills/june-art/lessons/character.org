@@ -1,0 +1,9 @@
+* Lessons for drawing a character
+** Tall art comes from a tall canvas
+Generate full figures at 832x1536 with the =character= pipeline. =art/pipelines/character/example-tall-standing-mug.json= holds the parameters of a standing pose Jon approved (seed 71101), including prompt wording that shows the crown through the boots with clear margins.
+
+** Check the source's face size
+A standing source's face is about 200 px, against 275 to 345 px in portraits. Judge the expression at that size before accepting one. Whether =masked-repair= can sharpen a standing face has not been tried.
+
+** Start from the right RGB
+Several production portraits had their irises repaired after generation, so the original RGB has the old eye colour. Anything built from an original needs that repair again. Evidence: the idle outpaint pilot's eyes came out brown.
