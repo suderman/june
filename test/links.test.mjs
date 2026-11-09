@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { emacsCall, linkKind, markup } from "../overlay/strip.mjs";
 
@@ -28,10 +30,20 @@ test("June's links become anchors, in Markdown or Org form, and anything else ke
 });
 
 test("a file link becomes an emacsclient call whose path and search are only ever Lisp strings", () => {
-	assert.deepEqual(emacsCall("file:~/org/todo.org::*Call the dentist"), ["emacsclient", "-r", "-n", "--eval", '(suderman/june-open "~/org/todo.org" "*Call the dentist")']);
-	assert.deepEqual(emacsCall("file:~/org/notes.org").at(-1), '(suderman/june-open "~/org/notes.org" "")');
-	assert.equal(emacsCall('file:~/org/a.org::x") (shell-command "rm') .at(-1), '(suderman/june-open "~/org/a.org" "x\\") (shell-command \\"rm")', "a quote stays inside the string");
-	assert.equal(emacsCall("file:/tmp/a.org::two::colons").at(-1), '(suderman/june-open "/tmp/a.org" "two::colons")');
+	assert.deepEqual(emacsCall("file:~/org/todo.org::*Call the dentist"), ["emacsclient", "-r", "-n", "--eval", '(june-open "~/org/todo.org" "*Call the dentist")']);
+	assert.deepEqual(emacsCall("file:~/org/notes.org").at(-1), '(june-open "~/org/notes.org" "")');
+	assert.equal(emacsCall('file:~/org/a.org::x") (shell-command "rm') .at(-1), '(june-open "~/org/a.org" "x\\") (shell-command \\"rm")', "a quote stays inside the string");
+	assert.equal(emacsCall("file:/tmp/a.org::two::colons").at(-1), '(june-open "/tmp/a.org" "two::colons")');
+});
+
+let hasEmacs = false;
+try { execFileSync("emacs", ["--version"], { stdio: "ignore" }); hasEmacs = true; } catch { /* CI supplies Emacs; JS-only installs can still check markup. */ }
+
+test("June's Emacs integration opens files and handles the phone protocol", { skip: !hasEmacs }, () => {
+	execFileSync("emacs", ["-Q", "--batch", "-L", "org/links", "-l", "org/tests/links.el", "-f", "ert-run-tests-batch-and-exit"], {
+		cwd: fileURLToPath(new URL("../", import.meta.url)),
+		stdio: "pipe",
+	});
 });
 
 test("a link's words take the colour the strip gives them", () => {

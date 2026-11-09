@@ -7,6 +7,7 @@ org/
 ├── dispatch/org-dispatch.el   dispatcher, run by Emacs in batch
 ├── dispatch/org-dispatch      command-line wrapper
 ├── edit/org-edit              TODO states and dates set by Org for agents
+├── links/june-links.el        file links opened in interactive Emacs
 ├── prompts/                   task.org and nudge.org, sent to the agent
 ├── bin/herdr-link             stamp and follow herdr: links
 └── tests/                     batch tests with fixtures
@@ -20,6 +21,21 @@ June's Home Manager module (=homeModules.default=, see the main README) builds =
 The skills are different. =~/.agents/skills.json= lists them as local entries with two paths, so =agents apply= links =~/.agents/skills/project-org-tasks= and =org-triage= into this checkout when it is there, and edits apply at once; elsewhere it links the pinned copy that =programs.june= places at =~/.config/june/skills=. Every harness finds them in =~/.agents/skills=. Rebuild before publishing skill text that describes a new command.
 
 An Emacs configuration that shows these tasks needs the same TODO keywords, and the =herdr:= link handler if it opens session links. Change both copies of the keywords together.
+
+** File links in interactive Emacs
+=links/june-links.el= belongs to June but runs in the user's interactive Emacs, not the batch dispatcher. Load it at startup on the desktop and in the Android Emacs APK. With =use-package=:
+
+#+begin_src emacs-lisp
+(use-package june-links
+  :vc (:url "https://github.com/suderman/june" :lisp-dir "org/links" :rev :newest)
+  :ensure nil
+  :demand t
+  :custom (june-host "kit"))
+#+end_src
+
+=package-vc= fetches June and builds the =org/links= Lisp directory as the package, so the same setup works without a separate June checkout on the desktop or phone. Set =june-host= to the host running June; it defaults to the current machine. Upgrade with =package-vc-upgrade-all= when this integration changes.
+
+The desktop calls =(june-open PATH SEARCH)= through =emacsclient=. The Android app keeps using =org-protocol://june-open?path=…&search=…=; the package registers that handler and loads =org-protocol= at startup in the APK. Files under =~/org= open locally on each device. Other files open on =june-host=, through TRAMP from another desktop, and are refused on Android. Heading, custom-ID, line and text searches follow Org's file-link rules. Link arguments remain data, never Lisp to evaluate.
 
 ** The contract
 

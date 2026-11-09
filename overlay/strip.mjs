@@ -172,13 +172,13 @@ export function linkKind(url) {
 }
 
 /**
- * The emacsclient call that opens a file link in Emacs at its search: suderman/june-open in Jon's Emacs configuration
+ * The emacsclient call that opens a file link in Emacs at its search: june-open in org/links/june-links.el
  * takes the path and search as strings, so they are quoted as Lisp strings (JSON's escapes are Lisp's) and never read
  * as code. -r reuses the frame Jon has, or makes one.
  */
 export function emacsCall(url) {
 	const [path, ...rest] = url.slice("file:".length).split("::");
-	return ["emacsclient", "-r", "-n", "--eval", `(suderman/june-open ${JSON.stringify(path)} ${JSON.stringify(rest.join("::"))})`];
+	return ["emacsclient", "-r", "-n", "--eval", `(june-open ${JSON.stringify(path)} ${JSON.stringify(rest.join("::"))})`];
 }
 
 // Org's emphasis, as src/org.ts reads it: a marker after a space or opening punctuation, no space just inside, and

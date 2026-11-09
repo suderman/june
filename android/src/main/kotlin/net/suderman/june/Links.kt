@@ -10,8 +10,8 @@ import androidx.compose.ui.platform.UriHandler
 /**
  * The links in June's words that a tap opens: web pages in the browser, `herdr:` links to an agent's session, which
  * Termux attaches to over ssh as Jon's Emacs does (suderman/org-herdr-follow-android), and `file:` links to files in
- * ~/org, which Emacs opens at their heading or line through org-protocol (suderman/june-open in Jon's Emacs
- * configuration; ~/org there is this phone's copy of the tree). Links come from the model, so nothing here runs what
+ * ~/org, which Emacs opens at their heading or line through org-protocol (june-open in org/links/june-links.el;
+ * ~/org there is this phone's copy of the tree). Links come from the model, so nothing here runs what
  * a link says: a herdr link must have the form herdr-link stamps, and every kind only opens or focuses.
  */
 object Links {
