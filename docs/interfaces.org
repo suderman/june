@@ -28,7 +28,9 @@ The plan builds on these seams rather than beside them.
 - Settled on 2026-10-30 in [[file:architecture.org::*Client protocol for graphical clients][the architecture notes]]: the folded view is an attach option beside raw events, items change by whole-item replacement, and the listener stays on loopback behind Traefik as =wss://june.kit/=, reachable on the LAN without Tailscale and away through the subnet route. Both graphical clients use the WebSocket, the desktop overlay included.
 - Settled: where June's own notices go when the user last spoke from the overlay or the phone app: the overlay counts as the terminal, plus a desktop notification when it is hidden. The Android app gets a phone notification through the existing ntfy server, since Telegram becomes a fallback; the notice itself waits in the conversation. Firebase push also works where sandboxed Google Play is installed, but it needs a Google project and routes notices through Google, so it is the fallback. Telegram gets notices only when the user last spoke there.
 
-* Hyprland overlay
+* Desktop client
+The desktop client is one Quickshell program with two modes: an overlay on top of the desktop, and an ordinary window. These notes grew up around the overlay mode and often call the whole program "the overlay".
+
 ** Requirements that drive the choice
 A layer-shell surface on the =overlay= layer draws above fullscreen windows, which an ordinary floating window does not. Exclusive keyboard interactivity while shown, Escape to hide, a Hyprland bind that toggles a resident process so scrollback survives, and placement on the focused output. Those are protocol behaviours shared by every toolkit, so the toolkit choice is mostly about ergonomics, rendering, and upkeep.
 

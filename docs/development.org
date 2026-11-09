@@ -20,7 +20,7 @@ Tests use pi-ai's faux model, never a real provider. Unix socket paths are limit
 | Path              | Holds                                                                             |
 |-------------------+-----------------------------------------------------------------------------------|
 | =src/=            | The daemon, the terminal client, the Telegram bridge, and June's tools            |
-| =overlay/=        | The Hyprland overlay, and the panel layout logic shared with the phone            |
+| =overlay/=        | The desktop client, and the panel layout logic shared with the phone              |
 | =android/=        | The Android app                                                                   |
 | =org/=            | The Org dispatcher and =org-edit=; see [[file:../org/README.org][org/README.org]] |
 | =art/=            | =june-art=, which finishes generated art and drives ComfyUI                       |
@@ -51,7 +51,7 @@ The module sets up =programs.june=: the =june= client, =org-edit=, and =herdr-li
   programs.june = {
     enable = true;
     daemon.enable = true;   # on the host that runs her
-    remote.enable = true;   # WebSocket on 127.0.0.1:7347, for the overlay and the phone
+    remote.enable = true;   # WebSocket on 127.0.0.1:7347, for the desktop client and the phone
     dispatch.enable = true; # on each host that runs AUTO tasks
     daemonHost = "kit";
     environmentFiles = ["/run/user/1000/june.env"];

@@ -1,6 +1,6 @@
 #+TITLE: June
 
-June is a personal assistant: one persistent daemon on Pi Durable. You talk to her from a terminal client, a desktop overlay, an Android app, or Telegram. She reads Org for tasks and knowledge and Herdr for live agent sessions. She does quick checks and small edits herself with a shell and file tools, and hands larger work to coding agents through an Org dispatcher.
+June is a personal assistant: one persistent daemon on Pi Durable. You talk to her from a terminal client, a desktop client, an Android app, or Telegram. She reads Org for tasks and knowledge and Herdr for live agent sessions. She does quick checks and small edits herself with a shell and file tools, and hands larger work to coding agents through an Org dispatcher.
 
 * Built on
 - [[https://github.com/earendil-works/pi/tree/main/packages/durable][Pi Durable]]: the harness June runs in. Her conversation, tasks, tools, and compaction are durable, so a restart resumes work rather than losing or repeating it. [[https://github.com/earendil-works/pi/tree/main/packages/ai][pi-ai]] talks to the models and [[https://github.com/earendil-works/pi/tree/main/packages/tui][pi-tui]] draws the terminal client.
@@ -30,7 +30,7 @@ June has one conversation, shared by every client. Detaching or losing the conne
 | [[file:docs/behaviour.org][docs/behaviour.org]]         | Heartbeats, memory, the journal, Org tasks, and her other routines   |
 | [[file:docs/development.org][docs/development.org]]     | Checks, repository layout, the two skill directories, and deployment |
 | [[file:docs/architecture.org][docs/architecture.org]]   | Design decisions and the client protocol                             |
-| [[file:docs/interfaces.org][docs/interfaces.org]]       | The overlay, the Android app, the avatar, and voice                  |
+| [[file:docs/interfaces.org][docs/interfaces.org]]       | The desktop client, the Android app, the avatar, and voice           |
 | [[file:org/README.org][org/README.org]]                 | The Org dispatcher and =org-edit=                                    |
 
 * Development
