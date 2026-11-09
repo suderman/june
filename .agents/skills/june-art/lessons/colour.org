@@ -58,3 +58,6 @@ Run 3's first =curious-listening-fresh-m= WebP differed from production in 1,343
 
 ** Keep each small command's report before running the next
 =run masks= replaces =SET/colour-masks.json=, and =colours= replaces =SET/colour-report.json= with the current plan's results. The eleven one-pose plans on 2026-11-09 needed separate saved reports to retain all 33 garment coverages and 41 colour steps. Save them in each pose's host-local run directory; a final top-level report covers only the last pose.
+
+** A wrong-metal buckle needs a mask and flat colour
+=skeptical-standing-raised-eyebrow='s silver buckle came out pale champagne with the plain =belt-hardware= target, because near-grey metal hits the saturation cap. A step with ="segment": "belt buckle"=, =hueKeep: 0= and =satKeep: 0= found it without coordinates and gave the library's gold (2026-11-09).
