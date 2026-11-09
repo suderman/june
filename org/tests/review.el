@@ -299,6 +299,31 @@
       (should (= 1 (length (org-dispatch--eligible (list source-task (plist-put (copy-sequence source-task) :dir alias)) nil t))))
       (should-not (org-dispatch--eligible (list source-task) (list (list :id "other" :status "running" :dir alias)) t)))))
 
+(ert-deftest review-generic-complete-and-resume-cannot-strand-or-reassign-a-linked-review ()
+  (test-with-review
+    (test-review-start)
+    (test-review-report "pass")
+    (let ((id (plist-get (test-review-loop) :review)))
+      (let ((command-line-args-left (list test-review-file (concat "id:" id) "DONE" "--expect" "EVAL")))
+        (should-error (org-edit-todo)))
+      (let ((command-line-args-left (list test-review-file (concat "id:" id) "AUTO" "--expect" "EVAL"
+                                        "--request" "bypass" "--host" "kit" "--agent" "claude" "--note" "Bypass attempt.")))
+        (should-error (org-edit-todo)))
+      (should (equal (test-review-state id) "EVAL"))
+      (test-review-at id (lambda () (should (equal (org-entry-get nil "AGENT") "pi")))))
+    (test-review-advance)
+    (should (equal (test-review-state) "DONE"))))
+
+(ert-deftest review-dispatch-serializes-subdirectories-of-one-git-worktree ()
+  (test-with-review
+    (let* ((subdir (expand-file-name "src" test-review-repo))
+           (org-dispatch-max-agents 10)
+           (one (list :id "one" :host "kit" :agent "pi" :june t :dir test-review-repo :hash "a"))
+           (two (list :id "two" :host "kit" :agent "pi" :june t :dir subdir :hash "b")))
+      (make-directory subdir)
+      (should (= 1 (length (org-dispatch--eligible (list one two) nil t))))
+      (should-not (org-dispatch--eligible (list two) (list (list :id "one" :status "running" :dir test-review-repo)) t)))))
+
 (ert-deftest review-contract-needs-explicit-human-list-and-fresh-read-and-no-worker-coordinator ()
   (test-with-review
     (let ((spec (list :revision (test-review-revision) :commit test-review-commit

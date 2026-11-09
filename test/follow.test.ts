@@ -545,6 +545,61 @@ test("resuming after EVAL and HOLD follows each new run without duplicate report
 	assert.equal(inspection.tasks.filter((task) => task.record.kind === "june.follow").length, 0, "superseded HOLD watcher also ended");
 });
 
+test("review handoffs recover save-follow-kick failure, restart and re-review without duplicate watchers", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "org");
+	const file = join(root, "work.org");
+	await mkdir(root, { recursive: true });
+	await writeFile(join(tmp.dir, "agenda"), `${file}\n`);
+	const orgText = (parent: string, first: string, second = "TODO") => `* ${parent} Build\n:PROPERTIES:\n:ID: development01\n:DEV_REVIEW: fixture\n:END:\n* ${first} Review one\n:PROPERTIES:\n:ID: review0001\n:REVIEW_PARENT: development01\n:END:\n* ${second} Review two\n:PROPERTIES:\n:ID: review0002\n:REVIEW_PARENT: development01\n:END:\n`;
+	await writeFile(file, orgText("EVAL", "AUTO"));
+	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") }, dispatch: { hosts: ["kit"] } };
+	let kicks = 0;
+	const extension = createDispatchExtension(config, new Org(root), new Herdr(config.herdr, async () => "{}"), "inst", async (args) => {
+		if (args[0] === "systemctl") {
+			if (++kicks === 1) throw new Error("fixture crash after saved handoff and follow, before kick");
+			return "";
+		}
+		assert.deepEqual(args.slice(0, 2), ["org-edit", "review"]);
+		const spec = JSON.parse(args[5]!);
+		const fixes = args[2] === "advance";
+		if (fixes) await replaceFile(file, orgText("AUTO", "DONE"));
+		const second = spec.commit === "b".repeat(40);
+		return JSON.stringify({ id: "development01", state: fixes ? "AUTO" : "EVAL", review: {
+			phase: fixes ? "fixes" : "review", review: second ? "review0002" : "review0001", commit: spec.commit, round: second ? 2 : 1, host: "kit", agent: "pi",
+		} });
+	}, { intervalMs: 40, launchMs: 60_000, maxMs: 3_600_000 });
+	const faux = fauxProvider();
+	const call = (action: "start" | "advance", commit = "a".repeat(40)) => fauxAssistantMessage([fauxToolCall("org_review_task", {
+		action, file: "work.org", heading: "id:development01", revision: "c".repeat(64), commit,
+	})], { stopReason: "toolUse" });
+	faux.setResponses([call("start"), fauxAssistantMessage("Handoff saved; kick failed."), call("start"), fauxAssistantMessage("Recovered."),
+		fauxAssistantMessage("Review findings received."), call("advance"), fauxAssistantMessage("Findings returned."),
+		fauxAssistantMessage("Developer revision received."), call("start", "b".repeat(40)), fauxAssistantMessage("Second review queued."), fauxAssistantMessage("Second review received.")]);
+	let daemon = await openTestDaemon({ ...tmp, faux, config, extensions: [extension] });
+	t.after(() => daemon.close());
+	await ask(tmp.paths.socket, "start review");
+	await ask(tmp.paths.socket, "recover the saved handoff");
+	assert.equal((await daemon.harness.inspect(BG)).tasks.filter((task) => task.record.kind === "june.follow").length, 1);
+	await daemon.close();
+	daemon = await openTestDaemon({ ...tmp, faux, config, extensions: [extension] });
+	const reports = async () => (await daemon.root.context(BG)).entries.filter((e) => (e.data as { source?: string })?.source === "follow");
+	await replaceFile(file, orgText("EVAL", "EVAL"));
+	await until(async () => (await reports()).length === 1 && !(await daemon.status()).busy);
+	assert.match(JSON.stringify((await reports())[0]!.data), /DEV_REVIEW or REVIEW_PARENT/);
+	await ask(tmp.paths.socket, "return findings");
+	await replaceFile(file, orgText("EVAL", "DONE"));
+	await until(async () => (await reports()).length === 2 && !(await daemon.status()).busy);
+	await replaceFile(file, orgText("EVAL", "DONE", "AUTO"));
+	await ask(tmp.paths.socket, "review new revision");
+	await replaceFile(file, orgText("EVAL", "DONE", "EVAL"));
+	await until(async () => (await reports()).length === 3 && !(await daemon.status()).busy);
+	await new Promise((resolve) => setTimeout(resolve, 150));
+	assert.equal((await reports()).length, 3);
+	assert.equal(kicks, 4, "failure recovery repeats only the normal dispatcher kick");
+});
+
 test("following ignores isolated missing reads, resets after recovery or errors, and keeps HOLD deduplicated", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);

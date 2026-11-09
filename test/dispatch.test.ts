@@ -612,6 +612,12 @@ test("real review wrapper creates one isolated exact-hash task and refuses ordin
 	assert.equal(await readFile(f.project, "utf8"), text);
 	assert.throws(() => f.run(["org-edit", "todo", f.project, "id:resume123", "DONE"]), /review contract/);
 	assert.equal(await readFile(f.project, "utf8"), text);
+	const reviewHeading = `id:${first.review.review}`;
+	const reviewAtEval = text.replace(/^\* AUTO Review /m, "* EVAL Review ");
+	await writeFile(f.project, reviewAtEval);
+	await assert.rejects(f.dispatch.complete(request.file, reviewHeading), /review contract/);
+	await assert.rejects(f.dispatch.resume({ file: request.file, heading: reviewHeading, expected: "EVAL", host: "kit", agent: "claude", note: "Bypass attempt.", key: "bypass" }, idleHerdr), /review contract/);
+	assert.equal(await readFile(f.project, "utf8"), reviewAtEval, "generic tools cannot close or reassign a linked review");
 	assert.equal(git("status", "--porcelain"), "");
 });
 

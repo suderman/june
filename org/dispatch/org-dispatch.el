@@ -1248,9 +1248,17 @@ and the durable no-nudge state for inspection."
 (defun org-dispatch--pending-file ()
   (expand-file-name "pending.json" org-dispatch-state-dir))
 
+(defun org-dispatch--worktree (dir)
+  "Git worktree root for DIR, or DIR itself outside Git."
+  (or (and dir (file-directory-p dir)
+           (with-temp-buffer
+             (when (eq 0 (call-process "git" nil '(t nil) nil "-C" dir "rev-parse" "--show-toplevel"))
+               (string-trim (buffer-string))))) dir))
+
 (defun org-dispatch--same-dir-p (a b)
-  "Whether A and B name the same working directory, including symlinks."
-  (or (equal a b) (and a b (file-equal-p a b))))
+  "Whether A and B share a worktree or a non-Git directory, including aliases."
+  (let ((a (org-dispatch--worktree a)) (b (org-dispatch--worktree b)))
+    (or (equal a b) (and a b (file-equal-p a b)))))
 
 (defun org-dispatch--eligible (tasks states &optional dry-run)
   "TASKS this host may launch now, respecting STATES already running.
@@ -1372,7 +1380,9 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
            (lambda ()
              (org-dispatch--check-stopped-task t)
              (let ((task (org-dispatch--task)))
-               (when (and (equal todo "DONE") (or (plist-get task :review) (org-entry-get nil "DEV_REVIEW")))
+               (when (and (equal todo "DONE")
+                          (or (plist-get task :review) (org-entry-get nil "DEV_REVIEW")
+                              (org-entry-get nil "REVIEW_PARENT")))
                  (setq todo "EVAL"))
                (cond
                 ((equal todo "HOLD")
