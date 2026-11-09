@@ -42,6 +42,7 @@ async function fixture() {
 			if (!(argv[2]! in stamps)) throw new Error(`not a date: ${argv[2]}`);
 			return `${stamps[argv[2]!]}\n`;
 		}
+		if (argv[0] === "org-edit" && argv[1] === "stop-task") return JSON.stringify({ id: "resume123", title: "Existing thread", state: "HOLD", stopped: true, replay: false });
 		if (argv[0] === "org-edit" && argv[1] === "remove-dependencies") return JSON.stringify({ id: "resume123", title: "Existing thread", state: "HOLD", depends: ["id:keep"], written: true });
 		if (argv[0] === "org-edit") return JSON.stringify({ id: "resume123", title: "Existing thread", host: "kit", written: true });
 		if (argv[0] === "org-dispatch") {
@@ -511,6 +512,29 @@ test("removal refuses active linked workers and malformed requests before org-ed
 	assert.equal(f.runs.length, 0);
 });
 
+const stopping = { file: request.file, heading: "id:resume123", revision: "a".repeat(64), note: "Jon asked to stop this run and use pi.", key: "inst:stop1" };
+
+test("stop uses the narrow supported operation with no HERDR_ENV, kick or follow", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	const result = await f.dispatch.stop(stopping);
+	assert.equal(result.stopped, true);
+	assert.deepEqual(f.runs, [["org-edit", "stop-task", f.project, stopping.heading, "--revision", stopping.revision, "--request", stopping.key, "--note", stopping.note]]);
+	for (const invalid of [{ revision: "wrong" }, { heading: "title" }, { note: "" }, { note: "a\nb" }])
+		await assert.rejects(f.dispatch.stop({ ...stopping, ...invalid }));
+	await assert.rejects(f.dispatch.stop({ ...stopping, file: "asana.org" }), /does not write asana/);
+	await assert.rejects(f.dispatch.stop({ ...stopping, file: "other.org" }), /not an agenda file/);
+	assert.equal(f.runs.length, 1);
+	for (const [out, error] of [["{}", /did not confirm/], ["partial", /did not confirm/]] as const) {
+		const dispatch = new Dispatch(new Org(f.root), f.config, async () => out);
+		await assert.rejects(dispatch.stop(stopping), error);
+	}
+	const old = new Dispatch(new Org(f.root), f.config, async () => { throw new Error("usage: org-edit todo|schedule|deadline"); });
+	await assert.rejects(old.stop(stopping), /installed org-edit cannot stop tasks yet and wrote nothing/);
+	const failed = new Dispatch(new Org(f.root), f.config, async () => { throw new Error("transport failed"); });
+	await assert.rejects(failed.stop(stopping), /may already have parked.*do not reassign/);
+});
+
 let hasEmacs = false;
 try { execFileSync("emacs", ["--version"], { stdio: "ignore" }); hasEmacs = true; } catch { /* Real-org tests need Emacs; the tool-contract tests above do not. */ }
 
@@ -602,7 +626,7 @@ test("real removal serializes against dispatch, refuses active state and Herdr, 
 	await writeFile(f.project, removableTask().replace("** Dialog", "- [[herdr:kit/pi:01a1176c-3aa6-7717-a4c6-eaa0aa0a0088@w9:p2][newer idle run]]\n\n** Dialog"));
 	const before = await readFile(f.project, "utf8");
 	const locked = new Dispatch(new Org(f.root), f.config, async (argv) => execFileSync("flock", ["-n", join(f.runtime, "org-dispatch.lock"), "bash", fileURLToPath(new URL("../org/edit/org-edit", import.meta.url)), ...argv.slice(1)], f.options));
-	await assert.rejects(locked.removeDependencies({ ...removal, revision: await f.revision() }, idleHerdr), /dispatcher or dependency edit busy/);
+	await assert.rejects(locked.removeDependencies({ ...removal, revision: await f.revision() }, idleHerdr), /dispatcher or task edit busy/);
 	assert.equal(await readFile(f.project, "utf8"), before);
 	const stateDir = join(f.dir, "state/org-dispatch");
 	await mkdir(stateDir, { recursive: true });
@@ -625,4 +649,55 @@ test("real removal serializes against dispatch, refuses active state and Herdr, 
 	await writeFile(f.init, `(require 'org)\n(setq org-agenda-files (list ${JSON.stringify(f.project)}))\n(write-region "\\n* TODO Concurrent autosave\\n" nil ${JSON.stringify(f.project)} t 'silent)\n`);
 	await assert.rejects(f.remove(), /changed on disk/);
 	assert.equal(await readFile(f.project, "utf8"), `${before}\n* TODO Concurrent autosave\n`);
+});
+
+test("real stop locks out dispatch, parks before exact named input, confirms, replays and reassigns", { skip: !hasEmacs }, async (t) => {
+	const f = await removalFixture();
+	t.after(f.cleanup);
+	await writeFile(f.project, removableTask("PROG").replace(":AGENT: pi", ":AGENT: claude").replace("herdr:kit/pi:", "herdr:kit/claude:"));
+	const stateDir = join(f.dir, "state/org-dispatch");
+	await mkdir(stateDir, { recursive: true });
+	const stateFile = join(stateDir, "resume123.json");
+	await writeFile(stateFile, JSON.stringify({ id: "resume123", file: f.project, heading: "Existing thread", dir: f.dir, status: "running", agent: "claude", pane: "w9:p1", session: "01a1176c-3aa6-7717-a4c6-eaa0aa0a0833" }));
+	const statusFile = join(f.dir, "status");
+	const callsFile = join(f.dir, "keys");
+	await writeFile(statusFile, "working\n");
+	await writeFile(join(f.bin, "herdr"), `#!/bin/sh
+set -eu
+case "$*" in
+  '--session default agent list')
+    read -r status < ${JSON.stringify(statusFile)}
+    printf '{"result":{"agents":[{"agent":"claude","name":"auto-stop-test","pane_id":"w9:p1","agent_status":"%s","agent_session":{"value":"01a1176c-3aa6-7717-a4c6-eaa0aa0a0833"}}]}}\\n' "$status";;
+  '--session default agent send-keys auto-stop-test esc')
+    grep -q '^\\* HOLD ' ${JSON.stringify(f.project)}
+    grep -q '"status":"stopping"' ${JSON.stringify(stateFile)}
+    printf '%s\\n' "$*" >> ${JSON.stringify(callsFile)}
+    printf 'idle\\n' > ${JSON.stringify(statusFile)}
+    printf '{}\\n';;
+  *) exit 66;;
+esac
+`, { mode: 0o755 });
+	const revision = await f.revision();
+	const locked = new Dispatch(new Org(f.root), f.config, async (argv) => execFileSync("flock", ["-n", join(f.runtime, "org-dispatch.lock"), "bash", fileURLToPath(new URL("../org/edit/org-edit", import.meta.url)), ...argv.slice(1)], f.options));
+	await assert.rejects(locked.stop({ ...stopping, revision }), /dispatcher or task edit busy/);
+	await assert.rejects(f.dispatch.stop({ ...stopping, revision: "0".repeat(64) }), /revision changed/);
+	const result = await f.dispatch.stop({ ...stopping, revision });
+	assert.deepEqual([result.state, result.stopped, result.replay], ["HOLD", true, false]);
+	const parked = await readFile(f.project, "utf8");
+	assert.match(parked, /^:AGENT: *claude$/m);
+	assert.match(parked, /^:DEPENDS: *id:drop id:keep$/m);
+	assert.ok(parked.includes("Keep this scope. Wait for Drop before making art."));
+	assert.ok(parked.includes("- Jon [2026-11-07 Sat 22:00] Wait for Drop.\n- Agent [2026-11-07 Sat 22:01] Paused for Drop."));
+	assert.equal(JSON.parse(await readFile(stateFile, "utf8")).status, "stopped");
+	const keys = await readFile(callsFile, "utf8");
+	assert.equal(keys, "--session default agent send-keys auto-stop-test esc\n");
+	assert.equal((await f.dispatch.stop({ ...stopping, revision })).replay, true);
+	const resumed = await f.dispatch.resume({ file: request.file, heading: stopping.heading, expected: "HOLD", note: "Jon asked to use pi.", agent: "pi", host: "kit", key: "inst:resume2" }, idleHerdr);
+	assert.equal(resumed.written, true);
+	const later = await readFile(f.project, "utf8");
+	assert.match(later, /^\* AUTO Existing thread$/m);
+	assert.match(later, /^:AGENT: *pi$/m);
+	assert.equal((await f.dispatch.stop({ ...stopping, revision })).state, "AUTO", "old stop replay never parks a new run");
+	assert.equal(await readFile(f.project, "utf8"), later);
+	assert.equal(await readFile(callsFile, "utf8"), keys);
 });

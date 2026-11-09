@@ -524,7 +524,8 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
                      (when (equal (plist-get agent :value) "pi") org-dispatch-model))
           :dir (if dir (expand-file-name dir) (org-dispatch--project-dir buffer-file-name))
           :repos (org-dispatch--project-repos buffer-file-name)
-          :session (car sessions)
+          ;; An interrupted session stays in history but must never receive work again.
+          :session (unless (equal (car sessions) (org-entry-get nil "JUNE_STOP_SESSION")) (car sessions))
           :dialog (org-dispatch--new-dialog)
           :hash (secure-hash 'sha1 (org-dispatch--subtree-text)))))
 
@@ -834,11 +835,82 @@ replaying the same key and spec; missing prerequisites block partial plans."
 
 (defun org-dispatch--save-state (state)
   (make-directory org-dispatch-state-dir t)
-  (with-temp-file (org-dispatch--state-file (plist-get state :id))
-    (insert (json-serialize state))))
+  (let ((temp (make-temp-file (expand-file-name ".state-" org-dispatch-state-dir))))
+    (unwind-protect
+        (progn
+          (with-temp-file temp (insert (json-serialize state)))
+          (rename-file temp (org-dispatch--state-file (plist-get state :id)) t))
+      (when (file-exists-p temp) (delete-file temp)))))
 
 (defun org-dispatch--drop-state (id)
   (ignore-errors (delete-file (org-dispatch--state-file id))))
+
+(defun org-dispatch--check-stopped-task (&optional worker)
+  "Refuse unconfirmed stops, or WORKER writes from a stopped or superseded run."
+  (let* ((request (org-entry-get nil "JUNE_STOP_REQUEST"))
+         (file (org-dispatch--state-file (org-entry-get nil "ID")))
+         (state (and (file-exists-p file)
+                     (with-temp-buffer (insert-file-contents file)
+                                       (json-parse-buffer :object-type 'plist))))
+         (status (plist-get state :status)))
+    (when (or (and request (not (equal request (org-entry-get nil "JUNE_STOPPED"))))
+              (equal status "stopping")
+              (and worker request (not (equal status "running"))))
+      (error "task stop is pending or completed; inspect before resuming, never finish or retry this run"))
+    (when (and worker request state
+               (not (equal (getenv "HERDR_PANE_ID") (plist-get state :pane))))
+      (error "this worker is not the task's current dispatcher pane"))
+    (when (and request (not worker) (equal status "stopped"))
+      (let ((agent (org-dispatch--stop-agent state)))
+        (when (and agent (not (member (alist-get 'agent_status agent) '("idle" "done"))))
+          (error "stopped worker is active or unknown again; inspect before resuming"))))))
+
+(defun org-dispatch--stop-agent (state)
+  "Find STATE's exact session, refusing unavailable or ambiguous Herdr data."
+  (let* ((response (org-dispatch--herdr "agent" "list"))
+         (result (org-dispatch--get response 'result))
+         (session (plist-get state :session))
+         (matches (seq-filter
+                   (lambda (agent)
+                     (let* ((value (org-dispatch--get agent 'agent_session 'value))
+                            (uuid (and value (string-match "[0-9a-f]\\{8\\}-[0-9a-f-]\\{27\\}\\'" (file-name-base value))
+                                       (match-string 0 (file-name-base value)))))
+                       (equal uuid session)))
+                   (alist-get 'agents result))))
+    (unless (assq 'agents result) (error "Herdr did not return agents; stop remains unconfirmed"))
+    (when (and (null matches)
+               (seq-some (lambda (agent)
+                           (not (org-dispatch--get agent 'agent_session 'value)))
+                         (alist-get 'agents result)))
+      (error "Herdr has workers without session identities; stop remains unconfirmed"))
+    (when (cdr matches) (error "session appears in multiple panes; stop remains unconfirmed"))
+    (when (and (car matches) (not (equal (alist-get 'agent (car matches)) (plist-get state :agent))))
+      (error "session agent changed; stop remains unconfirmed"))
+    (car matches)))
+
+(defun org-dispatch--interrupt-session (state)
+  "Interrupt STATE's session and confirm two settled observations, or its exit.
+No shell input, approval answers, process kills or tab closes. Unknown status
+and timeouts leave HOLD and the durable no-nudge state for inspection."
+  (let* ((agent (org-dispatch--stop-agent state))
+         (status (alist-get 'agent_status agent))
+         (deadline (+ (float-time) 15))
+         (settled 0))
+    (when (member status '("working" "blocked"))
+      ;; Names belong to the live process and clear on replacement. Pane IDs do not.
+      (let ((name (alist-get 'name agent)))
+        (unless (and name (string-match-p "\\`[a-z][a-z0-9_-]\\{0,31\\}\\'" name))
+          (error "worker has no stable Herdr name; stop remains unconfirmed"))
+        (org-dispatch--herdr "agent" "send-keys" name "esc")))
+    (while agent
+      (setq status (alist-get 'agent_status agent))
+      (unless (member status '("working" "blocked" "idle" "done"))
+        (error "worker status is unknown; stop remains unconfirmed"))
+      (setq settled (if (member status '("idle" "done")) (1+ settled) 0))
+      (if (>= settled 2) (setq agent nil)
+        (when (>= (float-time) deadline) (error "worker did not settle; stop remains unconfirmed"))
+        (sleep-for 0.5)
+        (setq agent (org-dispatch--stop-agent state))))))
 
 ;;; Prompts
 
@@ -1102,6 +1174,9 @@ replaying the same key and spec; missing prerequisites block partial plans."
          (status (and pane (org-dispatch--agent-status pane)))
          (nudges (plist-get state :nudges)))
     (cond
+     ((member (plist-get state :status) '("stopping" "stopped"))
+      ;; Explicit stops never nudge, expire, or close the worker's tab.
+      nil)
      ((equal (plist-get state :status) "finished")
       ;; Close tabs this dispatcher opened once their work is accepted. Older
       ;; runs recorded a whole workspace instead.
@@ -1182,7 +1257,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                   (with-temp-buffer (insert-file-contents file) (json-parse-buffer))
                 (make-hash-table :test 'equal)))
          (new (make-hash-table :test 'equal))
-         (running (seq-filter (lambda (s) (member (plist-get s :status) '("running" "starting")))
+         (running (seq-filter (lambda (s) (member (plist-get s :status) '("running" "starting" "stopping")))
                               states))
          (index (when (seq-some (lambda (task) (plist-get task :depends)) tasks)
                   (org-dispatch--dependency-index)))
@@ -1287,6 +1362,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
           (org-dispatch--edit
            file id
            (lambda ()
+             (org-dispatch--check-stopped-task t)
              (let ((task (org-dispatch--task)))
                (when (and (equal todo "DONE") (plist-get task :review))
                  (setq todo "EVAL"))
@@ -1338,6 +1414,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
     (org-dispatch--edit
      file id
      (lambda ()
+       (org-dispatch--check-stopped-task t)
        (let ((task (org-dispatch--task)))
          (unless (equal (plist-get task :todo) "PROG")
            (error "only a running task can retry; this one is %s" (plist-get task :todo)))

@@ -205,6 +205,8 @@ Coding workers must not set AUTO; that permission lives in instructions."
            (unless (member state org-todo-keywords-1)
              (error "STATE is one of %s" (string-join org-todo-keywords-1 " ")))
            (when depends (setq depends (org-edit--depends depends)))
+           (when (equal state "AUTO")
+             (org-dispatch--check-stopped-task))
            (when request
              (org-id-get-create)
              ;; The drawer decides where and how it runs; tags are left as they are.
@@ -228,6 +230,106 @@ Coding workers must not set AUTO; that permission lives in instructions."
                           (written . ,(if replay :false t)))))))
      request)
     (when request (princ (concat (json-serialize result) "\n")))))
+
+(defun org-edit-stop-task ()
+  "Park a dispatcher task, interrupt its exact session, and confirm it settled.
+The wrapper holds the launch lock. A failed stop stays parked and cannot resume."
+  (let* ((args command-line-args-left)
+         (file (pop args)) (heading (pop args))
+         revision request note state replay confirmed result
+         (create-lockfiles t) (file-precious-flag t))
+    (setq command-line-args-left nil)
+    (unless (and file heading (string-match-p "\\`id:[[:alnum:]][[:alnum:]-]*\\'" heading))
+      (error "stop-task needs FILE and id:UUID"))
+    (while args
+      (let ((flag (pop args)) (value (pop args)))
+        (pcase flag
+          ("--revision" (setq revision value))
+          ("--request" (setq request value))
+          ("--note" (setq note value))
+          (_ (error "unknown option %s" flag)))))
+    (unless (and revision (string-match-p "\\`[0-9a-f]\\{64\\}\\'" revision)
+                 request (not (string-empty-p request)) note (not (string-empty-p (string-trim note)))
+                 (not (string-match-p "[\n\r]" (concat request note))))
+      (error "stop-task needs --revision SHA256, --request KEY and one-line --note"))
+    (when (directory-files (file-name-directory (expand-file-name file)) nil
+                           (concat "\\`" (regexp-quote (file-name-base file)) "\\.sync-conflict-.*\\.org\\'"))
+      (error "resolve the file's Syncthing conflict copies first"))
+    (org-edit--at
+     file heading
+     (lambda ()
+       (let* ((task (org-dispatch--task)) (id (plist-get task :id))
+              (node (gethash id (org-dispatch--dependency-index)))
+              (state-file (org-dispatch--state-file id)))
+         (unless (and node (not (plist-get node :duplicate))
+                      (member (file-truename file) (mapcar #'file-truename (org-dispatch--agenda-files))))
+           (error "stop-task needs a unique task ID in a live agenda file"))
+         (when (or (plist-get task :problem) (not (equal (plist-get task :host) org-dispatch-host)))
+           (error "stop-task must run on the task's dispatcher host"))
+         (setq state (and (file-exists-p state-file)
+                          (with-temp-buffer (insert-file-contents state-file)
+                                            (json-parse-buffer :object-type 'plist))))
+         ;; A new tool call may recover the same pending stop after an error.
+         ;; HOLD with a receipt is also a no-op, never a second interruption.
+         (cond
+          ((and (equal (plist-get state :status) "stopping") (plist-get state :stop-request))
+           (setq request (plist-get state :stop-request)))
+          ((and (equal (org-get-todo-state) "HOLD") (org-entry-get nil "JUNE_STOP_REQUEST")
+                (equal (org-entry-get nil "JUNE_STOP_REQUEST") (org-entry-get nil "JUNE_STOPPED")))
+           (setq request (org-entry-get nil "JUNE_STOP_REQUEST"))))
+         (setq replay (equal request (org-entry-get nil "JUNE_STOP_REQUEST"))
+               confirmed (and replay (equal request (org-entry-get nil "JUNE_STOPPED"))))
+         (unless confirmed
+           (unless (and state (equal (plist-get state :id) id)
+                        (equal (plist-get state :file) (plist-get task :file))
+                        (plist-get state :session) (plist-get state :pane)
+                        (or replay (equal (plist-get state :session) (plist-get task :session)))
+                        (equal (plist-get state :agent) (plist-get task :agent))
+                        (or (equal (plist-get state :status) "running")
+                            (and (equal (plist-get state :status) "stopping")
+                                 (equal (plist-get state :stop-request) request))))
+             (error "no matching dispatcher run to stop; inspect the task and worker"))
+           (unless replay
+             (unless (equal (org-get-todo-state) "PROG") (error "only a PROG dispatcher task can stop"))
+             (unless (equal revision (secure-hash 'sha256 (encode-coding-string
+                                      (replace-regexp-in-string "\n+\\'" "" (org-dispatch--subtree-text)) 'utf-8)))
+               (error "task revision changed; read the task and Dialog again"))
+             ;; Durable suppression precedes HOLD and any input. Recovery uses the same request.
+             (setq state (plist-put state :stop-request request))
+             (org-dispatch--save-state (plist-put state :status "stopping"))
+             (org-entry-put nil "JUNE_STOP_REQUEST" request)
+             (org-entry-put nil "JUNE_STOP_SESSION" (plist-get state :session))
+             (org-dispatch--headline nil "HOLD")
+             (org-todo "HOLD")
+             (org-dispatch--append "Dialog" (org-dispatch--entry
+               "June" (concat "Stop requested; parked at HOLD before interrupting the worker. " note))))
+           (unless (equal (org-get-todo-state) "HOLD")
+             (error "stop pending but task is not HOLD; inspect before continuing")))
+         (setq result `((id . ,id) (title . ,(org-get-heading t t t t))
+                        (state . ,(org-get-todo-state)) (replay . ,(if replay t :false)))))) t)
+    ;; Recover a crash after the Org receipt but before the local state save.
+    (when confirmed
+      (let ((state-file (org-dispatch--state-file (substring heading 3))))
+        (when (file-exists-p state-file)
+          (let ((old (with-temp-buffer (insert-file-contents state-file)
+                                      (json-parse-buffer :object-type 'plist))))
+            (when (and (equal (plist-get old :stop-request) request)
+                       (equal (plist-get old :status) "stopping"))
+              (org-dispatch--save-state (plist-put old :status "stopped")))))))
+    (unless confirmed
+      (org-dispatch--interrupt-session state)
+      ;; Re-read after waiting; never overwrite a concurrent worker or editor save.
+      (org-edit--at
+       file heading
+       (lambda ()
+         (unless (and (equal request (org-entry-get nil "JUNE_STOP_REQUEST"))
+                      (equal (org-get-todo-state) "HOLD"))
+           (error "task changed during interruption; stop remains unconfirmed"))
+         (org-entry-put nil "JUNE_STOPPED" request)
+         (org-dispatch--append "Dialog" (org-dispatch--entry
+           "June" "Worker interruption confirmed. Task remains HOLD; reassignment needs a separate authorized resume."))) t)
+      (org-dispatch--save-state (plist-put state :status "stopped")))
+    (princ (concat (json-serialize (append result '((stopped . t)))) "\n"))))
 
 (defun org-edit-remove-dependencies ()
   "Remove selected edges on this host, pausing AUTO before a separate resume.

@@ -20,7 +20,7 @@ case ${1:-run} in
   finish)
     [[ $# -ge 3 ]] || { echo "usage: org-dispatch finish ID EVAL|HOLD|DONE [NOTE] [--headline LINE]" >&2; exit 2; }
     shift
-    exec "${batch[@]}" -f org-dispatch-finish "$@"
+    exec flock -n "${XDG_RUNTIME_DIR:-/tmp}/org-dispatch.lock" "${batch[@]}" -f org-dispatch-finish "$@"
     ;;
   plan)
     [[ $# -eq 2 ]] || { echo "usage: org-dispatch plan SPEC.json" >&2; exit 2; }
@@ -30,7 +30,7 @@ case ${1:-run} in
   retry)
     [[ $# -ge 4 ]] || { echo "usage: org-dispatch retry ID WHEN NOTE" >&2; exit 2; }
     shift
-    exec "${batch[@]}" -f org-dispatch-retry "$@"
+    exec flock -n "${XDG_RUNTIME_DIR:-/tmp}/org-dispatch.lock" "${batch[@]}" -f org-dispatch-retry "$@"
     ;;
   *) echo "usage: org-dispatch [run|scan|plan SPEC.json|finish ID STATE [NOTE] [--headline LINE]|retry ID WHEN NOTE]" >&2; exit 2 ;;
 esac
