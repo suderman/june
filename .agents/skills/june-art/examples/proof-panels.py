@@ -30,7 +30,7 @@ def wrapper_environment():
 
 
 def find_xvfb():
-    found = shutil.which("Xvfb")
+    found = shutil.which("Xvfb") or next((str(p) for p in sorted(Path("/nix/store").glob("*-xorg-server-*/bin/Xvfb"))), None)
     if found:
         return found
     out = subprocess.run(["nix", "build", "--no-link", "--print-out-paths", "nixpkgs#xorg.xorgserver"], capture_output=True, text=True, check=True).stdout.strip()

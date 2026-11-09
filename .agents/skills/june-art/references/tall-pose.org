@@ -23,7 +23,7 @@ Do not use =examples/preflight-pose.mjs= for tall art: it models portrait placem
 
 1. Measure the face box on the source, forehead through chin and cheek to cheek, and the mouth, then draw them on a copy and look. Do not copy a box from another image.
 2. Ingest into a new staging set with =full= in =framings=, and record seed, prompts and hashes in the =.txt= sidecar.
-3. Render the real panels with =python examples/proof-panels.py --set SET --pose ID --out NEW_DIR=. It covers 1040, 820, 620 and 390 px, short and long, on both sides, privately, and prints each panel's framing, face size and whether all of her is in view. Look at =proof.png= as well. She should stand whole on a tall desktop panel and zoom to her face on a phone with her body running on behind the words. A pose that leans sideways can lose its body behind the words on one side; report which side it suits.
+3. Render the real panels with =python "$SKILL/examples/proof-panels.py" --set SET --pose ID --out NEW_DIR=, where =$SKILL= is this skill's directory. It covers 1040, 820, 620 and 390 px, short and long, on both sides, privately, and prints each panel's framing, face size and whether all of her is in view. Look at =proof.png= as well. She should stand whole on a tall desktop panel and zoom to her face on a phone with her body running on behind the words. A pose that leans sideways can lose its body behind the words on one side; report which side it suits.
 
 ** Hand over
 Show Jon the seed sheets and panels, with rejects and reasons. Add what the job taught to the lessons before setting EVAL. Promote only what he approves, by =references/ingestion.org=, checking that only the new pose changed.
