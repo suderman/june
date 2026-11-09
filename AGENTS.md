@@ -1,6 +1,6 @@
 # June development
 
-Check `~/org/work/suderman/june/june.org` before substantive work. Keep its checklist and verification current. It records active scope and work that still needs approval.
+Check `~/org/work/suderman/june/june.org` before substantive work, or `art.org` beside it for art work. Keep its checklist and verification current. It records active scope and work that still needs approval.
 
 ## Ship the testable result
 

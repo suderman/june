@@ -13,17 +13,17 @@ Hair is left alone. =belt-hardware= is only for a buckle that came out the wrong
 
 ** Plan one pose
 Make a grid of its source, =june-art run grid SET/source/NAME.png OUT --step 50=, and look at it. Coordinates are source pixels. Add a step for each item the pose visibly shows:
-- =eyes=: no region needed; it uses the face box. It selects only green, so closed eyes simply change nothing. Leave them out of the plan.
-- =skirt=: always a =polygon=, from the bottom of the belt along the garment's edge to the hem. Stay just inside a hem over her legs, because tights fall inside the skirt's colour range. Include the whole visible skirt, or a line appears where you stopped. Hands and arms are left out by colour.
-- =blouse=: a =region= or =polygon= covering it, kept below her chin. Skin and hair are left out by colour. Do not include her face or the top of her head.
-- =boots=: a =region= around the boots only, starting below their tops, for the same reason as the hem.
+- =eyes=: a tight =region= or =polygon= around her irises. The default face-box region can catch green fringe outside them, and a tilted head needs a polygon. Leave closed eyes out of the plan.
+- =skirt=: always a =polygon=, from the bottom of the belt along the garment's edge to the hem. Stay just inside a hem over her legs, because tights fall inside the skirt's colour range. Include the whole visible skirt, or a line appears where you stopped. Skirts are the hardest garment to outline: most attempts in the 2026-11-08 run left seams and were reverted.
+- =blouse=: a =region= or =polygon= covering it, kept below her chin, with hands, forearms and cuffs outside it. Colour ranges do not protect skin or hair: wrist shadows, finger outlines and hair highlights all match the blouse range. Only poses with no arm crossing the blouse came out clean in the 2026-11-08 run.
+- =boots=: skip them unless you can outline the whole shaft. A region starting below the top leaves a straight colour join, and a region reaching the top catches the tights. None survived the 2026-11-08 run.
 Leave out anything the pose does not show. If you cannot draw a clean region for an item, skip that item and say so in the report. A pose with one item done is better than a pose with a visible seam.
 
 ** Apply and judge
-Work through the poses in batches of about eight, without stopping to ask.
+Work through the poses in batches of about eight, without stopping to ask. Run each batch as its own command, since a whole library takes longer than one shell call allows.
 1. Run =nix run .#art -- colours SET PLAN=. A pose that fails is reported and the rest continue. It always starts from =colour-originals/=, so a corrected plan can be re-run without stacking changes.
 2. Run =june-art run compare SET OUT NAME... --columns 4=, and look at it.
-3. Check each pose for: a line where a region stopped, colour bleeding into tights, hands or hair, and a change that clearly goes too far. Zoom in where you are unsure. Fix the plan and re-run that pose.
+3. Check each pose for: a line where a region stopped, colour bleeding into tights, hands or hair, speckles inside the cloth, and a change that clearly goes too far. Look at a before and after difference mask as well as the sheet, and zoom in where you are unsure. Fix the plan and re-run that pose, or drop that step. =--match= changes brightness too, so judge against canon.
 4. Read =colour-report.json=: a step whose =changed= is near zero missed its target.
 
 ** At the end

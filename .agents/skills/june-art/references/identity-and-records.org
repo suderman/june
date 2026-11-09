@@ -1,6 +1,6 @@
 * Identity, authority and records
 ** Locate the project material
-From the checkout, use =REPO=$(git rev-parse --show-toplevel)=. Jon's =~/org/work/= is synchronized across his workstations; the project is =$HOME/org/work/suderman/june/june.org=. Kit is the designated ComfyUI/NVIDIA host. Read synced material from another workstation as needed, but perform GPU/service operations on kit rather than provisioning a second installation. Read the active art task for current approval and scope. Old milestone summaries retain their original pending-review language; later explicit project decisions take precedence.
+From the checkout, use =REPO=$(git rev-parse --show-toplevel)=. Jon's =~/org/work/= is synchronized across his workstations; the art project file is =$HOME/org/work/suderman/june/art.org=, part of =june.org= beside it. Kit is the designated ComfyUI/NVIDIA host. Read synced material from another workstation as needed, but perform GPU/service operations on kit rather than provisioning a second installation. Read the active art task for current approval and scope. Old milestone summaries retain their original pending-review language; later explicit project decisions take precedence.
 
 The current material root is =$HOME/org/work/suderman/june/2026-11-03-june-art=. Confirm it contains =art-list.org= and =june-agent-character-sheet.png=. If moved, find the project file's links rather than assuming the checkout contains artwork. Optional shell names used throughout these references:
 

@@ -9,7 +9,7 @@ Generate coherent June characters from fresh noise with reference conditioning, 
 
 ## Begin
 
-1. Resolve the checkout with `git rev-parse --show-toplevel`. Read the matching Org project and current authorization before work. On Jon's host the project is `~/org/work/suderman/june/june.org`.
+1. Resolve the checkout with `git rev-parse --show-toplevel`. Read the matching Org project and current authorization before work. On Jon's host the art project file is `~/org/work/suderman/june/art.org`, part of `june.org` beside it.
 2. Read `references/identity-and-records.org`. Locate the canonical sheet and the exact inventory entry, not a similar-looking experimental image. Inspect the images yourself.
 3. Read `references/environment.org`; check the live service, model hashes, required node schemas and saved workflow before selecting settings. Do not install or restart things merely because an endpoint or optional node fails.
 4. Read `lessons/general.org` and the lessons for your pipeline. Before setting EVAL, add what this job taught you, including what failed. Use `june-art run` (`references/runner.org`) rather than writing a submit script.
