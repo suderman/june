@@ -903,8 +903,9 @@ and the durable no-nudge state for inspection."
          (settled 0))
     (when (member status '("working" "blocked"))
       ;; Herdr protocol 22 accepts only a mutable name or pane, not an expected
-      ;; session/generation. A replacement can take that target before input.
-      (error "Herdr lacks identity-bound interruption; task parked, stop unconfirmed; Jon must interrupt this session manually"))
+      ;; session/generation. Normal agent.prompt has the same gap; its queue
+      ;; orders terminal bytes, not session-bound cooperative instructions.
+      (error "Herdr lacks identity-bound interruption; normal prompts also lack session-bound delivery; task parked, stop unconfirmed; Jon must interrupt this session manually"))
     (while agent
       (setq status (alist-get 'agent_status agent))
       (unless (member status '("working" "blocked" "idle" "done"))

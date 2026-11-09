@@ -260,21 +260,25 @@
             (org-entry-put nil "AGENT" agent)
             (should-not (plist-get (org-dispatch--task) :session))))))))
 
-(ert-deftest stop-active-name-replacement-receives-no-input-and-no-confirmation ()
-  (test-with-stop
-    (setq test-stop-status "working")
-    (cl-letf (((symbol-function 'org-dispatch--herdr)
-               (lambda (&rest args)
-                 ;; Replacement happens after discovery but before a name-targeted send.
-                 (if (member "send-keys" args)
-                     (progn (push args test-stop-calls) (setq test-stop-session "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
-                   (apply #'test-stop-herdr args)))))
-      (should-error (test-stop)))
-    (should-not (seq-find (lambda (args) (member "send-keys" args)) test-stop-calls))
-    (should (equal (plist-get (car (org-dispatch--states)) :status) "stopping"))
-    (org-dispatch--edit test-stop-file test-stop-id
-      (lambda () (should (equal (org-get-todo-state) "HOLD"))
-        (should-not (org-entry-get nil "JUNE_STOPPED"))))))
+(ert-deftest stop-active-or-blocked-replacement-receives-neither-prompts-nor-keys ()
+  (dolist (status '("working" "blocked"))
+    (test-with-stop
+      (setq test-stop-status status)
+      (cl-letf (((symbol-function 'org-dispatch--herdr)
+                 (lambda (&rest args)
+                   ;; A normal prompt is no safer than keys: the replacement
+                   ;; takes the same name and pane after discovery.
+                   (if (equal args '("agent" "list"))
+                       (apply #'test-stop-herdr args)
+                     (push args test-stop-calls)
+                     (setq test-stop-session "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+                     '((result . ((submitted . t))))))))
+        (should-error (test-stop)))
+      (should (equal test-stop-calls '(("agent" "list"))))
+      (should (equal (plist-get (car (org-dispatch--states)) :status) "stopping"))
+      (org-dispatch--edit test-stop-file test-stop-id
+        (lambda () (should (equal (org-get-todo-state) "HOLD"))
+          (should-not (org-entry-get nil "JUNE_STOPPED")))))))
 
 (ert-deftest stop-general-todo-refuses-late-worker-writes-but-allows-human-and-june ()
   (test-with-stop
@@ -326,5 +330,27 @@
       (test-stop)
       (let ((test-stop-session identity) (test-stop-status "working"))
         (should-error (test-stop-todo "AUTO"))))))
+
+(ert-deftest stop-nonresponse-and-retries-never-submit-or-claim-a-cooperative-stop ()
+  (test-with-stop
+    (setq test-stop-status "working")
+    (dotimes (attempt 3)
+      (should-error (test-stop nil (format "test:retry-%s" attempt)))
+      (org-dispatch--watch (car (org-dispatch--states)))
+      (should-error (test-stop-todo "AUTO"))
+      (let ((process-environment (copy-sequence process-environment)))
+        (setenv "HERDR_PANE_ID" "p-exact")
+        (should-error (test-stop-todo "EVAL"))))
+    (should (seq-every-p (lambda (args) (member args '(("agent" "list") ("agent" "get" "p-exact"))))
+                         test-stop-calls))
+    (org-dispatch--edit test-stop-file test-stop-id
+      (lambda ()
+        (should (equal (org-get-todo-state) "HOLD"))
+        (should-not (org-entry-get nil "JUNE_STOPPED"))
+        (should (= 1 (how-many "Stop requested; parked" (point) (point-max))))))
+    ;; Only a later independent observation can confirm this original run.
+    (setq test-stop-status "idle")
+    (test-stop nil "test:after-manual-stop")
+    (should (equal (plist-get (car (org-dispatch--states)) :status) "stopped"))))
 
 (ert-run-tests-batch-and-exit)
