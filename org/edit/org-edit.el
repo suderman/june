@@ -161,7 +161,8 @@ Print the heading unless QUIET is non-nil."
   (when-let* ((pane (getenv "HERDR_PANE_ID")))
     (or (getenv "PI_SESSION_ID") (getenv "CLAUDECODE")
         (let ((result (org-dispatch--get (org-dispatch--herdr "agent" "list") 'result)))
-          (unless (assq 'agents result) (error "Herdr did not identify the caller; refusing state write"))
+          (unless (vectorp (alist-get 'agents result))
+            (error "Herdr did not identify the caller; refusing state write"))
           (seq-some (lambda (agent) (equal pane (alist-get 'pane_id agent)))
                     (alist-get 'agents result))))))
 
@@ -216,7 +217,7 @@ Coding workers must not set AUTO; that permission lives in instructions."
            (when depends (setq depends (org-edit--depends depends)))
            ;; Protect general state writes too, without treating human Herdr
            ;; shells or June's daemon as workers. This is a cooperative guard.
-           (cond ((and (org-entry-get nil "JUNE_STOP_REQUEST") (org-edit--worker-p))
+           (cond ((org-edit--worker-p)
                   (org-dispatch--check-stopped-task t))
                  ((equal state "AUTO") (org-dispatch--check-stopped-task)))
            (when request

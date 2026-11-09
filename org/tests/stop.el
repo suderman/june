@@ -134,13 +134,14 @@
     (should (equal (org-dispatch--edit test-stop-file test-stop-id #'org-get-todo-state) "AUTO"))))
 
 (ert-deftest stop-unknown-missing-identity-and-timeout-stay-unconfirmed ()
-  (dolist (failure '(unknown missing-identity malformed-response timeout))
+  (dolist (failure '(unknown missing-identity malformed-response null-agents timeout))
     (test-with-stop
       (let ((clock 0) (poll 0))
         (cl-letf (((symbol-function 'org-dispatch--herdr)
                    (lambda (&rest args)
                      (pcase failure
                        ('malformed-response '((result . nil)))
+                       ('null-agents '((result . ((agents . nil)))))
                        ('timeout (let ((test-stop-status (if (cl-oddp (cl-incf poll)) "idle" "working")))
                                    (apply #'test-stop-herdr args)))
                        (_ (let ((test-stop-status (if (eq failure 'unknown) "unknown" test-stop-status))
@@ -298,5 +299,32 @@
       (setenv "HERDR_PANE_ID" nil)
       (test-stop-todo "EVAL")
       (should (equal (org-dispatch--edit test-stop-file test-stop-id #'org-get-todo-state) "EVAL")))))
+
+(ert-deftest stop-crash-before-org-save-rejects-general-worker-state-writes ()
+  (test-with-stop
+    ;; Local no-nudge state is durable, but the Org receipt was not saved.
+    (let ((state (car (org-dispatch--states))))
+      (org-dispatch--save-state (plist-put (plist-put state :status "stopping") :stop-request "test:crashed")))
+    (setenv "HERDR_PANE_ID" "p-exact")
+    (dolist (state '("EVAL" "HOLD" "DONE" "TODO" "PROG" "AUTO"))
+      (should-error (test-stop-todo state)))
+    (should (equal (org-dispatch--edit test-stop-file test-stop-id #'org-get-todo-state) "PROG"))
+    (setenv "HERDR_PANE_ID" nil)
+    (test-stop nil "test:recover")
+    (should (equal (plist-get (car (org-dispatch--states)) :status) "stopped"))))
+
+(ert-deftest stop-unparseable-identities-never-confirm-exit-or-permit-auto ()
+  (dolist (identity '("/fixture/session-unknown.jsonl" "" "aaaaaaaa----------------------------" 42))
+    (test-with-stop
+      (let ((test-stop-session identity) (test-stop-status "working"))
+        (should-error (test-stop)))
+      (should (equal (plist-get (car (org-dispatch--states)) :status) "stopping"))
+      (org-dispatch--edit test-stop-file test-stop-id
+        (lambda () (should-not (org-entry-get nil "JUNE_STOPPED"))))
+      ;; A valid settled observation confirms the run. A later malformed
+      ;; identity must also block the resume recheck, not count as exit.
+      (test-stop)
+      (let ((test-stop-session identity) (test-stop-status "working"))
+        (should-error (test-stop-todo "AUTO"))))))
 
 (ert-run-tests-batch-and-exit)
