@@ -353,6 +353,14 @@ test("a long panel stands art drawn to her feet on its floor, and puts art cut a
 		assert.ok(out.art.y + out.art.h >= out.height - 1, `${side}: her figure reaches the bottom of the panel`);
 		for (const e of out.elements) assert.ok(!overlaps(e, out.face, 1), `${side}: words stay off her face`);
 	}
+	// A long figure, ten faces tall: whole on the floor when there is room; legs cropped only to keep a readable face.
+	const longFigure = { ...pose("content-standing-mug"), face: { x: 0.42, y: 0.09, w: 0.16, h: 0.095 }, figure: { x: 0.2, y: 0.04, w: 0.6, h: 0.96 } };
+	const roomy = plan({ width: 820, side: "left", pose: longFigure, elements: [{ kind: "june", w: 400, h: 1800 }] });
+	assert.equal(roomy.framing, "full");
+	assert.ok(roomy.art.y + 0.04 * roomy.art.h >= -0.5 && roomy.art.y + roomy.art.h <= roomy.height + 1 && roomy.art.y + roomy.art.h >= roomy.height - 1, "all of her, standing on the floor");
+	const snug = plan({ width: 820, side: "left", pose: longFigure, elements: [{ kind: "june", w: 400, h: 600 }] });
+	assert.ok(snug.face.h >= 89, `a readable face before all of her, ${snug.face.h}`);
+	assert.ok(snug.art.y + snug.art.h > snug.height, "so her legs run off the panel");
 	const huge = plan({ width: 820, side: "left", pose: pose("content-standing-mug"), elements: [{ kind: "june", w: 400, h: 3000 }] });
 	assert.equal(huge.clip.inset, false, "however tall the panel, drawn feet need no inset");
 	assert.equal(huge.framing, "full");
@@ -1320,7 +1328,7 @@ test("standing placements Jon un-rejected at 620 and 700 px need no new take or 
 	assert.equal(narrow.pose.id, "clipboard-front");
 	assert.equal(narrow.layout.framing, "full");
 	assert.equal(narrow.layout.mirror, false);
-	assert.ok(narrow.layout.face.h >= 93 && gestureShownAt(narrow, 0) >= 0.75 && gestureShownAt(narrow, 1) >= 0.5);
+	assert.ok(narrow.layout.face.h >= 89 && gestureShownAt(narrow, 0) >= 0.75 && gestureShownAt(narrow, 1) >= 0.5, `face ${narrow.layout.face.h}, board ${gestureShownAt(narrow, 0)}`);
 });
 
 test("an existing standing take survives the real iris-review panel becoming older", () => {

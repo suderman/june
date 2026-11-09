@@ -472,6 +472,8 @@ const FACE_GAP = 26;
 // hair and the top of her shoulders in frame, as a comic close-up does.
 const FACE_SHARE = { "close-up": 0.6, head: 0.46, bust: 0.34, waist: 0.25, full: 0.15 };
 const FACE_Y = { "close-up": 0.5, head: 0.44, bust: 0.38, waist: 0.3, full: 0.15 };
+// How much of a tall panel her whole figure may fill, leaving some air above her hair.
+const FULL_FIGURE_SHARE = 0.92;
 // An illustration contains her to this many face heights below her face's centre: the waist-up view the art was framed for.
 const ILLUSTRATION_BELOW_FACE = 2.5;
 // How far a hip-cut drawing runs behind its desk's top edge, so the cut never shows.
@@ -504,6 +506,11 @@ export function chooseFraming(width, height, pose, hint) {
 export function frame(pose, area, side, edge, framing, mirror) {
 	const faceAspect = (pose.face.w * pose.width) / (pose.face.h * pose.height);
 	let faceH = area.h * FACE_SHARE[framing];
+	// Drawn to her feet, she fits whole on the floor where the panel has room; only a panel too short for a readable
+	// face crops her legs (Jon, 2026-11-08).
+	const fit = framing === "full" ? (area.h * FULL_FIGURE_SHARE) / ((feetOf(pose) - (pose.figure ? pose.figure.y : 0)) / pose.face.h) : Infinity;
+	const fitted = fit < faceH && fit > READABLE_FACE;
+	faceH = Math.min(faceH, Math.max(READABLE_FACE, fit));
 	// Her face stays clear of the words, with a lane between for balloon tails, and inside the area.
 	const room = side === "left" ? edge - area.x - FACE_GAP - 4 : area.x + area.w - edge - FACE_GAP - 4;
 	faceH = Math.min(faceH, (room * 0.98) / faceAspect, area.h - 8);
@@ -516,7 +523,7 @@ export function frame(pose, area, side, edge, framing, mirror) {
 	const feet = feetOf(pose);
 	const centerY = area.y + area.h * FACE_Y[framing];
 	const reach = (area.y + area.h - centerY) / (pose.height * Math.max(feet - fcy, 0.01));
-	if (reach > scale) scale = Math.min(reach, scale * 1.35, ((room * 0.98) / faceAspect) / (pose.face.h * pose.height));
+	if (reach > scale && !fitted) scale = Math.min(reach, scale * 1.35, ((room * 0.98) / faceAspect) / (pose.face.h * pose.height));
 	const w = pose.width * scale;
 	const h = pose.height * scale;
 	const faceW = pose.face.w * w;
