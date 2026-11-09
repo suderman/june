@@ -317,6 +317,37 @@ cp "$tasks" "$HOME/org/tasks.sync-conflict-20261024-000000-ABC.org"
 check "conflict copies are refused" \
   has "$(run todo "$HOME/org/tasks.sync-conflict-20261024-000000-ABC.org" Plan DONE)" 'conflict copy'
 
+content="$HOME/org/content.org"
+printf '* TODO Old title\nOld scope.\n' >"$content"
+cp "$content" "$fixture/content-before"
+revision=$(printf '* TODO Old title\nOld scope.' | sha256sum | cut -d' ' -f1)
+printf -v spec '{"revision":"%s","request":"fixture:wrapper","note":"Jon approved the corrected wording.","title":"New title","scope":"New scope."}' "$revision"
+export ORG_DISPATCH_ROOT="$HOME/org" ORG_DISPATCH_EMACS_INIT="$fixture/no-init.el"
+
+locked_update() {
+  local status=0 lockfd
+  exec {lockfd}>"$XDG_RUNTIME_DIR/org-dispatch.lock"
+  flock -n "$lockfd"
+  bash "$edit" update-task "$content" "Old title" "$spec" >"$fixture/locked-output" 2>&1 || status=$?
+  flock -u "$lockfd"
+  exec {lockfd}>&-
+  [[ $status == 75 ]] && grep -q 'dispatcher or task edit busy' "$fixture/locked-output" && cmp -s "$content" "$fixture/content-before"
+}
+check "task content edit refuses launch-lock contention without writing" locked_update
+out=$(run update-task "$content" "Old title" "$spec")
+check "content wrapper returns a successful JSON result" has "$out" '"written":true'
+check "content wrapper changes title" line "$content" '^\* TODO New title$'
+check "content wrapper replaces legacy scope" line "$content" '^New scope\.$'
+cp "$content" "$fixture/content-edited"
+out=$(run update-task "$content" "Old title" "$spec")
+check "content wrapper replays after rename" has "$out" '"written":false'
+check "content replay leaves all bytes alone" cmp -s "$content" "$fixture/content-edited"
+check "content edit releases its lock" flock -n "$XDG_RUNTIME_DIR/org-dispatch.lock" true
+cp "$org/edit/org-edit.el" "$fixture/org-edit.el"
+# Existing command docstrings exceed Emacs's width limit; check code warnings.
+compile=$(emacs -Q --batch -L "$org/dispatch" --eval "(setq byte-compile-error-on-warn t byte-compile-warnings '(not docstrings))" -f batch-byte-compile "$fixture/org-edit.el" 2>&1 | grep -v '^Loading' || true)
+check "org-edit.el byte-compiles without code warnings" test -z "$compile"
+
 if ((failures)); then
   echo "$failures failed"
   exit 1

@@ -704,6 +704,9 @@ check "safe task interruption, parking, replay and reassignment" \
 check "bounded exact-revision reviews, snapshots, handoffs and mixed acceptance" \
   emacs -Q --batch -L "$org/dispatch" -L "$org/edit" -l "$org/tests/review.el"
 
+check "revision-checked task title and Scope updates, preservation and replay" \
+  emacs -Q --batch -L "$org/dispatch" -L "$org/edit" -l "$org/tests/content.el"
+
 # The source byte-compiles without warnings.
 cp "$org/dispatch/org-dispatch.el" "$fixture/org-dispatch.el"
 compile=$(emacs -Q --batch --eval '(setq byte-compile-error-on-warn t)' -f batch-byte-compile "$fixture/org-dispatch.el" 2>&1 | grep -v '^Loading' || true)

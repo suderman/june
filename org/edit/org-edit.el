@@ -7,8 +7,10 @@
 ;;   org-edit-schedule  FILE HEADING WHEN
 ;;   org-edit-deadline  FILE HEADING WHEN
 ;;   org-edit-date      WHEN
+;;   org-edit-update-task FILE HEADING JSON
 ;;
-;; Agents write content as text. States and dates go through Org, so CLOSED,
+;; Task content updates use a read revision and preserve old wording in Dialog.
+;; States and dates go through Org, so CLOSED,
 ;; repeaters, LOGBOOK entries, and weekdays come out as Emacs makes them.
 ;; HEADING is a title without keyword, priority, or tags, an outline path
 ;; such as "Hockey / Practice", or id:UUID.
@@ -447,6 +449,137 @@ keep Dialog append-only, and never change prose or launch a worker here."
                         (depends . ,(vconcat (split-string (or (org-entry-get nil "DEPENDS") ""))))
                         (written . ,(if replay :false t))))))
      t)
+    (princ (concat (json-serialize result) "\n"))))
+
+(defun org-edit-update-task ()
+  "Update a task's title and/or Scope, keeping state, planning and history.
+SPEC is JSON with revision, request, note and optional title and scope.
+The wrapper holds the launch lock. Replays find the receipt even after a rename."
+  (pcase-let* ((`(,file ,heading ,json) (org-edit--args 3 "update-task FILE HEADING JSON"))
+               (spec (json-parse-string json :object-type 'plist :null-object nil :false-object :false))
+               (revision (plist-get spec :revision)) (request (plist-get spec :request))
+               (note (plist-get spec :note)) (title (plist-get spec :title))
+               (scope (plist-get spec :scope))
+               (fingerprint (secure-hash 'sha256 (json-serialize
+                             (list :title title :scope scope :note note))))
+               (receipt (json-serialize (list :request request :hash fingerprint)))
+               (create-lockfiles t) (file-precious-flag t)
+               (agenda nil) (replay-selector nil) (result nil))
+    (cl-loop for (key _value) on spec by #'cddr do
+             (unless (memq key '(:revision :request :note :title :scope))
+               (error "unknown update-task field %s" key)))
+    (unless (and (stringp revision) (string-match-p "\\`[0-9a-f]\\{64\\}\\'" revision)
+                 (stringp request) (not (string-empty-p request))
+                 (stringp note) (not (string-empty-p (string-trim note)))
+                 (not (string-match-p "[\n\r]" (concat request note)))
+                 (or (plist-member spec :title) (plist-member spec :scope)))
+      (error "update-task needs revision SHA256, request, one-line note and title and/or scope"))
+    (when (plist-member spec :title)
+      (unless (and (stringp title) (not (string-empty-p title)) (equal title (string-trim title))
+                   (not (string-match-p "[[:cntrl:]]" title))
+                   (not (string-match-p "\\`\\(?:\\*+\\|\\[#[^]]+\\]\\|TODO\\|AUTO\\|PROG\\|EVAL\\|HOLD\\|DONE\\)\\(?:[ \t]\\|\\'\\)" title))
+                   (not (string-match-p "[ \t]+:[[:alnum:]_@#%:]+:\\'" title)))
+        (error "title must be one line without keyword, priority, stars or tags")))
+    (when (plist-member spec :scope)
+      (unless (and (stringp scope) (not (string-empty-p (string-trim scope)))
+                   (not (string-match-p "\r" scope))
+                   (not (string-match-p "^\\*+[ \t]\\|^[ \t]*:[[:alnum:]_@#%]+:[ \t]*$\\|^[ \t]*\\(?:SCHEDULED\\|DEADLINE\\|CLOSED\\):\\|^[ \t]*#\\+" scope)))
+        (error "scope must be prose or lists, without headings, drawers, planning or directives"))
+      (setq scope (string-trim scope)))
+    (setq file (file-truename file))
+    (when (or (member (file-name-nondirectory file) '("asana.org" "inbox.org" "archive.org"))
+              (string-match-p "/archive/\\|\\.sync-conflict-" file)
+              (not (file-in-directory-p file (org-dispatch--org-root))))
+      (error "not a writable live Org file: %s" file))
+    (setq agenda (mapcar #'file-truename (org-dispatch--agenda-files)))
+    (unless (member file agenda)
+      (error "not an agenda file: %s" file))
+    (when (directory-files (file-name-directory file) nil
+                           (concat "\\`" (regexp-quote (file-name-base file)) "\\.sync-conflict-.*\\.org\\'"))
+      (error "resolve the file's Syncthing conflict copies first"))
+    ;; A title is not a stable selector after renaming. Locate this request's
+    ;; receipt before resolving the original selector, without writing anything.
+    (with-temp-buffer
+      (insert-file-contents file)
+      (org-mode)
+      (org-map-entries
+       (lambda ()
+         (when-let* ((old (org-entry-get nil "JUNE_TASK_EDIT")))
+           (when (equal request (plist-get (json-parse-string old :object-type 'plist) :request))
+             (when replay-selector (error "duplicate task edit receipt"))
+             (unless (equal old receipt) (error "request key reused with different content"))
+             (setq replay-selector (concat "id:" (org-entry-get nil "ID"))))))))
+    (org-edit--at
+     file (or replay-selector heading)
+     (lambda ()
+       (let ((replay (equal receipt (org-entry-get nil "JUNE_TASK_EDIT"))))
+         (unless replay
+           (unless (equal revision (secure-hash 'sha256 (encode-coding-string
+                    (replace-regexp-in-string "\n+\\'" "" (org-dispatch--subtree-text)) 'utf-8)))
+             (error "task revision changed; read the whole task and Dialog again"))
+           (unless (member (org-get-todo-state) '(nil "TODO" "HOLD" "EVAL"))
+             (error "only plain, TODO, HOLD or EVAL tasks can be updated; never active or queued work"))
+           (when (or (org-entry-get nil "DEV_REVIEW") (org-entry-get nil "REVIEW_PARENT"))
+             (error "task has a review contract; ask Jon before changing scope"))
+           (when-let* ((host (org-entry-get nil "HOST")))
+             (unless (equal host org-dispatch-host) (error "update on the task's dispatcher host")))
+           (when-let* ((id (org-entry-get nil "ID")))
+             (let ((matches 0))
+               (dolist (path agenda)
+                 (with-temp-buffer
+                   (insert-file-contents path)
+                   (org-mode)
+                   (org-map-entries (lambda () (when (equal id (org-entry-get nil "ID")) (cl-incf matches))))))
+               (unless (= matches 1) (error "duplicate task ID")))
+             (org-dispatch--check-stopped-task)
+             (let ((state-file (org-dispatch--state-file id)))
+               (when (file-exists-p state-file)
+                 (let ((state (with-temp-buffer (insert-file-contents state-file)
+                                               (json-parse-buffer :object-type 'plist))))
+                   (unless (member (plist-get state :status) '("finished" "stopped"))
+                     (error "task has active or uncertain dispatcher state; inspect before editing"))))))
+           ;; Check every linked session, including links outside Sessions.
+           ;; This confirms settlement/exit only; it sends no terminal input.
+           (let ((text (org-dispatch--subtree-text)) (offset 0))
+             (while (string-match "herdr:\\([^/]+\\)/\\([^:]+\\):\\([0-9a-f-]\\{36\\}\\)" text offset)
+               (let ((host (match-string 1 text)) (agent (match-string 2 text)) (session (match-string 3 text)))
+                 (setq offset (match-end 0))
+                 (unless (equal host org-dispatch-host) (error "remote session needs its host's coordinator"))
+                 (org-dispatch--interrupt-session (list :session session :agent agent)))))
+           (let ((old-title (org-get-heading t t t t)) old-scope
+                 (start (point-marker)) (sections 0))
+             (when scope
+               (save-excursion
+                 (let ((end (save-excursion (org-end-of-subtree t t) (point)))
+                       (stars (org-dispatch--section-stars)))
+                   (while (re-search-forward (format "^%s Scope[ \t]*$" (regexp-quote stars)) end t)
+                     (cl-incf sections))))
+               (when (> sections 1) (error "multiple Scope sections; reconcile them first"))
+               (let ((section (org-dispatch--section-bounds "Scope")))
+                 (save-excursion
+                   (if section
+                       (progn (goto-char (car section)) (forward-line 1))
+                     ;; Legacy manual tasks keep their scope directly under the
+                     ;; task. Preserve metadata and all child sections.
+                     (org-end-of-meta-data t))
+                   (let ((end (if section (cdr section)
+                                (save-excursion (outline-next-heading) (point)))))
+                     (setq old-scope (buffer-substring-no-properties (point) end))
+                     (when (string-match-p "^\\*+[ \t]\\|^[ \t]*:[[:alnum:]_@#%]+:[ \t]*$\\|^[ \t]*\\(?:SCHEDULED\\|DEADLINE\\|CLOSED\\):\\|^[ \t]*#\\+" old-scope)
+                       (error "Scope contains structure; reconcile it before replacing prose"))
+                     (delete-region (point) end)
+                     (insert scope "\n" (if (eobp) "" "\n"))))))
+             (goto-char start)
+             (when title (org-edit-headline title))
+             (org-id-get-create)
+             (org-entry-put nil "JUNE_TASK_EDIT" receipt)
+             (org-dispatch--append "Dialog" (org-dispatch--entry "June"
+               (concat note " Previous content (JSON): "
+                       (json-serialize (append (when title (list :title old-title))
+                                               (when scope (list :scope old-scope)))))))
+             (set-marker start nil)))
+         (setq result `((id . ,(org-entry-get nil "ID")) (title . ,(org-get-heading t t t t))
+                        (state . ,(org-get-todo-state)) (written . ,(if replay :false t)))))) t)
     (princ (concat (json-serialize result) "\n"))))
 
 (defun org-edit--planning (keyword usage)

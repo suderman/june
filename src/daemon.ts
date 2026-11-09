@@ -125,7 +125,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			createPhoneExtension(phones, `${paths.state}/inbox`),
 			createCodingExtension(),
 			createOrgExtension(config, org),
-			createOrgWriteExtension(config, org),
+			createOrgWriteExtension(config, org, instanceId(paths.state)),
 			createHerdrExtension(config, herdr),
 			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, herdr, instanceId(paths.state))] : []),
 		];

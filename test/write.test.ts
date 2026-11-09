@@ -154,6 +154,58 @@ test("states change through Org with the state just read; AUTO is not June's to 
 	assert.deepEqual(f.runs.at(-1), ["org-edit", "schedule", f.school, "Pickup", "none"]);
 });
 
+test("task content updates use the guarded backend, never direct writes or a dispatcher kick", async (t) => {
+	const f = await fixture(async () => 'loading agenda\n{"id":"trip-1","title":"Verify access","state":"TODO","written":true}\n');
+	t.after(f.cleanup);
+	const request = { file: "life/school.org", heading: "id:trip-1", revision: "a".repeat(64), title: "Verify access", scope: "Check access.\n- Keep permissions.", note: "Alex approved the new wording.", key: "fixture:1" };
+	assert.deepEqual(await f.writes.updateTask(request), { file: request.file, id: "trip-1", title: request.title, state: "TODO", written: true });
+	assert.deepEqual(f.runs, [["org-edit", "update-task", f.school, request.heading, JSON.stringify({ revision: request.revision, title: request.title, scope: request.scope, note: request.note, request: request.key })]]);
+	assert.equal(await readFile(f.school, "utf8"), SCHOOL, "only the backend writes");
+	await assert.rejects(f.writes.updateTask({ ...request, file: "asana.org" }), /does not write asana.org/);
+	await assert.rejects(f.writes.updateTask({ ...request, file: "elsewhere.org" }), /not an agenda file/);
+	assert.equal(f.runs.length, 1);
+	const old = await fixture(async () => { throw new Error("usage: org-edit todo|schedule|deadline FILE HEADING ARG, org-edit date WHEN"); });
+	t.after(old.cleanup);
+	await assert.rejects(old.writes.updateTask(request), /installed org-edit cannot update task content yet and wrote nothing/);
+});
+
+test("task content edits round-trip org_read_task revisions through the real private Emacs backend", async (t) => {
+	try {
+		execFileSync("sh", ["-c", "command -v emacs"]);
+	} catch {
+		t.skip("emacs is not installed");
+		return;
+	}
+	const f = await fixture();
+	t.after(f.cleanup);
+	await mkdir(f.paths.runtime, { recursive: true });
+	const script = fileURLToPath(new URL("../org/edit/org-edit", import.meta.url));
+	const org = new Org(f.root);
+	const writes = new OrgWrites(org, f.config, (argv) => runProcess([
+		"env", `HOME=${f.dir}`, `XDG_RUNTIME_DIR=${f.paths.runtime}`, `XDG_STATE_HOME=${f.paths.state}`,
+		`ORG_DISPATCH_ROOT=${f.root}`, `ORG_DISPATCH_EMACS_INIT=${join(f.dir, "no-init.el")}`,
+		"bash", script, ...argv.slice(1),
+	], 60_000));
+	await writeFile(f.garden, PROJECT.replace("Cedar, not pine.", "The estimate is approved. 🌲\n\n** Scope\nOld scope.\n\n** Checklist\n- [X] Approve estimate.\n\n** Dialog\n- Alex: Keep earlier evidence."));
+	const before = await org.read("work/home/garden/garden.org", "Build the raised beds");
+	// This is a manual PROG task, still deliberately refused until it is paused.
+	await assert.rejects(writes.updateTask({ file: before.file, heading: "Build the raised beds", revision: before.revision, title: "Verify access", note: "Alex asked.", key: "fixture:blocked" }), /only plain, TODO, HOLD or EVAL/);
+	await writeFile(f.garden, (await readFile(f.garden, "utf8")).replace("* PROG", "* HOLD"));
+	const paused = await org.read("work/home/garden/garden.org", "Build the raised beds");
+	const request = { file: paused.file, heading: "Build the raised beds", revision: paused.revision, title: "Verify access 🌲", scope: "Check access.\n- Do not deploy.", note: "Alex approved the estimate; access is next.", key: "fixture:edit" };
+	const result = await writes.updateTask(request);
+	assert.equal(result.written, true);
+	const after = await org.read(paused.file, `id:${result.id}`);
+	assert.match(after.text, /^\* HOLD Verify access 🌲\n/);
+	assert.match(after.text, /The estimate is approved. 🌲/);
+	assert.match(after.text, /\*\* Scope\nCheck access.\n- Do not deploy.\n\n\*\* Checklist\n- \[X\] Approve estimate./);
+	assert.match(after.text, /\*\* Dialog\n- Alex: Keep earlier evidence./);
+	assert.match(after.text, /Previous content \(JSON\): .*Old scope/);
+	assert.equal((await writes.updateTask(request)).written, false, "replay finds its receipt after a title-only selector has changed");
+	assert.equal((await org.read(paused.file, `id:${result.id}`)).revision, after.revision);
+	await assert.rejects(writes.updateTask({ ...request, heading: `id:${result.id}`, key: "fixture:stale", scope: "Different scope." }), /task revision changed/);
+});
+
 test("through this checkout's org-edit, a TODO gets its deadline and later closes as Emacs would", async (t) => {
 	try {
 		execFileSync("sh", ["-c", "command -v emacs"]);

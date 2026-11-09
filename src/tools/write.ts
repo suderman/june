@@ -1,4 +1,4 @@
-// Safe Org writes: a new TODO, a note on a heading, a state, a date. June writes heading and body text herself, as
+// Safe Org writes: a new TODO, a note, task content, a state, a date. June writes new heading and body text herself, as
 // agents do, replacing the file only if nobody changed it meanwhile; Org sets states and dates through org-edit, so
 // CLOSED, repeaters, logbook entries, and weekdays come out as Emacs makes them. Each write is safe to replay.
 import { readFile } from "node:fs/promises";
@@ -55,6 +55,16 @@ function splice(before: readonly string[], block: readonly string[], after: read
 	const tail = rest.length === 0 ? [""] : /^\*+ /.test(block.at(-1)!) || block.at(-1) === ":END:" ? rest : ["", ...rest];
 	return [...kept, ...(bare ? [] : [""]), ...block, ...tail].join("\n");
 }
+
+export type TaskUpdate = {
+	file: string;
+	heading: string;
+	revision: string;
+	title?: string;
+	scope?: string;
+	note: string;
+	key: string;
+};
 
 export class OrgWrites {
 	readonly #org: Org;
@@ -144,6 +154,22 @@ export class OrgWrites {
 		return { file: this.#org.rel(path), heading: out.trim().split("\n")[0], written: true };
 	}
 
+	/** Update only title/Scope under the dispatcher's lock, with revision and replay guards. */
+	async updateTask(request: TaskUpdate) {
+		const path = await writable(this.#org, this.#config, request.file);
+		const { file: _, heading, key, ...spec } = request;
+		const out = await this.#run(["org-edit", "update-task", path, heading, JSON.stringify({ ...spec, request: key })], 120_000).catch((error: Error) => {
+			if (/usage: org-edit/.test(error.message) && !/update-task FILE HEADING JSON/.test(error.message))
+				throw new Error(`The installed org-edit cannot update task content yet and wrote nothing; ${user()} needs to update June's Nix input and activate the updated Org commands. Do not bypass it with text edits.`);
+			throw error;
+		});
+		try {
+			return { file: this.#org.rel(path), ...JSON.parse(out.trim().split("\n").at(-1)!) };
+		} catch (cause) {
+			throw new Error("org-edit update-task did not return a result; re-read the task before retrying", { cause });
+		}
+	}
+
 	/** Set or clear SCHEDULED or DEADLINE through Org. */
 	async setDate(file: string, heading: string, kind: "scheduled" | "deadline", when: string) {
 		const path = await writable(this.#org, this.#config, file);
@@ -156,7 +182,7 @@ export class OrgWrites {
 
 const WHEN = "As org-edit takes it: a date (2026-10-30, +3d, fri, today), an optional time or range (14:00, 9:00-10:30), and optional repeater or warning cookies (+1w, .+1d, -2d)";
 
-export function createOrgWriteExtension(config: Config, org: Org, run: Run = runProcess): Extension {
+export function createOrgWriteExtension(config: Config, org: Org, instance: string, run: Run = runProcess): Extension {
 	const writes = new OrgWrites(org, config, run);
 	const json = (value: unknown) => ({ output: [{ type: "text" as const, text: JSON.stringify(value, null, 1) }] });
 	const file = str({ description: "Agenda Org file under ~/org, as org_search returns it" });
@@ -196,6 +222,20 @@ export function createOrgWriteExtension(config: Config, org: Org, run: Run = run
 				parameters: obj({ file, heading, text: str({ description: "Org text, one physical line per paragraph or list item; no headings, dates, or drawers" }) }),
 				replay: "safe",
 				execute: async (args) => json(await writes.addNote(args.file, args.heading, args.text)),
+			}),
+			defineTool({
+				name: "org_update_task",
+				description: `Correct an existing task's stale title and/or Scope when ${user()} asks to organize or update their work. Read the whole task and Dialog with org_read_task first and pass its revision. Keeps state, priority, tags, dates, prerequisites, checklist and history; records replaced content and the reason in Dialog. scope replaces only a direct Scope section's prose. If none exists, it replaces the heading's own prose below metadata, before child sections. Old prose stays in Dialog. Never expand permissions, waive approval gates or rewrite Dialog. Refuses AUTO, PROG, DONE, active/unknown workers and review-contract tasks. Stop/reconcile active work first; this tool never resumes or launches anything. A remote task needs that host's June. Requires updated installed org-edit; never bypass a refusal with raw edits.`,
+				parameters: obj({
+					file,
+					heading,
+					revision: str({ description: "Exact revision returned by org_read_task; stale reads are refused" }),
+					title: opt(str({ description: "Replacement title without keyword, priority or tags; omit to keep it" })),
+					scope: opt(str({ description: "Replacement Scope prose or lists, one physical line per paragraph/item; no headings, drawers, dates or directives. Omit to keep it" })),
+					note: str({ description: `One line recording ${user()}'s request and why the old wording is stale; preserve other instructions` }),
+				}),
+				replay: "safe",
+				execute: async (args, api) => json(await writes.updateTask({ ...args, key: `${instance}:${api.taskId}` })),
 			}),
 			defineTool({
 				name: "org_set_state",
