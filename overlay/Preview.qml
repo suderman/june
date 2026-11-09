@@ -4,6 +4,7 @@
 // other file only its name. Esc (the window's shortcut), the close, or a click on the ground closes it. See "Previewing
 // what a message brought" in docs/interfaces.org.
 import QtQuick
+import "Code.mjs" as Code
 
 Item {
   id: preview
@@ -26,6 +27,7 @@ Item {
   property var lit: null
   // Asks the window to open the url with the desktop's app.
   signal external(string url)
+  signal copyText(string text)
   visible: open
   z: 100
 
@@ -37,28 +39,13 @@ Item {
   }
   function look(item) {
     what = item; pages = -1; page = 1; words = ""; failed = false; lit = null;
+    if (kind === "artifact") { words = item.text; lit = item.lines ?? null; }
     if (kind === "text") ask(item.url + "/highlight", text => { lit = JSON.parse(text).lines ?? null; }, () => {});
     if (kind === "pdf") ask(item.url + "/pages", text => { pages = Number(JSON.parse(text).pages) || 0; }, () => { pages = 0; });
     else if (kind === "text") ask(item.url, text => { words = text.length > maxChars ? text.slice(0, maxChars) + "\n…" : text; }, () => { failed = true; });
   }
   function close() { what = null; set = []; at = 0; }
 
-  // Code on the tool card's dark ground, coloured by what each token is; the words as they are when no colour applies.
-  readonly property var palette: ({
-    comment: "#7d8697", quote: "#7d8697", doctag: "#7d8697",
-    keyword: "#c792ea", "selector-tag": "#c792ea", operator: "#89ddff", punctuation: "#89ddff",
-    string: "#c3e88d", regexp: "#c3e88d", addition: "#c3e88d", char: "#c3e88d", subst: "#e4e8f2",
-    number: "#f78c6c", literal: "#f78c6c", symbol: "#f78c6c", bullet: "#f78c6c",
-    title: "#82aaff", section: "#82aaff", name: "#82aaff", function: "#82aaff",
-    type: "#ffcb6b", built_in: "#ffcb6b", class: "#ffcb6b", params: "#ffcb6b",
-    attr: "#89ddff", attribute: "#89ddff", variable: "#89ddff", property: "#89ddff", "template-variable": "#89ddff", tag: "#89ddff",
-    meta: "#9aa3b8", deletion: "#ff8f80"
-  })
-  function codeHtml(lines) {
-    const escape = t => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const line = tokens => tokens.map(([scope, text]) => palette[scope] ? "<span style=\"color:" + palette[scope] + (scope === "comment" ? "; font-style:italic" : "") + "\">" + escape(text) + "</span>" : escape(text)).join("");
-    return "<pre style=\"font-family:monospace\">" + lines.map(line).join("\n") + "</pre>";
-  }
   // The next or previous of what the message brought, wrapping round.
   function step(by) { if (!stepping) return; at = (at + by + set.length) % set.length; look(set[at]); }
   // The arrow keys: a PDF's pages first, then on to the next or previous thing the message brought.
@@ -117,7 +104,7 @@ Item {
       objectName: "words"
       anchors.centerIn: parent
       width: Math.min(parent.width, 820); height: parent.height
-      visible: preview.kind === "text" && preview.words !== ""
+      visible: (preview.kind === "text" && preview.words !== "") || preview.kind === "artifact"
       color: preview.lit ? Theme.cardFill : "#fbf8f1"; radius: 6
       MouseArea { anchors.fill: parent }
       Flickable {
@@ -132,7 +119,7 @@ Item {
           readOnly: true; selectByMouse: true
           wrapMode: TextEdit.Wrap
           textFormat: preview.lit ? TextEdit.RichText : TextEdit.PlainText
-          text: preview.lit ? preview.codeHtml(preview.lit) : preview.words
+          text: preview.lit ? Code.html(preview.lit) : preview.words
           font.family: "monospace"; font.pixelSize: 14; color: preview.lit ? Theme.cardInk : Theme.ink
           selectionColor: Theme.highlight
         }
@@ -183,13 +170,17 @@ Item {
     spacing: 10
     Button { objectName: "previous"; label: "‹"; visible: preview.paging; dim: preview.page <= 1; onClicked: preview.previous() }
     Button { objectName: "next"; label: "›"; visible: preview.paging; dim: preview.page >= preview.pages; onClicked: preview.next() }
-    Button { objectName: "external"; label: "open in browser"; onClicked: preview.external(preview.what.url) }
+    Button { objectName: "copy"; label: copied.running ? "Copied" : "Copy"; visible: preview.kind === "artifact"; onClicked: { preview.copyText(preview.what.text); copied.restart(); } }
+    Button { objectName: "external"; label: "open in browser"; visible: preview.kind !== "artifact"; onClicked: preview.external(preview.what.url) }
     Button { objectName: "close"; label: "✕"; onClicked: preview.close() }
   }
 
   // Between the things a message brought: a large arrow at each side, clear of what is shown.
   Button { objectName: "back"; label: "‹"; big: true; visible: preview.stepping; anchors.left: parent.left; anchors.leftMargin: 16; anchors.verticalCenter: parent.verticalCenter; onClicked: preview.step(-1) }
   Button { objectName: "forward"; label: "›"; big: true; visible: preview.stepping; anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter; onClicked: preview.step(1) }
+
+  Timer { id: copied; interval: 1600 }
+  onWhatChanged: copied.stop()
 
   component Button: Rectangle {
     id: button
@@ -199,6 +190,14 @@ Item {
     signal clicked()
     width: big ? 48 : text.implicitWidth + 28
     height: big ? 48 : 34
+    activeFocusOnTab: true
+    Accessible.role: Accessible.Button
+    Accessible.name: label
+    Accessible.onPressAction: clicked()
+    Keys.onReturnPressed: clicked()
+    Keys.onSpacePressed: clicked()
+    border.width: activeFocus ? 3 : 0
+    border.color: Theme.highlight
     radius: height / 2
     color: "#ffffff"
     opacity: dim ? 0.4 : area.containsMouse ? 1 : 0.88
@@ -206,7 +205,7 @@ Item {
       id: text
       anchors.centerIn: parent
       text: button.label
-      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: button.big ? 26 : 14; color: Theme.ink
+      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: button.big ? 26 : 14; color: "#1b1a1f"
     }
     MouseArea { id: area; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: button.clicked() }
   }

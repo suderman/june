@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -214,7 +215,10 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
         // A picture or file the user sent, previewed over the strip while open.
         var viewing by remember { mutableStateOf<Pair<List<Previewing>, Int>?>(null) }
         avatar.attachedPath = link.attachedPath
-        androidx.compose.runtime.CompositionLocalProvider(LocalPictures provides Pictures(avatar, link.attachedPath) { set, at -> viewing = set to at }) {
+        androidx.compose.runtime.CompositionLocalProvider(
+            LocalPictures provides Pictures(avatar, link.attachedPath) { set, at -> viewing = set to at },
+            LocalArtifactPreview provides { viewing = listOf(it) to 0 },
+        ) {
             LazyColumn(Modifier.fillMaxSize(), state = followNewest(if (count > 0) shown.getJSONObject(count - 1).getString("id") else null), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 items(count, key = { shown.getJSONObject(count - 1 - it).getString("id") }) { i ->
                     PanelView(shown.getJSONObject(count - 1 - i), newest = i == 0, width.value, m, decisions, avatar, now, sky, link)
@@ -232,7 +236,7 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
 class Pictures(val avatar: Avatar, val path: String?, val open: (List<Previewing>, Int) -> Unit)
 
 /** What a preview shows: `kind` as Strip.previewKind names it ("picture", "pdf", "text", "file"), at `path` under the hello's `attached`. */
-data class Previewing(val kind: String, val path: String, val name: String)
+data class Previewing(val kind: String, val path: String, val name: String, val text: String? = null, val lines: JSONArray? = null)
 
 /** Everything a note's message brought, every picture (not only the three drawn) then every file, as the preview steps through them. */
 private fun brought(item: JSONObject, el: JSONObject): List<Previewing> {
@@ -244,6 +248,7 @@ private fun brought(item: JSONObject, el: JSONObject): List<Previewing> {
 }
 
 val LocalPictures = androidx.compose.runtime.staticCompositionLocalOf<Pictures?> { null }
+private val LocalArtifactPreview = androidx.compose.runtime.staticCompositionLocalOf<(Previewing) -> Unit> { {} }
 
 /** What to do once another app is opening over June: the assistant sheet hides, so the app is not behind it. */
 val LocalLeave = androidx.compose.runtime.staticCompositionLocalOf<() -> Unit> { {} }
@@ -255,7 +260,7 @@ val LocalLeave = androidx.compose.runtime.staticCompositionLocalOf<() -> Unit> {
  * does the same on the desktop.
  */
 @Composable
-private fun Preview(set: List<Previewing>, start: Int, avatar: Avatar, close: () -> Unit) {
+private fun Preview(set: List<Previewing>, start: Int, avatar: Avatar?, close: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val leave = LocalLeave.current
     var at by remember(set) { mutableStateOf(start.coerceIn(0, set.size - 1)) }
@@ -264,15 +269,15 @@ private fun Preview(set: List<Previewing>, start: Int, avatar: Avatar, close: ()
     var page by remember(shown) { mutableStateOf(1) }
     // A PDF's page count: -1 while asking, 0 when it cannot be read.
     val pages by produceState(-1, shown) {
-        value = if (shown.kind != "pdf") 0 else avatar.bytes("${shown.path}/pages")?.let { runCatching { JSONObject(String(it)).optInt("pages") }.getOrNull() } ?: 0
+        value = if (shown.kind != "pdf") 0 else avatar?.bytes("${shown.path}/pages")?.let { runCatching { JSONObject(String(it)).optInt("pages") }.getOrNull() } ?: 0
     }
     // The picture shown, a picture file or a PDF's current page: a list while loading, then one bitmap, or none when it
     // cannot be had.
     val got by produceState<List<ImageBitmap>?>(null, shown, page, pages) {
         value = null
         val bytes = when {
-            shown.kind == "picture" -> avatar.bytes(shown.path)
-            shown.kind == "pdf" && pages > 0 -> avatar.bytes("${shown.path}/page/$page")
+            shown.kind == "picture" -> avatar?.bytes(shown.path)
+            shown.kind == "pdf" && pages > 0 -> avatar?.bytes("${shown.path}/page/$page")
             else -> return@produceState
         }
         value = listOfNotNull(bytes?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() })
@@ -280,10 +285,10 @@ private fun Preview(set: List<Previewing>, start: Int, avatar: Avatar, close: ()
     val picture = got?.firstOrNull()
     // Code's highlighted lines from the daemon (src/highlight.ts), drawn on the tool card's dark ground; null for words.
     val lit by produceState<JSONArray?>(null, shown) {
-        value = if (shown.kind != "text") null else avatar.bytes("${shown.path}/highlight")?.let { runCatching { JSONObject(String(it)).optJSONArray("lines") }.getOrNull() }
+        value = if (shown.kind == "artifact") shown.lines else if (shown.kind != "text") null else avatar?.bytes("${shown.path}/highlight")?.let { runCatching { JSONObject(String(it)).optJSONArray("lines") }.getOrNull() }
     }
     val words by produceState<String?>(null, shown) {
-        value = if (shown.kind != "text") null else avatar.bytes(shown.path)?.let { val t = String(it, Charsets.UTF_8); if (t.length > 200_000) t.take(200_000) + "\n…" else t } ?: ""
+        value = if (shown.kind == "artifact") shown.text else if (shown.kind != "text") null else avatar?.bytes(shown.path)?.let { val t = String(it, Charsets.UTF_8); if (t.length > 200_000) t.take(200_000) + "\n…" else t } ?: ""
     }
     // A swipe, or ‹ › at the sides: a PDF's pages first, then on to the next thing the message brought, wrapping round.
     val step = { by: Int ->
@@ -309,11 +314,11 @@ private fun Preview(set: List<Previewing>, start: Int, avatar: Avatar, close: ()
             val still = Modifier.clickable(inner, null) {}
             when {
                 picture != null -> androidx.compose.foundation.Image(picture, shown.name, still.then(if (shown.kind == "pdf") Modifier.background(Color.White) else Modifier), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
-                shown.kind == "text" && lit != null -> Box(still.fillMaxSize().background(Look.cardFill, RoundedCornerShape(6.dp)).padding(14.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()).horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
+                shown.kind in setOf("text", "artifact") && lit != null -> Box(still.fillMaxSize().background(Look.cardFill, RoundedCornerShape(6.dp)).padding(14.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()).horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
                     androidx.compose.foundation.text.selection.SelectionContainer { Text(codeText(lit!!), style = noteBody.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp, color = Look.cardInk), softWrap = false) }
                 }
-                shown.kind == "text" && !words.isNullOrEmpty() -> Box(still.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(6.dp)).padding(14.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
-                    androidx.compose.foundation.text.selection.SelectionContainer { Text(words!!, style = noteBody.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 13.sp, color = Look.ink)) }
+                (shown.kind == "text" && !words.isNullOrEmpty() || shown.kind == "artifact") -> Box(still.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(6.dp)).padding(14.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                    androidx.compose.foundation.text.selection.SelectionContainer { Text(words.orEmpty(), style = noteBody.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 13.sp, color = Look.ink)) }
                 }
                 else -> Text(
                     when {
@@ -332,8 +337,9 @@ private fun Preview(set: List<Previewing>, start: Int, avatar: Avatar, close: ()
                 PreviewButton("‹", enabled = page > 1) { page-- }
                 PreviewButton("›", enabled = page < pages) { page++ }
             }
-            PreviewButton("open in browser") {
-                val address = avatar.url(shown.path)
+            if (shown.kind == "artifact") CopyArtifact(shown.text.orEmpty())
+            else PreviewButton("open in browser") {
+                val address = avatar?.url(shown.path)
                 val opened = address != null && runCatching {
                     context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(address)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                 }.isSuccess
@@ -353,9 +359,48 @@ private fun Preview(set: List<Previewing>, start: Int, avatar: Avatar, close: ()
     }
 }
 
+private fun artifactWords(artifact: JSONObject): AnnotatedString = artifact.optJSONArray("lines")?.let { codeText(it) } ?: AnnotatedString(artifact.optString("text"))
+
+@Composable
+private fun CopyArtifact(text: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var copied by remember(text) { mutableStateOf(0) }
+    LaunchedEffect(copied) { if (copied > 0) { kotlinx.coroutines.delay(1600); copied = 0 } }
+    androidx.compose.material3.TextButton(
+        onClick = {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("June artifact", text))
+            copied++
+        },
+        modifier = Modifier.heightIn(min = 48.dp).background(Color.White, RoundedCornerShape(6.dp)),
+    ) { Text(if (copied > 0) "Copied" else "Copy", color = Look.ink, style = noteBody.copy(fontSize = 14.sp)) }
+}
+
+/** The same bounded code ground in comic and console looks; the modal reuses the attachment preview. */
+@Composable
+private fun ArtifactBalloon(artifact: JSONObject, modifier: Modifier = Modifier) {
+    val source = artifact.optString("text")
+    val language = artifact.optString("language", "text")
+    val excerpt = artifact.getJSONObject("excerpt")
+    val open = LocalArtifactPreview.current
+    val preview = { open(Previewing("artifact", "", if (language == "text") "Copy text" else language, source, artifact.optJSONArray("lines"))) }
+    var overflow by remember(source) { mutableStateOf(false) }
+    Column(modifier.background(Look.cardFill, RoundedCornerShape(8.dp)).border(2.dp, Look.ink, RoundedCornerShape(8.dp)).clickable(onClickLabel = "Preview full text", onClick = preview).padding(8.dp)) {
+        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text(if (language == "text") "Copy text" else language, color = Look.cardInk, style = noteBody.copy(fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 6.dp))
+            CopyArtifact(source)
+        }
+        Text(artifactWords(excerpt), style = cardLine.copy(fontSize = 14.sp), maxLines = 8, overflow = TextOverflow.Ellipsis,
+            onTextLayout = { overflow = it.hasVisualOverflow }, modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp).heightIn(max = 144.dp).clipToBounds())
+        androidx.compose.material3.TextButton(onClick = preview, modifier = Modifier.height(48.dp)) {
+            Text((if (excerpt.optBoolean("truncated") || overflow) "… " else "") + "Preview full text", color = Look.cardInk, maxLines = 1)
+        }
+    }
+}
+
 /** Colours for code's tokens on the dark ground, as the desktop's Preview.qml paints them. */
 private val CODE = mapOf(
-    "comment" to 0xFF7D8697, "quote" to 0xFF7D8697, "doctag" to 0xFF7D8697,
+    "comment" to 0xFF9AA3B8, "quote" to 0xFF9AA3B8, "doctag" to 0xFF9AA3B8,
     "keyword" to 0xFFC792EA, "selector-tag" to 0xFFC792EA, "operator" to 0xFF89DDFF, "punctuation" to 0xFF89DDFF,
     "string" to 0xFFC3E88D, "regexp" to 0xFFC3E88D, "addition" to 0xFFC3E88D, "char" to 0xFFC3E88D,
     "number" to 0xFFF78C6C, "literal" to 0xFFF78C6C, "symbol" to 0xFFF78C6C, "bullet" to 0xFFF78C6C,
@@ -554,6 +599,12 @@ private fun measure(e: JSONObject, newest: Boolean, textWidth: Float, measurer: 
     val kind = kindOf(e)
     return when (kind) {
         "june" -> {
+            val artifact = e.optJSONObject("artifact")
+            if (artifact != null) {
+                val words = min(textWidth, 460f) - 28
+                val body = artifactWords(artifact.getJSONObject("excerpt"))
+                return Measured(kind, words + 28, 112 + min(height(body, cardLine.copy(fontSize = 14.sp), words), 144f), e, words)
+            }
             val text = juneText(e)
             val style = balloonStyle(newest)
             val words = min(natural(text, style) + 2, textWidth - 44)
@@ -850,8 +901,12 @@ private fun ElementView(e: Measured, box: JSONObject, newest: Boolean) {
     val el = e.element
     when (e.kind) {
         "june" -> {
-            Outline(box.optString("path"), Look.balloon, if (newest) 3f else 2.5f)
-            Box(Modifier.offset(max((e.w - e.textW) / 2, 22f).dp, 14.dp).width(e.textW.dp)) { Text(juneText(el), style = balloonStyle(newest)) }
+            val artifact = el.optJSONObject("artifact")
+            if (artifact != null) ArtifactBalloon(artifact, Modifier.fillMaxSize())
+            else {
+                Outline(box.optString("path"), Look.balloon, if (newest) 3f else 2.5f)
+                Box(Modifier.offset(max((e.w - e.textW) / 2, 22f).dp, 14.dp).width(e.textW.dp)) { Text(juneText(el), style = balloonStyle(newest)) }
+            }
         }
         "user" -> {
             val item = el.getJSONObject("item")
@@ -921,22 +976,29 @@ fun ConsoleStrip(link: Link, decisions: Decisions, palette: Look.Palette, modifi
     // One snapshot for the list, as in Strip.
     val shown = strip
     val count = shown.length()
-    LazyColumn(modifier, state = followNewest(if (count > 0) shown.getJSONObject(count - 1).getString("id") else null), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        items(count, key = { shown.getJSONObject(count - 1 - it).getString("id") }) { i ->
-            val panel = shown.getJSONObject(count - 1 - i)
-            val lines = panel.getJSONArray("lines")
-            PanelActions(panel, link, Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (j in 0 until lines.length()) ConsoleLine(lines.getJSONObject(j), palette)
-                    if (panel.optBoolean("live") && link.state.activity.isNotEmpty()) Text("… " + link.state.activity, color = palette.busy, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+    Box(modifier) {
+        var viewing by remember { mutableStateOf<Previewing?>(null) }
+        androidx.compose.runtime.CompositionLocalProvider(LocalArtifactPreview provides { viewing = it }) {
+            LazyColumn(Modifier.fillMaxSize(), state = followNewest(if (count > 0) shown.getJSONObject(count - 1).getString("id") else null), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                items(count, key = { shown.getJSONObject(count - 1 - it).getString("id") }) { i ->
+                    val panel = shown.getJSONObject(count - 1 - i)
+                    val lines = panel.getJSONArray("lines")
+                    PanelActions(panel, link, Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for (j in 0 until lines.length()) ConsoleLine(lines.getJSONObject(j), palette)
+                            if (panel.optBoolean("live") && link.state.activity.isNotEmpty()) Text("… " + link.state.activity, color = palette.busy, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                        }
+                    }
                 }
             }
         }
+        viewing?.let { Preview(listOf(it), 0, null) { viewing = null } }
     }
 }
 
 @Composable
 private fun ConsoleLine(line: JSONObject, palette: Look.Palette) {
+    line.optJSONObject("artifact")?.let { ArtifactBalloon(it, Modifier.fillMaxWidth()); return }
     val kind = line.optString("kind")
     val quiet = kind == "tool" || kind == "thought"
     val prefixColour = when (kind) {

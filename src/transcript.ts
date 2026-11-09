@@ -4,6 +4,7 @@
 import type { Sky } from "./situation.ts";
 import type { ConversationView, LiveState } from "@earendil-works/pi-durable";
 import { plain } from "./plain.ts";
+import { replyParts, type ReplyPart } from "./artifact.ts";
 import { shownFiles } from "./shown.ts";
 
 /** A heartbeat's whole answer when nothing is worth raising; the view shows nothing for it. */
@@ -36,7 +37,7 @@ export type ViewItem =
 	 * the source of the input the reply follows, empty when that input is before the transcript. `alert` names the client
 	 * kind that should interrupt the user, on a finished reply only.
 	 */
-	| { kind: "assistant"; id: string; text: string; streaming: boolean; answers: string; alert?: Surface; error?: string; thinking?: string; private?: true; expression?: string; pose?: string; side?: "left" | "right"; expressionAt?: number; artVersion?: string; take?: number; takes?: ArtTake[]; artRequests?: string[]; artContext?: ArtContext; at?: number }
+	| { kind: "assistant"; id: string; text: string; parts?: ReplyPart[]; streaming: boolean; answers: string; alert?: Surface; error?: string; thinking?: string; private?: true; expression?: string; pose?: string; side?: "left" | "right"; expressionAt?: number; artVersion?: string; take?: number; takes?: ArtTake[]; artRequests?: string[]; artContext?: ArtContext; at?: number }
 	/** `error` is the first line of a failed call's output; `output`, in detail only, is all of what the call kept. */
 	| { kind: "tool"; id: string; name: string; summary: string; status: "running" | "done" | "error"; error?: string; output?: string; private?: true }
 	/** What June showed with her show tool, after the call: each file's name, size and type, served at `<id>/file/<n>`. */
@@ -134,10 +135,12 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 		if (!shown && !detail) return;
 		if (words === "" && thinking === "" && !error && !streaming) return;
 		const notify = shown && !streaming && final && (words.trim() !== "" || error !== undefined) ? alert() : undefined;
+		const parts = replyParts(words);
 		items.push({
 			kind: "assistant",
 			id,
 			text: text(words),
+			...(parts.some((p) => p.artifact) ? { parts } : {}),
 			streaming,
 			answers: answering,
 			...(notify ? { alert: notify } : {}),

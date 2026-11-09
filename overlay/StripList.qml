@@ -19,6 +19,7 @@ ListView {
   signal take(var action)
   // A picture or file a panel asks to show over the strip: { kind, url, name }.
   signal preview(var item)
+  signal copyText(string text)
   // A link in June's words was clicked, in either look.
   signal link(string url)
   // The console look instead of the comic strip.
@@ -124,6 +125,7 @@ ListView {
         sky: list.sky
         attached: list.attached
         onPreview: item => list.preview(item)
+        onCopyText: text => list.copyText(text)
         onLink: url => list.link(url)
       }
     }
@@ -134,6 +136,8 @@ ListView {
         width: list.width
         newest: cell.index === 0
         activity: list.activity
+        onPreview: item => list.preview(item)
+        onCopyText: text => list.copyText(text)
         onLink: url => list.link(url)
       }
     }

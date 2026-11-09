@@ -11,6 +11,131 @@ import { WebSocketServer } from "ws";
 
 const qml = process.env.JUNE_TEST_QML;
 
+test("Qt renders artifact beats in both looks, bounds previews and copies full literal text", { skip: !qml, timeout: 30000 }, async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "june-artifacts-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	await mkdir(join(dir, "ui"));
+	for (const file of ["Artifact.qml", "ArtifactButton.qml", "Preview.qml", "ConsolePanel.qml", "Panel.qml", "Balloon.qml", "Backdrop.qml", "Scenery.qml", "FileCard.qml", "Code.mjs", "console.mjs", "compose.mjs", "strip.mjs", "light.mjs", "live.mjs", "scenery.mjs"]) await copyFile(new URL(`../overlay/${file}`, import.meta.url), join(dir, "ui", file));
+	const theme = (await readFile(new URL("../overlay/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
+	await writeFile(join(dir, "ui", "Theme.qml"), theme);
+	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\n");
+	await writeFile(join(dir, "tst_artifacts.qml"), `
+import QtQuick
+import QtTest
+import "ui"
+import "ui/strip.mjs" as Strip
+Item {
+  id: root
+  width: 900; height: 700
+  property string raw: "  <b>literal</b> & “quoted”—\\t😀\\n\\n" + "a long line to wrap ".repeat(20000)
+  property string copied: ""
+  Artifact { id: card; content: ({ text: root.raw, language: "text", lines: null }); onPreview: item => modal.show(item); onCopyText: text => root.copied = text }
+  Preview { id: modal; anchors.fill: parent; onCopyText: text => root.copied = text }
+  ConsolePanel { id: consoleView; visible: false; width: 340; onCopyText: text => root.copied = text; json: JSON.stringify({ elements: [{kind: "june", id:"a#0", artifact:card.content, text:root.raw}] }) }
+  Panel { id: comicView; visible: false; width: 340; onCopyText: text => root.copied = text; json: JSON.stringify({id:"a", side:"left", elements:[{kind:"june",id:"a#0",text:root.raw,artifact:card.content}]}) }
+  TestCase {
+    name: "Artifacts"
+    when: windowShown
+    function cleanup() { modal.close(); root.copied = ""; card.maxWidth = 400; }
+    function test_qml_engine_and_console() {
+      const item = {kind: "assistant", id:"a", text:root.raw, parts:[{text:"Intro"}, {text:root.raw, artifact:true, language:"text"}], streaming:false};
+      const panels = Strip.panels([item]);
+      compare(panels.reduce((n,p) => n+p.elements.length,0), 2);
+      const beat = panels.reduce((all,p) => all.concat(p.elements), []).find(e => e.artifact);
+      compare(beat.artifact.text, root.raw);
+      consoleView.visible = true;
+      tryVerify(() => consoleView.height > 0 && consoleView.height < 300);
+      findChild(consoleView,"copy").clicked(); compare(root.copied, root.raw); root.copied = "";
+      consoleView.visible = false;
+      comicView.visible = true;
+      for (const width of [340,820]) {
+        comicView.width = width;
+        tryVerify(() => comicView.sizes.length === 1 && comicView.sizes[0].h > 0);
+        verify(comicView.sizes[0].h <= 256);
+        verify(comicView.sizes[0].w <= comicView.m.textWidth);
+        const box = comicView.layout.elements[0];
+        verify(box.x >= 0 && box.x+box.w <= width);
+      }
+      findChild(comicView,"copy").clicked(); compare(root.copied, root.raw);
+      comicView.visible = false;
+    }
+    function test_bound_and_copy() {
+      for (const width of [340,820]) {
+        card.maxWidth = width;
+        verify(card.w <= width); verify(card.h <= 256);
+        verify(findChild(card,"excerpt").text.length <= 1600);
+        const copy = findChild(card,"copy"); mouseClick(copy, copy.width/2, copy.height/2);
+        compare(root.copied, root.raw);
+        root.copied = "";
+        verify(!modal.open, "copy does not open preview");
+      }
+    }
+    function test_full_preview_and_keyboard() {
+      const expand = findChild(card,"expand"); expand.forceActiveFocus(); keyClick(Qt.Key_Return);
+      compare(modal.open,true); compare(modal.words,root.raw);
+      compare(findChild(modal,"external").visible,false);
+      const copy = findChild(modal,"copy"); copy.forceActiveFocus(); keyClick(Qt.Key_Space);
+      compare(root.copied,root.raw);
+      const close = findChild(modal,"close"); close.forceActiveFocus(); keyClick(Qt.Key_Return); compare(modal.open,false);
+    }
+    function test_empty_and_replaced() {
+      modal.show({kind:"artifact",text:"",name:"Empty"});
+      compare(modal.words, ""); compare(findChild(modal,"status").visible,false);
+      modal.show({kind:"artifact",text:"replacement",name:"New",lines:null});
+      compare(modal.words, "replacement"); compare(modal.lit, null);
+    }
+  }
+}
+`);
+	const child = spawn(join(dirname(qml), "qmltestrunner"), ["-input", dir], { env: { ...process.env, QT_QPA_PLATFORM: "offscreen", QT_QUICK_BACKEND: "software", QT_QUICK_CONTROLS_STYLE: "Basic", QT_STYLE_OVERRIDE: "", QT_QPA_PLATFORMTHEME: "", QT_FORCE_STDERR_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+	let output = "";
+	for (const stream of [child.stdout, child.stderr]) stream.on("data", (data) => { output += data; });
+	const closed = once(child, "close");
+	t.after(() => child.kill());
+	const [code] = await closed;
+	assert.equal(code, 0, output);
+	assert.doesNotMatch(output, /TypeError|ReferenceError|Binding loop/);
+});
+
+test("Quickshell clipboard writes preserve NBSP, CRLF and Unicode separators without a text document", { skip: !process.env.JUNE_TEST_QS, timeout: 15000 }, async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "june-clipboard-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	await writeFile(join(dir, "shell.qml"), `
+import QtQuick
+import Quickshell
+import ${JSON.stringify(new URL("../overlay", import.meta.url).href)}
+ShellRoot {
+  Item {
+    id: root
+    property string raw: "  a\\u00a0b\\r\\n“quoted”—\\u2028line\\u2029paragraph\\t<literal> & 😀\\n" + "x".repeat(200001)
+    Artifact { id: card; content: ({text: root.raw, language:"text", lines:null}); onCopyText: text => Quickshell.clipboardText = text }
+    Preview { id: modal; onCopyText: text => Quickshell.clipboardText = text }
+    function button(item) { for (const child of item.children) if (child.objectName === "copy") return child; }
+    Component.onCompleted: Qt.callLater(() => {
+      button(card).clicked();
+      if (Quickshell.clipboardText !== raw) { console.error("CARD_COPY_FAILED"); Qt.quit(); return; }
+      Quickshell.clipboardText = "reset";
+      modal.show({kind:"artifact", name:"Full", text:raw});
+      // Preview's button belongs to its bottom row.
+      for (const row of modal.children) for (const child of row.children) if (child.objectName === "copy") child.clicked();
+      if (Quickshell.clipboardText !== raw) console.error("PREVIEW_COPY_FAILED");
+      else console.log("CLIPBOARD_EXACT");
+      Qt.quit();
+    })
+  }
+}
+`);
+	const child = spawn(process.env.JUNE_TEST_QS, ["-p", join(dir, "shell.qml")], { env: { ...process.env, QT_QPA_PLATFORM: "offscreen", QT_QUICK_BACKEND: "software", QT_QUICK_CONTROLS_STYLE: "Basic", QT_STYLE_OVERRIDE: "", QT_QPA_PLATFORMTHEME: "", QT_FORCE_STDERR_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+	let output = "";
+	for (const stream of [child.stdout, child.stderr]) stream.on("data", (data) => { output += data; });
+	const closed = once(child, "close");
+	t.after(() => child.kill());
+	const [code] = await closed;
+	assert.equal(code, 0, output);
+	assert.match(output, /CLIPBOARD_EXACT/);
+	assert.doesNotMatch(output, /COPY_FAILED|TypeError|ReferenceError/);
+});
+
 test("Qt reconnects a silent socket, reattaches for a fresh view, and supports manual refresh", { skip: !qml, timeout: 15000 }, async (t) => {
 	const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
 	await once(server, "listening");
@@ -274,7 +399,7 @@ test("Qt's preview shows a picture over the strip, hands it to the desktop on re
 	const dir = await mkdtemp(join(tmpdir(), "june-preview-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await mkdir(join(dir, "ui"));
-	await copyFile(new URL("../overlay/Preview.qml", import.meta.url), join(dir, "ui", "Preview.qml"));
+	for (const file of ["Preview.qml", "Code.mjs"]) await copyFile(new URL(`../overlay/${file}`, import.meta.url), join(dir, "ui", file));
 	const theme = (await readFile(new URL("../overlay/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
 	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\nPreview 1.0 Preview.qml\n");

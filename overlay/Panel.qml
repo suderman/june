@@ -13,6 +13,7 @@ Item {
   id: panel
   // A picture or file the user's message brought, to show over the strip: { kind, url, name } (Preview.qml).
   signal preview(var item)
+  signal copyText(string text)
   // A link in June's words was clicked.
   signal link(string url)
 
@@ -335,11 +336,13 @@ Item {
       required property int index
       readonly property var element: panel.p.elements[index] ?? null
       readonly property string kind: element ? panel.kindOf(element) : ""
+      readonly property bool isArtifact: element && Boolean(element.artifact)
+      onIsArtifactChanged: Qt.callLater(panel.measure)
       readonly property var box: panel.layout.elements[index] ?? null
       x: box ? box.x : 0
       y: box ? box.y : 0
       visible: box !== null
-      sourceComponent: kind === "user" ? note : kind === "shown" ? shownCard : kind === "june" ? speech : kind === "thought" ? thought : kind === "chip" ? chip : kind === "card" ? card : kind === "burst" ? burst : null
+      sourceComponent: kind === "user" ? note : kind === "shown" ? shownCard : kind === "june" ? (element.artifact ? artifactSpeech : speech) : kind === "thought" ? thought : kind === "chip" ? chip : kind === "card" ? card : kind === "burst" ? burst : null
       // The kind the loaded component draws. A slot's element can change kind before the Loader swaps components, so
       // the element reaches the component only while they agree: a balloon never sees a tool call, which has no words.
       property string loadedKind: ""
@@ -549,6 +552,18 @@ Item {
           width: noteBox.w - 28
         }
       }
+    }
+  }
+
+  Component {
+    id: artifactSpeech
+    Artifact {
+      property var element
+      property var box
+      content: element && element.artifact ? element.artifact : ({ text: "", language: "text", lines: null })
+      maxWidth: panel.m.textWidth
+      onPreview: item => panel.preview(item)
+      onCopyText: text => panel.copyText(text)
     }
   }
 

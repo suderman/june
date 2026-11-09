@@ -67,6 +67,7 @@ export function lines(panel) {
 			reply = item;
 			// A code block is already monospace here; markup drops its #+begin_src and #+end_src lines.
 			const line = { kind: "june", prefix, text: e.text.replace(/\n+$/, "") };
+			if (e.artifact) line.artifact = e.artifact;
 			if (e.streaming) line.streaming = true;
 			out.push(line);
 		} else if (e.kind === "tools") {

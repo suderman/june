@@ -145,6 +145,7 @@ FloatingWindow {
       onTake: action => win.shell.take(action)
       attached: win.shell.attached
       onPreview: item => preview.show(item)
+      onCopyText: text => Quickshell.clipboardText = text
       onLink: url => win.shell.openLink(url)
     }
 
@@ -188,6 +189,7 @@ FloatingWindow {
     id: preview
     anchors.fill: parent
     onExternal: url => { preview.close(); Qt.openUrlExternally(url); }
+    onCopyText: text => Quickshell.clipboardText = text
   }
 
   /** An hour as a clock reading, 16.5 as 16:30. */

@@ -14,6 +14,53 @@ import { DND_MODE, MODES_CALL, SCHEMES, SCHEME_CALL, isDark, parseModes, parseSc
 import { FACES, LOOKS, face, liveFace, lines as consoleLines } from "../overlay/console.mjs";
 import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent } from "../overlay/live.mjs";
 
+import { replyParts } from "../src/artifact.ts";
+import { excerpt as codeExcerpt, html as codeHtml } from "../overlay/Code.mjs";
+import { panels as phonePanels, consoleStrip as phoneConsole } from "../android/js/june.mjs";
+
+test("artifacts remain whole beats on desktop and phone, including console, replay and streaming", () => {
+	const body = '  “Email”—<literal>\n\n=source=\n' + "line\n".repeat(20);
+	const text = `Here is the draft.\n\n#+begin_example\n${body}\n#+end_example\n\nKeep this explanation outside.`;
+	const item = { ...june("a", text), parts: replyParts(text) };
+	const artifact = result => result.flatMap(p => p.elements).find(e => e.artifact).artifact;
+	const desktop = panels([item]);
+	assert.equal(artifact(desktop).text, body);
+	assert.equal(desktop.flatMap(p => p.elements).filter(e => e.artifact).length, 1);
+	const state = { running: false };
+	const phone = phonePanels([item], state, false);
+	assert.equal(artifact(phone).text, body);
+	assert.deepEqual(artifact(phone).excerpt, codeExcerpt(artifact(desktop)));
+	assert.equal(phoneConsole([item], state, false).flatMap(p => p.lines).find(l => l.artifact).artifact.text, body);
+	assert.equal(consoleLines(desktop.find(p => p.elements.some(e => e.artifact))).find(l => l.artifact).artifact.text, body);
+	const view = applyView(emptyView(), { type: "view", reset: true, items: [item] });
+	assert.deepEqual(panels(view.items), desktop);
+	const live = { ...item, streaming: true };
+	assert.equal(panels([live]).flatMap(p => p.elements).at(-1).streaming, true);
+	assert.equal(panels([live]).flatMap(p => p.elements).find(e => e.artifact).streaming, false);
+});
+
+test("phone artifact previews use the existing host overlay, with a snapshot outside streaming balloons", async () => {
+	const phone = await readFile(new URL("../android/src/main/kotlin/net/suderman/june/Strip.kt", import.meta.url), "utf8");
+	assert.doesNotMatch(phone, /compose\.ui\.window\.Dialog/);
+	assert.doesNotMatch(phone, /viewing by remember\(source\)/);
+	assert.match(phone, /LocalArtifactPreview provides \{ viewing = listOf\(it\) to 0 \}/);
+	assert.match(phone, /LocalArtifactPreview provides \{ viewing = it \}/);
+});
+
+test("artifact excerpts bound lines and characters without changing the copy source; token HTML stays escaped", () => {
+	for (const body of ["", "short", "x".repeat(200000), "x\n".repeat(20000), "<script>&\t😀\n".repeat(200)]) {
+		const a = { text: body, lines: body.split("\n").map(line => [["string", line]]) };
+		const short = codeExcerpt(a);
+		assert.ok(short.text.length <= 1600);
+		assert.ok(short.text.split("\n").length <= 8);
+		assert.equal(short.lines.map(l => l.map(t => t[1]).join("")).join("\n"), short.text);
+		assert.equal(short.truncated, short.text !== body);
+		assert.equal(a.text, body);
+	}
+	assert.doesNotMatch(codeHtml([[["string", "<img src=x>&"]]]), /<img/);
+	assert.match(codeHtml([[["string", "<img src=x>&"]]]), /&lt;img src=x&gt;&amp;/);
+});
+
 const user = (id, text = "hi", source = "gui") => ({ kind: "user", id, source, text });
 const june = (id, text = "hello", streaming = false) => ({ kind: "assistant", id, text, streaming, answers: "gui" });
 const tool = (id, name = "read", summary = "x", status = "done") => ({ kind: "tool", id, name, summary, status });
@@ -462,9 +509,10 @@ test("a balloon and its tail are one closed outline from any side, and a burst s
 
 test("the shared modules use only JavaScript that QML's engine runs", async () => {
 	// Each of these loaded under Node but failed in Quickshell, blanking the overlay.
-	for (const file of ["strip.mjs", "compose.mjs", "live.mjs", "scroll.mjs", "light.mjs", "scenery.mjs", "console.mjs", "desktop.mjs"]) {
+	for (const file of ["strip.mjs", "compose.mjs", "live.mjs", "scroll.mjs", "light.mjs", "scenery.mjs", "console.mjs", "desktop.mjs", "Code.mjs"]) {
 		const source = (await readFile(new URL(`../overlay/${file}`, import.meta.url), "utf8")).replace(/^\s*(\/\/|\*).*$/gm, "");
 		assert.doesNotMatch(source, /\.at\(/, `${file}: Array.prototype.at`);
+		assert.doesNotMatch(source, /\.flatMap\(/, `${file}: Array.prototype.flatMap`);
 		assert.doesNotMatch(source, /Object\.hasOwn\(/, `${file}: Object.hasOwn`);
 		assert.doesNotMatch(source, /\{\s*\.\.\./, `${file}: object spread`);
 	}

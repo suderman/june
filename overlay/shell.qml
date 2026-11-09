@@ -8,6 +8,7 @@
 // One key cycles the overlay (`june-overlay cycle`, for an Alt tap): hidden, live June in the corner with her note
 // open, the full strip, hidden again; if she popped up by herself, the first press opens her note. Esc dismisses either. `toggle`, `open`, `close`, and `mini` reach each directly.
 // `window` opens the same strip in an ordinary window with this device's toggles (StripWindow.qml).
+// Shared modules must run in QML's JS engine too. Node-only array helpers can blank both looks.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
@@ -670,6 +671,7 @@ ShellRoot {
             onTake: action => root.take(action)
             attached: root.attached
             onPreview: item => preview.show(item)
+        onCopyText: text => Quickshell.clipboardText = text
             onLink: url => { if (root.openLink(url)) root.hide(); }
           }
 
@@ -722,6 +724,7 @@ ShellRoot {
       id: preview
       anchors.fill: parent
       onExternal: url => { preview.close(); Qt.openUrlExternally(url); }
+      onCopyText: text => Quickshell.clipboardText = text
     }
   }
 }

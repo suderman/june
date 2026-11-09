@@ -46,6 +46,20 @@ test("the fold: thinking as one line each, tool lines with their status, June's 
 	assert.deepEqual(state, { running: false, background: 0, queued: 0, model: "terra:medium", compacting: false, expression: "idle" });
 });
 
+test("the fold carries exact copy bodies through live updates, commit, replay and view diffs", () => {
+	const text = 'Draft\n#+begin_example\n“Hello”—<literal>\n\n  Jon\n#+end_example\n';
+	const entries = [user(1, "gui", "draft it")];
+	const live = fold(entries, { "pi.live": { generation: { message: { content: [{ type: "text", text }] } }, run: { taskId: 1 } } });
+	const done = fold([...entries, said(2, [{ type: "text", text }])], {});
+	const a = live.items.at(-1)!;
+	const b = done.items.at(-1)!;
+	assert.ok(a.kind === "assistant" && b.kind === "assistant");
+	assert.deepEqual(a.parts, b.parts);
+	assert.equal(b.parts![1]!.text, "“Hello”—<literal>\n\n  Jon");
+	assert.deepEqual(applyChanges(live.items, diff(live.items, done.items, new Map())), done.items);
+	assert.deepEqual(done, fold([...entries, said(2, [{ type: "text", text }])], {}));
+});
+
 test("the fold carries when each message was written, for a client that lights panels by their hour", () => {
 	const entries = [
 		{ ...user(1, "gui", "morning"), model: [{ role: "user", content: "[gui] morning", timestamp: 1000 }] },

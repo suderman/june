@@ -13,6 +13,8 @@ Item {
   property string activity: ""
   // A link in June's words was clicked.
   signal link(string url)
+  signal preview(var item)
+  signal copyText(string text)
 
   readonly property var p: JSON.parse(json)
   readonly property var out: Console.lines(p)
@@ -39,14 +41,26 @@ Item {
     spacing: 6
     Repeater {
       model: row.out
-      delegate: TextEdit {
+      delegate: Column {
+        id: entry
         required property var modelData
+        width: column.width
+        Artifact {
+          visible: Boolean(entry.modelData.artifact)
+          content: entry.modelData.artifact ?? ({ text: "", language: "text", lines: null })
+          maxWidth: entry.width
+          onPreview: item => row.preview(item)
+          onCopyText: text => row.copyText(text)
+        }
+        TextEdit {
+        readonly property var modelData: entry.modelData
+        visible: !modelData.artifact
         width: column.width
         readOnly: true
         selectByMouse: true
         wrapMode: TextEdit.Wrap
         textFormat: TextEdit.RichText
-        text: (modelData.prefix === "" ? "" : "<span style='color:" + row.colour(modelData) + "; font-weight:700'>" + row.escaped(modelData.prefix) + "</span> ") + row.body(modelData)
+        text: modelData.artifact ? "" : (modelData.prefix === "" ? "" : "<span style='color:" + row.colour(modelData) + "; font-weight:700'>" + row.escaped(modelData.prefix) + "</span> ") + row.body(modelData)
         font.family: "monospace"
         font.pixelSize: modelData.kind === "tool" || modelData.kind === "thought" ? 13 : 15
         color: Theme.ink
@@ -54,6 +68,7 @@ Item {
         selectedTextColor: Theme.ink
         onLinkActivated: url => row.link(url)
         HoverHandler { cursorShape: parent.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor }
+        }
       }
     }
     Text {

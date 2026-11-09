@@ -4,6 +4,19 @@
 // stays the plain words the preview already shows.
 import hljs from "highlight.js";
 
+// highlight.js has no Org grammar. Keep source readable without interpreting it as rich text.
+hljs.registerLanguage("org", () => ({
+	name: "Org",
+	case_insensitive: true,
+	contains: [
+		{ scope: "section", begin: /^\*+ /, end: /$/ },
+		{ scope: "meta", begin: /^\s*#\+/, end: /$/ },
+		{ scope: "comment", begin: /^# /, end: /$/ },
+		{ scope: "string", begin: /\[\[/, end: /\]\]/ },
+		{ scope: "code", begin: /[=~]/, end: /[=~]/ },
+	],
+}));
+
 export type Token = [scope: string, text: string];
 export type Highlighted = { language: string; lines: Token[][] };
 

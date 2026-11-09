@@ -3,6 +3,7 @@
 // console look. The modules stay in overlay/, written in the plain JavaScript both QML and QuickJS run; see "What the
 // phone shares with the desktop" in docs/interfaces.org. Below them, the phone's own glue: it keeps the strip's memory
 // and the avatar set's poses in the engine between calls, and hands back layouts ready to draw.
+import { excerpt } from "../../overlay/Code.mjs";
 import * as compose from "../../overlay/compose.mjs";
 import * as looks from "../../overlay/console.mjs";
 import * as light from "../../overlay/light.mjs";
@@ -48,7 +49,10 @@ export function panels(items, state, holding) {
 	// Tool calls carry their caption line, as the overlay's chips and cards show them.
 	for (const panel of composed) {
 		panel.takeMenu = compose.takeMenu(panel);
-		for (const e of panel.elements) if (e.kind === "tools") e.items = e.items.map((item) => Object.assign({}, item, { caption: strip.caption(item) }));
+		for (const e of panel.elements) {
+			if (e.kind === "tools") e.items = e.items.map((item) => Object.assign({}, item, { caption: strip.caption(item) }));
+			if (e.artifact) e.artifact.excerpt = excerpt(e.artifact);
+		}
 	}
 	return composed;
 }

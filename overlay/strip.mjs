@@ -85,9 +85,14 @@ export function panels(items, now = Date.now()) {
 		if (item.kind === "assistant" && !item.error) {
 			// A turn of only tool calls leaves an assistant item with no words: nothing to letter.
 			if (item.text.trim() === "" && !item.streaming) continue;
-			const parts = beats(item.text);
-			if (parts.length === 0) parts.push("");
-			for (const [i, text] of parts.entries()) {
+			const parts = [];
+			for (const part of item.parts ?? [{ text: item.text }]) {
+				if (part.artifact) parts.push(part);
+				else for (const text of beats(part.text)) parts.push({ text });
+			}
+			if (parts.length === 0) parts.push({ text: "" });
+			for (const [i, part] of parts.entries()) {
+				const text = part.text;
 				const lastJune = current.elements.map((e) => e.kind).lastIndexOf("june");
 				if (lastJune >= 0 && (current.elements[lastJune].replyId !== item.id || weight() > PANEL_BUDGET)) {
 					// The next panel starts with what leads into this balloon: the tools and thought since her last one.
@@ -95,6 +100,7 @@ export function panels(items, now = Date.now()) {
 					open(`${item.id}#${i}`, carried);
 				}
 				const beat = { kind: "june", id: `${item.id}#${i}`, text, streaming: item.streaming && i === parts.length - 1 };
+				if (part.artifact) beat.artifact = { text, language: part.language ?? "text", lines: part.lines ?? null };
 				// The face the daemon picked for the reply (expression.ts), once it has settled.
 				if (item.expression) beat.expression = item.expression;
 				if (item.pose) beat.pose = item.pose;

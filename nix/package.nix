@@ -12,6 +12,7 @@
   jq,
   tzdata,
   qt6,
+  quickshell,
   imagemagick,
   poppler-utils,
   util-linux,
@@ -26,7 +27,7 @@
   # The tests also cover org-dispatch and org-edit, whose Emacs Lisp lives beside the daemon.
   testSrc = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test ../org ../overlay ../art ../skills];
+    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test ../org ../overlay ../android/js ../android/src/main/kotlin/net/suderman/june/Strip.kt ../art ../skills];
   };
 in
   buildNpmPackage (finalAttrs: {
@@ -67,6 +68,7 @@ in
         export HOME=$TMPDIR TZDIR=${tzdata}/share/zoneinfo
         export ICU_TIMEZONE_FILES_DIR=${timezoneData}
         export JUNE_TEST_QML=${qt6.qtdeclarative}/bin/qml
+        export JUNE_TEST_QS=${quickshell}/bin/qs
         export QML2_IMPORT_PATH=${qt6.qtdeclarative}/lib/qt-6/qml:${qt6.qtwebsockets}/lib/qt-6/qml
         patchShebangs org skills
         org/tests/test-org-dispatch
