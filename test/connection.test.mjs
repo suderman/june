@@ -125,7 +125,8 @@ ShellRoot {
   }
 }
 `);
-	const child = spawn(process.env.JUNE_TEST_QS, ["-p", join(dir, "shell.qml")], { env: { ...process.env, QT_QPA_PLATFORM: "offscreen", QT_QUICK_BACKEND: "software", QT_QUICK_CONTROLS_STYLE: "Basic", QT_STYLE_OVERRIDE: "", QT_QPA_PLATFORMTHEME: "", QT_FORCE_STDERR_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+	// Keep Quickshell's runtime files private and let crashes exit instead of holding the test's pipes open.
+	const child = spawn(process.env.JUNE_TEST_QS, ["-p", join(dir, "shell.qml")], { env: { ...process.env, XDG_RUNTIME_DIR: dir, QS_DISABLE_CRASH_HANDLER: "1", QT_QPA_PLATFORM: "offscreen", QT_QUICK_BACKEND: "software", QT_QUICK_CONTROLS_STYLE: "Basic", QT_STYLE_OVERRIDE: "", QT_QPA_PLATFORMTHEME: "", QT_FORCE_STDERR_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
 	let output = "";
 	for (const stream of [child.stdout, child.stderr]) stream.on("data", (data) => { output += data; });
 	const closed = once(child, "close");
