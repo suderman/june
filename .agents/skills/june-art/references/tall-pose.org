@@ -13,15 +13,17 @@ Start from =art/pipelines/character/example-tall-idle-standing.json=. Change onl
 1. Run 4 seeds of the first pose at 832x1536 and look at them before starting another pose. Carry what you learn into the next prompts.
 2. Reject on: arms or hands that do not perform the pose, extra or missing limbs, the wrong boots (they are brown ankle boots with a modest block heel), a dark undershirt, a smirk where the pose wants firmness, a flattened or altered body compared with canon.
 3. Cut out the best with =alpha-toonout=. Do not reject a floor shadow in the RGB; ToonOut removes it.
-4. Run =june-art run edges= on the cut-outs.
+4. Run =june-art run edges= on the cut-outs, then look at the top of the original RGB as well. =edges= cannot certify a crown: ToonOut can leave a thin transparent gap above a crown the frame cut (curious 96103 reported clear). Its =clear= also ignores the bottom edge, so read the =bottom= count for clipped boots.
 
 ** Repair a crown
 If =edges= reports the top touched, run =crown-repair= on the original RGB with =top=192= and the default prompt, 2 to 4 seeds. Look at every result, for a second head or a floating cap. Do not pad the bottom in the same pass: boots came out as sandals or doubled. Confirm with =unchanged= that pixels below the feather match the original, offsetting by the pad.
 
 ** Stage and prove
+Do not use =examples/preflight-pose.mjs= for tall art: it models portrait placement only. Check the real tall result in the ingested manifest. =examples/panel.qml= covers only 820 and 360 px with short text, so copy it privately for the other widths and long text.
+
 1. Measure the face box on the source, forehead through chin and cheek to cheek, and the mouth, then draw them on a copy and look. Do not copy a box from another image.
 2. Ingest into a new staging set with =full= in =framings=, and record seed, prompts and hashes in the =.txt= sidecar.
-3. Render the real panels at 1040, 820, 620 and 390 px, short and long, as in =references/preview.org=. Check she stands whole on a tall panel and zooms to her face on a phone.
+3. Render the real panels at 1040, 820, 620 and 390 px, short and long, as in =references/preview.org=. Check she stands whole on a tall panel and zooms to her face on a phone. Check both sides of her too: a leaning pose can run off the panel's edge.
 
 ** Hand over
 Show Jon the seed sheets and panels, with rejects and reasons. Add what the job taught to the lessons before setting EVAL. Promote only what he approves, by =references/ingestion.org=, checking that only the new pose changed.
