@@ -375,6 +375,23 @@ export function comparePixels(a, b, [x, y, w, h]) {
 	return { identical: differing === 0, differing_pixels: differing, region: [x, y, w, h], box_x0_y0_x1_y1: box && [box[0] + x, box[1] + y, box[2] + x, box[3] + y] };
 }
 
+/** How many solid pixels of a cut-out touch each edge of its image: a figure touching the top has lost its crown. */
+export function edgeContact(path) {
+	const [width, height] = magick([path, "-format", "%w %h", "info:"]).toString().trim().split(" ").map(Number);
+	const alpha = magick([path, "-alpha", "extract", "-depth", "8", "GRAY:-"]);
+	const solid = (i) => alpha[i] > 127;
+	const edges = { top: 0, bottom: 0, left: 0, right: 0 };
+	for (let x = 0; x < width; x++) {
+		if (solid(x)) edges.top++;
+		if (solid((height - 1) * width + x)) edges.bottom++;
+	}
+	for (let y = 0; y < height; y++) {
+		if (solid(y * width)) edges.left++;
+		if (solid(y * width + width - 1)) edges.right++;
+	}
+	return { width, height, ...edges, clear: edges.top === 0 && edges.left === 0 && edges.right === 0 };
+}
+
 /** A labelled contact sheet of jobs' main outputs, for a person to judge. */
 export function contactSheet(dir, out, labels, { node, height = 720, columns = 4 } = {}) {
 	const ledger = readLedger(dir);
@@ -441,6 +458,7 @@ export const USAGE = `usage: june-art run VERB ...
   upload RUN PATH                             send a picture to ComfyUI; prints the name for a graph
   submit RUN LABEL (--pipeline P [--set K=V]... | --graph F) [--group G] [--timeout S]
   unchanged A B --region X,Y,W,H              exact pixel comparison inside a region
+  edges CUTOUT...                             solid pixels touching each edge; fails if the top or a side is touched
   sheet RUN OUT LABEL... [--node ID] [--height PX] [--columns N]
   stop RUN REASON | resume RUN --by WHO | raise RUN [--budget N] [--group-limit N] --by WHO`;
 
@@ -470,6 +488,12 @@ export async function runCommand(argv) {
 		const result = comparePixels(first, second, flags.region);
 		print(result);
 		if (!result.identical) process.exitCode = 1;
+		return;
+	}
+	if (verb === "edges" && first) {
+		const results = flags.positional.map((path) => ({ path, ...edgeContact(path) }));
+		print(results);
+		if (results.some((r) => !r.clear)) process.exitCode = 1;
 		return;
 	}
 	if (verb === "init" && first) {

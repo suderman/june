@@ -17,6 +17,9 @@ Most candidates drew one despite the prompt and negative. ToonOut removed it in 
 ** The skirt colour wanders
 "Dark charcoal-plum" came out olive, charcoal or brown across seeds, and canon is plum-brown. Treat this as a job for colour normalization, not a reason to re-roll.
 
+** Look for changes to her body
+Jon's one note on the first tall set (2026-11-08): determined seed 93003 flattened her chest. Compare her figure with canon, not only her face and anatomy.
+
 ** Bodies vary in face heights
 Standing figures measure up to ten face heights tall, against about seven and a half for the older clipboards, so framing must fit the figure rather than assume a share of the panel. Measure each new pose.
 

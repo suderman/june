@@ -27,6 +27,7 @@ All bundled paths below are relative to this skill directory. External paths in 
 | Crop sheet or actual desktop/narrow panel proof | `references/preview.org` |
 | Diagnose visual, node, API or integration failures | `references/troubleshooting.org` |
 | Run anything through ComfyUI, or add a pipeline | `references/runner.org` |
+| Draw a new tall pose, start to finish | `references/tall-pose.org` |
 
 ## Proven starting point
 

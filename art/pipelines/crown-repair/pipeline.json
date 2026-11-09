@@ -1,0 +1,34 @@
+{
+ "status": "proven",
+ "summary": "Pad a character's RGB and draw only the new edge: a crown cut by the frame, and optionally a clipped foot. Every pixel outside the feather is kept.",
+ "graph": "graph.json",
+ "main": "11",
+ "parameters": {
+  "seed": {
+   "type": "number"
+  },
+  "image": {},
+  "top": {
+   "default": 192
+  },
+  "bottom": {
+   "default": 0
+  },
+  "feathering": {
+   "default": 112
+  },
+  "positive": {
+   "default": "masterpiece, best quality, score_7, safe, 1girl, solo. Complete the naturally rounded top of this adult woman's dark chocolate-brown hair and dark padded headset headband. Continue the existing smooth bangs, fine anime linework, warm hair reflections and soft neutral background seamlessly. One continuous head and hair silhouette, generous empty pale background above the crown. Preserve the existing emotional performance below."
+  },
+  "negative": {
+   "default": "worst quality, low quality, extra head, duplicate face, extra eyes, multiple people, floating hair, disconnected hair, ponytail, light hair, orange hair, text, watermark, sticker border, white outline, detached hair, floating tuft, hat, beret, detached headband, horizontal seam"
+  },
+  "reference_body": {
+   "default": "june-canonical-fullbody.png"
+  },
+  "reference_face": {
+   "default": "june-canonical-face.png"
+  }
+ },
+ "proven": "June - Crown outpaint protected v2, which repaired the crowns on the curious, indignant and pout expressions Jon approved. It can invent a floating cap, so look at every result. Use it on the original RGB, then run alpha-toonout on the output."
+}

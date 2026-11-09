@@ -2,6 +2,9 @@
 ** Status
 Do not extend portraits to full figures. The idle pilot (2026-11-08) failed review after 12 samplers across two methods. Draw new poses tall instead, with the =character= pipeline. Crown repair works, and =masked-repair= removes hard joins.
 
+** Repair a crown by itself
+The =crown-repair= pipeline completed four of four crowns on 2026-11-08 with =top=192= (94001, 94002, 95101, 95102), every kept pixel unchanged. Padding the crown and a clipped boot in one pass failed both times: a bare-toed sandal (95001) and a second head above the crown (95002). The new area can hold a pale ghost of her body; ToonOut removed it.
+
 ** Hair extends; limbs do not join
 =June - Crown outpaint protected v2.json= repaired the crowns on curious, indignant and pout, because hair is forgiving at a seam. Arms and legs have hard edges that must line up.
 

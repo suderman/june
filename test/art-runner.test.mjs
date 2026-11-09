@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { assertRunLocation, client, comparePixels, contactSheet, driftOf, initRun, listPipelines, loadPipeline, raiseRun, readLedger, readRun, refusal, renderPipeline, renderTemplate, resumeRun, seedsOf, stopRun, submit, uploadFile, validateGraph } from "../art/runner.mjs";
+import { assertRunLocation, client, comparePixels, contactSheet, driftOf, edgeContact, initRun, listPipelines, loadPipeline, raiseRun, readLedger, readRun, refusal, renderPipeline, renderTemplate, resumeRun, seedsOf, stopRun, submit, uploadFile, validateGraph } from "../art/runner.mjs";
 
 const SCHEMAS = {
 	KSampler: { input: { required: { seed: ["INT", {}], model: ["MODEL", {}], sampler_name: [["er_sde", "euler"], {}] } }, output: ["LATENT"] },
@@ -111,7 +111,7 @@ test("the proven pipelines load, render completely, and record what proved them"
 	assert.equal(repair["9"].inputs.denoise, 0.6);
 	assert.deepEqual(repair["17"].inputs.mask, ["15", 0], "the mask stays connected");
 	assert.ok(!JSON.stringify(repair).includes("${"));
-	for (const example of ["example-idle-attentive", "example-tall-standing-mug"]) {
+	for (const example of ["example-idle-attentive", "example-tall-standing-mug", "example-tall-idle-standing"]) {
 		const values = JSON.parse(readFileSync(new URL(`../art/pipelines/character/${example}.json`, import.meta.url), "utf8"));
 		assert.ok(renderPipeline(loadPipeline("character"), values, { prefix: "o" })["9"].inputs.seed > 0, `${example} fills the pipeline`);
 	}
@@ -225,6 +225,23 @@ test("an upload is named by its content, inside the run's folder", async (t) => 
 	assert.equal(await uploadFile(dir, file, api), "june-art/r/uploaded.png");
 	assert.match(state.uploads[0], /picture-[0-9a-f]{12}\.png/);
 	assert.match(state.uploads[0], /name="subfolder"\r\n\r\njune-art\/r/);
+});
+
+test("a cut-out touching the top or a side is not clear; a boot just touching the bottom is reported", (t) => {
+	const parent = mkdtempSync(join(tmpdir(), "june-art-edges-"));
+	t.after(() => rmSync(parent, { recursive: true, force: true }));
+	const clear = join(parent, "clear.png");
+	execFileSync("magick", ["-size", "30x40", "xc:none", "-fill", "#884", "-draw", "rectangle 5,5 20,30", clear]);
+	assert.deepEqual(edgeContact(clear), { width: 30, height: 40, top: 0, bottom: 0, left: 0, right: 0, clear: true });
+	const cut = join(parent, "cut.png");
+	execFileSync("magick", ["-size", "30x40", "xc:none", "-fill", "#884", "-draw", "rectangle 5,0 20,39", cut]);
+	const edges = edgeContact(cut);
+	assert.equal(edges.top, 16);
+	assert.equal(edges.bottom, 16);
+	assert.equal(edges.clear, false);
+	const feet = join(parent, "feet.png");
+	execFileSync("magick", ["-size", "30x40", "xc:none", "-fill", "#884", "-draw", "rectangle 5,5 20,39", feet]);
+	assert.equal(edgeContact(feet).clear, true, "feet may meet the bottom");
 });
 
 test("pixels are compared exactly inside a region, and a contact sheet is built from jobs' outputs", async (t) => {
