@@ -9,9 +9,9 @@ import androidx.compose.ui.platform.UriHandler
 
 /**
  * The links in June's words that a tap opens: web pages in the browser, `herdr:` links to an agent's session, which
- * Termux attaches to over ssh as Jon's Emacs does (suderman/org-herdr-follow-android), and `file:` links to files in
- * ~/org, which Emacs opens at their heading or line through org-protocol (june-open in org/links/june-links.el;
- * ~/org there is this phone's copy of the tree). Links come from the model, so nothing here runs what
+ * Termux attaches to over ssh as Jon's Emacs does (suderman/org-herdr-follow-android), and `file:` links, which Emacs
+ * opens at their heading or line through org-protocol (june-open in org/links/june-links.el). ~/org opens the phone's
+ * synced copy; other files open through TRAMP on June's host. Links come from the model, so nothing here runs what
  * a link says: a herdr link must have the form herdr-link stamps, and every kind only opens or focuses.
  */
 object Links {
@@ -53,13 +53,11 @@ object Links {
     }
 
     /**
-     * A file in ~/org, opened in Emacs at its search through org-protocol://june-open. Files elsewhere live on the
-     * desktop, which opens them; Emacs here has only the Org tree.
+     * Open a file at its search through org-protocol://june-open. Emacs owns local versus TRAMP routing.
      */
     private fun emacs(context: Context, link: String): String? {
         val path = link.substringBefore("::")
         val search = if ("::" in link) link.substringAfter("::") else ""
-        if (!path.startsWith("~/org/")) return "That file is on the desktop; open it there"
         val uri = Uri.parse("org-protocol://june-open?path=${Uri.encode(path)}&search=${Uri.encode(search)}")
         return runCatching {
             context.startActivity(Intent(Intent.ACTION_VIEW, uri).setPackage("org.gnu.emacs").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

@@ -34,19 +34,22 @@
           (june-open "~/outside-org.org")
           (should (equal opened "/ssh:june-test-host:~/outside-org.org")))))))
 
-(ert-deftest june-links-android-keeps-org-local ()
+(ert-deftest june-links-android-keeps-org-local-and-uses-tramp ()
   (test-with-june-org
-    (let ((featurep (symbol-function 'featurep)) opened)
+    (let ((featurep (symbol-function 'featurep))
+          (june-host "june-test-host") opened)
       (cl-letf (((symbol-function 'featurep)
 		 (lambda (feature &optional subfeature)
                    (or (eq feature 'android) (funcall featurep feature subfeature))))
+                ((symbol-function 'system-name) (lambda () "android-phone"))
                 ((symbol-function 'find-file) (lambda (file) (setq opened file)))
                 ((symbol-function 'select-frame-set-input-focus) #'ignore))
         (june-open "~/org/june-link-test.org")
         (should (equal opened (expand-file-name "~/org/june-link-test.org")))
-        (setq opened nil)
-        (should-error (june-open "/tmp/june-link-test.org") :type 'user-error)
-        (should-not opened)))))
+        (june-open "/tmp/june-link-test.org")
+        (should (equal opened "/ssh:june-test-host:/tmp/june-link-test.org"))
+        (june-open "~/outside-org.org")
+        (should (equal opened "/ssh:june-test-host:~/outside-org.org"))))))
 
 (ert-deftest june-links-org-searches ()
   (with-temp-buffer

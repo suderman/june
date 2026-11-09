@@ -27,14 +27,12 @@
 (defun june-open (path &optional search)
   "Open PATH from a link June wrote, then find SEARCH as an Org file link does.
 ~/org is the same tree on every device, so its files open here.  Any other
-path is a file on `june-host', opened over TRAMP from elsewhere and
-not at all on Android.  SEARCH is a heading (*Heading), custom ID (#id),
+path is a file on `june-host', opened over TRAMP from other devices,
+including Android.  SEARCH is a heading (*Heading), custom ID (#id),
 line number, or text; nothing in it is evaluated."
   (let* ((org (file-name-as-directory (expand-file-name "~/org")))
          (local (expand-file-name path))
          (file (cond ((file-in-directory-p local org) local)
-                     ((featurep 'android)
-                      (user-error "June's link is to a file on %s" june-host))
                      ((string= (system-name) june-host) local)
                      (t (concat "/ssh:" june-host ":" path)))))
     (find-file file)

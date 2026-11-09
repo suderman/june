@@ -35,7 +35,9 @@ An Emacs configuration that shows these tasks needs the same TODO keywords, and 
 
 =package-vc= fetches June and builds the =org/links= Lisp directory as the package, so the same setup works without a separate June checkout on the desktop or phone. Set =june-host= to the host running June; it defaults to the current machine. Upgrade with =package-vc-upgrade-all= when this integration changes.
 
-The desktop calls =(june-open PATH SEARCH)= through =emacsclient=. The Android app keeps using =org-protocol://june-open?path=…&search=…=; the package registers that handler and loads =org-protocol= at startup in the APK. Files under =~/org= open locally on each device. Other files open on =june-host=, through TRAMP from another desktop, and are refused on Android. Heading, custom-ID, line and text searches follow Org's file-link rules. Link arguments remain data, never Lisp to evaluate.
+The desktop calls =(june-open PATH SEARCH)= through =emacsclient=. The Android app keeps using =org-protocol://june-open?path=…&search=…=; the package registers that handler and loads =org-protocol= at startup in the APK. Files under =~/org= open locally on each device. Other files open on =june-host=, through TRAMP from other devices, including Android. Heading, custom-ID, line and text searches follow Org's file-link rules. Link arguments remain data, never Lisp to evaluate.
+
+Android TRAMP needs working SSH from the Emacs APK. With shared-UID Termux integration, SSH uses Termux's host config and agent. If the key is locked, run =~/bin/ssh-unlock= in Termux and approve the fingerprint before opening a remote link. The current phone setup keeps the key unlocked for one hour. Synced Org links do not need SSH.
 
 ** The contract
 
