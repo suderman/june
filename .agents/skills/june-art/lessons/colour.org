@@ -13,3 +13,18 @@ Rectangles failed on both pilot skirts. Determined's colour bled into the tights
 
 ** Fix the source, then re-ingest
 Recolour the source RGBA, ingest it with the pose's measured face, mouth and gestures, and compare the manifest entry with the old one. It should differ only in what you meant to change. Type gesture names exactly as the sidecar has them.
+
+** Match mode can change brightness
+The value-preservation rule above applies to hue-and-saturation shifts, not =--match=. Match mode shifts value toward the target median too, while preserving pixel offsets until clipping. In the 2026-11-08 library run, blouse matching changed brightness as well as hue. Judge the result against canon; a target median alone is not acceptance.
+
+** Colour ranges do not protect skin or hair
+The 56-pose run on 2026-11-08 selected wrist shadows, finger edges and hair highlights with the blouse range. =curious-head-tilt= visibly changed hair tips. Inspect a binary before/after difference mask as well as the comparison, and revert an item when its boundary is uncertain. Do not rely on the runbook's claim that colour excludes skin and hair.
+
+** Reject threshold patchwork
+A region can cover the whole blouse while its colour range selects only parts. =determined-ready-front= and =pout-reluctant-front= developed speckles and hard colour boundaries in the 2026-11-08 run. Both blouse edits were reverted. Widening the region cannot fix a hue-range boundary inside the cloth.
+
+** Inspect the whole boot at native size
+Starting below a boot's top can leave a horizontal colour join. The 2026-11-08 =determined-hands-on-hips= attempt left matching straight joins on both shafts, obvious in a native crop but easy to miss on a contact sheet. Reverted both boots. Protecting tights is necessary, but leaving half a shaft unchanged is not a clean fix.
+
+** Check tilted eyes against the source
+A face-sized eye region can select green fringe outside the irises. A tight rectangle can also cut a tilted iris: the first =curious-standing-lean-front= region missed part of her left iris. A source-grid polygon covered both irises without the lower fringe. Check a native face crop after correction, not just the changed-pixel count.
