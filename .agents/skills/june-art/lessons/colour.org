@@ -40,3 +40,15 @@ The =warm-hands-clasped= skirt was blue-black and mauve-grey. Keeping each pixel
 
 ** A dim pose needs its brightness moved as well
 With =keepValue=, =wry-mug-toast='s blouse went from =#916661= to =#91524B=, correctly coloured and much darker than the rest. Overriding that step with =keepValue: false= and =strength: 0.6= gave =#BB7269=, in family with the others and with its folds intact.
+
+** A clean skirt mask can still produce a red rim
+Run 3 kept all 56 segmented blouse steps and eight whole-boot steps, but rejected 26 of 55 attempted skirts. Even with =hueKeep: 0=, relative saturation can turn tan edge highlights red or pink against dark cloth. =pout-reluctant-front= also gained mottled shadows inside a solid mask. Inspect the native cloth and its outlines; a clean binary mask does not prove the colour transform is good. Leave the original skirt when the result fails.
+
+** Coverage cannot approve a garment mask
+=serious-calm-report-front='s skirt mask covered only 0.01% and selected no pixels after cleanup. Asking for =dark pleated skirt= gave the same failure. =idle-listening-earcup-front='s larger mask included tights in the pleat openings. Belt subtraction does not prove that everything left is skirt. Review the waistband, pleats and tights separately.
+
+** Apply brightness overrides pose by pose
+Run 3 found eight more dim blouses that needed the existing =keepValue: false=, =strength: 0.6= override, including =idle-headset-adjust-front=, =wry-knowing-smile-front= and =pout-reluctant-front=. Their reviewed results kept folds without staying brown. Keep the override local; the other 47 blouses did not need it.
+
+** Check finished alpha as well as source alpha
+Run 3's first =curious-listening-fresh-m= WebP differed from production in 1,343 alpha pixels, despite exact source alpha. Original-source and corrected-source replays both matched production alpha. Rerunning the same approved colour plan produced identical source RGBA and a finished WebP with exact production alpha; PNG file hashes differed. The initial mismatch did not reproduce, so its cause remains unknown. Verify every finished WebP instead of inferring its alpha from the source.
