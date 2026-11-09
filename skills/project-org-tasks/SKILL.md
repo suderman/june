@@ -277,6 +277,18 @@ Prevent retries from applying the same delivery twice without changing the provi
   set the right state, and grow them with scope and checklist. Preserve his
   headings and prose, and leave unrelated ideas alone.
 
+## Independent development review
+
+When June enrolls an explicitly delegated loop, the development heading has
+`DEV_REVIEW` and linked ordinary review tasks have `REVIEW_PARENT` and
+`REVIEW_COMMIT`. Read the `development-review` skill for that workflow. Keep
+one development outcome. Developers handle only authorized findings and end
+EVAL with an exact new commit. Reviewers use their snapshot, record the exact
+verdict with the command in their task, and end EVAL. Neither worker grants
+AUTO or closes its own review. June coordinates bounded returns and exact
+agent/human acceptance through `org_review_task`; generic resume/completion
+must not bypass it. No review verdict grants deployment permission.
+
 ## Multi-repository projects
 
 Keep one thread for work spanning several repositories unless the parts are

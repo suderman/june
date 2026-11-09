@@ -24,7 +24,7 @@ self: {
   # Agents set TODO states and dates through Org rather than editing text.
   orgEdit = pkgs.writeShellApplication {
     name = "org-edit";
-    runtimeInputs = [pkgs.coreutils cfg.emacsPackage pkgs.util-linux] ++ lib.optional (cfg.herdrPackage != null) cfg.herdrPackage;
+    runtimeInputs = [pkgs.coreutils cfg.emacsPackage pkgs.git pkgs.util-linux] ++ lib.optional (cfg.herdrPackage != null) cfg.herdrPackage;
     runtimeEnv = {
       TZDIR = tzdir;
       ORG_EDIT_EL = "${org}/edit/org-edit.el";

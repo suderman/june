@@ -23,9 +23,13 @@ here="$(dirname "$(readlink -f "$0")")"
 # org-dispatch.el pins Calgary time; without zone data Emacs silently runs in UTC,
 # so evenings would date tomorrow. NixOS keeps zones in /etc/zoneinfo, not the libc default.
 if [[ -z ${TZDIR:-} && ! -d /usr/share/zoneinfo && -d /etc/zoneinfo ]]; then export TZDIR=/etc/zoneinfo; fi
-batch=(emacs -Q --batch -L "$(dirname "$ORG_DISPATCH_EL")" -l "$ORG_EDIT_EL")
+batch=(emacs -Q --batch -L "$(dirname "$ORG_DISPATCH_EL")" -L "$(dirname "$ORG_EDIT_EL")" -l "$ORG_EDIT_EL")
 
 case ${1:-} in
+  review)
+    shift
+    flock -n -E 75 "${XDG_RUNTIME_DIR:-/tmp}/org-dispatch.lock" "${batch[@]}" -l org-review -f org-edit-review "$@"
+    ;;
   stop-task | remove-dependencies)
     command=$1
     shift
@@ -41,5 +45,5 @@ case ${1:-} in
     shift
     flock -n "${XDG_RUNTIME_DIR:-/tmp}/org-dispatch.lock" "${batch[@]}" -f "org-edit-$command" "$@" 2> >(grep -v -e '^Loading' -e 'state changed to' -e '^Scheduled to' -e '^Deadline on' -e '^Entry repeats' -e '^Note stored' >&2)
     ;;
-  *) echo "usage: org-edit todo|schedule|deadline FILE HEADING ARG, org-edit date WHEN, org-edit stop-task FILE id:UUID --revision HASH --request KEY --note TEXT, or org-edit remove-dependencies FILE id:UUID --expect STATE --revision HASH --remove REFS --request KEY --note TEXT" >&2; exit 2 ;;
+  *) echo "usage: org-edit todo|schedule|deadline FILE HEADING ARG, org-edit date WHEN, org-edit review start|verdict|advance|human FILE id:UUID JSON, org-edit stop-task FILE id:UUID --revision HASH --request KEY --note TEXT, or org-edit remove-dependencies FILE id:UUID --expect STATE --revision HASH --remove REFS --request KEY --note TEXT" >&2; exit 2 ;;
 esac

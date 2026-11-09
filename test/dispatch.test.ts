@@ -535,6 +535,25 @@ test("stop uses the narrow supported operation with no HERDR_ENV, kick or follow
 	await assert.rejects(failed.stop(stopping), /may already have parked.*do not reassign/);
 });
 
+test("review tool forwards exact revision and scopes, maps human checks and refuses old commands", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	const calls: string[][] = [];
+	const result = { id: "resume123", state: "EVAL", review: { phase: "human", review: "review123", commit: "a".repeat(40), round: 1, host: "kit", agent: "pi" } };
+	const dispatch = new Dispatch(new Org(f.root), f.config, async (argv) => { calls.push([...argv]); return `Org log\n${JSON.stringify(result)}\n`; });
+	const request = { file: "work/studio/portal/portal.org", heading: "id:resume123", revision: "b".repeat(64), commit: "a".repeat(40) };
+	assert.deepEqual(await dispatch.review({ ...request, action: "start", authorization: "Alex delegated fixes.", permissions: "Local tests; no deployment.", checks: "Agent tests.", human: ["Phone"], agent: "pi" }), result);
+	assert.deepEqual(calls[0]!.slice(0, 5), ["org-edit", "review", "start", f.project, request.heading]);
+	const spec = JSON.parse(calls[0]![5]!);
+	assert.deepEqual([spec.revision, spec.commit, spec.permissions, spec.human], [request.revision, request.commit, "Local tests; no deployment.", ["Phone"]]);
+	await dispatch.review({ ...request, action: "human", human: ["Phone"], note: "Alex confirmed this commit." });
+	assert.deepEqual(JSON.parse(calls[1]![5]!).checks, ["Phone"]);
+	await assert.rejects(dispatch.review({ ...request, action: "advance", commit: "short" }), /full Git SHA/);
+	await assert.rejects(dispatch.review({ ...request, action: "advance", revision: "stale" }), /org_read_task/);
+	const old = new Dispatch(new Org(f.root), f.config, async () => { throw new Error("usage: org-edit todo|schedule|deadline"); });
+	await assert.rejects(old.review({ ...request, action: "advance" }), /lacks review handoffs and wrote nothing/);
+});
+
 let hasEmacs = false;
 try { execFileSync("emacs", ["--version"], { stdio: "ignore" }); hasEmacs = true; } catch { /* Real-org tests need Emacs; the tool-contract tests above do not. */ }
 
@@ -562,6 +581,39 @@ async function removalFixture() {
 	const remove = async (extra: Partial<Parameters<Dispatch["removeDependencies"]>[0]> = {}) => dispatch.removeDependencies({ ...removal, revision: await revision(), ...extra }, idleHerdr);
 	return { ...f, dispatch, options, run, remove, revision, init, runtime, bin };
 }
+
+test("real review wrapper creates one isolated exact-hash task and refuses ordinary completion", { skip: !hasEmacs }, async (t) => {
+	const f = await removalFixture();
+	t.after(f.cleanup);
+	const source = join(f.dir, "source");
+	await mkdir(source);
+	const git = (...args: string[]) => execFileSync("git", ["-C", source, ...args], f.options).trim();
+	git("init", "-b", "main");
+	git("config", "user.name", "Fixture");
+	git("config", "user.email", "fixture@example.invalid");
+	await writeFile(join(source, "source.txt"), "source stays\n");
+	git("add", "."); git("commit", "-m", "fixture");
+	const commit = git("rev-parse", "HEAD");
+	await writeFile(f.project, `* EVAL Build app\n:PROPERTIES:\n:ID: resume123\n:AGENT: pi\n:HOST: kit\n:DIR: ${source}\n:REVIEW: yes\n:DEPLOY: no\n:END:\nKeep scope.\n`);
+	const start = { file: request.file, heading: "id:resume123", action: "start" as const, revision: await f.revision(), commit,
+		authorization: "Alex delegated bounded fixes and independent review.", permissions: "Local tests only; no deployment.", checks: "Agent checks requirements.", human: ["Phone"], agent: "pi" };
+	const first = await f.dispatch.review(start);
+	assert.equal(first.state, "EVAL");
+	assert.equal(first.review.phase, "review");
+	const text = await readFile(f.project, "utf8");
+	assert.equal(text.match(/^\* AUTO Review /gm)?.length, 1);
+	assert.ok(text.includes(`:REVIEW_COMMIT: ${commit}`));
+	const parent = await new Org(f.root).read(request.file, "id:resume123");
+	const metadata = JSON.parse(/^:DEV_REVIEW: +(.+)$/m.exec(parent.text)![1]!);
+	assert.notEqual(metadata.snapshot, source);
+	assert.equal(execFileSync("git", ["-C", metadata.snapshot, "rev-parse", "HEAD"], f.options).trim(), commit);
+	assert.equal(execFileSync("git", ["-C", metadata.snapshot, "remote"], f.options).trim(), "");
+	assert.deepEqual(await f.dispatch.review(start), first, "a new Emacs process replays from Org");
+	assert.equal(await readFile(f.project, "utf8"), text);
+	assert.throws(() => f.run(["org-edit", "todo", f.project, "id:resume123", "DONE"]), /review contract/);
+	assert.equal(await readFile(f.project, "utf8"), text);
+	assert.equal(git("status", "--porcelain"), "");
+});
 
 test("real org-edit pauses AUTO in one save, preserves other edges and history, and replays without touching later work", { skip: !hasEmacs }, async (t) => {
 	const f = await removalFixture();

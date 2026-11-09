@@ -16,6 +16,8 @@ The package, Home Manager wrapper and development shell set =ICU_TIMEZONE_FILES_
 
 Tests use pi-ai's faux model, never a real provider. Unix socket paths are limited to 108 bytes, so keep =JUNE_RUNTIME_DIR= short. =nix build= typechecks and produces =result/bin/june=. After changing dependencies, update =npmDepsHash= in =nix/package.nix=.
 
+For a delegated development/review loop, use June's =development-review= skill and the [[file:../org/README.org::*Independent development and review][Org review handoffs]]. It keeps the development outcome separate from exact-commit reviewer records, uses private snapshots, bounds fix rounds and keeps required human checks at EVAL. Review approval does not authorize deployment.
+
 * Repository layout
 | Path              | Holds                                                                             |
 |-------------------+-----------------------------------------------------------------------------------|

@@ -214,6 +214,8 @@ Coding workers must not set AUTO; that permission lives in instructions."
            ;; Keywords are buffer-local, and a file may set its own.
            (unless (member state org-todo-keywords-1)
              (error "STATE is one of %s" (string-join org-todo-keywords-1 " ")))
+           (when (and (org-entry-get nil "DEV_REVIEW") (member state '("AUTO" "DONE")))
+             (error "task has a review contract; use org-edit review for fixes or acceptance, ask Jon to change scope"))
            (when depends (setq depends (org-edit--depends depends)))
            ;; Protect general state writes too, without treating human Herdr
            ;; shells or June's daemon as workers. This is a cooperative guard.

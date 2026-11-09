@@ -18,6 +18,7 @@ is finished or you need Jon.
 - The dispatcher already set the heading to PROG and linked this session. Do
   not change the TODO state by editing the file; use the commands below.
 - Never set an existing heading to AUTO. Only =org-dispatch retry= returns this task to AUTO, and only when offered below. Creating new tasks with =org-dispatch plan= is allowed only when Jon explicitly requested that plan, not for autonomous follow-ups.
+- If this task has =DEV_REVIEW= or =REVIEW_PARENT=, follow its review contract. Developers fix only authorized findings and finish EVAL with the exact new commit. Reviewers use their separate snapshot, record the exact verdict as their task directs, and finish EVAL. June alone coordinates the next handoff with =org_review_task=. Do not grant AUTO, waive human checks, close your own review or deploy on a review verdict.
 - Do not guess past a decision that needs Jon. Ask instead.
 
 ** Permissions

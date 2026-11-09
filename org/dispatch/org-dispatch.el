@@ -1248,6 +1248,10 @@ and the durable no-nudge state for inspection."
 (defun org-dispatch--pending-file ()
   (expand-file-name "pending.json" org-dispatch-state-dir))
 
+(defun org-dispatch--same-dir-p (a b)
+  "Whether A and B name the same working directory, including symlinks."
+  (or (equal a b) (and a b (file-equal-p a b))))
+
 (defun org-dispatch--eligible (tasks states &optional dry-run)
   "TASKS this host may launch now, respecting STATES already running.
 A task launches only after its text stays unchanged for
@@ -1312,7 +1316,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                (< (- now (gethash "seen" entry))
                   (or org-dispatch-settle (org-dispatch--default "settle" 120))))
           (when dry-run (push (plist-put task :waiting t) eligible)))
-         ((seq-find (lambda (s) (equal (plist-get s :dir) (plist-get task :dir)))
+         ((seq-find (lambda (s) (org-dispatch--same-dir-p (plist-get s :dir) (plist-get task :dir)))
                     (append running eligible)))
          ((>= (+ (length running) (length eligible)) org-dispatch-max-agents))
          (t (push task eligible)))))
@@ -1368,7 +1372,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
            (lambda ()
              (org-dispatch--check-stopped-task t)
              (let ((task (org-dispatch--task)))
-               (when (and (equal todo "DONE") (plist-get task :review))
+               (when (and (equal todo "DONE") (or (plist-get task :review) (org-entry-get nil "DEV_REVIEW")))
                  (setq todo "EVAL"))
                (cond
                 ((equal todo "HOLD")

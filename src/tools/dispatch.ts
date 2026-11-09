@@ -14,6 +14,26 @@ import type { Herdr } from "./herdr.ts";
 import { type Org, orgTime, parseHeading } from "./org.ts";
 import { User, user } from "../user.ts";
 
+export type ReviewRequest = {
+	action: "start" | "advance" | "human";
+	file: string;
+	heading: string;
+	revision: string;
+	commit: string;
+	authorization?: string;
+	permissions?: string;
+	checks?: string;
+	human?: string[];
+	agent?: string;
+	note?: string;
+};
+
+export type ReviewResult = {
+	id: string;
+	state: string;
+	review: { phase: string; review: string; commit: string; round: number; host: string; agent: string };
+};
+
 export type QueueRequest = {
 	file: string;
 	title: string;
@@ -508,6 +528,24 @@ export class Dispatch {
 		}
 	}
 
+	/** Existing Org tasks carry the bounded review contract and immutable verdicts. */
+	async review(request: ReviewRequest): Promise<ReviewResult> {
+		if (!/^id:[0-9A-Za-z][0-9A-Za-z-]{0,63}$/.test(request.heading)) throw new Error("heading must be id:UUID");
+		if (!/^[0-9a-f]{64}$/.test(request.revision)) throw new Error("revision must come from org_read_task");
+		if (!/^[0-9a-f]{40}$/.test(request.commit)) throw new Error("commit must be the full Git SHA");
+		if (request.agent) checkAgent(request.agent, dispatchAgents(this.#config.dispatch));
+		const path = await this.#target(request.file);
+		const { action, file: _file, heading, ...spec } = request;
+		const out = await this.#run(["org-edit", "review", action, path, heading, JSON.stringify({
+			...spec, ...(action === "human" ? { checks: request.human } : {}),
+		})], 120_000).catch((error: Error) => {
+			if (/usage: org-edit todo\|schedule\|deadline/.test(error.message))
+				throw new Error("Installed org-edit lacks review handoffs and wrote nothing; update June's Nix input and activate the Org commands with approval. Do not imitate the transition with general state writes.");
+			throw error;
+		});
+		return JSON.parse(out.trim().split("\n").at(-1)!) as ReviewResult;
+	}
+
 	/** Close a task June created, after she reviews its outcome. Org supplies CLOSED and logging. */
 	async complete(file: string, heading: string) {
 		const path = await this.#target(file);
@@ -812,6 +850,37 @@ export function createDispatchExtension(
 					await api.commit((tx) => follow(tx, followTask, input, Number(api.conversationId)), context);
 					const updates = args.everyMinutes > 0 ? `a progress update every ${args.everyMinutes} minutes while it is PROG, for ${hours} hours, and ` : "";
 					return { output: [{ type: "text", text: `Following «${input.title}» on ${host}: you will get ${updates}[follow] messages when it blocks, holds, or finishes.` }] };
+				},
+			}),
+			defineTool({
+				name: "org_review_task",
+				description: `Coordinate an explicitly delegated development/review loop, using the development-review skill. Read the whole development task, Dialog and linked review Outcome first. start creates a fresh independent AUTO reviewer in a private exact-commit clone, at most three rounds; the original development task stays EVAL. First start requires ${user()}'s authorization for bounded in-scope fixes, separate permissions, agent checks and specific human checks (empty only when none are required). This tool grants no new implementation, publication, remote-write, activation or deployment permission. advance consumes the linked review's immutable verdict: in-scope findings return the same development task to its original agent/session; a new EVAL revision needs start again. A pass closes only when no human checks remain; otherwise it stays EVAL. Blocked work or a third unsuccessful round goes HOLD for ${user()}. human records only checks ${user()} explicitly accepted for the exact agent-approved commit; partial acceptance stays EVAL. Stale commits, dirty source, active/unknown linked workers and ordinary AUTO/DONE bypasses are refused. Review sessions can close and June can restart without losing Org records; retry the same operation after reading the record, never create a duplicate task. Worker crashes and partial/dirty snapshots need inspection, not a reset. Only one local Git repository/branch is supported; report other cases rather than expanding scope. Never deploy on approval alone.`,
+				parameters: obj({
+					action: union([lit("start"), lit("advance"), lit("human")]),
+					file: str(), heading: str({ description: "id:UUID of the development task, not the review task" }),
+					revision: str({ description: "Current org_read_task revision" }), commit: str({ description: "Full exact Git SHA" }),
+					authorization: opt(str({ description: "First start only: record the user's delegation of in-scope fixes, not just testing" })),
+					permissions: opt(str({ description: "First start only: separate local checks, remote reads/writes, commits/pushes, activation/deployment. State exclusions explicitly" })),
+					checks: opt(str({ description: "First start only: specific agent checks and reviewer responsibility" })),
+					human: opt(arr(str(), { description: "First start: required human checks, [] if none. human action: exact check names the user just accepted" })),
+					agent: agentParameter("First start: independent reviewer agent. Every round starts a fresh session"),
+					note: opt(str({ description: "human only: the user's actual acceptance, never inferred from an agent verdict" })),
+				}),
+				replay: "safe",
+				execute: async (args, api, context) => {
+					const result = await dispatch.review(args);
+					const id = result.review.phase === "review" ? result.review.review : result.review.phase === "fixes" ? result.id : undefined;
+					if (id) {
+						const task = await org.byId(id);
+						if (!task) throw new Error("Review handoff saved but followed task missing; inspect Org before retrying");
+						await api.commit((tx) => follow(tx, followTask, {
+							id, title: task.title, host: result.review.host, queuedAt: Date.now(),
+							request: `review:${result.id}:${result.review.commit}:${result.review.phase}`,
+						}, Number(api.conversationId)), context);
+						// Like resume: a replay after the save/follow/kick boundary is harmless.
+						await dispatch.kick();
+					}
+					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\nRead the development-review skill for the next handoff. Report blockers and outcomes, not each transfer. No deployment is authorized by this result.` }] };
 				},
 			}),
 			defineTool({
