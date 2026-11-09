@@ -517,6 +517,7 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
           :depends (split-string (or (org-entry-get nil "DEPENDS") ""))
           :retry (string-to-number (or (org-entry-get nil "RETRY") "0"))
           :june (or (org-entry-get nil "JUNE_REQUEST") (org-entry-get nil "PLAN_REQUEST"))
+          :review-loop (and (or (org-entry-get nil "DEV_REVIEW") (org-entry-get nil "REVIEW_PARENT")) t)
           :review (not (equal (downcase (or (org-entry-get nil "REVIEW") "yes")) "no"))
           :deploy (equal (downcase (or (org-entry-get nil "DEPLOY") "no")) "yes")
           :branch (org-entry-get nil "BRANCH")
@@ -856,6 +857,8 @@ replaying the same key and spec; missing prerequisites block partial plans."
                      (with-temp-buffer (insert-file-contents file)
                                        (json-parse-buffer :object-type 'plist))))
          (status (plist-get state :status)))
+    (when (equal status "launch-uncertain")
+      (error "launch ownership is uncertain; Jon must inspect the task, Herdr and child processes before recovery"))
     (when (or (and request (not (equal request (org-entry-get nil "JUNE_STOPPED"))))
               (equal status "stopping")
               (and worker request (not (equal status "running"))))
@@ -1081,6 +1084,7 @@ and the durable no-nudge state for inspection."
              (label (truncate-string-to-width (concat "auto · " (plist-get task :heading)) 60))
              (state (list :id id :file (plist-get task :file) :heading (plist-get task :heading)
                           :dir (plist-get task :dir) :agent agent :status "starting"
+                          :review-loop (if (plist-get task :review-loop) 1 0)
                           :started (float-time) :nudges 0
                           :repeat (if (plist-get task :repeat) 1 0))))
         (org-dispatch--save-state state)
@@ -1094,6 +1098,9 @@ and the durable no-nudge state for inspection."
                                 (file-name-base (plist-get task :file)))))
                   (setq pane (alist-get 'pane_id created)
                         tab (alist-get 'tab_id created)))
+                (setq state (plist-put state :pane pane))
+                (setq state (plist-put state :tab (or tab "")))
+                (org-dispatch--save-state state)
                 (let ((name (format "auto-%s-%s"
                                     (substring (replace-regexp-in-string "[^0-9a-f]" "" id) 0 8)
                                     (format-time-string "%H%M%S")))
@@ -1112,6 +1119,9 @@ and the durable no-nudge state for inspection."
                     (apply #'org-dispatch--herdr "agent" "start" name
                            "--kind" agent "--pane" pane "--timeout" "60000" "--" args))))
               (let ((session (org-dispatch--pane-session pane agent)))
+                (setq state (plist-put state :pane pane))
+                (setq state (plist-put state :session session))
+                (org-dispatch--save-state state)
                 (org-dispatch--claim task pane session)
                 (setq state (plist-put state :pane pane))
                 (setq state (plist-put state :tab (or tab "")))
@@ -1134,6 +1144,8 @@ and the durable no-nudge state for inspection."
            ;; Blocked dialogs and failed custom launchers need attention, not
            ;; another tab every tick when quota is exhausted or a command is wrong.
            (cond
+            ((plist-get task :review-loop)
+             (org-dispatch--uncertain-launch state (error-message-string err)))
             ((and pane (equal (org-dispatch--agent-status pane) "blocked"))
              (org-dispatch--claim task pane nil)
              (org-dispatch--hold
@@ -1171,6 +1183,17 @@ and the durable no-nudge state for inspection."
       (ignore-errors
         (org-dispatch--edit file (plist-get state :id) #'org-get-todo-state)))))
 
+(defun org-dispatch--uncertain-launch (state reason)
+  "Reserve STATE's worktree before parking an uncertain review-loop startup."
+  (org-dispatch--save-state (plist-put state :status "launch-uncertain"))
+  (org-dispatch--edit (plist-get state :file) (plist-get state :id)
+    (lambda ()
+      (unless (equal (org-get-todo-state) "HOLD")
+        (org-todo "HOLD")
+        (org-dispatch--append "Dialog" (org-dispatch--entry "Dispatcher"
+          (concat "Review-loop launch ownership is uncertain; directory/slot remain reserved and no relaunch or terminal input is allowed. Jon must inspect Herdr, this receipt and child processes before recovery. " reason))))))
+  (org-dispatch--notify (concat "HOLD · " (plist-get state :heading)) reason))
+
 (defun org-dispatch--watch (state)
   (let* ((id (plist-get state :id))
          (pane (plist-get state :pane))
@@ -1178,6 +1201,9 @@ and the durable no-nudge state for inspection."
          (status (and pane (org-dispatch--agent-status pane)))
          (nudges (plist-get state :nudges)))
     (cond
+     ((equal (plist-get state :status) "launch-uncertain")
+      ;; Recover a crash after reserving but before the Org HOLD save.
+      (unless (equal todo "HOLD") (org-dispatch--uncertain-launch state "Recovered uncertain startup receipt.")))
      ((member (plist-get state :status) '("stopping" "stopped"))
       ;; Explicit stops never nudge, expire, or close the worker's tab.
       nil)
@@ -1196,7 +1222,12 @@ and the durable no-nudge state for inspection."
      ((not (equal (plist-get state :status) "running"))
       ;; A launch that died part way leaves a "starting" entry behind.
       (when (> (- (float-time) (plist-get state :started)) 600)
-        (org-dispatch--drop-state id)))
+        (if (or (eq (plist-get state :review-loop) 1)
+                ;; Older starting receipts may not carry the loop marker.
+                (org-dispatch--edit (plist-get state :file) id
+                  (lambda () (plist-get (org-dispatch--task) :review-loop))))
+            (org-dispatch--uncertain-launch state "Startup did not publish a complete worker claim within ten minutes.")
+          (org-dispatch--drop-state id))))
      ((null todo)
       (org-dispatch--log "dropped %s: heading not found" id)
       (org-dispatch--drop-state id))
@@ -1273,7 +1304,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                   (with-temp-buffer (insert-file-contents file) (json-parse-buffer))
                 (make-hash-table :test 'equal)))
          (new (make-hash-table :test 'equal))
-         (running (seq-filter (lambda (s) (member (plist-get s :status) '("running" "starting" "stopping")))
+         (running (seq-filter (lambda (s) (member (plist-get s :status) '("running" "starting" "stopping" "launch-uncertain")))
                               states))
          (index (when (seq-some (lambda (task) (plist-get task :depends)) tasks)
                   (org-dispatch--dependency-index)))

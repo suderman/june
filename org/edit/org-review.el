@@ -119,7 +119,9 @@
             (format "- Authorized fixes, at most three exact-revision reviews: %s\n- Permissions for every handoff: %s\n- Agent checks: %s\n- Human checks: %s"
                     (plist-get loop :authorization) (plist-get loop :permissions) (plist-get loop :checks)
                     (if human (string-join human "; ") "none")))))
-      (unless (and (equal host (plist-get loop :host)) (equal developer (plist-get loop :developer)))
+      (unless (and (equal host (plist-get loop :host)) (equal developer (plist-get loop :developer))
+                   (equal (file-truename (org-review--git (plist-get task :dir) "rev-parse" "--show-toplevel"))
+                          (plist-get loop :repo)))
         (error "assignment changed; ask Jon before continuing"))
       (org-review--source loop commit)
       (let* ((review (org-id-new)) (title (format "Review %s, round %d" (plist-get task :heading) round))
