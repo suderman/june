@@ -7,7 +7,7 @@ A runbook, so any agent reaches the same standard. Authorization for a budget co
 3. Start the run: =june-art run init RUN --budget N --group-limit 4 --watch ~/org/june/avatar=.
 
 ** Prompts
-Start from =art/pipelines/character/example-tall-idle-standing.json=. Change only the acting: stance, hands, expression, direction. Keep its outfit and face wording, with two corrections to the eyes and headroom. Ask for bright emerald-green eyes, not olive or hazel. Ask for generous empty space above her hair and below her boots. Change the negative to match the acting: an idle negative that bans crossed arms will fight a folded-arm pose.
+Start from =art/pipelines/character/example-tall-idle-standing.json=. Change only the acting: stance, hands, expression, direction. Keep its outfit and face wording, including =olive-hazel green-dominant= eyes, with one correction for headroom. Ask for generous empty space above her hair and below her boots. Change the negative to match the acting: an idle negative that bans crossed arms will fight a folded-arm pose.
 
 ** Generate and gate
 1. Run 4 seeds of the first pose at 832x1536 and look at them before starting another pose. Carry what you learn into the next prompts.
@@ -23,7 +23,8 @@ Do not use =examples/preflight-pose.mjs= for tall art: it models portrait placem
 
 1. Measure the face box and mouth on the source, then draw them on a copy and look. Do not copy a box from another image. The box runs cheek to cheek and its bottom is on her chin. Its height follows one rule, because bangs hide her hairline: 1.85 times the distance from the midpoint of her irises to her chin, corrected for head tilt. =examples/face-box.py IMAGE --face X,Y,W,H= computes it from a rough box. Closed eyes need the same measure by hand, from the line of the lids. The box height sets how large the whole figure is drawn, so an inconsistent box makes her head a different size from other poses.
 2. Ingest into a new staging set with =full= in =framings=, and record seed, prompts and hashes in the =.txt= sidecar.
-3. Render the real panels with =python "$SKILL/examples/proof-panels.py" --set SET --pose ID --out NEW_DIR=, where =$SKILL= is this skill's directory. It covers 1040, 820, 620 and 390 px, short and long, on both sides, privately, and prints each panel's framing, face size and whether all of her is in view. Look at =proof.png= as well. She should stand whole on a tall desktop panel and zoom to her face on a phone with her body running on behind the words. A pose that leans sideways can lose its body behind the words on one side; report which side it suits.
+3. Normalize its colours, following "One new pose" in =references/colour-run.org=. Do this before the panel proof, so Jon reviews the colours that will ship.
+4. Render the real panels with =python "$SKILL/examples/proof-panels.py" --set SET --pose ID --out NEW_DIR=, where =$SKILL= is this skill's directory. It covers 1040, 820, 620 and 390 px, short and long, on both sides, privately, and prints each panel's framing, face size and whether all of her is in view. Look at =proof.png= as well. She should stand whole on a tall desktop panel and zoom to her face on a phone with her body running on behind the words. A pose that leans sideways can lose its body behind the words on one side; report which side it suits.
 
 ** Hand over
-Show Jon the seed sheets and panels, with rejects and reasons. Add what the job taught to the lessons before setting EVAL. Promote only what he approves, by =references/ingestion.org=, checking that only the new pose changed.
+Show Jon the seed sheets and panels, with rejects and reasons. Add what the job taught to the lessons before setting EVAL. Promote only what he approves, by =references/ingestion.org=, checking that only the new pose changed. Promote the recoloured =SET/source/NAME.png= and its finished WebP, not the raw cut-out, which still has the generated colours.

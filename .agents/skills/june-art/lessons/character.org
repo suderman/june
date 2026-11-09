@@ -5,8 +5,8 @@ Generate full figures at 832x1536 with the =character= pipeline. =art/pipelines/
 ** Check the top and bottom edges before judging a candidate
 Asking for "generous empty space above her hair" did not keep the crown in frame. Of six candidates cut out on 2026-11-08, three touched the top edge (92002 by 110 px, 92003 by 73, 93003 by 30), and 92002's boot touched the bottom. Measure the alpha's top and bottom rows with =magick -alpha extract= before choosing a seed, then inspect the original RGB too. Curious seed 96103 on 2026-11-08 had a visibly clipped crown but zero solid top-edge pixels after ToonOut, with a two-pixel gap. Seed 96102 had 25 solid bottom-edge pixels while =edges= still reported =clear: true=. Read the counts, not just that boolean. A clipped crown needs repair before ingest: full framing stands her on the floor, and =frame= pins a cut crown to the top, so the two conflict.
 
-** The eyes are emerald now
-Canon's original olive golden green has been brightened toward emerald. Prompt for it directly. Evidence: the 2026-11-08 run's "olive-hazel green-dominant" wording gave green eyes straight from generation, without the repairs earlier portraits needed, but it asked for the older colour.
+** Prompt olive-hazel eyes and let the colour step finish them
+Jon tried emerald, then rejected bright versions as radioactive on 2026-11-08 and chose the muted olive-green of =gentle-offering-mug-front=. The "olive-hazel green-dominant" wording gave green eyes straight from generation in the 2026-11-08 tall run, without the repairs earlier portraits needed. Do not re-roll for iris colour: =colour-run.org= sets it.
 
 ** Size every face box by one rule
 Hand-measured boxes on 2026-11-08 ran 1.57 to 1.88 times the eye-to-chin distance, and the two tightest drew her head noticeably larger. Use the rule in =references/tall-pose.org=.

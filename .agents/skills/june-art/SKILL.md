@@ -42,6 +42,7 @@ Preferred alpha: saved `June - Production alpha ToonOut.json`. Preserve RGB, nat
 
 - Read the named art-list description and keep the fixed 18-expression vocabulary. Canonical skirt outfit overrides obsolete jeans wording.
 - Use a bounded candidate count authorized by Jon. Compare identity, expression, anatomy, outfit, framing and rendering. Report rejects and uncertainty.
+- Normalize a new pose's colours in staging before Jon reviews it (`references/colour-run.org`, "One new pose"), and promote the recoloured source, never the raw cut-out.
 - Obtain review before promotion. Use a new staging set first; inspect the destination manifest and files before production writes. Never overwrite unrelated art.
 - Keep the original canonical sheet highest authority. Palette is approved; turnaround is a working reference with marked angle/pose limits. Outfit-and-props sheet and five props are approved working references; its mug handle protrusion and illustrative keyboard layout are not canon. Check the project for later decisions.
 - No automatic LoRA training, model changes, renderer fixes, pose library, chibis or animation. Reference sheets are production aids, not runtime poses.

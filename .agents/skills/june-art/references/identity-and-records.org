@@ -17,7 +17,7 @@ readlink -f "$AVATAR"
 These are shell variables, not existing required environment settings. =$HOME/.local/share/june= resolves to =$HOME/org/june= on kit; confirm before writes. Runtime logs/builders/manifests belong under =$STATE/<milestone>/=. Human-review images, sources and summaries belong under =$ART/<milestone>/=. The repository keeps this skill, application code and placeholder art, not production images or models.
 
 ** Canonical June
-June is an adult with soft rounded cheeks and a compact lower face, long mostly smooth dark chocolate-brown hair with gentle bends and familiar bangs, eyes that were originally an olive golden green and that Jon has since brightened away from yellow, closer to emerald (Jon, 2026-11-08). This overrides the canonical sheet on eye colour. A warm amber near the pupils remains. Prompt for bright emerald-green eyes, not olive or yellow-green. Her acting is warm, clever, playful and mischievous; personality should change her pose and eyes, not just her mouth.
+June is an adult with soft rounded cheeks and a compact lower face, long mostly smooth dark chocolate-brown hair with gentle bends and familiar bangs, muted olive-green eyes, the colour of =gentle-offering-mug-front= (=#69732A=, Jon, 2026-11-08, after brighter emerald and lime versions looked radioactive). This overrides the canonical sheet, whose irises measure a brighter green, =#77973D=. A warm amber near the pupils remains. Prompt for olive-hazel green-dominant eyes; the colour step sets the final colour. Her acting is warm, clever, playful and mischievous; personality should change her pose and eyes, not just her mouth.
 
 Her costume is a dusty-rose collared blouse, neckline casually open, sleeves rolled toward the elbows; high-waisted dark charcoal/plum A-line skirt, approximately 5-10 cm above the knees standing; slim dark belt; opaque dark tights; brown ankle boots with modest block heels; delicate gold necklaces including a small pendant; dark over-ear headset and compact mouth-level boom. Wristwatch/bracelets are optional, not identity anchors. The rasters have no physical scale, so the centimeter target is an instruction, not a measured claim about the sheet.
 
@@ -29,6 +29,8 @@ Authority order:
 5. Prompts for the requested scene/acting and explicit amendments. Approved above-knee skirt wording overrides older inventory jeans/generic-shirt wording. Do not silently treat any new prompt as permission to redesign June.
 
 Secondary preserved face: =june-approved-face.png=, SHA256 =3853c7c6cb4532d9ded78b9eab7b8406675ec867005880f63c05e62cc7cd090a=. It remains valuable but does not compete with or replace the complete canonical sheet. Its early F-eyes/G-nose compositing workflow is an archived design experiment, not the production generator.
+
+The 2026-11-09 library colour run did not touch the reference images. Its blouse, skirt and boots targets in =art/colour-targets.json= were measured from canon, so finished art moved toward the references. Eyes are the one exception, as above. Do not recolour a reference to match, and treat a generated pose's colours as provisional until the colour step in =references/colour-run.org= has run.
 
 Do not recursively replace input references with each attractive output. Keep canonical inputs fixed, compare new generations directly against them, and obtain approval for a reference change. This prevents gradual changes in jaw, hair, eye shape, accessories and costume.
 

@@ -33,5 +33,8 @@ Work through the poses in batches of about eight, without stopping to ask. Run e
 5. A skirt mask near 0% usually means the pose has no belt and the subtraction erased the skirt: use ={"item":"skirt","subtract":[]}= first. Otherwise fix a bad mask by rewording that pose's prompt with a =segment= field on the step, for example ={"item":"skirt","segment":"dark pleated skirt"}=, and re-run with =--force=. If it still cannot be done cleanly, drop the step and say so in the report. A pose with one item done is better than one with a visible fault.
 6. A blouse drawn much darker than the rest stays dark, because the target keeps each pose's brightness. When =colour-report.json= shows its =after= colour clearly darker than the others, override the step with ={"item":"blouse","keepValue":false,"strength":0.6}=. Use this only for those poses: it worked on =wry-mug-toast=, whose blouse started at =#916661=.
 
+** One new pose
+Every new pose gets this after ingest into staging and before Jon reviews it, because Anima's eyes, blouse and skirt drift between seeds. Write a plan for just that pose, with the eyes step and each garment it shows. Run =june-art run masks RUN SET PLAN=, then =june-art colours SET PLAN=, then =june-art run compare SET OUT NAME=, in the pose's own run directory. Segmentation does not spend the generation budget. Judge it as in "Apply and judge". Its colours should fall in with the library, so a blouse clearly brighter or darker than its neighbours gets the same override.
+
 ** At the end
 Confirm the manifest still equals production's: only the art changes. Render a sample of poses with =examples/proof-panels.py=. Add what you learned to =lessons/colour.org=.
