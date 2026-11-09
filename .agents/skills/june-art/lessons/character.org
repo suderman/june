@@ -1,9 +1,24 @@
 * Lessons for drawing a character
 ** Tall art comes from a tall canvas
-Generate full figures at 832x1536 with the =character= pipeline. =art/pipelines/character/example-tall-standing-mug.json= holds the parameters of a standing pose Jon approved (seed 71101), including prompt wording that shows the crown through the boots with clear margins.
+Generate full figures at 832x1536 with the =character= pipeline. =art/pipelines/character/example-tall-standing-mug.json= holds the parameters of a standing pose Jon approved (seed 71101). Evidence: all 12 generations of the 2026-11-08 tall-first run were single adult figures with believable proportions, with no sign of the anatomy faults that portrait extension produced.
 
-** Check the source's face size
-A standing source's face is about 200 px, against 275 to 345 px in portraits. Judge the expression at that size before accepting one. Whether =masked-repair= can sharpen a standing face has not been tried.
+** Check the top and bottom edges before judging a candidate
+Asking for "generous empty space above her hair" did not keep the crown in frame. Of six candidates cut out on 2026-11-08, three touched the top edge (92002 by 110 px, 92003 by 73, 93003 by 30), and 92002's boot touched the bottom. Measure the alpha's top and bottom rows with =magick -alpha extract= before choosing a seed. A crown that touches the edge needs repair before ingest: full framing stands her on the floor, and =frame= pins a cut crown to the top, so the two conflict.
+
+** The eyes are emerald now
+Canon's original olive golden green has been brightened toward emerald. Prompt for it directly. Evidence: the 2026-11-08 run's "olive-hazel green-dominant" wording gave green eyes straight from generation, without the repairs earlier portraits needed, but it asked for the older colour.
+
+** A small standing face can still read
+Forehead-to-chin faces of about 150 px in an 832x1536 source were sharp and held their expression at full panel size after ingest. Judge the expression at that size anyway. Evidence: idle-standing-attentive, seed 91002.
+
+** Do not reject a candidate for its floor shadow
+Most candidates drew one despite the prompt and negative. ToonOut removed it in all six cut-outs on 2026-11-08, so judge the cut-out.
+
+** The skirt colour wanders
+"Dark charcoal-plum" came out olive, charcoal or brown across seeds, and canon is plum-brown. Treat this as a job for colour normalization, not a reason to re-roll.
+
+** Bodies vary in face heights
+Standing figures measure up to ten face heights tall, against about seven and a half for the older clipboards, so framing must fit the figure rather than assume a share of the panel. Measure each new pose.
 
 ** Start from the right RGB
 Several production portraits had their irises repaired after generation, so the original RGB has the old eye colour. Anything built from an original needs that repair again. Evidence: the idle outpaint pilot's eyes came out brown.

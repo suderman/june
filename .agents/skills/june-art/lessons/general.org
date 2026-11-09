@@ -12,3 +12,9 @@ A positional connection silently left =ImageCompositeMasked= without its mask, a
 
 ** Give the model a whole subject to continue
 Evidence, not yet isolated from other causes: idle outpaint windows that showed only 448 px of belt and skirt produced three legs (81002) and two lower bodies (81003).
+
+** Gate on the first subject before spending the rest
+Run one subject's seeds and look at them before the others, then carry what they teach into the next prompts. Evidence: the tall-first run's idle gate (2026-11-08) proved the method and exposed the headroom problem after 4 of 12 generations.
+
+** Render the real panel before accepting the art
+A clean image can still lay out wrongly. Evidence: the first full-figure pose ran off the bottom of the tallest panels until =frame= learned to fit her, which only the private =Panel.qml= proof showed.
