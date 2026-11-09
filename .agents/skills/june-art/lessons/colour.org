@@ -1,0 +1,9 @@
+* Lessons for fixing colours
+** Prefer a pixel recolour to a generation
+A colour fix should change colour and nothing else. =june-art run recolor= shifts hue and saturation for pixels matching a range inside a region. It keeps each pixel's value, so shading survives, and never touches alpha. Evidence: =gentle-standing-hands-clasped='s silver buckle became gold (2026-11-08, 344 pixels in a 35x28 region), alpha byte-identical.
+
+** The region is the mask
+A tight box plus a saturation and value range isolated a metal buckle from a dark navy belt. A few edge pixels that blend into a neighbour can keep a faint tint; check at 8x. Big regions are harder: her blouse and skin are close in hue, so a blouse fix needs a better mask than a box.
+
+** Fix the source, then re-ingest
+Recolour the source RGBA, ingest it with the pose's measured face, mouth and gestures, and compare the manifest entry with the old one. It should differ only in what you meant to change. Type gesture names exactly as the sidecar has them.

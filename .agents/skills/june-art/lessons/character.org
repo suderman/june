@@ -8,6 +8,9 @@ Asking for "generous empty space above her hair" did not keep the crown in frame
 ** The eyes are emerald now
 Canon's original olive golden green has been brightened toward emerald. Prompt for it directly. Evidence: the 2026-11-08 run's "olive-hazel green-dominant" wording gave green eyes straight from generation, without the repairs earlier portraits needed, but it asked for the older colour.
 
+** Size every face box by one rule
+Hand-measured boxes on 2026-11-08 ran 1.57 to 1.88 times the eye-to-chin distance, and the two tightest drew her head noticeably larger. Use the rule in =references/tall-pose.org=.
+
 ** A small standing face can still read
 Forehead-to-chin faces of about 150 px in an 832x1536 source were sharp and held their expression at full panel size after ingest. Judge the expression at that size anyway. Evidence: idle-standing-attentive, seed 91002.
 

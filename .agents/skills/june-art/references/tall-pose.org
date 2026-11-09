@@ -21,7 +21,7 @@ If =edges= reports the top touched, run =crown-repair= on the original RGB with 
 ** Stage and prove
 Do not use =examples/preflight-pose.mjs= for tall art: it models portrait placement only. Check the real tall result in the ingested manifest.
 
-1. Measure the face box on the source, forehead through chin and cheek to cheek, and the mouth, then draw them on a copy and look. Do not copy a box from another image.
+1. Measure the face box and mouth on the source, then draw them on a copy and look. Do not copy a box from another image. The box runs cheek to cheek and its bottom is on her chin. Its height follows one rule, because bangs hide her hairline: 1.85 times the distance from the midpoint of her irises to her chin, corrected for head tilt. =examples/face-box.py IMAGE --face X,Y,W,H= computes it from a rough box. Closed eyes need the same measure by hand, from the line of the lids. The box height sets how large the whole figure is drawn, so an inconsistent box makes her head a different size from other poses.
 2. Ingest into a new staging set with =full= in =framings=, and record seed, prompts and hashes in the =.txt= sidecar.
 3. Render the real panels with =python "$SKILL/examples/proof-panels.py" --set SET --pose ID --out NEW_DIR=, where =$SKILL= is this skill's directory. It covers 1040, 820, 620 and 390 px, short and long, on both sides, privately, and prints each panel's framing, face size and whether all of her is in view. Look at =proof.png= as well. She should stand whole on a tall desktop panel and zoom to her face on a phone with her body running on behind the words. A pose that leans sideways can lose its body behind the words on one side; report which side it suits.
 

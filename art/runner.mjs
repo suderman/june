@@ -375,6 +375,58 @@ export function comparePixels(a, b, [x, y, w, h]) {
 	return { identical: differing === 0, differing_pixels: differing, region: [x, y, w, h], box_x0_y0_x1_y1: box && [box[0] + x, box[1] + y, box[2] + x, box[3] + y] };
 }
 
+function rgbToHsv(r, g, b) {
+	const max = Math.max(r, g, b);
+	const d = max - Math.min(r, g, b);
+	let h = 0;
+	if (d > 0) {
+		if (max === r) h = ((g - b) / d + 6) % 6;
+		else if (max === g) h = (b - r) / d + 2;
+		else h = (r - g) / d + 4;
+	}
+	return [h * 60, max === 0 ? 0 : d / max, max];
+}
+
+function hsvToRgb(h, s, v) {
+	const c = v * s;
+	const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+	const m = v - c;
+	const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+	return [r + m, g + m, b + m].map((n) => Math.round(n * 255));
+}
+
+/**
+ * Recolour the pixels inside a region that match a hue, saturation and value range, keeping each pixel's value so the
+ * drawing's shading survives. Nothing else changes, and alpha never does: a colour fix cannot alter a drawn shape.
+ */
+export function recolor(input, output, { region: [rx, ry, rw, rh], hue = [0, 360], sat = [0, 1], val = [0, 1], toHue, toSat }) {
+	if (resolve(input) === resolve(output)) throw new Error("recolor writes a new file; give a different output");
+	if (!Number.isFinite(toHue) || !Number.isFinite(toSat)) throw new Error("recolor needs --to-hue and --to-sat");
+	const [width, height] = magick([input, "-format", "%w %h", "info:"]).toString().trim().split(" ").map(Number);
+	if (rx < 0 || ry < 0 || rw <= 0 || rh <= 0 || rx + rw > width || ry + rh > height) throw new Error(`the region is not inside the ${width}x${height} image`);
+	const pixels = magick([input, "-alpha", "on", "-depth", "8", "RGBA:-"]);
+	const inHue = (h) => (hue[0] <= hue[1] ? h >= hue[0] && h <= hue[1] : h >= hue[0] || h <= hue[1]);
+	let changed = 0;
+	let box = null;
+	for (let y = ry; y < ry + rh; y++) {
+		for (let x = rx; x < rx + rw; x++) {
+			const i = 4 * (y * width + x);
+			if (pixels[i + 3] === 0) continue;
+			const [h, s, v] = rgbToHsv(pixels[i] / 255, pixels[i + 1] / 255, pixels[i + 2] / 255);
+			if (!inHue(h) || s < sat[0] || s > sat[1] || v < val[0] || v > val[1]) continue;
+			const [r, g, b] = hsvToRgb(toHue, toSat, v);
+			if (r === pixels[i] && g === pixels[i + 1] && b === pixels[i + 2]) continue;
+			pixels[i] = r;
+			pixels[i + 1] = g;
+			pixels[i + 2] = b;
+			changed++;
+			box = box ? [Math.min(box[0], x), Math.min(box[1], y), Math.max(box[2], x), Math.max(box[3], y)] : [x, y, x, y];
+		}
+	}
+	execFileSync("magick", ["-size", `${width}x${height}`, "-depth", "8", "RGBA:-", `PNG32:${output}`], { input: pixels, maxBuffer: 2 ** 31 - 1, stdio: ["pipe", "pipe", "pipe"] });
+	return { input, output, changed_pixels: changed, box_x0_y0_x1_y1: box };
+}
+
 /** How many solid pixels of a cut-out touch each edge of its image: a figure touching the top has lost its crown. */
 export function edgeContact(path) {
 	const [width, height] = magick([path, "-format", "%w %h", "info:"]).toString().trim().split(" ").map(Number);
@@ -443,6 +495,11 @@ function parseFlags(args) {
 		else if (arg === "--graph") flags.graph = next();
 		else if (arg === "--node") flags.node = next();
 		else if (arg === "--region") flags.region = next().split(",").map(Number);
+		else if (arg === "--hue") flags.hue = next().split(",").map(Number);
+		else if (arg === "--sat") flags.sat = next().split(",").map(Number);
+		else if (arg === "--val") flags.val = next().split(",").map(Number);
+		else if (arg === "--to-hue") flags.toHue = Number(next());
+		else if (arg === "--to-sat") flags.toSat = Number(next());
 		else if (arg.startsWith("--")) throw new Error(`unknown option ${arg}`);
 		else flags.positional.push(arg);
 	}
@@ -459,6 +516,8 @@ export const USAGE = `usage: june-art run VERB ...
   submit RUN LABEL (--pipeline P [--set K=V]... | --graph F) [--group G] [--timeout S]
   unchanged A B --region X,Y,W,H              exact pixel comparison inside a region
   edges CUTOUT...                             solid pixels touching each edge; fails if the top or a side is touched
+  recolor IN OUT --region X,Y,W,H --to-hue H --to-sat S [--hue L,H] [--sat L,H] [--val L,H]
+                                              recolour matching pixels in a region, keeping shading and alpha
   sheet RUN OUT LABEL... [--node ID] [--height PX] [--columns N]
   stop RUN REASON | resume RUN --by WHO | raise RUN [--budget N] [--group-limit N] --by WHO`;
 
@@ -489,6 +548,10 @@ export async function runCommand(argv) {
 		print(result);
 		if (!result.identical) process.exitCode = 1;
 		return;
+	}
+	if (verb === "recolor" && first && second) {
+		if (flags.region?.length !== 4 || !flags.region.every(Number.isInteger)) throw new Error("recolor needs --region X,Y,W,H");
+		return print(recolor(first, second, flags));
 	}
 	if (verb === "edges" && first) {
 		const results = flags.positional.map((path) => ({ path, ...edgeContact(path) }));

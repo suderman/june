@@ -36,5 +36,6 @@ art status "$RUN"
 - Graphs are checked against the live =/object_info=, including that =ImageCompositeMasked= has its mask connected.
 - =raise= and =resume= need =--by WHO=, and record it. Only do them with that person's approval.
 - =status= reports any file under =--watch= that changed since the run began. Watch production art.
+- =recolor IN OUT --region X,Y,W,H --to-hue H --to-sat S= recolours matching pixels in a region, keeping shading and alpha. It is not a generation and costs nothing.
 - =edges CUTOUT...= counts solid pixels touching each edge, and exits non-zero if the top or a side is touched.
 - =unchanged A B --region X,Y,W,H= compares pixels exactly and exits non-zero if they differ. Use it to prove protected art was not touched.

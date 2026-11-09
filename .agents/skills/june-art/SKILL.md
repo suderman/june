@@ -28,6 +28,7 @@ All bundled paths below are relative to this skill directory. External paths in 
 | Diagnose visual, node, API or integration failures | `references/troubleshooting.org` |
 | Run anything through ComfyUI, or add a pipeline | `references/runner.org` |
 | Draw a new tall pose, start to finish | `references/tall-pose.org` |
+| Fix colours in finished art | `lessons/colour.org` and `references/runner.org` |
 
 ## Proven starting point
 

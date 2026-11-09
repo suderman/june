@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { assertRunLocation, client, comparePixels, contactSheet, driftOf, edgeContact, initRun, listPipelines, loadPipeline, raiseRun, readLedger, readRun, refusal, renderPipeline, renderTemplate, resumeRun, seedsOf, stopRun, submit, uploadFile, validateGraph } from "../art/runner.mjs";
+import { assertRunLocation, client, comparePixels, contactSheet, driftOf, edgeContact, recolor, initRun, listPipelines, loadPipeline, raiseRun, readLedger, readRun, refusal, renderPipeline, renderTemplate, resumeRun, seedsOf, stopRun, submit, uploadFile, validateGraph } from "../art/runner.mjs";
 
 const SCHEMAS = {
 	KSampler: { input: { required: { seed: ["INT", {}], model: ["MODEL", {}], sampler_name: [["er_sde", "euler"], {}] } }, output: ["LATENT"] },
@@ -225,6 +225,29 @@ test("an upload is named by its content, inside the run's folder", async (t) => 
 	assert.equal(await uploadFile(dir, file, api), "june-art/r/uploaded.png");
 	assert.match(state.uploads[0], /picture-[0-9a-f]{12}\.png/);
 	assert.match(state.uploads[0], /name="subfolder"\r\n\r\njune-art\/r/);
+});
+
+test("a recolour changes only matching pixels in its region, keeps shading, and never touches alpha", (t) => {
+	const parent = mkdtempSync(join(tmpdir(), "june-art-recolor-"));
+	t.after(() => rmSync(parent, { recursive: true, force: true }));
+	const a = join(parent, "a.png");
+	const b = join(parent, "b.png");
+	// A silver block, a brown block beside it, a silver block outside the region, and a transparent corner.
+	execFileSync("magick", ["-size", "40x20", "xc:none", "-fill", "#c0c0c0", "-draw", "rectangle 2,2 9,9", "-fill", "#808080", "-draw", "rectangle 2,10 9,17", "-fill", "#6b4a2b", "-draw", "rectangle 12,2 19,9", "-fill", "#c0c0c0", "-draw", "rectangle 30,2 37,9", `PNG32:${a}`]);
+	const out = recolor(a, b, { region: [0, 0, 24, 20], sat: [0, 0.2], val: [0.3, 1], toHue: 40, toSat: 0.6 });
+	assert.equal(out.changed_pixels, 128);
+	assert.deepEqual(out.box_x0_y0_x1_y1, [2, 2, 9, 17]);
+	const pixel = (file, x, y) => execFileSync("magick", [file, "-format", `%[pixel:p{${x},${y}}]`, "info:"]).toString();
+	assert.notEqual(pixel(b, 5, 5), pixel(a, 5, 5), "the silver in the region changed");
+	assert.equal(pixel(b, 15, 5), pixel(a, 15, 5), "a colour outside the range did not");
+	assert.equal(pixel(b, 33, 5), pixel(a, 33, 5), "nor did silver outside the region");
+	const value = (file, x, y) => Math.max(...execFileSync("magick", [file, "-crop", `1x1+${x}+${y}`, "-depth", "8", "RGB:-"]));
+	assert.equal(value(b, 5, 5), 192, "the light block keeps its value");
+	assert.equal(value(b, 5, 14), 128, "the dark block keeps its own");
+	const alpha = (file) => execFileSync("magick", [file, "-alpha", "extract", "-depth", "8", "GRAY:-"]).toString("latin1");
+	assert.equal(alpha(b), alpha(a), "alpha is untouched");
+	assert.throws(() => recolor(a, a, { region: [0, 0, 5, 5], toHue: 1, toSat: 1 }), /different output/);
+	assert.throws(() => recolor(a, b, { region: [30, 10, 40, 40], toHue: 1, toSat: 1 }), /not inside/);
 });
 
 test("a cut-out touching the top or a side is not clear; a boot just touching the bottom is reported", (t) => {
