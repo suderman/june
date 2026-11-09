@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { Dispatch, insertAfterPreamble, renderTask, taskBody } from "../src/tools/dispatch.ts";
 import { Herdr } from "../src/tools/herdr.ts";
 import { Org } from "../src/tools/org.ts";
+import { OrgWrites } from "../src/tools/write.ts";
 import { tempDir, testConfig } from "./helpers.ts";
 
 const PROJECT = `#+TITLE: Portal
@@ -278,6 +279,57 @@ test("completion closes only June-created EVAL tasks, refuses stale states, and 
 	await writeFile(f.project, evalText.replace(/^Queued by June: .+\n/m, ""));
 	await assert.rejects(dispatch.complete(request.file, request.title), /only tasks she created/);
 	await assert.rejects(dispatch.complete("asana.org", "mirrored"), /does not write/);
+});
+
+test("completion recognizes Org property spacing but still requires creation evidence on the task", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	const id = "11111111-2222-4333-8444-555555555555";
+	for (const spacing of [" ", "       ", "\t"]) {
+		for (const property of ["JUNE_REQUEST: inst:7", "PLAN_REQUEST: june-inst-3"]) {
+			const text = `* EVAL Reviewed task\n:PROPERTIES:\n:ID:${spacing}${id}${spacing}\n:${property.replace(": ", `:${spacing}`)}\n:END:\nQueued by June: Alex asked.\n\n** Outcome\nVerified.\n`;
+			await writeFile(f.project, text);
+			assert.deepEqual(await f.dispatch.complete(request.file, "Reviewed task"), { file: request.file, id, state: "DONE", written: true });
+			assert.deepEqual(f.runs.at(-1), ["org-edit", "todo", f.project, `id:${id}`, "DONE", "--expect", "EVAL"]);
+			const calls = f.runs.length;
+			await writeFile(f.project, text.replace("* EVAL", "* DONE"));
+			assert.equal((await f.dispatch.complete(request.file, `id:${id}`)).written, false);
+			assert.equal(f.runs.length, calls, "aligned DONE replay writes nothing");
+
+			for (const unowned of [
+				text.replace("Queued by June: Alex asked.\n", ""),
+				text.replace(`:${property.replace(": ", `:${spacing}`)}\n`, ""),
+				text.replace(":ID:", ":OTHER_ID:"),
+				text.replace(/\n:(JUNE_REQUEST|PLAN_REQUEST):[^\n]+/, "") + `\n** Child\n:PROPERTIES:\n:${property}\n:END:\nQueued by June: Alex asked.\n`,
+			]) {
+				await writeFile(f.project, unowned);
+				await assert.rejects(f.dispatch.complete(request.file, "Reviewed task"), /only tasks she created/);
+				assert.equal(f.runs.length, calls, "missing task-owned creation evidence never edits Org");
+				assert.equal(await readFile(f.project, "utf8"), unowned);
+			}
+		}
+	}
+});
+
+test("completion reads creation properties only from the task's own drawer", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	const base = "* EVAL Reviewed task\n:PROPERTIES:\n:ID:       resume123\n:JUNE_REQUEST: inst:7\n:END:\nNo ownership claim.\n";
+	for (const unowned of [
+		base,
+		base.replace(":END:", ":JUNE_CREATED: no\n:END:"),
+		base + ":JUNE_CREATED: yes\n",
+		base + ":PROPERTIES:\n:JUNE_CREATED: yes\n:END:\n",
+		base + "\n** Child\n:PROPERTIES:\n:JUNE_CREATED: yes\n:END:\n",
+		base.replace(":JUNE_REQUEST: inst:7", ":PLAN_REQUEST: june-").replace(":END:", ":JUNE_CREATED: yes\n:END:"),
+	]) {
+		await writeFile(f.project, unowned);
+		await assert.rejects(f.dispatch.complete(request.file, "Reviewed task"), /only tasks she created/);
+		assert.equal(await readFile(f.project, "utf8"), unowned);
+	}
+	assert.equal(f.runs.length, 0);
+	await writeFile(f.project, base.replace(":END:", ":JUNE_CREATED:    yes \t\n:END:"));
+	assert.equal((await f.dispatch.complete(request.file, "Reviewed task")).written, true);
 });
 
 test("the nudge starts the dispatcher unit and reports its scan", async (t) => {
@@ -581,6 +633,47 @@ async function removalFixture() {
 	const remove = async (extra: Partial<Parameters<Dispatch["removeDependencies"]>[0]> = {}) => dispatch.removeDependencies({ ...removal, revision: await revision(), ...extra }, idleHerdr);
 	return { ...f, dispatch, options, run, remove, revision, init, runtime, bin };
 }
+
+test("June-created TODO ownership survives real resume, repeated runs and completion without claiming reused tasks", { skip: !hasEmacs }, async (t) => {
+	const f = await removalFixture();
+	t.after(f.cleanup);
+	const org = new Org(f.root);
+	const writes = new OrgWrites(org, f.config, async (argv) => f.run(argv));
+	const task = { file: request.file, title: "Build review loop", body: "Alex asked for an independently reviewed change." };
+	assert.equal((await writes.addTask(task)).written, true);
+	assert.match((await org.read(task.file, task.title)).text, /^:JUNE_CREATED: yes$/m);
+	assert.equal((await writes.addTask(task)).written, false, "creation replay preserves the existing marker");
+	const resume = { file: task.file, heading: task.title, expected: "TODO" as const, host: "kit", note: "Alex asked to queue this task.", key: "inst:create1" };
+	const queued = await f.dispatch.resume(resume, idleHerdr);
+	const auto = await readFile(f.project, "utf8");
+	assert.match(auto, /^:ID: {2,}\S+$/m, "org-id-get-create pads the new ID");
+	await f.dispatch.resume(resume, idleHerdr);
+	assert.equal(await readFile(f.project, "utf8"), auto, "resume replay changes neither provenance nor history");
+	for (let round = 0; round < 2; round++) {
+		f.run(["org-edit", "todo", f.project, `id:${queued.id}`, "EVAL", "--expect", "AUTO"]);
+		// A new Dispatch object has no creation history in memory.
+		const dispatch = new Dispatch(org, f.config, async (argv) => f.run(argv));
+		assert.equal((await dispatch.complete(task.file, `id:${queued.id}`)).written, true);
+		const done = await readFile(f.project, "utf8");
+		assert.match(done, /^CLOSED: \[.+\]$/m);
+		assert.match(done, /^:JUNE_CREATED: +yes$/m);
+		assert.doesNotMatch(done, /Queued by June:/, "TODO authorship does not depend on a queue authorship line");
+		assert.equal((await dispatch.complete(task.file, `id:${queued.id}`)).written, false);
+		assert.equal(await readFile(f.project, "utf8"), done);
+		if (round === 0) {
+			f.run(["org-edit", "todo", f.project, `id:${queued.id}`, "HOLD", "--expect", "DONE"]);
+			await dispatch.resume({ ...resume, heading: `id:${queued.id}`, expected: "HOLD", key: "inst:create2" }, idleHerdr);
+		}
+	}
+	const before = await readFile(f.project, "utf8");
+	assert.equal((await writes.addTask({ file: task.file, title: "Existing thread" })).written, false);
+	assert.equal(await readFile(f.project, "utf8"), before, "reusing Alex's task never stamps June as creator");
+	f.run(["org-edit", "todo", f.project, "Existing thread", "HOLD", "--expect", "PROG"]);
+	await f.dispatch.resume({ ...resume, heading: "Existing thread", expected: "HOLD", key: "inst:alex" }, idleHerdr);
+	f.run(["org-edit", "todo", f.project, "Existing thread", "EVAL", "--expect", "AUTO"]);
+	await assert.rejects(f.dispatch.complete(task.file, "Existing thread"), /only tasks she created/);
+	assert.doesNotMatch((await org.read(task.file, "Existing thread")).text, /JUNE_CREATED/);
+});
 
 test("real review wrapper creates one isolated exact-hash task and refuses ordinary completion", { skip: !hasEmacs }, async (t) => {
 	const f = await removalFixture();

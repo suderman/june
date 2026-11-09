@@ -177,6 +177,10 @@ org-edit date WHEN                          # print an active timestamp
 
 =--expect STATE= refuses a stale state before saving. June resumes with =org-edit todo FILE HEADING AUTO --expect HOLD --request KEY --host HOST --note "Chose option A. Resume."=. The expected state must be TODO, EVAL, or HOLD. This saves the state, =HOST=, =AGENT= if missing, ID if missing, =JUNE_REQUEST= key, review on, deploy off, and a June entry in Dialog together. It preserves other properties, schedules, and task history. The request key makes a replay return the existing ID without changing the task, even if work has already finished. This form prints JSON rather than the heading. June checks for active linked agents before calling it. Coding workers must not use it to grant AUTO.
 
+=org_add_task= stamps a new TODO with =JUNE_CREATED: yes= in its property drawer. Reusing a matching task never adds that marker. Resume preserves it but never grants authorship. =org_complete_task= requires a task ID, a June queue/resume request or June-prefixed plan request, and creation evidence: this marker or the older queue/plan authorship line =Queued by June:=. It reads only the task's own drawer, accepts Org's property padding, and still requires EVAL with no outstanding review or decision. Existing review contracts remain enforced by org-edit. Already DONE is a no-op.
+
+Older TODOs created through =org_add_task= have no creation marker. Do not infer authorship from =JUNE_REQUEST= alone, since resuming someone else's task writes that too. Repair an old task's creation metadata only after verifying its original successful creation in June's local conversation history; otherwise leave it for the user. No automatic ownership backfill occurs.
+
 =HEADING= is the title without keyword, priority, or tags. When a title
 matches twice, name it by its outline path, matched from the end, such as
 =Garden / Spring / Planting=, or by =id:UUID=; a path that still matches twice

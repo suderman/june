@@ -63,8 +63,8 @@ test("a TODO goes last under the heading it concerns, written once, with dates s
 	assert.deepEqual([first.heading, first.written], ["Pickup / Leave to pick up the kids", true]);
 	assert.equal(
 		await readFile(f.school, "utf8"),
-		SCHOOL.replace("- Office: 555-0100\n\n", "- Office: 555-0100\n\n** TODO Leave to pick up the kids\n"),
-		"a level below, after a blank line that ends the list, and none after the bare heading",
+		SCHOOL.replace("- Office: 555-0100\n\n", "- Office: 555-0100\n\n** TODO Leave to pick up the kids\n:PROPERTIES:\n:JUNE_CREATED: yes\n:END:\n"),
+		"a level below, after a blank line that ends the list, and none after the property drawer",
 	);
 	assert.deepEqual(f.runs, [
 		["org-edit", "date", "today 15:25"],
@@ -84,7 +84,7 @@ test("without a parent, a TODO is a first heading after the preamble, newest fir
 	await f.writes.addTask({ file: "work/home/garden/garden.org", title: "Order soil", body: "Twelve bags.\n- topsoil\n- compost" });
 	assert.equal(
 		await readFile(f.garden, "utf8"),
-		"#+TITLE: Garden\n#+CATEGORY: garden\n\n* TODO Order soil\nTwelve bags.\n- topsoil\n- compost\n\n* PROG Build the raised beds\nCedar, not pine.\n",
+		"#+TITLE: Garden\n#+CATEGORY: garden\n\n* TODO Order soil\n:PROPERTIES:\n:JUNE_CREATED: yes\n:END:\nTwelve bags.\n- topsoil\n- compost\n\n* PROG Build the raised beds\nCedar, not pine.\n",
 	);
 	assert.deepEqual(f.runs, [], "no dates, no Org call");
 });

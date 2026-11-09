@@ -52,7 +52,7 @@ function splice(before: readonly string[], block: readonly string[], after: read
 	const bare = kept.length === 0 || /^\*+ /.test(last) || /^\s*(:END:|SCHEDULED:|DEADLINE:|CLOSED:)/.test(last);
 	const rest = [...after];
 	while (rest.length > 0 && rest[0] === "") rest.shift();
-	const tail = rest.length === 0 ? [""] : /^\*+ /.test(block.at(-1)!) ? rest : ["", ...rest];
+	const tail = rest.length === 0 ? [""] : /^\*+ /.test(block.at(-1)!) || block.at(-1) === ":END:" ? rest : ["", ...rest];
 	return [...kept, ...(bare ? [] : [""]), ...block, ...tail].join("\n");
 }
 
@@ -88,7 +88,12 @@ export class OrgWrites {
 		const path_ = [...(parent === undefined ? [] : outline(lines, parent).map((h) => h.title)), task.title].join(" / ");
 		let written = false;
 		if (same < 0) {
-			const block = [`${"*".repeat(level)} ${task.todo === false ? "" : "TODO "}${task.title}`, ...(body ? body.split("\n") : [])];
+			const block = [
+				`${"*".repeat(level)} ${task.todo === false ? "" : "TODO "}${task.title}`,
+				// Stamp only new tasks, never a matching task belonging to the user.
+				...(task.todo === false ? [] : [":PROPERTIES:", ":JUNE_CREATED: yes", ":END:"]),
+				...(body ? body.split("\n") : []),
+			];
 			let next: string;
 			if (parent === undefined) {
 				// After the preamble, newest first, as project files keep their threads.

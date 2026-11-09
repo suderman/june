@@ -551,10 +551,22 @@ export class Dispatch {
 		const path = await this.#target(file);
 		const task = await this.#org.read(file, heading);
 		const own = task.text.split(/\n\*+ /, 1)[0]!;
-		const id = /^:ID: (.+)$/m.exec(own)?.[1];
-		// org_queue_task marks its heading JUNE_REQUEST; org-dispatch plan marks hers PLAN_REQUEST with June's prefix.
-		if (!id || !/^:(JUNE_REQUEST: .+|PLAN_REQUEST: june-.+)$/m.test(own) || !/^Queued by June: .+$/m.test(own))
-			throw new Error("June may close only tasks she created, not tasks she merely resumed");
+		const lines = own.split("\n").slice(1);
+		if (/^[ \t]*(SCHEDULED|DEADLINE|CLOSED):/.test(lines[0] ?? "")) lines.shift();
+		const end = lines.findIndex((line) => line.trim() === ":END:");
+		const properties: Record<string, string> = {};
+		if (lines[0]?.trim() === ":PROPERTIES:" && end > 0) {
+			for (const line of lines.slice(1, end)) {
+				const match = /^[ \t]*:(\w+):[ \t]+(.+)$/.exec(line);
+				if (match) properties[match[1]!.toUpperCase()] = match[2]!.trim();
+			}
+		}
+		const id = properties.ID;
+		const queued = properties.JUNE_REQUEST || /^june-.+$/.test(properties.PLAN_REQUEST ?? "");
+		// New TODOs retain creation evidence through resume. Older queue/plan tasks carry the authorship line instead.
+		const created = properties.JUNE_CREATED === "yes" || /^Queued by June: .+$/m.test(own);
+		if (!id || !queued || !created)
+			throw new Error("June may close only tasks she created; creation evidence is missing (a resume request alone does not prove ownership)");
 		const state = parseHeading(task.text.split("\n")[0]!, task.line)?.state;
 		if (state !== "EVAL" && state !== "DONE") throw new Error(`Expected EVAL, found ${state ?? "no state"}; read the task again`);
 		if (state === "DONE") return { file: task.file, id, state, written: false };
