@@ -361,6 +361,22 @@ test("a long panel stands art drawn to her feet on its floor, and puts art cut a
 	const snug = plan({ width: 820, side: "left", pose: longFigure, elements: [{ kind: "june", w: 400, h: 600 }] });
 	assert.ok(snug.face.h >= 89, `a readable face before all of her, ${snug.face.h}`);
 	assert.ok(snug.art.y + snug.art.h > snug.height, "so her legs run off the panel");
+	// Leaning, most of her lies to one side of her face: she shrinks to keep it on the panel rather than lose it off the edge.
+	const leaning = { ...pose("content-standing-mug"), mirror: false, face: { x: 0.2, y: 0.09, w: 0.16, h: 0.1 }, figure: { x: 0.05, y: 0.04, w: 0.85, h: 0.9 } };
+	const leanRight = plan({ width: 1040, side: "right", pose: leaning, elements: [{ kind: "june", w: 400, h: 1400 }] });
+	assert.equal(leanRight.framing, "full");
+	const figureRight = leanRight.art.x + (leaning.figure.x + leaning.figure.w) * leanRight.art.w;
+	assert.ok(figureRight <= leanRight.width + 0.5, `all of her is on the panel, to ${figureRight}`);
+	assert.ok(leanRight.face.h >= 89, "and her face stays readable");
+	// On a phone, art drawn to her feet runs the length of the panel behind the words; art cut at her hips does not.
+	const standing = { ...pose("content-standing-mug"), figure: { x: 0.2, y: 0.05, w: 0.6, h: 0.75 } };
+	const phone = plan({ width: 390, side: "left", pose: standing, elements: [{ kind: "june", w: 340, h: 900 }] });
+	assert.ok(phone.metrics.stacked);
+	assert.equal(phone.clip.h, phone.height, "seen down to the bottom of the panel");
+	const feet = phone.art.y + (standing.figure.y + standing.figure.h) * phone.art.h;
+	assert.ok(feet > phone.elements[0].y, `her feet run on behind the words, at ${feet}`);
+	const hipPhone = plan({ width: 390, side: "left", pose: pose("idle-attentive"), elements: [{ kind: "june", w: 340, h: 900 }, { kind: "june", w: 340, h: 300 }] });
+	assert.ok(hipPhone.clip.h < hipPhone.height, "art cut at her hips stops behind her first balloon");
 	const huge = plan({ width: 820, side: "left", pose: pose("content-standing-mug"), elements: [{ kind: "june", w: 400, h: 3000 }] });
 	assert.equal(huge.clip.inset, false, "however tall the panel, drawn feet need no inset");
 	assert.equal(huge.framing, "full");

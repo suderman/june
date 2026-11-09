@@ -1,4 +1,7 @@
 * Inspect crops and render the actual comic panel
+** The quick way
+For poses in a set, =python examples/proof-panels.py --set SET --pose ID --out NEW_DIR= renders real panels at several widths and lengths on a private display, and writes =proof.png= and =results.json=. The rest of this file describes what it automates.
+
 ** First use the existing crop sheet
 =nix run .#art -- sheet SET NAME OUT= reads the existing manifest and processed image, producing a contact sheet with face/mouth annotation and the allowed framing crops. It does not ingest or change source art, but it writes OUT and creates its parent. Choose a new output under host-local state or a review directory. The default writes =SET/sheets/NAME.png=, so supply OUT when auditing production read-only.
 

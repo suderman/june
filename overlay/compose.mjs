@@ -342,7 +342,7 @@ export const GESTURE_FACE = 0.75;
 // of its gesture, without sacrificing the face to show the whole prop. Full-action and other portraits stay stricter.
 export const STANDING_CROP_SHOWN = 0.4;
 /** The least face height, in px, that reads in a panel; below it art zooms in, unless it shows her doing something. */
-export const READABLE_FACE = 90;
+export const READABLE_FACE = 89;
 
 /**
  * How much of the primary gesture of `pose` (or its gesture at `index`), as framed by `layout`, is seen: inside the
@@ -498,21 +498,35 @@ export function chooseFraming(width, height, pose, hint) {
 	return order.find((f) => allowed.includes(f)) ?? want;
 }
 
+/** The face height that fits her whole figure, head to boots, into `area`. */
+function fullHeightFit(pose, area) {
+	return (area.h * FULL_FIGURE_SHARE) / ((feetOf(pose) - (pose.figure ? pose.figure.y : 0)) / pose.face.h);
+}
+
+/** The face height that keeps all of her on the outer side of her face inside `room`, Infinity without a drawn figure. */
+function fullWidthFit(pose, side, room, mirror) {
+	if (!pose.figure) return Infinity;
+	const face = mirror ? 1 - pose.face.x - pose.face.w : pose.face.x;
+	const left = mirror ? 1 - pose.figure.x - pose.figure.w : pose.figure.x;
+	const outer = side === "left" ? face + pose.face.w - left : left + pose.figure.w - face;
+	return outer > 0 ? (room / (outer * pose.width)) * pose.face.h * pose.height : Infinity;
+}
+
 /**
  * Frame a pose into `area` (x, y, w, h in panel coordinates) with June's face hugging `edge`, the x the words begin
  * (side left) or end (side right). Returns the image's rectangle, which may run past the area and is clipped to it, and
- * where her face and mouth land.
+ * where her face and mouth land. `floor` is where her feet should reach, when that is below the area.
  */
-export function frame(pose, area, side, edge, framing, mirror) {
+export function frame(pose, area, side, edge, framing, mirror, floor = area.y + area.h) {
 	const faceAspect = (pose.face.w * pose.width) / (pose.face.h * pose.height);
 	let faceH = area.h * FACE_SHARE[framing];
-	// Drawn to her feet, she fits whole on the floor where the panel has room; only a panel too short for a readable
-	// face crops her legs (Jon, 2026-11-08).
-	const fit = framing === "full" ? (area.h * FULL_FIGURE_SHARE) / ((feetOf(pose) - (pose.figure ? pose.figure.y : 0)) / pose.face.h) : Infinity;
-	const fitted = fit < faceH && fit > READABLE_FACE;
-	faceH = Math.min(faceH, Math.max(READABLE_FACE, fit));
 	// Her face stays clear of the words, with a lane between for balloon tails, and inside the area.
 	const room = side === "left" ? edge - area.x - FACE_GAP - 4 : area.x + area.w - edge - FACE_GAP - 4;
+	// Drawn to her feet, she fits whole in the panel where it has room: tall enough for head to boots, and wide enough
+	// for whatever of her lies on the outer side of her face. Only a panel too small for a readable face crops her.
+	const fitted = framing === "full" ? Math.max(READABLE_FACE, Math.min(fullHeightFit(pose, area), fullWidthFit(pose, side, room, mirror))) : Infinity;
+	const shrunk = fitted < faceH;
+	faceH = Math.min(faceH, fitted);
 	faceH = Math.min(faceH, (room * 0.98) / faceAspect, area.h - 8);
 	let scale = faceH / (pose.face.h * pose.height);
 	const fx = mirror ? 1 - pose.face.x - pose.face.w : pose.face.x;
@@ -522,8 +536,8 @@ export function frame(pose, area, side, edge, framing, mirror) {
 	// area's bottom when the pose has body enough, growing a little if needed.
 	const feet = feetOf(pose);
 	const centerY = area.y + area.h * FACE_Y[framing];
-	const reach = (area.y + area.h - centerY) / (pose.height * Math.max(feet - fcy, 0.01));
-	if (reach > scale && !fitted) scale = Math.min(reach, scale * 1.35, ((room * 0.98) / faceAspect) / (pose.face.h * pose.height));
+	const reach = (floor - centerY) / (pose.height * Math.max(feet - fcy, 0.01));
+	if (reach > scale && !shrunk) scale = Math.min(reach, scale * 1.35, ((room * 0.98) / faceAspect) / (pose.face.h * pose.height));
 	const w = pose.width * scale;
 	const h = pose.height * scale;
 	const faceW = pose.face.w * w;
@@ -802,13 +816,15 @@ export function plan({ width, side, pose, elements, framing: hint, mirror: allow
 			const kept = pose.framings.filter((f) => f !== "full");
 			const zoomed = (m.stacked || zoom) && !pose.special ? USUAL : kept;
 			framing = chooseFraming(width, (area ?? clip).h, Object.assign({}, pose, { framings: zoomed.length > 0 ? zoomed : USUAL }), m.stacked ? (hint ?? "close-up") : hint);
-			framed = frame(pose, area ?? clip, side, edgeOf(area ?? clip), framing, mirror);
+			// On a phone, art drawn to her feet stands on the panel's floor, behind the words below her band.
+			const drawnToFeet = m.stacked && pose.framings.includes("full");
+			framed = frame(pose, area ?? clip, side, edgeOf(area ?? clip), framing, mirror, drawnToFeet && ["close-up", "head"].includes(framing) ? height : undefined);
 			// Framed in her band, but seen on down behind her first balloon under it, so her body runs on behind the words
 			// rather than stopping at a gap above them, and up to the panel's top behind any notes over the band, so her hair
 			// is cut only where the panel ends, never flat along the band's edge.
 			if (m.stacked) {
 				const under = placed.find((e) => e.y >= bandTop + m.band);
-				const bottom = under ? Math.min(height, under.y + under.h) : bandTop + m.band;
+				const bottom = drawnToFeet ? height : under ? Math.min(height, under.y + under.h) : bandTop + m.band;
 				clip = Object.assign({}, clip, { y: 0, h: bottom });
 			}
 		}

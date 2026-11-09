@@ -19,11 +19,11 @@ Start from =art/pipelines/character/example-tall-idle-standing.json=. Change onl
 If =edges= reports the top touched, run =crown-repair= on the original RGB with =top=192= and the default prompt, 2 to 4 seeds. Look at every result, for a second head or a floating cap. Do not pad the bottom in the same pass: boots came out as sandals or doubled. Confirm with =unchanged= that pixels below the feather match the original, offsetting by the pad.
 
 ** Stage and prove
-Do not use =examples/preflight-pose.mjs= for tall art: it models portrait placement only. Check the real tall result in the ingested manifest. =examples/panel.qml= covers only 820 and 360 px with short text, so copy it privately for the other widths and long text.
+Do not use =examples/preflight-pose.mjs= for tall art: it models portrait placement only. Check the real tall result in the ingested manifest.
 
 1. Measure the face box on the source, forehead through chin and cheek to cheek, and the mouth, then draw them on a copy and look. Do not copy a box from another image.
 2. Ingest into a new staging set with =full= in =framings=, and record seed, prompts and hashes in the =.txt= sidecar.
-3. Render the real panels at 1040, 820, 620 and 390 px, short and long, as in =references/preview.org=. Check she stands whole on a tall panel and zooms to her face on a phone. Check both sides of her too: a leaning pose can run off the panel's edge.
+3. Render the real panels with =python examples/proof-panels.py --set SET --pose ID --out NEW_DIR=. It covers 1040, 820, 620 and 390 px, short and long, on both sides, privately, and prints each panel's framing, face size and whether all of her is in view. Look at =proof.png= as well. She should stand whole on a tall desktop panel and zoom to her face on a phone with her body running on behind the words. A pose that leans sideways can lose its body behind the words on one side; report which side it suits.
 
 ** Hand over
 Show Jon the seed sheets and panels, with rejects and reasons. Add what the job taught to the lessons before setting EVAL. Promote only what he approves, by =references/ingestion.org=, checking that only the new pose changed.
