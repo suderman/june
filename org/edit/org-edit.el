@@ -156,6 +156,15 @@ Print the heading unless QUIET is non-nil."
       (org-dispatch--validate-graph (list self) index))
     all))
 
+(defun org-edit--worker-p ()
+  "Whether this caller has worker context, not a plain human Herdr shell."
+  (when-let* ((pane (getenv "HERDR_PANE_ID")))
+    (or (getenv "PI_SESSION_ID") (getenv "CLAUDECODE")
+        (let ((result (org-dispatch--get (org-dispatch--herdr "agent" "list") 'result)))
+          (unless (assq 'agents result) (error "Herdr did not identify the caller; refusing state write"))
+          (seq-some (lambda (agent) (equal pane (alist-get 'pane_id agent)))
+                    (alist-get 'agents result))))))
+
 (defun org-edit-todo ()
   "Set FILE HEADING to STATE, optionally checking --expect STATE.
 For EVAL, DONE or HOLD, --headline LINE binds a fresh worker report to this write.
@@ -205,8 +214,11 @@ Coding workers must not set AUTO; that permission lives in instructions."
            (unless (member state org-todo-keywords-1)
              (error "STATE is one of %s" (string-join org-todo-keywords-1 " ")))
            (when depends (setq depends (org-edit--depends depends)))
-           (when (equal state "AUTO")
-             (org-dispatch--check-stopped-task))
+           ;; Protect general state writes too, without treating human Herdr
+           ;; shells or June's daemon as workers. This is a cooperative guard.
+           (cond ((and (org-entry-get nil "JUNE_STOP_REQUEST") (org-edit--worker-p))
+                  (org-dispatch--check-stopped-task t))
+                 ((equal state "AUTO") (org-dispatch--check-stopped-task)))
            (when request
              (org-id-get-create)
              ;; The drawer decides where and how it runs; tags are left as they are.
@@ -232,7 +244,7 @@ Coding workers must not set AUTO; that permission lives in instructions."
     (when request (princ (concat (json-serialize result) "\n")))))
 
 (defun org-edit-stop-task ()
-  "Park a dispatcher task, interrupt its exact session, and confirm it settled.
+  "Park a dispatcher task and confirm its exact session settled or exited.
 The wrapper holds the launch lock. A failed stop stays parked and cannot resume."
   (let* ((args command-line-args-left)
          (file (pop args)) (heading (pop args))
@@ -298,11 +310,15 @@ The wrapper holds the launch lock. A failed stop stays parked and cannot resume.
              (setq state (plist-put state :stop-request request))
              (org-dispatch--save-state (plist-put state :status "stopping"))
              (org-entry-put nil "JUNE_STOP_REQUEST" request)
+             (org-entry-put nil "JUNE_STOP_SESSIONS"
+               (string-join (delete-dups (delq nil
+                 (append (split-string (or (org-entry-get nil "JUNE_STOP_SESSIONS") ""))
+                         (list (org-entry-get nil "JUNE_STOP_SESSION") (plist-get state :session))))) " "))
              (org-entry-put nil "JUNE_STOP_SESSION" (plist-get state :session))
              (org-dispatch--headline nil "HOLD")
              (org-todo "HOLD")
              (org-dispatch--append "Dialog" (org-dispatch--entry
-               "June" (concat "Stop requested; parked at HOLD before interrupting the worker. " note))))
+               "June" (concat "Stop requested; parked at HOLD before checking the worker. " note))))
            (unless (equal (org-get-todo-state) "HOLD")
              (error "stop pending but task is not HOLD; inspect before continuing")))
          (setq result `((id . ,id) (title . ,(org-get-heading t t t t))
@@ -327,7 +343,7 @@ The wrapper holds the launch lock. A failed stop stays parked and cannot resume.
            (error "task changed during interruption; stop remains unconfirmed"))
          (org-entry-put nil "JUNE_STOPPED" request)
          (org-dispatch--append "Dialog" (org-dispatch--entry
-           "June" "Worker interruption confirmed. Task remains HOLD; reassignment needs a separate authorized resume."))) t)
+           "June" "Worker observed settled or exited. Task remains HOLD; reassignment needs a separate authorized resume."))) t)
       (org-dispatch--save-state (plist-put state :status "stopped")))
     (princ (concat (json-serialize (append result '((stopped . t)))) "\n"))))
 

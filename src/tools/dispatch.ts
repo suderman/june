@@ -708,7 +708,7 @@ export function createDispatchExtension(
 			})]),
 			defineTool({
 				name: "org_stop_task",
-				description: `When ${user()} asks you to stop a running dispatcher task or switch its agent, read the whole task and Dialog, then use this tool first. It runs only on the task's dispatcher host, parks PROG at HOLD, disables dispatcher nudges, interrupts the exact named worker and confirms idle/done or exit. No HERDR_ENV is needed: this is the dispatcher's supported task operation, not generic terminal control. It preserves ID, scope, schedule, prerequisites, findings and session history. A failed or uncertain interruption stays parked and blocks resume; inspect the task and worker, never claim it stopped on error. Retry the same tool call after inspection, not raw keys or a duplicate task. Success confirms interruption of that run, not completion or termination of its child processes. Re-read the task before org_resume_task with the requested agent, only if ${user()} authorized reassignment. Stop alone never starts work. Remote tasks need that host's June or ${user()}.`,
+				description: `When ${user()} asks you to stop a running dispatcher task or switch its agent, read the whole task and Dialog, then use this tool first. It runs only on the task's dispatcher host, parks PROG at HOLD, disables dispatcher nudges and confirms the exact session is idle/done or exited. It sends no input. Herdr lacks expected-session/generation-bound interruption, so active working/blocked workers remain unconfirmed: ask the user to interrupt that exact session manually, then retry this tool. Never substitute named or pane-targeted keys. No HERDR_ENV is needed: this is the dispatcher's supported task operation, not generic terminal control. It preserves ID, scope, schedule, prerequisites, findings and session history. A failed or uncertain interruption stays parked and blocks resume; inspect the task and worker, never claim it stopped on error. Retry the same tool call after inspection, not raw keys or a duplicate task. Success confirms that run was observed settled or exited, not that June interrupted it or its child processes ended. Re-read the task before org_resume_task with the requested agent, only if ${user()} authorized reassignment. Stop alone never starts work. Remote tasks need that host's June or ${user()}.`,
 				parameters: obj({
 					file: str({ description: "Org agenda file under ~/org" }),
 					heading: str({ description: "id:UUID of the running dispatcher task, from org_read_task" }),
@@ -718,7 +718,7 @@ export function createDispatchExtension(
 				replay: "safe",
 				execute: async (args, api) => {
 					const result = await dispatch.stop({ ...args, key: `${instance}:${api.taskId}` });
-					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\nThe original run's interruption is confirmed. No work was started. On replay the task may since have moved on; re-read before a separate authorized org_resume_task.` }] };
+					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\nThe original run was observed settled or exited. No input was sent and no work was started. On replay the task may since have moved on; re-read before a separate authorized org_resume_task.` }] };
 				},
 			}),
 			defineTool({

@@ -51,7 +51,7 @@ June reads Org with ripgrep and writes only through =org-edit= and the dispatche
 - find or create a project file under =~/org/work= (=org_projects=, =org_create_project=);
 - queue a new AUTO task, now or for a later start written with it, and nudge the dispatcher (=org_queue_task=, =org_dispatch_now=), then follow it and report its transitions;
 - queue a plan of connected tasks, each waiting on its prerequisites through =:DEPENDS:=, and follow every one (=org_queue_plan=);
-- stop a running local dispatcher task when the user asks, park it at HOLD before interrupting its exact worker, and confirm interruption before any separately authorized reassignment (=org_stop_task=);
+- park a running local dispatcher task at HOLD when the user asks and confirm its worker settled or exited before any separately authorized reassignment (=org_stop_task=); active workers require the user's manual interruption because Herdr lacks identity-bound input, so June sends no keys and leaves those stops unconfirmed;
 - resume an existing TODO, EVAL, or HOLD task when the user asks, optionally adding prerequisites it waits on; a stopped run gets a fresh worker, and unconfirmed stops cannot resume (=org_resume_task=);
 - remove selected prerequisites when the user asks, pausing AUTO at HOLD before a separate authorized resume (=org_remove_dependencies=);
 - follow any task the user names, with a progress update every few minutes while it is PROG (=org_follow_task=);

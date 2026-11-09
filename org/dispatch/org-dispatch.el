@@ -525,7 +525,10 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
           :dir (if dir (expand-file-name dir) (org-dispatch--project-dir buffer-file-name))
           :repos (org-dispatch--project-repos buffer-file-name)
           ;; An interrupted session stays in history but must never receive work again.
-          :session (unless (equal (car sessions) (org-entry-get nil "JUNE_STOP_SESSION")) (car sessions))
+          :session (unless (member (car sessions)
+                                   (cons (org-entry-get nil "JUNE_STOP_SESSION")
+                                         (split-string (or (org-entry-get nil "JUNE_STOP_SESSIONS") ""))))
+                     (car sessions))
           :dialog (org-dispatch--new-dialog)
           :hash (secure-hash 'sha1 (org-dispatch--subtree-text)))))
 
@@ -889,19 +892,18 @@ replaying the same key and spec; missing prerequisites block partial plans."
     (car matches)))
 
 (defun org-dispatch--interrupt-session (state)
-  "Interrupt STATE's session and confirm two settled observations, or its exit.
-No shell input, approval answers, process kills or tab closes. Unknown status
-and timeouts leave HOLD and the durable no-nudge state for inspection."
+  "Confirm two settled observations of STATE's session, or its exit.
+Active workers fail closed: Herdr has no identity-bound interruption operation.
+No input, process kills or tab closes. Unknown status and timeouts leave HOLD
+and the durable no-nudge state for inspection."
   (let* ((agent (org-dispatch--stop-agent state))
          (status (alist-get 'agent_status agent))
          (deadline (+ (float-time) 15))
          (settled 0))
     (when (member status '("working" "blocked"))
-      ;; Names belong to the live process and clear on replacement. Pane IDs do not.
-      (let ((name (alist-get 'name agent)))
-        (unless (and name (string-match-p "\\`[a-z][a-z0-9_-]\\{0,31\\}\\'" name))
-          (error "worker has no stable Herdr name; stop remains unconfirmed"))
-        (org-dispatch--herdr "agent" "send-keys" name "esc")))
+      ;; Herdr protocol 22 accepts only a mutable name or pane, not an expected
+      ;; session/generation. A replacement can take that target before input.
+      (error "Herdr lacks identity-bound interruption; task parked, stop unconfirmed; Jon must interrupt this session manually"))
     (while agent
       (setq status (alist-get 'agent_status agent))
       (unless (member status '("working" "blocked" "idle" "done"))
