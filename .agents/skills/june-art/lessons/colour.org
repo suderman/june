@@ -8,9 +8,6 @@ A tight box plus a saturation and value range isolated a metal buckle from a dar
 ** Measure a target the way the tool measures art
 Palette swatches are single spots, and matching a pose's median to one gives the wrong colour. Blouse swatch #C2817C turned tall poses mauve and a portrait bubblegum in the 2026-11-08 pilot. Canon's blouse measured with the same selection is #D7756A, close to what the tall poses already were. Use =recolor --match=, which keeps each pixel's offset from the typical colour so folds and shadows survive.
 
-** Follow a garment's edge with a polygon
-Rectangles failed on both pilot skirts. Determined's colour bled into the tights under the hem, and wry showed a line where the box began, because the belt was higher than it looked. Read coordinates from =run grid=.
-
 ** Fix the source, then re-ingest
 Recolour the source RGBA, ingest it with the pose's measured face, mouth and gestures, and compare the manifest entry with the old one. It should differ only in what you meant to change. Type gesture names exactly as the sidecar has them.
 
@@ -21,10 +18,25 @@ The value-preservation rule above applies to hue-and-saturation shifts, not =--m
 The 56-pose run on 2026-11-08 selected wrist shadows, finger edges and hair highlights with the blouse range. =curious-head-tilt= visibly changed hair tips. Inspect a binary before/after difference mask as well as the comparison, and revert an item when its boundary is uncertain. Do not rely on the runbook's claim that colour excludes skin and hair.
 
 ** Reject threshold patchwork
-A region can cover the whole blouse while its colour range selects only parts. =determined-ready-front= and =pout-reluctant-front= developed speckles and hard colour boundaries in the 2026-11-08 run. Both blouse edits were reverted. Widening the region cannot fix a hue-range boundary inside the cloth.
+A region can cover the whole blouse while its colour range selects only parts. =determined-ready-front= and =pout-reluctant-front= developed speckles and hard colour boundaries in the first 2026-11-08 run. Widening the region cannot fix a hue-range boundary inside the cloth; a garment mask with no hue range can.
 
 ** Inspect the whole boot at native size
-Starting below a boot's top can leave a horizontal colour join. The 2026-11-08 =determined-hands-on-hips= attempt left matching straight joins on both shafts, obvious in a native crop but easy to miss on a contact sheet. Reverted both boots. Protecting tights is necessary, but leaving half a shaft unchanged is not a clean fix.
+Starting below a boot's top can leave a horizontal colour join. The first 2026-11-08 =determined-hands-on-hips= attempt left matching straight joins on both shafts, obvious in a native crop but easy to miss on a contact sheet. A =boots:2= mask covers the whole shaft and removed the join.
 
 ** Check tilted eyes against the source
 A face-sized eye region can select green fringe outside the irises. A tight rectangle can also cut a tilted iris: the first =curious-standing-lean-front= region missed part of her left iris. A source-grid polygon covered both irises without the lower fringe. Check a native face crop after correction, not just the changed-pixel count.
+
+** Segment garments rather than outlining them
+Hand regions and colour ranges were the main cause of failure: the first 56-pose run kept only 17 blouse and 3 skirt steps out of the whole library, with no boots. SAM3 masks on eight hard poses on 2026-11-08 followed the blouse around hands and hair and both boots whole. The skirt mask can include the belt, so the target subtracts ="belt"=.
+
+** SAM3 finds what you ask for, even when it is absent
+="boots:2"= on =working-typing-laptop=, which shows no boots, returned a 1.6% mask and recoloured something that was not boots. List a garment only for a pose that shows it.
+
+** Keep value when the target is darker or brighter than the art
+The first eye target pulled value up to its own and made the irises look radioactive; Jon rejected them. =keepValue= moves only hue and saturation, so a dark iris stays dark. Pick an eye target from a pose that looks right, then judge it on several faces.
+
+** Near-neutral cloth needs its hue flattened
+The =warm-hands-clasped= skirt was blue-black and mauve-grey. Keeping each pixel's hue offset spread those into purple and olive with a green rim. =hueKeep: 0= sets every pixel to the target hue and leaves value and the relative saturation alone, and the patches went away.
+
+** A dim pose needs its brightness moved as well
+With =keepValue=, =wry-mug-toast='s blouse went from =#916661= to =#91524B=, correctly coloured and much darker than the rest. Overriding that step with =keepValue: false= and =strength: 0.6= gave =#BB7269=, in family with the others and with its folds intact.

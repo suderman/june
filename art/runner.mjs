@@ -438,50 +438,199 @@ function typicalColour(pixels) {
  * Recolour the pixels inside a region that match a hue, saturation and value range, keeping each pixel's value so the
  * drawing's shading survives. Nothing else changes, and alpha never does: a colour fix cannot alter a drawn shape.
  */
-export function recolor(input, output, { region, polygon, hue = [0, 360], sat = [0, 1], val = [0, 1], toHue, toSat, match }) {
+export function recolor(input, output, { region, polygon, mask: maskFile, exclude = [], hue = [0, 360], sat = [0, 1], val = [0, 1], toHue, toSat, match, keepValue = false, hueKeep = 1, strength = 1, clean = false, minArea = 0, maxHole = 0, feather = 0 }) {
 	if (polygon && polygon.length < 3) throw new Error("a polygon needs at least 3 points");
-	const inside = polygon ? (x, y) => inPolygon(polygon, x + 0.5, y + 0.5) : () => true;
-	const [rx, ry, rw, rh] = polygon ? boundingBox(polygon) : region;
-
 	if (resolve(input) === resolve(output)) throw new Error("recolor writes a new file; give a different output");
 	if (!match && (!Number.isFinite(toHue) || !Number.isFinite(toSat))) throw new Error("recolor needs --match HEX, or --to-hue and --to-sat");
 	const [width, height] = magick([input, "-format", "%w %h", "info:"]).toString().trim().split(" ").map(Number);
+	const guide = maskFile ? magick([maskFile, "-alpha", "off", "-resize", `${width}x${height}!`, "-colorspace", "Gray", "-depth", "8", "GRAY:-"]) : null;
+	const inside = guide ? (x, y) => guide[y * width + x] > 127 : polygon ? (x, y) => inPolygon(polygon, x + 0.5, y + 0.5) : () => true;
+	const left = (x, y) => exclude.some((shape) => inPolygon(shape, x + 0.5, y + 0.5));
+	const [rx, ry, rw, rh] = guide ? [0, 0, width, height] : polygon ? boundingBox(polygon) : region;
 	if (rx < 0 || ry < 0 || rw <= 0 || rh <= 0 || rx + rw > width || ry + rh > height) throw new Error(`the region is not inside the ${width}x${height} image`);
 	const pixels = magick([input, "-alpha", "on", "-depth", "8", "RGBA:-"]);
 	const inHue = (h) => (hue[0] <= hue[1] ? h >= hue[0] && h <= hue[1] : h >= hue[0] || h <= hue[1]);
-	const selected = [];
-	for (let y = ry; y < ry + rh; y++) {
-		for (let x = rx; x < rx + rw; x++) {
-			const i = 4 * (y * width + x);
-			if (pixels[i + 3] === 0) continue;
+	// `mask` is what will change; `barred` is what must not, however a clean-up would treat it.
+	const mask = new Uint8Array(rw * rh);
+	const barred = new Uint8Array(rw * rh);
+	const colour = new Float32Array(rw * rh * 3);
+	for (let y = 0; y < rh; y++) {
+		for (let x = 0; x < rw; x++) {
+			const at = y * rw + x;
+			const i = 4 * ((y + ry) * width + x + rx);
 			const [h, s, v] = rgbToHsv(pixels[i] / 255, pixels[i + 1] / 255, pixels[i + 2] / 255);
-			if (inside(x, y) && inHue(h) && s >= sat[0] && s <= sat[1] && v >= val[0] && v <= val[1]) selected.push({ x, y, i, h, s, v });
+			colour.set([h, s, v], 3 * at);
+			if (pixels[i + 3] === 0 || !inside(x + rx, y + ry) || left(x + rx, y + ry)) barred[at] = 1;
+			else if (inHue(h) && s >= sat[0] && s <= sat[1] && v >= val[0] && v <= val[1]) mask[at] = 1;
 		}
 	}
-	// Matching moves the selection's typical colour onto the target, keeping each pixel's difference from that typical
-	// colour, so folds, highlights and shadows stay as drawn.
+	const tidied = clean ? tidyMask(mask, barred, rw, rh, minArea, maxHole) : { removed: 0, filled: 0 };
+	const weights = insetWeights(mask, rw, rh, feather);
+	const selected = [];
+	for (let at = 0; at < mask.length; at++) if (mask[at]) selected.push({ at, h: colour[3 * at], s: colour[3 * at + 1], v: colour[3 * at + 2] });
+	// Matching moves the selection's typical colour toward the target, keeping each pixel's difference from it, so folds,
+	// highlights and shadows stay as drawn. With keepValue only hue and saturation move, so a dark iris stays dark.
+	// hueKeep shrinks each pixel's hue difference: near-neutral cloth has a hue spread that turns to purple and olive once saturated.
 	const before = typicalColour(selected);
 	const target = match ? hexToHsv(match) : null;
+	const bounded = (ratio) => Math.min(3, Math.max(1 / 3, ratio));
+	const ratioS = target && before.s > 0 ? 1 + (bounded(target[1] / before.s) - 1) * strength : 1;
+	const ratioV = target && before.v > 0 && !keepValue ? 1 + (bounded(target[2] / before.v) - 1) * strength : 1;
+	const turn = target ? strength * signedHue(target[0] - before.h) : 0;
 	let changed = 0;
 	let box = null;
 	const after = [];
-	for (const { x, y, i, h, s, v } of selected) {
-		{
-			const moved = target
-				? { h: (target[0] + signedHue(h - before.h) + 360) % 360, s: Math.min(1, before.s > 0 ? (s * target[1]) / before.s : target[1]), v: Math.min(1, before.v > 0 ? (v * target[2]) / before.v : target[2]) }
-				: { h: toHue, s: toSat, v };
-			after.push(moved);
-			const [r, g, b] = hsvToRgb(moved.h, moved.s, moved.v);
-			if (r === pixels[i] && g === pixels[i + 1] && b === pixels[i + 2]) continue;
-			pixels[i] = r;
-			pixels[i + 1] = g;
-			pixels[i + 2] = b;
-			changed++;
-			box = box ? [Math.min(box[0], x), Math.min(box[1], y), Math.max(box[2], x), Math.max(box[3], y)] : [x, y, x, y];
-		}
+	for (const { at, h, s, v } of selected) {
+		const moved = target ? { h: (before.h + turn + signedHue(h - before.h) * hueKeep + 360) % 360, s: Math.min(1, s * ratioS), v: Math.min(1, v * ratioV) } : { h: toHue, s: toSat, v };
+		after.push(moved);
+		const x = (at % rw) + rx;
+		const y = Math.floor(at / rw) + ry;
+		const i = 4 * (y * width + x);
+		const blend = weights ? weights[at] : 1;
+		const next = hsvToRgb(moved.h, moved.s, moved.v).map((n, c) => Math.round(pixels[i + c] + (n - pixels[i + c]) * blend));
+		if (next[0] === pixels[i] && next[1] === pixels[i + 1] && next[2] === pixels[i + 2]) continue;
+		pixels.set(next, i);
+		changed++;
+		box = box ? [Math.min(box[0], x), Math.min(box[1], y), Math.max(box[2], x), Math.max(box[3], y)] : [x, y, x, y];
 	}
 	execFileSync("magick", ["-size", `${width}x${height}`, "-depth", "8", "RGBA:-", `PNG32:${output}`], { input: pixels, maxBuffer: 2 ** 31 - 1, stdio: ["pipe", "pipe", "pipe"] });
-	return { input, output, selected_pixels: selected.length, changed_pixels: changed, box_x0_y0_x1_y1: box, before: selected.length ? hsvToHex(before) : null, after: after.length ? hsvToHex(typicalColour(after)) : null };
+	return { input, output, selected_pixels: selected.length, changed_pixels: changed, removed_specks: tidied.removed, filled_holes: tidied.filled, box_x0_y0_x1_y1: box, before: selected.length ? hsvToHex(before) : null, after: after.length ? hsvToHex(typicalColour(after)) : null };
+}
+
+/** The 4-connected parts of a grid where `member(index)` holds, as lists of indexes. */
+function connectedParts(size, width, height, member) {
+	const seen = new Uint8Array(size);
+	const parts = [];
+	for (let start = 0; start < size; start++) {
+		if (seen[start] || !member(start)) continue;
+		seen[start] = 1;
+		const part = [start];
+		for (let n = 0; n < part.length; n++) {
+			const at = part[n];
+			const x = at % width;
+			for (const next of [x > 0 ? at - 1 : -1, x < width - 1 ? at + 1 : -1, at >= width ? at - width : -1, at < size - width ? at + width : -1]) {
+				if (next >= 0 && !seen[next] && member(next)) {
+					seen[next] = 1;
+					part.push(next);
+				}
+			}
+		}
+		parts.push(part);
+	}
+	return parts;
+}
+
+/** Drop specks too small to be the garment, and fill small holes inside it that were not deliberately left out. */
+function tidyMask(mask, barred, width, height, minArea, maxHole) {
+	let removed = 0;
+	for (const part of connectedParts(mask.length, width, height, (at) => mask[at] === 1)) {
+		if (part.length >= minArea) continue;
+		for (const at of part) mask[at] = 0;
+		removed += part.length;
+	}
+	let filled = 0;
+	for (const hole of connectedParts(mask.length, width, height, (at) => mask[at] === 0)) {
+		const touchesEdge = hole.some((at) => at % width === 0 || at % width === width - 1 || at < width || at >= mask.length - width);
+		if (touchesEdge || hole.length > maxHole || hole.some((at) => barred[at])) continue;
+		for (const at of hole) mask[at] = 1;
+		filled += hole.length;
+	}
+	return { removed, filled };
+}
+
+/** How strongly each masked pixel changes, rising from the mask's edge over `feather` pixels, so no hard join appears. */
+function insetWeights(mask, width, height, feather) {
+	if (feather <= 0) return null;
+	const depth = new Uint8Array(mask.length);
+	for (let at = 0; at < mask.length; at++) if (mask[at]) depth[at] = 255;
+	for (let pass = 1; pass <= feather; pass++) {
+		const edge = [];
+		for (let at = 0; at < mask.length; at++) {
+			if (depth[at] !== 255) continue;
+			const x = at % width;
+			const open = (next) => next < 0 || next >= mask.length || depth[next] < 255;
+			if (x === 0 || x === width - 1 || open(at - width) || open(at + width) || depth[at - 1] < 255 || depth[at + 1] < 255) edge.push(at);
+		}
+		for (const at of edge) depth[at] = pass;
+	}
+	const weights = new Float32Array(mask.length);
+	for (let at = 0; at < mask.length; at++) weights[at] = depth[at] === 255 ? 1 : depth[at] / (feather + 1);
+	return weights;
+}
+
+/** Union the `includes` masks, take away the `subtracts`, and write the result: white where it applies. */
+export function combineMasks(includes, subtracts, out) {
+	const [width, height] = magick([includes[0], "-format", "%w %h", "info:"]).toString().trim().split(" ").map(Number);
+	const read = (file) => magick([file, "-alpha", "off", "-resize", `${width}x${height}!`, "-colorspace", "Gray", "-depth", "8", "GRAY:-"]);
+	const result = Buffer.alloc(width * height);
+	for (const file of includes) read(file).forEach((v, i) => { if (v > 127) result[i] = 255; });
+	for (const file of subtracts) read(file).forEach((v, i) => { if (v > 127) result[i] = 0; });
+	execFileSync("magick", ["-size", `${width}x${height}`, "-depth", "8", "GRAY:-", `PNG8:${out}`], { input: result, maxBuffer: 2 ** 31 - 1, stdio: ["pipe", "pipe", "pipe"] });
+	return result.reduce((n, v) => n + (v ? 1 : 0), 0) / result.length;
+}
+
+/** The colour targets, by item. */
+export const colourTargets = () => readJson(join(dirname(fileURLToPath(import.meta.url)), "colour-targets.json"));
+
+/**
+ * Segment each garment a colour plan needs, saving SET/colour-masks/NAME-ITEM.png. Masks already there are kept, so a
+ * corrected plan or an interrupted run costs nothing again. Waits for the queue when someone else is using ComfyUI.
+ */
+export async function makeMasks(dir, set, planPath, { api = client(readRun(dir).url), force = false, waitMs = 15_000, pollMs = 1000 } = {}) {
+	const plan = readJson(planPath);
+	const targets = colourTargets();
+	const pipeline = loadPipeline("segment");
+	const masks = join(set, "colour-masks");
+	mkdirSync(masks, { recursive: true });
+	mkdirSync(join(dir, "flat"), { recursive: true });
+	const report = [];
+	const submitted = new Map();
+	const wanted = async (name, prompt, image) => {
+		const key = `${name}|${prompt}`;
+		if (submitted.has(key)) return submitted.get(key);
+		const stem = `${name}-${prompt.replace(/[^a-z0-9]+/gi, "-").replace(/-$/, "").toLowerCase()}`;
+		const taken = readLedger(dir).filter((e) => e.label.startsWith(stem)).length;
+		const label = taken ? `${stem}.${taken}` : stem;
+		const graph = renderPipeline(pipeline, { image, prompt }, { prefix: `june-art/${basename(resolve(dir))}/${label}` });
+		for (let tries = 0; ; tries++) {
+			try {
+				const entry = await submit(dir, label, graph, { pipeline: "segment", main: pipeline.main, api, pollMs });
+				const file = join(dir, label, entry.outputs.find((o) => o.node === pipeline.main).file);
+				submitted.set(key, file);
+				return file;
+			} catch (error) {
+				if (!/queue is busy/.test(error.message) || tries >= 240) throw error;
+				await sleep(waitMs);
+			}
+		}
+	};
+	for (const [name, steps] of Object.entries(plan.poses)) {
+		for (const step of steps) {
+			const merged = { ...targets[step.item], ...step };
+			if (!merged.segment) continue;
+			const out = join(masks, `${name}-${step.item}.png`);
+			if (existsSync(out) && !force) continue;
+			try {
+				const source = existsSync(join(set, "colour-originals", `${name}.png`)) ? join(set, "colour-originals", `${name}.png`) : join(set, "source", `${name}.png`);
+				const flat = join(dir, "flat", `${name}.png`);
+				if (!existsSync(flat)) magick([source, "-background", "#ece7dd", "-flatten", "-alpha", "off", flat]);
+				const image = await uploadFile(dir, flat, api);
+				const includes = [];
+				for (const prompt of [merged.segment].flat()) includes.push(await wanted(name, prompt, image));
+				const subtracts = [];
+				for (const prompt of [merged.subtract ?? []].flat()) subtracts.push(await wanted(name, prompt, image));
+				const coverage = combineMasks(includes, subtracts, out);
+				report.push({ pose: name, item: step.item, coverage: Math.round(coverage * 10000) / 10000 });
+				console.log(`${name} ${step.item}: ${(coverage * 100).toFixed(1)}% of the image`);
+			} catch (error) {
+				report.push({ pose: name, item: step.item, error: error.message });
+				console.error(`${name} ${step.item}: FAILED: ${error.message}`);
+				process.exitCode = 1;
+			}
+		}
+	}
+	writeJson(join(set, "colour-masks.json"), report);
+	return report;
 }
 
 /** How many solid pixels of a cut-out touch each edge of its image: a figure touching the top has lost its crown. */
@@ -584,6 +733,7 @@ function parseFlags(args) {
 		else if (arg === "--sat") flags.sat = next().split(",").map(Number);
 		else if (arg === "--val") flags.val = next().split(",").map(Number);
 		else if (arg === "--match") flags.match = next();
+		else if (arg === "--force") flags.force = true;
 		else if (arg === "--polygon") flags.polygon = next().trim().split(/\s+/).map((point) => point.split(",").map(Number));
 		else if (arg === "--to-hue") flags.toHue = Number(next());
 		else if (arg === "--to-sat") flags.toSat = Number(next());
@@ -609,6 +759,7 @@ export const USAGE = `usage: june-art run VERB ...
   grid IMAGE OUT [--step N]                   a copy with a pixel grid, for reading off regions
   compare SET OUT NAME... [--height PX] [--columns N]
                                               before and after a colour plan, side by side
+  masks RUN SET PLAN [--force]                segment the garments a colour plan needs, into SET/colour-masks
   stop RUN REASON | resume RUN --by WHO | raise RUN [--budget N] [--group-limit N] --by WHO`;
 
 const print = (value) => console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
@@ -671,6 +822,10 @@ export async function runCommand(argv) {
 		const groups = {};
 		for (const e of ledger) if (e.group && e.sampler && e.status !== "rejected") groups[e.group] = (groups[e.group] ?? 0) + 1;
 		return print({ spent: spent(ledger), budget: run.budget, groupLimit: run.groupLimit, groups, stopped: run.stopped, changed_since_start: driftOf(run), jobs: ledger.map(({ label, status, seeds, group, wall_seconds }) => ({ label, status, seeds, group, wall_seconds })), changes: run.changes });
+	}
+	if (verb === "masks" && second && others[0]) {
+		await makeMasks(first, second, others[0], { force: flags.force });
+		return;
 	}
 	if (verb === "upload" && second) return print(await uploadFile(first, second));
 	if (verb === "stop" && second) return stopRun(first, [second, ...others].join(" "));

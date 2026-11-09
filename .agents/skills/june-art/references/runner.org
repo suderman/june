@@ -37,5 +37,6 @@ art status "$RUN"
 - =raise= and =resume= need =--by WHO=, and record it. Only do them with that person's approval.
 - =status= reports any file under =--watch= that changed since the run began. Watch production art.
 - =recolor= recolours matching pixels in a region or polygon, keeping shading and alpha. =--match HEX= moves their typical colour to a target. It is not a generation and costs nothing. =grid= draws a pixel grid on an image for reading coordinates, and =compare= sets a batch side by side. For a whole batch use =june-art colours= (=references/colour-run.org=).
+- =masks RUN SET PLAN= segments each garment a colour plan names through the =segment= pipeline and saves =SET/colour-masks/NAME-ITEM.png=. It waits while someone else is using ComfyUI. =--force= redoes finished masks. See =references/colour-run.org=.
 - =edges CUTOUT...= counts solid pixels touching each edge, and exits non-zero if the top or a side is touched.
 - =unchanged A B --region X,Y,W,H= compares pixels exactly and exits non-zero if they differ. Use it to prove protected art was not touched.

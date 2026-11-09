@@ -1,5 +1,5 @@
 {"poses":{
- "idle-standing-attentive":[{"item":"eyes"},{"item":"skirt","polygon":[[361,553],[522,545],[607,845],[537,883],[292,883],[223,837],[269,676]]},{"item":"blouse","region":[180,235,440,370]},{"item":"boots","region":[345,1240,275,290]}],
- "wry-knowing-smile-front":[{"item":"eyes"},{"item":"skirt","polygon":[[384,1322],[799,1322],[899,1536],[238,1536]]},{"item":"blouse","region":[90,610,900,800]}],
- "determined-hands-on-hips":[{"item":"eyes"},{"item":"skirt","polygon":[[349,782],[536,778],[684,1015],[651,1057],[606,1042],[511,1045],[432,1082],[424,1052],[301,1042],[269,1070],[226,1042],[301,865]]},{"item":"blouse","region":[120,470,580,330]},{"item":"boots","region":[220,1490,420,230]}]
+ "idle-standing-attentive":[{"item":"eyes"},{"item":"blouse"},{"item":"skirt"},{"item":"boots"}],
+ "wry-mug-toast":[{"item":"eyes"},{"item":"blouse","keepValue":false,"strength":0.6},{"item":"skirt"}],
+ "working-typing-laptop":[{"item":"eyes"},{"item":"blouse"}]
 }}

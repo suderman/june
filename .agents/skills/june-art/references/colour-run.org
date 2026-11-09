@@ -1,30 +1,35 @@
 * Normalize June's colours across a set of poses
-A runbook for a batch of colour fixes. It runs no generations and does not need ComfyUI: it recolours each pose's source, then finishes the pose again with its manifest entry unchanged. Nothing reaches production without Jon's approval, and promotion follows =references/ingestion.org=.
+A runbook for a batch of colour fixes. It runs no generations: it recolours each pose's source, then finishes the pose again with its manifest entry unchanged. ComfyUI is used only to segment garments, about 2 seconds a mask. Nothing reaches production without Jon's approval, and promotion follows =references/ingestion.org=.
 
 ** The targets
-=art/colour-targets.json= holds them. Do not change them during a run. =eyes= is sampled from =thinking-finger-tapping=, which Jon named as her eye colour. The others are medians of canon's own garments measured the same way the tool measures a pose, not palette values: a palette swatch is one spot, and matching a pose's median to a spot gives the wrong result.
+=art/colour-targets.json= holds them. Do not change them during a run. =eyes= is sampled from =gentle-offering-mug-front=, the eye colour Jon chose on 2026-11-08 after the brighter =#87B649= from =thinking-finger-tapping= looked radioactive. The garment targets are medians of canon's own garments measured the way the tool measures a pose, not palette values: a palette swatch is one spot, and matching a pose's median to a spot gives the wrong result.
 
 Hair is left alone. =belt-hardware= is only for a buckle that came out the wrong metal.
+
+** How garments are selected
+Do not outline a blouse, skirt or boots by hand. =june-art run masks= asks SAM3 for each garment and saves =SET/colour-masks/NAME-ITEM.png=, and =colours= uses those masks automatically. The targets name the prompts: ="pink blouse"=, ="dark skirt"= with the belt taken away, ="boots:2"=, where =:2= asks for both. A region or polygon on a garment step is ignored when the target has a mask.
+
+SAM3 always returns its best guess, even for something that is not there. It found "boots" on a pose with none on 2026-11-08 and recoloured something else. List a garment only for a pose that visibly shows it.
 
 ** Set up
 1. Copy production to a NEW staging set with =cp -a --dereference ~/org/june/avatar SET=, and work only there.
 2. Run =nix run .#art -- colours SET ALL.json --check=, where =ALL.json= lists every pose with an empty step list. Every pose should print =ok=.
-3. Start from the worked example, =examples/colour-plan.json=.
+3. Start =june-art run init RUN --budget 0= in a new run directory. Segmentation does not spend the budget.
 
-** Plan one pose
-Make a grid of its source, =june-art run grid SET/source/NAME.png OUT --step 50=, and look at it. Coordinates are source pixels. Add a step for each item the pose visibly shows:
-- =eyes=: a tight =region= or =polygon= around her irises. The default face-box region can catch green fringe outside them, and a tilted head needs a polygon. Leave closed eyes out of the plan.
-- =skirt=: always a =polygon=, from the bottom of the belt along the garment's edge to the hem. Stay just inside a hem over her legs, because tights fall inside the skirt's colour range. Include the whole visible skirt, or a line appears where you stopped. Skirts are the hardest garment to outline: most attempts in the 2026-11-08 run left seams and were reverted.
-- =blouse=: a =region= or =polygon= covering it, kept below her chin, with hands, forearms and cuffs outside it. Colour ranges do not protect skin or hair: wrist shadows, finger outlines and hair highlights all match the blouse range. Only poses with no arm crossing the blouse came out clean in the 2026-11-08 run.
-- =boots=: skip them unless you can outline the whole shaft. A region starting below the top leaves a straight colour join, and a region reaching the top catches the tights. None survived the 2026-11-08 run.
-Leave out anything the pose does not show. If you cannot draw a clean region for an item, skip that item and say so in the report. A pose with one item done is better than a pose with a visible seam.
+** Plan each pose
+Look at the poses, a contact sheet at a time, and add a step for each item the pose visibly shows. =examples/colour-plan.json= is a worked example.
+- =eyes=: a tight =region= or =polygon= around her irises, in source pixels. The default face-box region can catch green fringe outside them, and a tilted head needs a polygon. Make a grid with =june-art run grid SET/source/NAME.png OUT --step 50= to read coordinates. Leave closed eyes out.
+- =blouse=, =skirt=: just the item name, when the pose shows them. A skirt hidden behind a desk or laptop stays out.
+- =boots=: just the item name, only when both boots are in frame.
 
 ** Apply and judge
 Work through the poses in batches of about eight, without stopping to ask. Run each batch as its own command, since a whole library takes longer than one shell call allows.
-1. Run =nix run .#art -- colours SET PLAN=. A pose that fails is reported and the rest continue. It always starts from =colour-originals/=, so a corrected plan can be re-run without stacking changes.
-2. Run =june-art run compare SET OUT NAME... --columns 4=, and look at it.
-3. Check each pose for: a line where a region stopped, colour bleeding into tights, hands or hair, speckles inside the cloth, and a change that clearly goes too far. Look at a before and after difference mask as well as the sheet, and zoom in where you are unsure. Fix the plan and re-run that pose, or drop that step. =--match= changes brightness too, so judge against canon.
-4. Read =colour-report.json=: a step whose =changed= is near zero missed its target.
+1. Run =nix run .#art -- run masks RUN SET PLAN=. Finished masks are kept, so re-running costs nothing and =--force= redoes them. Jon uses this ComfyUI too: if his job is running, the command waits for it.
+2. Read =SET/colour-masks.json=: coverage is the share of the image. A figure far from its neighbours, or under about 1%, means look at that mask before trusting it.
+3. Run =nix run .#art -- colours SET PLAN=. A pose that fails is reported and the rest continue. It always starts from =colour-originals/=, so a corrected plan can be re-run without stacking changes.
+4. Run =june-art run compare SET OUT NAME... --columns 4=, and look at it. Check for: colour bleeding into hands, tights or hair, a garment left partly unchanged, speckles inside the cloth, and eyes that look lit from inside. Zoom in where you are unsure.
+5. Fix a bad mask by rewording that pose's prompt with a =segment= field on the step, for example ={"item":"skirt","segment":"dark pleated skirt"}=, and re-run with =--force=. If it still cannot be done cleanly, drop the step and say so in the report. A pose with one item done is better than one with a visible fault.
+6. A blouse drawn much darker than the rest stays dark, because the target keeps each pose's brightness. When =colour-report.json= shows its =after= colour clearly darker than the others, override the step with ={"item":"blouse","keepValue":false,"strength":0.6}=. Use this only for those poses: it worked on =wry-mug-toast=, whose blouse started at =#916661=.
 
 ** At the end
 Confirm the manifest still equals production's: only the art changes. Render a sample of poses with =examples/proof-panels.py=. Add what you learned to =lessons/colour.org=.

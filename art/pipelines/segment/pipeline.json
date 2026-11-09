@@ -1,0 +1,15 @@
+{
+ "status": "experimental",
+ "summary": "Find a thing in an image from a text prompt, as a white-on-black mask, with SAM3. Costs no generation.",
+ "graph": "graph.json",
+ "main": "6",
+ "parameters": {
+  "image": {},
+  "prompt": {},
+  "threshold": {
+   "default": 0.5,
+   "type": "number"
+  }
+ },
+ "evidence": "Added 2026-11-08 for garment masks in colour fixes."
+}

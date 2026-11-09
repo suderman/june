@@ -1,0 +1,63 @@
+{
+ "1": {
+  "class_type": "CheckpointLoaderSimple",
+  "inputs": {
+   "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+  }
+ },
+ "2": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": "${prompt}",
+   "clip": [
+    "1",
+    1
+   ]
+  }
+ },
+ "3": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "${image}"
+  }
+ },
+ "4": {
+  "class_type": "SAM3_Detect",
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "image": [
+    "3",
+    0
+   ],
+   "conditioning": [
+    "2",
+    0
+   ],
+   "threshold": "${threshold}",
+   "refine_iterations": 2,
+   "individual_masks": false
+  }
+ },
+ "5": {
+  "class_type": "MaskToImage",
+  "inputs": {
+   "mask": [
+    "4",
+    0
+   ]
+  }
+ },
+ "6": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "images": [
+    "5",
+    0
+   ],
+   "filename_prefix": "${prefix}-mask"
+  }
+ }
+}

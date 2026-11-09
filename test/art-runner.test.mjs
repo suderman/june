@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { assertRunLocation, client, comparePixels, contactSheet, driftOf, edgeContact, recolor, initRun, listPipelines, loadPipeline, raiseRun, readLedger, readRun, refusal, renderPipeline, renderTemplate, resumeRun, seedsOf, stopRun, submit, uploadFile, validateGraph } from "../art/runner.mjs";
+import { assertRunLocation, client, comparePixels, contactSheet, driftOf, edgeContact, recolor, combineMasks, initRun, listPipelines, loadPipeline, raiseRun, readLedger, readRun, refusal, renderPipeline, renderTemplate, resumeRun, seedsOf, stopRun, submit, uploadFile, validateGraph } from "../art/runner.mjs";
 
 const SCHEMAS = {
 	KSampler: { input: { required: { seed: ["INT", {}], model: ["MODEL", {}], sampler_name: [["er_sde", "euler"], {}] } }, output: ["LATENT"] },
@@ -268,6 +268,75 @@ test("matching moves a garment's typical colour to the target and keeps its shad
 	const triangle = recolor(a, b, { polygon: [[0, 0], [20, 0], [0, 20]], match: "#4A3C45" });
 	assert.ok(triangle.selected_pixels > 150 && triangle.selected_pixels < 250, `a polygon limits it to its own shape, ${triangle.selected_pixels}`);
 	assert.throws(() => recolor(a, b, { polygon: [[0, 0], [5, 5]], match: "#4A3C45" }), /at least 3/);
+});
+
+test("a colour match can keep brightness, ease in at its edges, ignore specks, fill holes, and leave out marked shapes", (t) => {
+	const parent = mkdtempSync(join(tmpdir(), "june-art-clean-"));
+	t.after(() => rmSync(parent, { recursive: true, force: true }));
+	const a = join(parent, "a.png");
+	const b = join(parent, "b.png");
+	// A 40x40 garment with a tiny hole, a larger one, a separate speck to its right, and an arm crossing it.
+	execFileSync("magick", ["-size", "80x60", "xc:none", "-fill", "#c06a60", "-draw", "rectangle 5,5 44,44", "-fill", "#222222", "-draw", "rectangle 12,12 13,13", "-fill", "#222222", "-draw", "rectangle 20,20 31,31", "-fill", "#c06a60", "-draw", "rectangle 60,10 61,11", `PNG32:${a}`]);
+	const rgb = (file, x, y) => [...execFileSync("magick", [file, "-crop", `1x1+${x}+${y}`, "-depth", "8", "RGB:-"])];
+	const common = { region: [0, 0, 80, 60], hue: [340, 20], sat: [0.2, 1], val: [0.3, 1], match: "#7d4f9e" };
+
+	let out = recolor(a, b, { ...common, keepValue: true });
+	assert.equal(Math.max(...rgb(b, 8, 8)), 192, "keepValue holds the brightness");
+	assert.notDeepEqual(rgb(b, 8, 8), rgb(a, 8, 8));
+	const full = rgb(b, 8, 8);
+
+	out = recolor(a, b, { ...common, keepValue: true, strength: 0.5 });
+	const half = rgb(b, 8, 8);
+	assert.ok(half[2] > rgb(a, 8, 8)[2] && half[2] < full[2], "half strength lands between");
+
+	out = recolor(a, b, { ...common, clean: true, minArea: 50, maxHole: 8 });
+	assert.deepEqual(rgb(b, 60, 10), rgb(a, 60, 10), "a speck smaller than minArea is left alone");
+	assert.equal(out.removed_specks, 4);
+	assert.equal(out.filled_holes, 4, "the tiny hole is filled");
+	assert.notDeepEqual(rgb(b, 12, 12), rgb(a, 12, 12));
+	assert.deepEqual(rgb(b, 25, 25), rgb(a, 25, 25), "a hole over maxHole stays out");
+
+	out = recolor(a, b, { ...common, clean: true, minArea: 50, maxHole: 8, exclude: [[[10, 10], [16, 10], [16, 16], [10, 16]]] });
+	assert.deepEqual(rgb(b, 12, 12), rgb(a, 12, 12), "a hole in a shape left out is not filled");
+	assert.deepEqual(rgb(b, 11, 11), rgb(a, 11, 11), "and the shape itself does not change");
+
+	recolor(a, b, { ...common, keepValue: true, feather: 2 });
+	const edge = rgb(b, 5, 25), inner = rgb(b, 8, 25), start = rgb(a, 8, 25);
+	assert.ok(Math.abs(edge[2] - start[2]) < Math.abs(inner[2] - start[2]), "the change eases in from the edge");
+});
+
+test("a garment mask decides what changes, and masks combine with a part taken away", (t) => {
+	const parent = mkdtempSync(join(tmpdir(), "june-art-mask-"));
+	t.after(() => rmSync(parent, { recursive: true, force: true }));
+	const a = join(parent, "a.png");
+	const b = join(parent, "b.png");
+	const skirt = join(parent, "skirt.png");
+	const belt = join(parent, "belt.png");
+	const out = join(parent, "out.png");
+	execFileSync("magick", ["-size", "40x40", "xc:#c06a60", `PNG32:${a}`]);
+	execFileSync("magick", ["-size", "40x40", "xc:black", "-fill", "white", "-draw", "rectangle 0,0 19,39", skirt]);
+	execFileSync("magick", ["-size", "40x40", "xc:black", "-fill", "white", "-draw", "rectangle 0,0 19,9", belt]);
+	assert.ok(Math.abs(combineMasks([skirt], [belt], out) - 0.375) < 0.01, "the belt comes out of the skirt");
+	const rgb = (file, x, y) => [...execFileSync("magick", [file, "-crop", `1x1+${x}+${y}`, "-depth", "8", "RGB:-"])];
+	recolor(a, b, { mask: out, match: "#7d4f9e", keepValue: true });
+	assert.notDeepEqual(rgb(b, 5, 20), rgb(a, 5, 20), "inside the mask changes");
+	assert.deepEqual(rgb(b, 5, 5), rgb(a, 5, 5), "the part taken away does not");
+	assert.deepEqual(rgb(b, 30, 20), rgb(a, 30, 20), "nor does anything outside it");
+	const hueAt = (file, x, y) => {
+		const [r, g, bl] = rgb(file, x, y);
+		const max = Math.max(r, g, bl);
+		const d = max - Math.min(r, g, bl);
+		return (max === r ? ((g - bl) / d + 6) % 6 : max === g ? (bl - r) / d + 2 : (r - g) / d + 4) * 60;
+	};
+	const greys = join(parent, "greys.png");
+	const flat = join(parent, "flat.png");
+	execFileSync("magick", ["-size", "40x40", "xc:#303848", "-fill", "#483840", "-draw", "rectangle 20,0 39,39", `PNG32:${greys}`]);
+	execFileSync("magick", ["-size", "40x40", "xc:white", join(parent, "all.png")]);
+	recolor(greys, flat, { mask: join(parent, "all.png"), match: "#52383A", keepValue: true, hueKeep: 0 });
+	assert.ok(Math.abs(hueAt(flat, 5, 5) - hueAt(flat, 30, 5)) < 6, "two near-neutral hues become one");
+	const none = join(parent, "none.png");
+	execFileSync("magick", ["-size", "40x40", "xc:black", none]);
+	assert.equal(recolor(a, join(parent, "untouched.png"), { mask: none, match: "#7d4f9e" }).changed_pixels, 0, "an empty mask changes nothing");
 });
 
 test("a cut-out touching the top or a side is not clear; a boot just touching the bottom is reported", (t) => {

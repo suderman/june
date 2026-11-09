@@ -145,10 +145,12 @@ function applyColours(set, planPath, { check = false } = {}) {
 				const merged = { ...targets[step.item], ...step };
 				if (!merged.match && !Number.isFinite(merged.toHue)) throw new Error(`step ${index}: no target for "${step.item}"`);
 				const region = merged.region === "face" ? recordedFaceBox(set, name) : merged.region;
-				if (!merged.polygon && !Array.isArray(region)) throw new Error(`step ${index} (${step.item}): needs a region or a polygon`);
+				const mask = merged.segment ? join(set, "colour-masks", `${name}-${step.item}.png`) : undefined;
+				if (mask && !existsSync(mask)) throw new Error(`step ${index} (${step.item}): no mask; run june-art run masks first`);
+				if (!mask && !merged.polygon && !Array.isArray(region)) throw new Error(`step ${index} (${step.item}): needs a region or a polygon`);
 				const next = join(work, `${index}.png`);
-				const done = recolor(current, next, { ...merged, region });
-				results.push({ item: step.item, region: merged.polygon ?? region, selected: done.selected_pixels, changed: done.changed_pixels, before: done.before, after: done.after });
+				const done = recolor(current, next, { ...merged, region, mask });
+				results.push({ item: step.item, region: mask ? "mask" : merged.polygon ?? region, selected: done.selected_pixels, changed: done.changed_pixels, before: done.before, after: done.after });
 				current = next;
 			});
 			ingest(set, name, { file: current, keepEntry: true });

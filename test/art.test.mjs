@@ -102,7 +102,10 @@ test("colours applies a plan to a set's sources and leaves each manifest entry a
 	const before = JSON.parse(readFileSync(join(set, "manifest.json"), "utf8")).poses.synthetic;
 	const webpBefore = readFileSync(join(set, "poses", "synthetic.webp"));
 	const plan = join(set, "plan.json");
-	writeFileSync(plan, JSON.stringify({ poses: { synthetic: [{ item: "skirt", region: [300, 1800, 1000, 800] }] } }));
+	writeFileSync(plan, JSON.stringify({ poses: { synthetic: [{ item: "skirt" }] } }));
+	assert.throws(() => art("colours", set, plan), (error) => /synthetic: FAILED.*no mask/.test(error.stderr), "a garment step needs its mask");
+	mkdirSync(join(set, "colour-masks"));
+	execFileSync("magick", ["-size", "1600x3000", "xc:black", "-fill", "white", "-draw", "rectangle 300,1800 1300,2600", join(set, "colour-masks", "synthetic-skirt.png")]);
 	assert.match(art("colours", set, plan, "--check"), /synthetic: ok/);
 	assert.deepEqual(readFileSync(join(set, "poses", "synthetic.webp")), webpBefore, "a check changes nothing");
 	assert.match(art("colours", set, plan), /skirt #404028/);
@@ -113,7 +116,7 @@ test("colours applies a plan to a set's sources and leaves each manifest entry a
 	assert.match(again, /skirt #404028/, "a re-run starts from the original");
 	const report = JSON.parse(readFileSync(join(set, "colour-report.json"), "utf8"));
 	assert.equal(report.synthetic.steps[0].item, "skirt");
-	writeFileSync(plan, JSON.stringify({ poses: { missing: [], synthetic: [{ item: "skirt", region: [300, 1800, 1000, 800] }] } }));
+	writeFileSync(plan, JSON.stringify({ poses: { missing: [], synthetic: [{ item: "skirt" }] } }));
 	assert.throws(() => art("colours", set, plan), (error) => /missing: FAILED/.test(error.stderr));
 	assert.ok(!JSON.parse(readFileSync(join(set, "colour-report.json"), "utf8")).synthetic.error, "a bad pose does not stop the rest");
 });
