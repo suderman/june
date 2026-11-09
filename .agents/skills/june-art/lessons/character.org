@@ -34,3 +34,6 @@ Several production portraits had their irises repaired after generation, so the 
 
 ** Name the direction actually drawn
 Check her face, not just her body's lean. All four curious-standing-lean seeds on 2026-11-08 looked toward the viewer despite left-facing and three-quarter wording. Seed 96103 was staged as =curious-standing-lean-front= with =facing: front= and =mirror: false=; the left-facing inventory slot remains unfilled. In the gentle-standing-hands-clasped run later that day, only 97103 of four seeds gave a shallow viewer-left face turn. It also had a complete native crown with 22 px of top clearance and intact boots, so no crown repair was needed. Keep the valid directional take rather than spending repair allowance on an already complete head; the other three were frontal.
+
+** Correct the failed limb instruction without claiming the direction was fixed
+All four first pout seeds on 2026-11-09 put her hands behind her body. One four-seed retry explicitly placed both forearms across the blouse and each hand on the opposite upper arm, with hidden hands in the negative. All four drew visibly folded arms, but none achieved the requested looking-away face. Seed 103803 became =pout-standing-folded-front=, not the directional inventory entry. A successful hand correction is not evidence of successful yaw.

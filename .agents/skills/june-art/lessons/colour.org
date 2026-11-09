@@ -55,3 +55,6 @@ Run 3 found eight more dim blouses that needed the existing =keepValue: false=, 
 
 ** Check finished alpha as well as source alpha
 Run 3's first =curious-listening-fresh-m= WebP differed from production in 1,343 alpha pixels, despite exact source alpha. Original-source and corrected-source replays both matched production alpha. Rerunning the same approved colour plan produced identical source RGBA and a finished WebP with exact production alpha; PNG file hashes differed. The initial mismatch did not reproduce, so its cause remains unknown. Verify every finished WebP instead of inferring its alpha from the source.
+
+** Keep each small command's report before running the next
+=run masks= replaces =SET/colour-masks.json=, and =colours= replaces =SET/colour-report.json= with the current plan's results. The eleven one-pose plans on 2026-11-09 needed separate saved reports to retain all 33 garment coverages and 41 colour steps. Save them in each pose's host-local run directory; a final top-level report covers only the last pose.
