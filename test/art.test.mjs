@@ -90,6 +90,34 @@ test("--portrait keeps a portrait's face size on art extended to her feet", (t) 
 	assert.ok(entry.framings.includes("full"));
 });
 
+test("colours applies a plan to a set's sources and leaves each manifest entry alone, without stacking on a re-run", (t) => {
+	const set = mkdtempSync(join(tmpdir(), "june-art-colours-"));
+	t.after(() => rmSync(set, { recursive: true, force: true }));
+	mkdirSync(join(set, "incoming"));
+	const source = join(set, "synthetic.png");
+	execFileSync("magick", ["-size", "1600x3000", "xc:none", "-fill", "#cc9966", "-draw", "rectangle 100,100 1500,2980", "-fill", "#404028", "-draw", "rectangle 300,1800 1300,2600", source]);
+	writeFileSync(join(set, "incoming", "synthetic.json"), JSON.stringify({ section: "poses", expression: "idle", facing: "front", faceBox: [600, 200, 400, 800] }));
+	const art = (...args) => execFileSync(process.execPath, [new URL("../art/june-art.mjs", import.meta.url).pathname, ...args], { encoding: "utf8", stdio: "pipe" });
+	art("ingest", set, "synthetic", "--file", source);
+	const before = JSON.parse(readFileSync(join(set, "manifest.json"), "utf8")).poses.synthetic;
+	const webpBefore = readFileSync(join(set, "poses", "synthetic.webp"));
+	const plan = join(set, "plan.json");
+	writeFileSync(plan, JSON.stringify({ poses: { synthetic: [{ item: "skirt", region: [300, 1800, 1000, 800] }] } }));
+	assert.match(art("colours", set, plan, "--check"), /synthetic: ok/);
+	assert.deepEqual(readFileSync(join(set, "poses", "synthetic.webp")), webpBefore, "a check changes nothing");
+	assert.match(art("colours", set, plan), /skirt #404028/);
+	assert.deepEqual(JSON.parse(readFileSync(join(set, "manifest.json"), "utf8")).poses.synthetic, before, "the manifest entry is untouched");
+	assert.notDeepEqual(readFileSync(join(set, "poses", "synthetic.webp")), webpBefore, "the art changed");
+	assert.ok(existsSync(join(set, "colour-originals", "synthetic.png")));
+	const again = art("colours", set, plan);
+	assert.match(again, /skirt #404028/, "a re-run starts from the original");
+	const report = JSON.parse(readFileSync(join(set, "colour-report.json"), "utf8"));
+	assert.equal(report.synthetic.steps[0].item, "skirt");
+	writeFileSync(plan, JSON.stringify({ poses: { missing: [], synthetic: [{ item: "skirt", region: [300, 1800, 1000, 800] }] } }));
+	assert.throws(() => art("colours", set, plan), (error) => /missing: FAILED/.test(error.stderr));
+	assert.ok(!JSON.parse(readFileSync(join(set, "colour-report.json"), "utf8")).synthetic.error, "a bad pose does not stop the rest");
+});
+
 test("a fully visible surviving box cannot certify source-gesture preservation", () => {
 	const source = { w: 10, h: 10, alpha: new Uint8Array(100).fill(255) };
 	const place = { size: [10, 10], scale: 1, x: 0, y: 3 };

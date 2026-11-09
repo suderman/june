@@ -395,26 +395,83 @@ function hsvToRgb(h, s, v) {
 	return [r + m, g + m, b + m].map((n) => Math.round(n * 255));
 }
 
+function boundingBox(points) {
+	const xs = points.map((p) => p[0]);
+	const ys = points.map((p) => p[1]);
+	const [x0, y0] = [Math.floor(Math.min(...xs)), Math.floor(Math.min(...ys))];
+	return [x0, y0, Math.ceil(Math.max(...xs)) - x0, Math.ceil(Math.max(...ys)) - y0];
+}
+
+/** Whether a point is inside a polygon, by counting edge crossings. */
+function inPolygon(points, x, y) {
+	let within = false;
+	for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+		const [xi, yi] = points[i];
+		const [xj, yj] = points[j];
+		if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) within = !within;
+	}
+	return within;
+}
+
+const hsvToHex = ({ h, s, v }) => `#${hsvToRgb(h, s, v).map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+const signedHue = (d) => ((d + 540) % 360) - 180;
+
+function hexToHsv(hex) {
+	const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+	if (!m) throw new Error(`${hex}: a colour is #RRGGBB`);
+	return rgbToHsv(parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255);
+}
+
+const median = (values) => {
+	const sorted = [...values].sort((a, b) => a - b);
+	return sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+};
+
+/** The middle hue, saturation and value of some pixels, hue taken around the circle. */
+function typicalColour(pixels) {
+	const x = pixels.reduce((n, p) => n + Math.cos((p.h * Math.PI) / 180), 0);
+	const y = pixels.reduce((n, p) => n + Math.sin((p.h * Math.PI) / 180), 0);
+	return { h: ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360, s: median(pixels.map((p) => p.s)), v: median(pixels.map((p) => p.v)) };
+}
+
 /**
  * Recolour the pixels inside a region that match a hue, saturation and value range, keeping each pixel's value so the
  * drawing's shading survives. Nothing else changes, and alpha never does: a colour fix cannot alter a drawn shape.
  */
-export function recolor(input, output, { region: [rx, ry, rw, rh], hue = [0, 360], sat = [0, 1], val = [0, 1], toHue, toSat }) {
+export function recolor(input, output, { region, polygon, hue = [0, 360], sat = [0, 1], val = [0, 1], toHue, toSat, match }) {
+	if (polygon && polygon.length < 3) throw new Error("a polygon needs at least 3 points");
+	const inside = polygon ? (x, y) => inPolygon(polygon, x + 0.5, y + 0.5) : () => true;
+	const [rx, ry, rw, rh] = polygon ? boundingBox(polygon) : region;
+
 	if (resolve(input) === resolve(output)) throw new Error("recolor writes a new file; give a different output");
-	if (!Number.isFinite(toHue) || !Number.isFinite(toSat)) throw new Error("recolor needs --to-hue and --to-sat");
+	if (!match && (!Number.isFinite(toHue) || !Number.isFinite(toSat))) throw new Error("recolor needs --match HEX, or --to-hue and --to-sat");
 	const [width, height] = magick([input, "-format", "%w %h", "info:"]).toString().trim().split(" ").map(Number);
 	if (rx < 0 || ry < 0 || rw <= 0 || rh <= 0 || rx + rw > width || ry + rh > height) throw new Error(`the region is not inside the ${width}x${height} image`);
 	const pixels = magick([input, "-alpha", "on", "-depth", "8", "RGBA:-"]);
 	const inHue = (h) => (hue[0] <= hue[1] ? h >= hue[0] && h <= hue[1] : h >= hue[0] || h <= hue[1]);
-	let changed = 0;
-	let box = null;
+	const selected = [];
 	for (let y = ry; y < ry + rh; y++) {
 		for (let x = rx; x < rx + rw; x++) {
 			const i = 4 * (y * width + x);
 			if (pixels[i + 3] === 0) continue;
 			const [h, s, v] = rgbToHsv(pixels[i] / 255, pixels[i + 1] / 255, pixels[i + 2] / 255);
-			if (!inHue(h) || s < sat[0] || s > sat[1] || v < val[0] || v > val[1]) continue;
-			const [r, g, b] = hsvToRgb(toHue, toSat, v);
+			if (inside(x, y) && inHue(h) && s >= sat[0] && s <= sat[1] && v >= val[0] && v <= val[1]) selected.push({ x, y, i, h, s, v });
+		}
+	}
+	// Matching moves the selection's typical colour onto the target, keeping each pixel's difference from that typical
+	// colour, so folds, highlights and shadows stay as drawn.
+	const before = typicalColour(selected);
+	const target = match ? hexToHsv(match) : null;
+	let changed = 0;
+	let box = null;
+	const after = [];
+	for (const { x, y, i, h, s, v } of selected) {
+		{
+			const moved = target
+				? { h: (target[0] + signedHue(h - before.h) + 360) % 360, s: Math.min(1, before.s > 0 ? (s * target[1]) / before.s : target[1]), v: Math.min(1, before.v > 0 ? (v * target[2]) / before.v : target[2]) }
+				: { h: toHue, s: toSat, v };
+			after.push(moved);
+			const [r, g, b] = hsvToRgb(moved.h, moved.s, moved.v);
 			if (r === pixels[i] && g === pixels[i + 1] && b === pixels[i + 2]) continue;
 			pixels[i] = r;
 			pixels[i + 1] = g;
@@ -424,7 +481,7 @@ export function recolor(input, output, { region: [rx, ry, rw, rh], hue = [0, 360
 		}
 	}
 	execFileSync("magick", ["-size", `${width}x${height}`, "-depth", "8", "RGBA:-", `PNG32:${output}`], { input: pixels, maxBuffer: 2 ** 31 - 1, stdio: ["pipe", "pipe", "pipe"] });
-	return { input, output, changed_pixels: changed, box_x0_y0_x1_y1: box };
+	return { input, output, selected_pixels: selected.length, changed_pixels: changed, box_x0_y0_x1_y1: box, before: selected.length ? hsvToHex(before) : null, after: after.length ? hsvToHex(typicalColour(after)) : null };
 }
 
 /** How many solid pixels of a cut-out touch each edge of its image: a figure touching the top has lost its crown. */
@@ -461,6 +518,33 @@ export function contactSheet(dir, out, labels, { node, height = 720, columns = 4
 	magick([...rows.flat(), "-background", "#f4efe6", "-append", out]);
 }
 
+/** A copy of an image with a labelled pixel grid, for reading off regions in source coordinates. */
+export function gridImage(input, output, { step = 100 } = {}) {
+	const [width, height] = magick([input, "-format", "%w %h", "info:"]).toString().trim().split(" ").map(Number);
+	const lines = ["-background", "#f4efe6", "-flatten", "-font", FONT, "-pointsize", "16", "-fill", "none", "-stroke", "#d3333366", "-strokewidth", "1"];
+	for (let x = step; x < width; x += step) lines.push("-draw", `line ${x},0 ${x},${height}`);
+	for (let y = step; y < height; y += step) lines.push("-draw", `line 0,${y} ${width},${y}`);
+	lines.push("-fill", "#b00020", "-stroke", "none");
+	for (let x = step; x < width; x += step) lines.push("-annotate", `+${x + 2}+16`, String(x));
+	for (let y = step; y < height; y += step) lines.push("-annotate", `+2+${y - 3}`, String(y));
+	mkdirSync(dirname(resolve(output)), { recursive: true });
+	magick([input, ...lines, output]);
+}
+
+/** Before and after a colour plan, side by side for each pose, from a set's kept originals and its current sources. */
+export function compareSheet(set, out, names, { height = 720, columns = 4 } = {}) {
+	const tile = (path, label) => ["(", path, "-resize", `x${height}`, "-background", "#f4efe6", "-flatten", "-font", FONT, "-fill", "#333", "-pointsize", "18", "-gravity", "southwest", "-annotate", "+6+4", label, "-gravity", "northwest", ")"];
+	const pairs = names.map((name) => {
+		const before = join(set, "colour-originals", `${name}.png`);
+		if (!existsSync(before)) throw new Error(`${name}: no kept original in this set`);
+		return ["(", ...tile(before, `${name} before`), ...tile(join(set, "source", `${name}.png`), "after"), "+append", "-bordercolor", "#333", "-border", "2", ")"];
+	});
+	const rows = [];
+	for (let i = 0; i < pairs.length; i += columns) rows.push(["(", ...pairs.slice(i, i + columns).flat(), "+append", ")"]);
+	mkdirSync(dirname(resolve(out)), { recursive: true });
+	magick([...rows.flat(), "-background", "#f4efe6", "-append", out]);
+}
+
 // The command line
 
 function parseFlags(args) {
@@ -487,6 +571,7 @@ function parseFlags(args) {
 		else if (arg === "--group-limit") flags.groupLimit = number(next(), arg);
 		else if (arg === "--timeout") flags.timeoutMs = number(next(), arg) * 1000;
 		else if (arg === "--height") flags.height = number(next(), arg);
+		else if (arg === "--step") flags.step = number(next(), arg);
 		else if (arg === "--columns") flags.columns = number(next(), arg);
 		else if (arg === "--url") flags.url = next();
 		else if (arg === "--by") flags.by = next();
@@ -498,6 +583,8 @@ function parseFlags(args) {
 		else if (arg === "--hue") flags.hue = next().split(",").map(Number);
 		else if (arg === "--sat") flags.sat = next().split(",").map(Number);
 		else if (arg === "--val") flags.val = next().split(",").map(Number);
+		else if (arg === "--match") flags.match = next();
+		else if (arg === "--polygon") flags.polygon = next().trim().split(/\s+/).map((point) => point.split(",").map(Number));
 		else if (arg === "--to-hue") flags.toHue = Number(next());
 		else if (arg === "--to-sat") flags.toSat = Number(next());
 		else if (arg.startsWith("--")) throw new Error(`unknown option ${arg}`);
@@ -516,9 +603,12 @@ export const USAGE = `usage: june-art run VERB ...
   submit RUN LABEL (--pipeline P [--set K=V]... | --graph F) [--group G] [--timeout S]
   unchanged A B --region X,Y,W,H              exact pixel comparison inside a region
   edges CUTOUT...                             solid pixels touching each edge; fails if the top or a side is touched
-  recolor IN OUT --region X,Y,W,H --to-hue H --to-sat S [--hue L,H] [--sat L,H] [--val L,H]
+  recolor IN OUT (--region X,Y,W,H | --polygon "X,Y X,Y ...") (--match HEX | --to-hue H --to-sat S) [--hue L,H] [--sat L,H] [--val L,H]
                                               recolour matching pixels in a region, keeping shading and alpha
   sheet RUN OUT LABEL... [--node ID] [--height PX] [--columns N]
+  grid IMAGE OUT [--step N]                   a copy with a pixel grid, for reading off regions
+  compare SET OUT NAME... [--height PX] [--columns N]
+                                              before and after a colour plan, side by side
   stop RUN REASON | resume RUN --by WHO | raise RUN [--budget N] [--group-limit N] --by WHO`;
 
 const print = (value) => console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
@@ -549,8 +639,16 @@ export async function runCommand(argv) {
 		if (!result.identical) process.exitCode = 1;
 		return;
 	}
+	if (verb === "grid" && first && second) {
+		gridImage(first, second, { step: flags.step });
+		return print(second);
+	}
+	if (verb === "compare" && first && second && others.length > 0) {
+		compareSheet(first, second, others, { height: flags.height, columns: flags.columns });
+		return print(second);
+	}
 	if (verb === "recolor" && first && second) {
-		if (flags.region?.length !== 4 || !flags.region.every(Number.isInteger)) throw new Error("recolor needs --region X,Y,W,H");
+		if (!flags.polygon && (flags.region?.length !== 4 || !flags.region.every(Number.isInteger))) throw new Error("recolor needs --region X,Y,W,H or --polygon \"X,Y X,Y ...\"");
 		return print(recolor(first, second, flags));
 	}
 	if (verb === "edges" && first) {

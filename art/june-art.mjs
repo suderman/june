@@ -7,6 +7,8 @@
 //   june-art sheet SET NAME [OUT] a contact sheet: the piece, its face box and mouth, and its crop at every framing
 //   june-art figure SET NAME...   record where finished poses' drawn figures lie (`figure`), for poses ingested before
 //                                 ingest wrote it; a tall panel stands her on the panel's bottom by it
+//   june-art colours SET PLAN     apply a plan of colour fixes to a set's sources and finish those poses again, with
+//                                 their manifest entries unchanged (--check only confirms each one can be finished)
 //   june-art run VERB ...         drive ComfyUI: pipelines, budgets, a ledger of every job, pixel checks (runner.mjs)
 //
 // ingest options: --file PATH (instead of incoming/NAME.png), --face X,Y,W,H and --mouth X,Y in source pixels,
@@ -25,8 +27,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseManifest } from "../src/avatar.ts";
 import { FRAMINGS, frame, framingsShowing, readPoses } from "../overlay/compose.mjs";
-import { FONT, runCommand } from "./runner.mjs";
-import { CROWN_CUT_SHARE, gesturePreservation, kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "./layout.mjs";
+import { FONT, recolor, runCommand } from "./runner.mjs";
+import { CROWN_CUT_SHARE, MAX_WIDTH, gesturePreservation, kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "./layout.mjs";
 
 const SECTIONS = ["poses", "chibi", "rooms", "plates", "props"];
 const BACKGROUND = ["rooms", "plates", "props"];
@@ -99,6 +101,71 @@ function size(file) {
 	return { x: 0, y: 0, w, h };
 }
 
+/** A finished pose's measured face box, in source pixels, from the records kept beside its source. */
+function recordedFaceBox(set, name) {
+	const fromJson = readJson(join(set, "source", `${name}.json`), {}).faceBox;
+	if (fromJson) return fromJson;
+	const text = join(set, "source", `${name}.txt`);
+	if (!existsSync(text)) throw new Error(`${name}: no recorded face box in source/`);
+	const record = readJson(text, {});
+	const box = (record.measurement ?? record.measurements)?.face ?? (record.measurement ?? {}).faceBox;
+	if (!box) throw new Error(`${name}: no recorded face box in source/`);
+	return box;
+}
+
+/**
+ * Apply a plan of colour fixes to a set's sources, then finish each pose again, its manifest entry unchanged. Each pose
+ * starts from the copy kept in colour-originals/, so running a corrected plan again never stacks changes. A pose that
+ * fails is reported and the rest go on. With --check, confirms only that every pose can be finished again.
+ */
+function applyColours(set, planPath, { check = false } = {}) {
+	const plan = readJson(planPath, null);
+	if (!plan?.poses) throw new Error(`${planPath}: a plan is { "poses": { NAME: [{ "item": ..., "region": [x, y, w, h] }] } }`);
+	const targets = readJson(new URL("./colour-targets.json", import.meta.url).pathname, {});
+	const originals = join(set, "colour-originals");
+	mkdirSync(originals, { recursive: true });
+	const reportPath = join(set, "colour-report.json");
+	const report = readJson(reportPath, {});
+	const manifest = readJson(join(set, "manifest.json"), {});
+	let failed = 0;
+	for (const [name, steps] of Object.entries(plan.poses)) {
+		const work = mkdtempSync(join(tmpdir(), "june-art-colour-"));
+		try {
+			if (!entries(manifest, "poses")[name]) throw new Error("not a pose in this set");
+			const original = join(originals, `${name}.png`);
+			if (!check && !existsSync(original)) copyFileSync(join(set, "source", `${name}.png`), original);
+			if (check) {
+				ingest(set, name, { file: join(set, "source", `${name}.png`), keepEntry: true, checkOnly: true });
+				console.log(`${name}: ok`);
+				continue;
+			}
+			let current = original;
+			const results = [];
+			steps.forEach((step, index) => {
+				const merged = { ...targets[step.item], ...step };
+				if (!merged.match && !Number.isFinite(merged.toHue)) throw new Error(`step ${index}: no target for "${step.item}"`);
+				const region = merged.region === "face" ? recordedFaceBox(set, name) : merged.region;
+				if (!merged.polygon && !Array.isArray(region)) throw new Error(`step ${index} (${step.item}): needs a region or a polygon`);
+				const next = join(work, `${index}.png`);
+				const done = recolor(current, next, { ...merged, region });
+				results.push({ item: step.item, region: merged.polygon ?? region, selected: done.selected_pixels, changed: done.changed_pixels, before: done.before, after: done.after });
+				current = next;
+			});
+			ingest(set, name, { file: current, keepEntry: true });
+			report[name] = { steps: results, at: new Date().toISOString() };
+			console.log(`${name}: ${results.map((r) => `${r.item} ${r.before} -> ${r.after} (${r.changed} px)`).join(", ") || "unchanged"}`);
+		} catch (error) {
+			failed++;
+			report[name] = { error: error instanceof Error ? error.message : String(error), at: new Date().toISOString() };
+			console.error(`${name}: FAILED: ${report[name].error}`);
+		} finally {
+			rmSync(work, { recursive: true, force: true });
+			if (!check) writeJson(reportPath, report);
+		}
+	}
+	if (failed > 0) process.exitCode = 1;
+}
+
 function ingest(set, name, options) {
 	const manifestPath = join(set, "manifest.json");
 	const manifest = readJson(manifestPath, { version: 1, size: [256, 256], expressions: {} });
@@ -132,6 +199,10 @@ function ingest(set, name, options) {
 		let place;
 		let face = null;
 		if (kind === "pose" || kind === "tall") {
+			if (options.keepEntry) {
+				options.face ??= recordedFaceBox(set, name);
+				options.maxWidth ??= Math.max(entry.size?.[0] ?? 0, MAX_WIDTH);
+			}
 			const box = options.face ?? faceBox;
 			if (!box) throw new Error(`${name}: a pose needs its face box in source pixels: --face X,Y,W,H`);
 			face = { x: box[0], y: box[1], w: box[2], h: box[3] };
@@ -144,6 +215,8 @@ function ingest(set, name, options) {
 			place = placeProp(figure, fit);
 		}
 
+		if (options.keepEntry && String(place.size) !== String(entry.size)) throw new Error(`${name}: placing it again gives ${place.size}, not the recorded ${entry.size}`);
+		if (options.checkOnly) return;
 		const gestures = options.gestures?.length ? options.gestures : gestureBoxes;
 		if (face && Array.isArray(gestures) && gestures.length > 0) {
 			const alpha = execFileSync("magick", [image, "-alpha", "extract", "-depth", "8", "gray:-"], { maxBuffer: 64 * 1024 * 1024 });
@@ -213,7 +286,7 @@ function ingest(set, name, options) {
 			if (!hole) throw new Error(`${name}: the finished room has no window`);
 			finished.window = windowOf(hole, [W, H]);
 		}
-		setEntry(manifest, section, key, finished);
+		setEntry(manifest, section, key, options.keepEntry ? entry : finished);
 		parseManifest(manifest);
 		writeJson(manifestPath, manifest);
 
@@ -339,6 +412,7 @@ function sheet(set, name, outPath) {
 
 function main(argv) {
 	if (argv[0] === "run") return runCommand(argv.slice(1));
+	if (argv[0] === "colours" && argv[1] && argv[2]) return applyColours(argv[1], argv[2], { check: argv.includes("--check") });
 	const [command, set, name, ...rest] = argv;
 	const options = {};
 	const positional = [];
@@ -353,6 +427,7 @@ function main(argv) {
 			(options.gestures ??= []).push({ name: gname, box: parseNumbers(parts.join(","), 4) });
 		} else if (arg === "--max-width") options.maxWidth = Number(rest[++i]);
 		else if (arg === "--portrait") options.portrait = true;
+		else if (arg === "--keep-entry") options.keepEntry = true;
 		else if (arg === "--key") options.key = rest[++i];
 		else if (arg === "--fuzz") options.fuzz = Number(rest[++i]);
 		else positional.push(arg);
@@ -361,7 +436,7 @@ function main(argv) {
 	if (command === "ingest" && set && name) return ingest(set, name, options);
 	if (command === "sheet" && set && name) return sheet(set, name, positional[0]);
 	if (command === "figure" && set && name) return measureFigures(set, [name, ...positional]);
-	console.error("usage: june-art status SET | ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--gesture NAME,X,Y,W,H]... [--max-width PX] [--portrait] [--key COLOUR] [--fuzz PERCENT] | sheet SET NAME [OUT] | figure SET NAME...");
+	console.error("usage: june-art status SET | ingest SET NAME [--file PATH] [--face X,Y,W,H] [--mouth X,Y] [--gesture NAME,X,Y,W,H]... [--max-width PX] [--portrait] [--keep-entry] [--key COLOUR] [--fuzz PERCENT] | colours SET PLAN [--check] | sheet SET NAME [OUT] | figure SET NAME...");
 	process.exit(2);
 }
 

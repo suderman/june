@@ -250,6 +250,26 @@ test("a recolour changes only matching pixels in its region, keeps shading, and 
 	assert.throws(() => recolor(a, b, { region: [30, 10, 40, 40], toHue: 1, toSat: 1 }), /not inside/);
 });
 
+test("matching moves a garment's typical colour to the target and keeps its shading", (t) => {
+	const parent = mkdtempSync(join(tmpdir(), "june-art-match-"));
+	t.after(() => rmSync(parent, { recursive: true, force: true }));
+	const a = join(parent, "a.png");
+	const b = join(parent, "b.png");
+	execFileSync("magick", ["-size", "20x20", "xc:#403c28", "-fill", "#201e14", "-draw", "rectangle 0,0 9,19", `PNG32:${a}`]);
+	const out = recolor(a, b, { region: [0, 0, 20, 20], match: "#4A3C45" });
+	assert.equal(out.selected_pixels, 400);
+	assert.notEqual(out.before, out.after);
+	const value = (x) => Math.max(...execFileSync("magick", [b, "-crop", `1x1+${x}+5`, "-depth", "8", "RGB:-"]));
+	assert.ok(value(15) > value(5), "the light side stays lighter than the shadow");
+	assert.ok(Math.abs(value(5) / value(15) - 0.5) < 0.05, "and by the same proportion");
+	const first = execFileSync("magick", [b, "-crop", "1x1+15+5", "-depth", "8", "RGB:-"]);
+	assert.ok(first[2] > first[1], "plum: more blue than green");
+	assert.throws(() => recolor(a, b, { region: [0, 0, 5, 5], match: "plum" }), /#RRGGBB/);
+	const triangle = recolor(a, b, { polygon: [[0, 0], [20, 0], [0, 20]], match: "#4A3C45" });
+	assert.ok(triangle.selected_pixels > 150 && triangle.selected_pixels < 250, `a polygon limits it to its own shape, ${triangle.selected_pixels}`);
+	assert.throws(() => recolor(a, b, { polygon: [[0, 0], [5, 5]], match: "#4A3C45" }), /at least 3/);
+});
+
 test("a cut-out touching the top or a side is not clear; a boot just touching the bottom is reported", (t) => {
 	const parent = mkdtempSync(join(tmpdir(), "june-art-edges-"));
 	t.after(() => rmSync(parent, { recursive: true, force: true }));

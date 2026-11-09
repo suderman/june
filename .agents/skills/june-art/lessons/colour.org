@@ -5,5 +5,11 @@ A colour fix should change colour and nothing else. =june-art run recolor= shift
 ** The region is the mask
 A tight box plus a saturation and value range isolated a metal buckle from a dark navy belt. A few edge pixels that blend into a neighbour can keep a faint tint; check at 8x. Big regions are harder: her blouse and skin are close in hue, so a blouse fix needs a better mask than a box.
 
+** Measure a target the way the tool measures art
+Palette swatches are single spots, and matching a pose's median to one gives the wrong colour. Blouse swatch #C2817C turned tall poses mauve and a portrait bubblegum in the 2026-11-08 pilot. Canon's blouse measured with the same selection is #D7756A, close to what the tall poses already were. Use =recolor --match=, which keeps each pixel's offset from the typical colour so folds and shadows survive.
+
+** Follow a garment's edge with a polygon
+Rectangles failed on both pilot skirts. Determined's colour bled into the tights under the hem, and wry showed a line where the box began, because the belt was higher than it looked. Read coordinates from =run grid=.
+
 ** Fix the source, then re-ingest
 Recolour the source RGBA, ingest it with the pose's measured face, mouth and gestures, and compare the manifest entry with the old one. It should differ only in what you meant to change. Type gesture names exactly as the sidecar has them.
