@@ -42,6 +42,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.zIndex
@@ -74,6 +75,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.em
@@ -362,21 +366,46 @@ private fun Preview(set: List<Previewing>, start: Int, avatar: Avatar?, close: (
 private fun artifactWords(artifact: JSONObject): AnnotatedString = artifact.optJSONArray("lines")?.let { codeText(it) } ?: AnnotatedString(artifact.optString("text"))
 
 @Composable
-private fun CopyArtifact(text: String) {
+private fun CopyArtifact(text: String, icon: Boolean = false) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var copied by remember(text) { mutableStateOf(0) }
     LaunchedEffect(copied) { if (copied > 0) { kotlinx.coroutines.delay(1600); copied = 0 } }
-    androidx.compose.material3.TextButton(
-        onClick = {
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("June artifact", text))
-            copied++
-        },
-        modifier = Modifier.heightIn(min = 48.dp).background(Color.White, RoundedCornerShape(6.dp)),
-    ) { Text(if (copied > 0) "Copied" else "Copy", color = Look.ink, style = noteBody.copy(fontSize = 14.sp)) }
+    val copy = {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("June artifact", text))
+        copied++
+    }
+    if (icon) androidx.compose.material3.IconButton(onClick = { copy() }, modifier = Modifier.size(48.dp).semantics {
+        contentDescription = "Copy full text"
+        stateDescription = if (copied > 0) "Copied" else ""
+    }) { ArtifactIcon(if (copied > 0) "check" else "copy", if (copied > 0) Color(0xFFC3E88D) else Look.cardInk) }
+    else androidx.compose.material3.TextButton(onClick = { copy() }, modifier = Modifier.heightIn(min = 48.dp).background(Color.White, RoundedCornerShape(6.dp))) {
+        Text(if (copied > 0) "Copied" else "Copy", color = Look.ink, style = noteBody.copy(fontSize = 14.sp))
+    }
 }
 
-/** The same bounded code ground in comic and console looks; the modal reuses the attachment preview. */
+private val artifactFill = Color(0xFF252836)
+private val artifactAccent = Color(0xFFCFB9F0)
+private val artifactRule = Color(0xFF685C7B)
+private val artifactBody = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp, color = Look.cardInk)
+
+@Composable
+private fun ArtifactIcon(name: String, ink: Color = Look.cardInk) {
+    val outline = remember(name) { path(when (name) {
+        "preview" -> "M 2 12 Q 12 -1 22 12 Q 12 25 2 12 Z M 15.5 12 A 3.5 3.5 0 1 1 8.5 12 A 3.5 3.5 0 1 1 15.5 12 Z"
+        "copy" -> "M 8 8 H 20 V 21 H 8 Z M 16 8 V 3 H 4 V 16 H 8"
+        "check" -> "M 4 12 L 9 17 L 20 6"
+        "envelope" -> "M 3 5 H 21 V 19 H 3 Z M 3 6 L 12 13 L 21 6"
+        else -> "M 9 6 L 15 12 L 9 18"
+    }) }
+    Canvas(Modifier.size(24.dp)) {
+        scale(density, density, pivot = Offset.Zero) {
+            drawPath(outline, ink, style = Stroke(1.7f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        }
+    }
+}
+
+/** The same bounded card in comic and console looks; the modal reuses the attachment preview. */
 @Composable
 private fun ArtifactBalloon(artifact: JSONObject, modifier: Modifier = Modifier) {
     val source = artifact.optString("text")
@@ -385,15 +414,38 @@ private fun ArtifactBalloon(artifact: JSONObject, modifier: Modifier = Modifier)
     val open = LocalArtifactPreview.current
     val preview = { open(Previewing("artifact", "", if (language == "text") "Copy text" else language, source, artifact.optJSONArray("lines"))) }
     var overflow by remember(source) { mutableStateOf(false) }
-    Column(modifier.background(Look.cardFill, RoundedCornerShape(8.dp)).border(2.dp, Look.ink, RoundedCornerShape(8.dp)).clickable(onClickLabel = "Preview full text", onClick = preview).padding(8.dp)) {
-        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Text(if (language == "text") "Copy text" else language, color = Look.cardInk, style = noteBody.copy(fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 6.dp))
-            CopyArtifact(source)
-        }
-        Text(artifactWords(excerpt), style = cardLine.copy(fontSize = 14.sp), maxLines = 8, overflow = TextOverflow.Ellipsis,
-            onTextLayout = { overflow = it.hasVisualOverflow }, modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp).heightIn(max = 144.dp).clipToBounds())
-        androidx.compose.material3.TextButton(onClick = preview, modifier = Modifier.height(48.dp)) {
-            Text((if (excerpt.optBoolean("truncated") || overflow) "… " else "") + "Preview full text", color = Look.cardInk, maxLines = 1)
+    val hiddenLines = source.count { it == '\n' } - excerpt.optString("text").count { it == '\n' }
+    Box(modifier.background(artifactFill, RoundedCornerShape(15.dp)).border(1.dp, Color(0xFFB9A4D8), RoundedCornerShape(15.dp)).padding(3.dp)) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.5.dp, Color(0xFFE8DFD5), RoundedCornerShape(12.dp))) {
+            Row(Modifier.fillMaxWidth().height(52.dp).padding(start = 12.dp, end = 2.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                if (language == "text") {
+                    ArtifactIcon("envelope", artifactAccent)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Box(Modifier.weight(1f)) {
+                    Text(if (language == "text") "Copy text" else language, color = if (language == "text") Look.cardInk else Color(0xFFE3CEF9),
+                        style = noteBody.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = if (language == "text") Modifier else Modifier.background(Color(0xFF49405C), RoundedCornerShape(14.dp)).padding(horizontal = 10.dp, vertical = 4.dp))
+                }
+                androidx.compose.material3.IconButton(onClick = preview, modifier = Modifier.size(48.dp).semantics { contentDescription = "Preview full text" }) { ArtifactIcon("preview") }
+                Box(Modifier.width(1.dp).height(20.dp).background(artifactRule))
+                CopyArtifact(source, icon = true)
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(artifactRule))
+            Text(artifactWords(excerpt), style = artifactBody,
+                onTextLayout = { overflow = it.hasVisualOverflow }, modifier = Modifier.fillMaxWidth().clickable(onClickLabel = "Preview full text", onClick = preview).padding(12.dp).heightIn(max = 144.dp).clipToBounds())
+            if (excerpt.optBoolean("truncated") || overflow) {
+                Row(Modifier.fillMaxWidth().height(48.dp).background(Color(0xFF383346)).clickable(onClickLabel = "Preview full text", onClick = preview), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Box(Modifier.fillMaxSize()) {
+                        Box(Modifier.fillMaxWidth().height(1.dp).background(artifactRule))
+                        Row(Modifier.align(androidx.compose.ui.Alignment.CenterStart).padding(horizontal = 12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            ArtifactIcon("chevron", artifactAccent)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Show more" + if (hiddenLines > 0 && !overflow) " ($hiddenLines ${if (hiddenLines == 1) "line" else "lines"})" else "", color = artifactAccent, style = noteBody.copy(fontSize = 14.sp))
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -601,9 +653,11 @@ private fun measure(e: JSONObject, newest: Boolean, textWidth: Float, measurer: 
         "june" -> {
             val artifact = e.optJSONObject("artifact")
             if (artifact != null) {
-                val words = min(textWidth, 460f) - 28
-                val body = artifactWords(artifact.getJSONObject("excerpt"))
-                return Measured(kind, words + 28, 112 + min(height(body, cardLine.copy(fontSize = 14.sp), words), 144f), e, words)
+                val words = min(textWidth, 460f) - 30
+                val excerpt = artifact.getJSONObject("excerpt")
+                val bodyH = height(artifactWords(excerpt), artifactBody, words)
+                val footer = if (excerpt.optBoolean("truncated") || bodyH > 144f) 48 else 0
+                return Measured(kind, words + 30, 83 + min(bodyH, 144f) + footer, e, words)
             }
             val text = juneText(e)
             val style = balloonStyle(newest)

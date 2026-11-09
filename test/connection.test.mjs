@@ -15,7 +15,7 @@ test("Qt renders artifact beats in both looks, bounds previews and copies full l
 	const dir = await mkdtemp(join(tmpdir(), "june-artifacts-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await mkdir(join(dir, "ui"));
-	for (const file of ["Artifact.qml", "ArtifactButton.qml", "Preview.qml", "ConsolePanel.qml", "Panel.qml", "Balloon.qml", "Backdrop.qml", "Scenery.qml", "FileCard.qml", "Code.mjs", "console.mjs", "compose.mjs", "strip.mjs", "light.mjs", "live.mjs", "scenery.mjs"]) await copyFile(new URL(`../overlay/${file}`, import.meta.url), join(dir, "ui", file));
+	for (const file of ["Artifact.qml", "ArtifactButton.qml", "ArtifactIcon.qml", "Preview.qml", "ConsolePanel.qml", "Panel.qml", "Balloon.qml", "Backdrop.qml", "Scenery.qml", "FileCard.qml", "Code.mjs", "console.mjs", "compose.mjs", "strip.mjs", "light.mjs", "live.mjs", "scenery.mjs"]) await copyFile(new URL(`../overlay/${file}`, import.meta.url), join(dir, "ui", file));
 	const theme = (await readFile(new URL("../overlay/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
 	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\n");
@@ -36,7 +36,7 @@ Item {
   TestCase {
     name: "Artifacts"
     when: windowShown
-    function cleanup() { modal.close(); root.copied = ""; card.maxWidth = 400; }
+    function cleanup() { modal.close(); root.copied = ""; card.maxWidth = 400; card.content = {text:root.raw, language:"text", lines:null}; }
     function test_qml_engine_and_console() {
       const item = {kind: "assistant", id:"a", text:root.raw, parts:[{text:"Intro"}, {text:root.raw, artifact:true, language:"text"}], streaming:false};
       const panels = Strip.panels([item]);
@@ -51,7 +51,7 @@ Item {
       for (const width of [340,820]) {
         comicView.width = width;
         tryVerify(() => comicView.sizes.length === 1 && comicView.sizes[0].h > 0);
-        verify(comicView.sizes[0].h <= 256);
+        verify(comicView.sizes[0].h <= 272);
         verify(comicView.sizes[0].w <= comicView.m.textWidth);
         const box = comicView.layout.elements[0];
         verify(box.x >= 0 && box.x+box.w <= width);
@@ -62,7 +62,7 @@ Item {
     function test_bound_and_copy() {
       for (const width of [340,820]) {
         card.maxWidth = width;
-        verify(card.w <= width); verify(card.h <= 256);
+        verify(card.w <= width); verify(card.h <= 272);
         verify(findChild(card,"excerpt").text.length <= 1600);
         const copy = findChild(card,"copy"); mouseClick(copy, copy.width/2, copy.height/2);
         compare(root.copied, root.raw);
@@ -77,6 +77,27 @@ Item {
       const copy = findChild(modal,"copy"); copy.forceActiveFocus(); keyClick(Qt.Key_Space);
       compare(root.copied,root.raw);
       const close = findChild(modal,"close"); close.forceActiveFocus(); keyClick(Qt.Key_Return); compare(modal.open,false);
+    }
+    function test_card_header_and_overflow() {
+      for (const text of ["", "Short draft", "One\\nTwo\\nThree"]) {
+        card.content = {text, language:"text", lines:null};
+        tryCompare(card, "overflow", false);
+        verify(!findChild(card,"more").visible, "short and empty text have no footer");
+        compare(findChild(card,"title").text, "Copy text");
+      }
+      const text = Array.from({length:13}, (_,i) => "line " + i).join("\\n");
+      card.content = {text, language:"a-very-long-language-label-that-must-not-overlap-controls", lines:null};
+      tryCompare(card, "overflow", true);
+      compare(card.hiddenLines,5);
+      compare(findChild(card,"more").label, "Show more (5 lines)");
+      const more = findChild(card,"more"); more.forceActiveFocus(); keyClick(Qt.Key_Space);
+      compare(modal.words,text); modal.close();
+      const expand = findChild(card,"expand");
+      verify(findChild(card,"title").x + findChild(card,"title").width < expand.x);
+      expand.forceActiveFocus(); keyClick(Qt.Key_Return); compare(modal.words,text); modal.close();
+      card.content = {text:"wrapped ".repeat(100), language:"text", lines:null};
+      tryCompare(card, "overflow", true);
+      compare(findChild(card,"more").label,"Show more");
     }
     function test_empty_and_replaced() {
       modal.show({kind:"artifact",text:"",name:"Empty"});
