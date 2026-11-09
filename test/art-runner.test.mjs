@@ -334,6 +334,14 @@ test("a garment mask decides what changes, and masks combine with a part taken a
 	execFileSync("magick", ["-size", "40x40", "xc:white", join(parent, "all.png")]);
 	recolor(greys, flat, { mask: join(parent, "all.png"), match: "#52383A", keepValue: true, hueKeep: 0 });
 	assert.ok(Math.abs(hueAt(flat, 5, 5) - hueAt(flat, 30, 5)) < 6, "two near-neutral hues become one");
+	const rimmed = join(parent, "rimmed.png");
+	const plain = join(parent, "plain.png");
+	execFileSync("magick", ["-size", "40x40", "xc:#303030", "-fill", "#343030", "-draw", "rectangle 0,0 29,39", "-fill", "#c8a878", "-draw", "rectangle 30,0 39,39", `PNG32:${rimmed}`]);
+	recolor(rimmed, plain, { mask: join(parent, "all.png"), match: "#52383A", keepValue: true, hueKeep: 0, satKeep: 0 });
+	const [r0, g0, b0] = rgb(plain, 35, 5);
+	assert.ok(r0 - Math.min(g0, b0) < r0 * 0.5, "a bright highlight does not saturate to red");
+	const [r1, g1, b1] = rgb(plain, 5, 5);
+	assert.ok(Math.abs((r1 - Math.min(g1, b1)) / r1 - 0.317) < 0.05, "grey cloth reaches the target saturation");
 	const none = join(parent, "none.png");
 	execFileSync("magick", ["-size", "40x40", "xc:black", none]);
 	assert.equal(recolor(a, join(parent, "untouched.png"), { mask: none, match: "#7d4f9e" }).changed_pixels, 0, "an empty mask changes nothing");

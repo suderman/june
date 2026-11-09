@@ -1,6 +1,6 @@
 {
- "eyes": { "match": "#69732A", "keepValue": true, "region": "face", "hue": [50, 175], "sat": [0.25, 1], "val": [0.25, 1], "clean": true, "minArea": 30, "feather": 1 },
- "skirt": { "match": "#52383A", "keepValue": true, "hueKeep": 0, "segment": "dark skirt", "subtract": "belt", "clean": true, "minArea": 400, "maxHole": 1500, "feather": 2 },
+ "eyes": { "match": "#69732A", "region": "face", "hue": [50, 175], "sat": [0.25, 1], "val": [0.25, 1], "clean": true, "minArea": 30, "feather": 1 },
+ "skirt": { "match": "#52383A", "keepValue": true, "hueKeep": 0, "satKeep": 0, "segment": "dark skirt", "subtract": "belt", "clean": true, "minArea": 400, "maxHole": 1500, "feather": 2 },
  "blouse": { "match": "#D7756A", "keepValue": true, "strength": 0.85, "segment": "pink blouse", "clean": true, "minArea": 400, "maxHole": 500, "feather": 2 },
  "boots": { "match": "#493631", "strength": 0.85, "segment": "boots:2", "clean": true, "minArea": 200, "maxHole": 300, "feather": 2 },
  "belt-hardware": { "match": "#B87435", "sat": [0, 0.4], "val": [0.38, 1] }

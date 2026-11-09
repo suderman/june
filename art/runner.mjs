@@ -438,7 +438,7 @@ function typicalColour(pixels) {
  * Recolour the pixels inside a region that match a hue, saturation and value range, keeping each pixel's value so the
  * drawing's shading survives. Nothing else changes, and alpha never does: a colour fix cannot alter a drawn shape.
  */
-export function recolor(input, output, { region, polygon, mask: maskFile, exclude = [], hue = [0, 360], sat = [0, 1], val = [0, 1], toHue, toSat, match, keepValue = false, hueKeep = 1, strength = 1, clean = false, minArea = 0, maxHole = 0, feather = 0 }) {
+export function recolor(input, output, { region, polygon, mask: maskFile, exclude = [], hue = [0, 360], sat = [0, 1], val = [0, 1], toHue, toSat, match, keepValue = false, hueKeep = 1, satKeep = 1, strength = 1, clean = false, minArea = 0, maxHole = 0, feather = 0 }) {
 	if (polygon && polygon.length < 3) throw new Error("a polygon needs at least 3 points");
 	if (resolve(input) === resolve(output)) throw new Error("recolor writes a new file; give a different output");
 	if (!match && (!Number.isFinite(toHue) || !Number.isFinite(toSat))) throw new Error("recolor needs --match HEX, or --to-hue and --to-sat");
@@ -470,7 +470,8 @@ export function recolor(input, output, { region, polygon, mask: maskFile, exclud
 	for (let at = 0; at < mask.length; at++) if (mask[at]) selected.push({ at, h: colour[3 * at], s: colour[3 * at + 1], v: colour[3 * at + 2] });
 	// Matching moves the selection's typical colour toward the target, keeping each pixel's difference from it, so folds,
 	// highlights and shadows stay as drawn. With keepValue only hue and saturation move, so a dark iris stays dark.
-	// hueKeep shrinks each pixel's hue difference: near-neutral cloth has a hue spread that turns to purple and olive once saturated.
+	// hueKeep and satKeep shrink each pixel's difference from the typical colour. Near-neutral cloth needs both: its hue spread
+	// turns to purple and olive once saturated, and a tan highlight multiplied up with the rest turns red.
 	const before = typicalColour(selected);
 	const target = match ? hexToHsv(match) : null;
 	const bounded = (ratio) => Math.min(3, Math.max(1 / 3, ratio));
@@ -481,7 +482,7 @@ export function recolor(input, output, { region, polygon, mask: maskFile, exclud
 	let box = null;
 	const after = [];
 	for (const { at, h, s, v } of selected) {
-		const moved = target ? { h: (before.h + turn + signedHue(h - before.h) * hueKeep + 360) % 360, s: Math.min(1, s * ratioS), v: Math.min(1, v * ratioV) } : { h: toHue, s: toSat, v };
+		const moved = target ? { h: (before.h + turn + signedHue(h - before.h) * hueKeep + 360) % 360, s: satKeep === 0 ? before.s + (target[1] - before.s) * strength : Math.min(1, (before.s + (s - before.s) * satKeep) * ratioS), v: Math.min(1, v * ratioV) } : { h: toHue, s: toSat, v };
 		after.push(moved);
 		const x = (at % rw) + rx;
 		const y = Math.floor(at / rw) + ry;

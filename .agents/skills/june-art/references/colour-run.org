@@ -4,6 +4,8 @@ A runbook for a batch of colour fixes. It runs no generations: it recolours each
 ** The targets
 =art/colour-targets.json= holds them. Do not change them during a run. =eyes= is sampled from =gentle-offering-mug-front=, the eye colour Jon chose on 2026-11-08 after the brighter =#87B649= from =thinking-finger-tapping= looked radioactive. The garment targets are medians of canon's own garments measured the way the tool measures a pose, not palette values: a palette swatch is one spot, and matching a pose's median to a spot gives the wrong result.
 
+Eyes match the target's brightness as well as its hue, so every iris lands on the reference's darkness. Skirts are flattened to one hue and saturation, leaving only the drawn shading.
+
 Hair is left alone. =belt-hardware= is only for a buckle that came out the wrong metal.
 
 ** How garments are selected
@@ -28,7 +30,7 @@ Work through the poses in batches of about eight, without stopping to ask. Run e
 2. Read =SET/colour-masks.json=: coverage is the share of the image. A figure far from its neighbours, or under about 1%, means look at that mask before trusting it.
 3. Run =nix run .#art -- colours SET PLAN=. A pose that fails is reported and the rest continue. It always starts from =colour-originals/=, so a corrected plan can be re-run without stacking changes.
 4. Run =june-art run compare SET OUT NAME... --columns 4=, and look at it. Check for: colour bleeding into hands, tights or hair, a garment left partly unchanged, speckles inside the cloth, and eyes that look lit from inside. Zoom in where you are unsure.
-5. Fix a bad mask by rewording that pose's prompt with a =segment= field on the step, for example ={"item":"skirt","segment":"dark pleated skirt"}=, and re-run with =--force=. If it still cannot be done cleanly, drop the step and say so in the report. A pose with one item done is better than one with a visible fault.
+5. A skirt mask near 0% usually means the pose has no belt and the subtraction erased the skirt: use ={"item":"skirt","subtract":[]}= first. Otherwise fix a bad mask by rewording that pose's prompt with a =segment= field on the step, for example ={"item":"skirt","segment":"dark pleated skirt"}=, and re-run with =--force=. If it still cannot be done cleanly, drop the step and say so in the report. A pose with one item done is better than one with a visible fault.
 6. A blouse drawn much darker than the rest stays dark, because the target keeps each pose's brightness. When =colour-report.json= shows its =after= colour clearly darker than the others, override the step with ={"item":"blouse","keepValue":false,"strength":0.6}=. Use this only for those poses: it worked on =wry-mug-toast=, whose blouse started at =#916661=.
 
 ** At the end

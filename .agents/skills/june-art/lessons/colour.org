@@ -32,20 +32,23 @@ Hand regions and colour ranges were the main cause of failure: the first 56-pose
 ** SAM3 finds what you ask for, even when it is absent
 ="boots:2"= on =working-typing-laptop=, which shows no boots, returned a 1.6% mask and recoloured something that was not boots. List a garment only for a pose that shows it.
 
-** Keep value when the target is darker or brighter than the art
-The first eye target pulled value up to its own and made the irises look radioactive; Jon rejected them. =keepValue= moves only hue and saturation, so a dark iris stays dark. Pick an eye target from a pose that looks right, then judge it on several faces.
+** Match eye brightness to a target that looks right
+The first eye target, =#87B649=, pulled dim irises up to its brightness and Jon called them radioactive. =keepValue= on the darker =#69732A= still left irises drawn bright: run 3's =thoughtful-pen= and =curious-head-tilt= went from emerald to yellow-lime. Run 4 dropped =keepValue=, so every iris lands on the reference's darkness, and they matched =gentle-offering-mug-front=. Pick the eye target from a pose that looks right, then judge it on the brightest irises as well as the dim ones.
 
-** Near-neutral cloth needs its hue flattened
-The =warm-hands-clasped= skirt was blue-black and mauve-grey. Keeping each pixel's hue offset spread those into purple and olive with a green rim. =hueKeep: 0= sets every pixel to the target hue and leaves value and the relative saturation alone, and the patches went away.
+** Near-neutral cloth needs its hue and saturation flattened
+The =warm-hands-clasped= skirt was blue-black and mauve-grey. Keeping each pixel's hue offset spread those into purple and olive with a green rim, which =hueKeep: 0= fixed. Run 3 then lost 26 of 55 skirts because saturation was still multiplied per pixel, up to 3x, and tan edge highlights turned red. =satKeep: 0= gives every pixel the target saturation and leaves only the drawn shading. All 55 skirts passed in run 4, including =pout-reluctant-front='s mottled shadows.
 
 ** A dim pose needs its brightness moved as well
 With =keepValue=, =wry-mug-toast='s blouse went from =#916661= to =#91524B=, correctly coloured and much darker than the rest. Overriding that step with =keepValue: false= and =strength: 0.6= gave =#BB7269=, in family with the others and with its folds intact.
 
-** A clean skirt mask can still produce a red rim
-Run 3 kept all 56 segmented blouse steps and eight whole-boot steps, but rejected 26 of 55 attempted skirts. Even with =hueKeep: 0=, relative saturation can turn tan edge highlights red or pink against dark cloth. =pout-reluctant-front= also gained mottled shadows inside a solid mask. Inspect the native cloth and its outlines; a clean binary mask does not prove the colour transform is good. Leave the original skirt when the result fails.
+** A clean mask does not prove the colour is good
+Run 3's red rims came from solid, correct masks. Inspect the cloth and its outlines at native size. When many poses fail the same way, fix the transform instead of dropping them one at a time.
 
 ** Coverage cannot approve a garment mask
-=serious-calm-report-front='s skirt mask covered only 0.01% and selected no pixels after cleanup. Asking for =dark pleated skirt= gave the same failure. =idle-listening-earcup-front='s larger mask included tights in the pleat openings. Belt subtraction does not prove that everything left is skirt. Review the waistband, pleats and tights separately.
+=idle-listening-earcup-front='s larger mask included tights in the pleat openings. Belt subtraction does not prove that everything left is skirt. Review the waistband, pleats and tights separately.
+
+** A near-empty mask can come from the subtraction
+=serious-calm-report-front='s skirt mask covered 0.01% with every prompt tried, in run 3 and in run 4. The pose has no belt, only a wide waistband, so ="belt"= matched the skirt and subtracting it erased the mask. A step with ="subtract": []= gave 8.7%. When coverage is near zero, remove the subtraction before rewording the prompt.
 
 ** Apply brightness overrides pose by pose
 Run 3 found eight more dim blouses that needed the existing =keepValue: false=, =strength: 0.6= override, including =idle-headset-adjust-front=, =wry-knowing-smile-front= and =pout-reluctant-front=. Their reviewed results kept folds without staying brown. Keep the override local; the other 47 blouses did not need it.
