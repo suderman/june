@@ -5,7 +5,7 @@ Rules learned from real runs, each with its evidence. Read this and the lessons 
 Seeds vary a composition; they do not repair a method. Evidence: all four first-step seeds of the idle outpaint pilot (2026-11-08) failed at the join.
 
 ** A technical pass is not an art pass
-Pixel checks prove protected art survived, not that the new art is good. Look at the actual image at full size against the canon. Evidence: the bashful crown repair completed cleanly and invented a floating cap.
+Pixel checks prove protected art survived, not that the new art is good. Look at the actual image at full size against the canon. Evidence: the bashful crown repair completed cleanly and invented a floating cap. Curious crown 96202 also passed edge and protected-RGB checks but drew a detached second crown; 96201 was the coherent repair.
 
 ** Check the graph that ran, not the one you meant
 A positional connection silently left =ImageCompositeMasked= without its mask, and five outputs used the whole decoded image. =june-art run= now refuses this graph.
@@ -17,4 +17,10 @@ Evidence, not yet isolated from other causes: idle outpaint windows that showed 
 Run one subject's seeds and look at them before the others, then carry what they teach into the next prompts. Evidence: the tall-first run's idle gate (2026-11-08) proved the method and exposed the headroom problem after 4 of 12 generations.
 
 ** Render the real panel before accepting the art
-A clean image can still lay out wrongly. Evidence: the first full-figure pose ran off the bottom of the tallest panels until =frame= learned to fit her, which only the private =Panel.qml= proof showed.
+A clean image can still lay out wrongly. Evidence: the first full-figure pose ran off the bottom of the tallest panels until =frame= learned to fit her, which only the private =Panel.qml= proof showed. The curious-standing-lean-front proof on 2026-11-08 exposed a different fault: right-side long panels at 1040, 820 and 620 px selected =full= but cropped the tucked hand, and the latter two cut much of her body at the right edge. Her source and normalized silhouette were intact. =full= is not a certificate that every limb fits; record the renderer fault rather than changing measured face geometry.
+
+** Resolve stale reference hashes through approval records
+A changed hash is a stop for investigation, not permission to substitute an image. In the 2026-11-08 curious run, the sheet hash in =references/environment.org= was stale after the approved emerald-eye promotion. The canonical manifest and promotion record explained the change, and the face/body files matched both the current sheet's exact crops and server inputs. Without that approval chain, do not generate.
+
+** Check which geometry a proof helper models
+=examples/preflight-pose.mjs= calls =placePose('pose')=, even for full-figure sources. In the curious run it predicted 2816x5386, while the actual tall ingest used 2048x4096. Use the real tall placement and resulting manifest for tall-art evidence; do not treat that portrait-only report as a failed or passed tall normalization gate.

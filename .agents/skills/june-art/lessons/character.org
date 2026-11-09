@@ -3,7 +3,7 @@
 Generate full figures at 832x1536 with the =character= pipeline. =art/pipelines/character/example-tall-standing-mug.json= holds the parameters of a standing pose Jon approved (seed 71101). Evidence: all 12 generations of the 2026-11-08 tall-first run were single adult figures with believable proportions, with no sign of the anatomy faults that portrait extension produced.
 
 ** Check the top and bottom edges before judging a candidate
-Asking for "generous empty space above her hair" did not keep the crown in frame. Of six candidates cut out on 2026-11-08, three touched the top edge (92002 by 110 px, 92003 by 73, 93003 by 30), and 92002's boot touched the bottom. Measure the alpha's top and bottom rows with =magick -alpha extract= before choosing a seed. A crown that touches the edge needs repair before ingest: full framing stands her on the floor, and =frame= pins a cut crown to the top, so the two conflict.
+Asking for "generous empty space above her hair" did not keep the crown in frame. Of six candidates cut out on 2026-11-08, three touched the top edge (92002 by 110 px, 92003 by 73, 93003 by 30), and 92002's boot touched the bottom. Measure the alpha's top and bottom rows with =magick -alpha extract= before choosing a seed, then inspect the original RGB too. Curious seed 96103 on 2026-11-08 had a visibly clipped crown but zero solid top-edge pixels after ToonOut, with a two-pixel gap. Seed 96102 had 25 solid bottom-edge pixels while =edges= still reported =clear: true=. Read the counts, not just that boolean. A clipped crown needs repair before ingest: full framing stands her on the floor, and =frame= pins a cut crown to the top, so the two conflict.
 
 ** The eyes are emerald now
 Canon's original olive golden green has been brightened toward emerald. Prompt for it directly. Evidence: the 2026-11-08 run's "olive-hazel green-dominant" wording gave green eyes straight from generation, without the repairs earlier portraits needed, but it asked for the older colour.
@@ -25,3 +25,6 @@ Standing figures measure up to ten face heights tall, against about seven and a 
 
 ** Start from the right RGB
 Several production portraits had their irises repaired after generation, so the original RGB has the old eye colour. Anything built from an original needs that repair again. Evidence: the idle outpaint pilot's eyes came out brown.
+
+** Name the direction actually drawn
+Check her face, not just her body's lean. All four curious-standing-lean seeds on 2026-11-08 looked toward the viewer despite left-facing and three-quarter wording. Seed 96103 was staged as =curious-standing-lean-front= with =facing: front= and =mirror: false=; the left-facing inventory slot remains unfilled.
