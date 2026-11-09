@@ -1,0 +1,72 @@
+#+TITLE: Configuring June
+
+* Files
+The repository holds code and templates only. June keeps her files in three XDG directories, each overridable:
+
+| What   | Directory (override)                         | Holds                                                |
+|--------+----------------------------------------------+------------------------------------------------------|
+| Config | =$XDG_CONFIG_HOME/june/= (=JUNE_CONFIG_DIR=) | =config.json=, =AGENTS.md=                           |
+| Data   | =$XDG_DATA_HOME/june/= (=JUNE_DATA_DIR=)     | =SOUL.org=, =MEMORY.org=, =HEARTBEAT.org=, =JOURNAL.org=, =MOOD.org=, =SELF.org= |
+| State  | =$XDG_STATE_HOME/june/= (=JUNE_STATE_DIR=)   | the database, =inbox/=, receipts, reflection copies |
+
+Files sent to June land in =inbox/YYYY-MM-DD/HHMM-<name>= in the state directory, private to the user, and are deleted after 30 days. The inbox is a landing place, not storage: June copies what is worth keeping into the right Org task directory.
+
+The socket is =$XDG_RUNTIME_DIR/june/june.sock= (=JUNE_RUNTIME_DIR=, =JUNE_SOCKET=). Keep the state directory out of any sync tool: copying a live SQLite database with its WAL corrupts it. The data directory may be a link to a synced folder.
+
+Machine settings come from the environment: =JUNE_DAEMON_HOST= (the machine that runs June). A =config.json= that sets =daemonHost= is refused. Telegram's settings are environment too: =TELEGRAM_BOT_TOKEN= and =TELEGRAM_ALLOWED_USERS=; a =telegram= block in =config.json= is ignored.
+
+=templates/= holds starting points that name nobody: =SOUL.org= (her role, judgment, and voice, with a character section to write), =MEMORY.org= and =HEARTBEAT.org= (their shape, with placeholders), an example =config.json=, and a starter =AGENTS.md= of the conventions June works by: Org as the authority, task states and AUTO, what needs approval, keeping credentials out of answers, and where tasks go. ={{name}}= stands for the user and ={{org}}= for =org.root= in =config.json=, which =june init= places first. Without an =AGENTS.md=, June is told she has none of the user's conventions and to ask before anything destructive, external, or outside the request. =avatar/= is the base avatar set of labelled placeholders, used in place; =june init= does not copy it. =june init [NAME]= copies whichever are missing into the data and config directories with the name filled in, taking =user.name= from =config.json= when no name is given, and never overwrites a file. June has no identity until =SOUL.org= exists; she creates =MEMORY.org= and =JOURNAL.org= when she first writes to them.
+
+* config.json
+Keys of =config.json=, with their defaults:
+
+#+begin_src json
+{
+  "user": { "name": null },
+  "model": {
+    "chat": { "provider": "(required)", "modelId": "(required)", "thinkingLevel": "medium" },
+    "focus": null,
+    "patter": null
+  },
+  "providersFile": "~/.pi/agent/models.json",
+  "envFiles": [],
+  "contextCap": 200000,
+  "skillDirs": [],
+  "org": { "root": "~/org", "agendaFiles": "~/.local/state/org-dispatch/agenda-files", "people": "~/org/people.org" },
+  "dispatch": { "hosts": [], "agent": "pi", "agents": ["pi"] },
+  "herdr": { "session": "default", "host": "<hostname>", "hosts": {}, "allowPrompt": true },
+  "rhythm": { "wake": "05:00", "quiet": "22:00", "sleep": "01:00" },
+  "reflection": { "enabled": true, "quietMinutes": 60, "recentDays": 3, "periods": ["week", "month", "quarter", "year"], "bitcoin": false },
+  "heartbeat": { "enabled": false, "everyMinutes": 60, "chattingMinutes": 15 },
+  "looseEnds": { "enabled": false, "at": "20:30" },
+  "conflicts": { "enabled": false, "at": "00:30" },
+  "mail": { "enabled": false, "query": "tag:inbox and tag:unread", "accounts": {} },
+  "watch": { "enabled": false, "gapMinutes": 10 },
+  "patter": { "openAfterSeconds": 8, "gapsSeconds": [25, 25, 25, 40, 60, 90, 120, 180] },
+  "situation": { "calendars": [], "homeAssistant": { "people": [], "weather": null, "pollSeconds": 300 } }
+}
+#+end_src
+
+- =user.name= is the person June serves. Her prompts and tools use it; without it she says "the user".
+- =model.chat= is June's everyday model. Its =provider= names a provider in =providersFile=, Pi's =models.json=, whose =apiKey= must be a =$VARIABLE=.
+- =model.focus= is the model for careful work, such as ={"modelId": "gpt-6.1-sol"}=; =provider= and =thinkingLevel= default to chat's. Without it there is no =focus= tool.
+- =model.patter= is a cheap model for company during long waits; =provider= comes from chat. Without it there is no patter.
+- =envFiles= are dotenv files read for keys at startup, for development. A service should get keys from its environment.
+- =skillDirs= are read in place; =skill_read= only reads inside a listed skill's directory.
+- =org.agendaFiles= is the list of agenda files the dispatcher maintains, which June reads to find tasks.
+- =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"laptop": {}}=; ={"ssh": "target"}= overrides the destination. =herdr.allowPrompt= defaults to true; false removes =herdr_prompt_agent=.
+- =dispatch.hosts= are the machines June may queue AUTO tasks for. Empty leaves out the task-writing tools. =dispatch.host= (the first of =hosts= by default) and =dispatch.agent= (pi by default) are what the dispatcher writes into an AUTO task's drawer when it has no =HOST= or =AGENT= and no tag names one; June's own tasks use them too. =dispatch.agents= are the agents June may choose for a task she queues or resumes (just =dispatch.agent= without it); each must be one the dispatcher can launch. To let her pick Claude Code, list it, such as =["pi", "claude"]=. =dispatch.improve= turns on =june_improve=: =file= is the Org file, under =org.root=, that its tasks go in, usually June's own project file, whose first repository should be her checkout; =agent= and =host= default to =dispatch.agent= and =dispatch.host=. =dispatch.settle= is how many seconds a heading the user typed must stay unchanged before the dispatcher launches it (120 by default; =ORG_DISPATCH_SETTLE= overrides it). Headings June writes launch at once.
+- =dispatch.commands= overrides the executable for each AUTO worker, such as ={"claude": "claude-auto"}=. Keys are =pi= or =claude=; values are executable names on the pane shell's PATH or absolute paths, without arguments, whitespace or shell syntax. Omitted entries use Herdr's native launcher. Install wrappers and Herdr's agent integration on each launching host; this setting does not install them or change the worker's =AGENT= identity. A Claude wrapper that selects a different =CLAUDE_CONFIG_DIR= must load Herdr's SessionStart hook there so the pane reports its real session. The dispatcher reads the launching host's June config when it runs, so a scheduled task chooses its command and any account policy when due, not when queued.
+
+  A configured launcher may select an account with a different session store. Existing live sessions are reused, but closed sessions start fresh with instructions to read the whole Org task and Dialog, without native resume flags. Unconfigured workers keep native resume behavior. Startup waits up to 60 seconds for the expected worker to become ready and verifies its session before claiming and prompting. A failed or blocked configured launch puts the task on HOLD with a diagnostic pane reference instead of opening another tab each minute.
+
+- =rhythm= is the user's day in local =HH:MM=: heartbeats run from =wake= until =quiet=, and the nightly reflection from =sleep= until =wake=.
+- =reflection= runs the nightly pass once the user has been quiet for =quietMinutes=; =recentDays= is how many recent "Day's end" entries June sees in her prompt; =periods= are the longer digests that follow it. =bitcoin= (false by default) has the nightly pass fetch bitcoin's price and its day and week change from CoinGecko's free public API, with no key and a 10-second timeout, so a big move reaches her mood; a failed or slow fetch is left out and never fails the pass.
+- =heartbeat= enables a private look every =everyMinutes= in waking hours; the user counts as chatting if they wrote within =chattingMinutes=.
+- =looseEnds= enables June's evening look for loose ends, once a day from =at= (local =HH:MM=) until =rhythm.quiet=.
+- =conflicts= enables June's nightly Syncthing check, once a day from =at= (local =HH:MM=) until =rhythm.quiet=.
+- =ntfy.url=, an ntfy topic's address such as =https://ntfy.example.com/june=, pushes each finished reply meant for the phone (one answering a phone message, or a notice routed there) to that topic while the June app does not have the conversation open; a tap opens the app on it (=june://conversation=). Off without it.
+- =mail= gives each heartbeat the new mail matching =query= in notmuch since the last look; =accounts= names each top-level maildir folder, such as ={"personal": "home"}=.
+- =watch= tells June about dispatched tasks she did not queue on =dispatch.hosts=, in waking hours and at most every =gapMinutes=.
+- =situation= feeds the =now= section: =calendars= are Org files read for today and tomorrow, =homeAssistant.people= are =person.*= entities, =homeAssistant.weather= a =weather.*= entity, polled every =pollSeconds= when =HASS_URL= and =HASS_TOKEN= are set.
+- =patter= sets when patter speaks: a run busy =openAfterSeconds= becomes a wait, and =gapsSeconds= are the pauses between lines, the last repeating.

@@ -1,258 +1,45 @@
 #+TITLE: June
 
-June is a personal assistant: one persistent daemon on Pi Durable that the user talks to from a terminal client, on the desktop or over SSH from a phone. She reads Org for tasks and knowledge and Herdr for live agent sessions, does quick checks and small edits herself with a shell and file tools, and hands larger work to coding agents through an Org dispatcher. Design notes are in [[file:docs/architecture.org][docs/architecture.org]].
+June is a personal assistant: one persistent daemon on Pi Durable. You talk to her from a terminal client, a desktop overlay, an Android app, or Telegram. She reads Org for tasks and knowledge and Herdr for live agent sessions. She does quick checks and small edits herself with a shell and file tools, and hands larger work to coding agents through an Org dispatcher.
 
 * Built on
-
 - [[https://github.com/earendil-works/pi/tree/main/packages/durable][Pi Durable]]: the harness June runs in. Her conversation, tasks, tools, and compaction are durable, so a restart resumes work rather than losing or repeating it. [[https://github.com/earendil-works/pi/tree/main/packages/ai][pi-ai]] talks to the models and [[https://github.com/earendil-works/pi/tree/main/packages/tui][pi-tui]] draws the terminal client.
 - [[https://github.com/earendil-works/pi/tree/main/packages/coding-agent][Pi Coding Agent]] and Claude Code: the agents the dispatcher starts for AUTO tasks, selected by =AGENT=. June reads her providers from Pi's =models.json=.
 - [[https://herdr.dev][Herdr]]: the runtime those agents run in, one pane each. June reads their status through its CLI.
 - [[https://orgmode.org][Org]] in [[https://www.gnu.org/software/emacs/][Emacs]]: where tasks, projects, calendars, and June's own files live. Task states and dates are set by Org itself, through Emacs in batch.
 - [[https://github.com/BurntSushi/ripgrep][ripgrep]]: how June searches Org.
 
-* Commands
+* Getting started
+June is packaged for Nix, with a Home Manager module for the daemon and clients. [[file:docs/development.org][docs/development.org]] covers installing and deploying her.
 
 #+begin_src sh
-june                 # terminal client attached to the primary conversation
-june ask "What are my agents doing?"
-june ask --json "..."    # {"requestId","status","text","reason"}
-echo "..." | june ask -
-june status [--json] # daemon, model, and conversation state; no model call
-june transcript --since 16:20 --detail  # the conversation as text; see below
-june doctor          # configuration and dependency checks
 june init [NAME]     # copy the starting files into place
-june serve           # the daemon
+june doctor          # configuration and dependency checks
+june                 # terminal client attached to the conversation
+june ask "What are my agents doing?"
+june status --json   # daemon, model, and conversation state; no model call
 #+end_src
 
-Exit codes: 0 answered, 1 unanswered or failed, 2 usage, 3 daemon not running. In the client, Enter sends (as a steer while June is working), Shift+Enter queues a follow-up, Alt+Enter starts a new line, Up and Down recall earlier prompts, Esc runs =/stop=, Ctrl+D detaches.
+June has one conversation, shared by every client. Detaching or losing the connection never stops her work.
 
-To attach a screenshot in the terminal client, press Ctrl+V or Shift+Insert on a Wayland desktop. June inserts an =[image N]= marker; add a message or send the image alone. Delete the marker to leave it out. Text on the clipboard still pastes as text. Clipboard access uses =wl-paste= from =wl-clipboard=, included in the Nix package. If the terminal handles Shift+Insert itself, configure that key to send Ctrl+V to June.
-
-Pasting an image file path also attaches it. Quote paths with spaces or escape the spaces with backslashes. Supported files are PNG, JPEG, WebP, GIF, and BMP. Up to ten images can accompany one message, with a 20 MiB limit per source file and 20 MiB total after preparation. Images are resized to fit the model and stored in the conversation; the transcript shows their count. A missing or invalid file, or a text-only model, leaves the draft unsent. Clipboard markers recalled from history need a fresh paste. This attachment handling is for the interactive client, not =june ask=.
-
-With Herdr, Ctrl+V can upload a clipboard image from the connecting machine and paste its path on the daemon host. June attaches that file through the same image-path handling; she does not need direct access to the connecting machine's clipboard. Herdr must intercept the paste key for this upload, so June's Shift+Insert binding alone does not add Shift+Insert uploads to Herdr. Over plain SSH without a clipboard-uploading client, paste a path to an image already on the daemon host. June refuses direct clipboard access over SSH rather than read the daemon host's unrelated clipboard.
-
-=june transcript= prints the recent conversation as text for a reader outside the terminal, such as a worker looking into something June could not do. It shows the last 200 entries by default, or the last =--last N=, or those since =--since= =30m=, =2h=, =1d=, =16:20=, or a date. The plain view is what the terminal shows, with one line per thinking block and each tool call; =--detail= adds her full thinking, tool arguments and output (clipped at 2,000 characters), and her private heartbeat, watch, work, and follow looks, marked private. =--json= prints the raw entries. It reads through the daemon socket, so the conversation stays on the daemon's host; elsewhere it runs there over SSH, as =june ask= does.
-
-=june transcript --search WORDS= searches June's whole timeline, back to her first day, newest first: the user's messages exactly as sent, her replies, patter, and one line per tool call, each with its entry id. Every word must appear, in any case, and a "quoted phrase" as it is; =--since=, =--until=, =--kinds user,june,patter,action,note= and =--last N= narrow it, and =--oldest= searches from the first day forward, for when something was first said. =--around ID [--before N] [--after N]= shows the conversation around an entry. =--hide ID[-ID]=, =--unhide= and =--hidden= leave entries out of the timeline, transcripts and views; they stay in the database. June searches the same timeline with her =timeline= tool.
-
-The terminal client and =june ask= share these slash commands:
-
-| Command                   | Effect                                                                                 |
-|---------------------------+----------------------------------------------------------------------------------------|
-| =/new=                    | Stop the run, drop queued messages, start a fresh context. History stays in storage. |
-| =/stop=                   | Stop the current run; queued messages continue.                                        |
-| =/compact [instructions]= | Compact the context now.                                                               |
-| =/status=                 | Model, state, queue, context use, and spend.                                           |
-| =/help=                   | List the commands.                                                                     |
-
-The terminal client and =june ask= also support =/reload=, which rescans the skill directories and rereads =SOUL.org=, =MEMORY.org=, and =AGENTS.md= without a model call or restart. Code, =config.json=, provider, and environment changes need a daemon restart.
-
-There is one conversation, so =/new= and =/compact= from any surface affect all of them. Detaching or losing the connection never stops work, and the client reconnects by itself. From another machine, =june= runs on the daemon host over SSH (see =JUNE_DAEMON_HOST=).
-
-* Files
-
-The repository holds code and templates only. June keeps her files in three XDG directories, each overridable:
-
-| What   | Directory (override)                         | Holds                                                |
-|--------+----------------------------------------------+------------------------------------------------------|
-| Config | =$XDG_CONFIG_HOME/june/= (=JUNE_CONFIG_DIR=) | =config.json=, =AGENTS.md=                           |
-| Data   | =$XDG_DATA_HOME/june/= (=JUNE_DATA_DIR=)     | =SOUL.org=, =MEMORY.org=, =HEARTBEAT.org=, =JOURNAL.org=, =MOOD.org=, =SELF.org= |
-| State  | =$XDG_STATE_HOME/june/= (=JUNE_STATE_DIR=)   | the database, =inbox/=, receipts, reflection copies |
-
-Files sent to June land in =inbox/YYYY-MM-DD/HHMM-<name>= in the state directory, private to the user, and are deleted after 30 days. The inbox is a landing place, not storage: June copies what is worth keeping into the right Org task directory.
-
-The socket is =$XDG_RUNTIME_DIR/june/june.sock= (=JUNE_RUNTIME_DIR=, =JUNE_SOCKET=). Keep the state directory out of any sync tool: copying a live SQLite database with its WAL corrupts it. The data directory may be a link to a synced folder.
-
-Machine settings come from the environment: =JUNE_DAEMON_HOST= (the machine that runs June). A =config.json= that sets =daemonHost= is refused. Telegram's settings are environment too: =TELEGRAM_BOT_TOKEN= and =TELEGRAM_ALLOWED_USERS=; a =telegram= block in =config.json= is ignored.
-
-=templates/= holds starting points that name nobody: =SOUL.org= (her role, judgment, and voice, with a character section to write), =MEMORY.org= and =HEARTBEAT.org= (their shape, with placeholders), an example =config.json=, and a starter =AGENTS.md= of the conventions June works by: Org as the authority, task states and AUTO, what needs approval, keeping credentials out of answers, and where tasks go. ={{name}}= stands for the user and ={{org}}= for =org.root= in =config.json=, which =june init= places first. Without an =AGENTS.md=, June is told she has none of the user's conventions and to ask before anything destructive, external, or outside the request. =avatar/= is the base avatar set of labelled placeholders, used in place; =june init= does not copy it. =june init [NAME]= copies whichever are missing into the data and config directories with the name filled in, taking =user.name= from =config.json= when no name is given, and never overwrites a file. June has no identity until =SOUL.org= exists; she creates =MEMORY.org= and =JOURNAL.org= when she first writes to them.
-
-* Configuration
-
-Keys of =config.json=, with their defaults:
-
-#+begin_src json
-{
-  "user": { "name": null },
-  "model": {
-    "chat": { "provider": "(required)", "modelId": "(required)", "thinkingLevel": "medium" },
-    "focus": null,
-    "patter": null
-  },
-  "providersFile": "~/.pi/agent/models.json",
-  "envFiles": [],
-  "contextCap": 200000,
-  "skillDirs": [],
-  "org": { "root": "~/org", "people": "~/org/people.org" },
-  "dispatch": { "hosts": [], "agent": "pi", "agents": ["pi"] },
-  "herdr": { "session": "default", "host": "<hostname>", "hosts": {}, "allowPrompt": true },
-  "rhythm": { "wake": "05:00", "quiet": "22:00", "sleep": "01:00" },
-  "reflection": { "enabled": true, "quietMinutes": 60, "recentDays": 3, "periods": ["week", "month", "quarter", "year"], "bitcoin": false },
-  "heartbeat": { "enabled": false, "everyMinutes": 60, "chattingMinutes": 15 },
-  "looseEnds": { "enabled": false, "at": "20:30" },
-  "conflicts": { "enabled": false, "at": "00:30" },
-  "mail": { "enabled": false, "query": "tag:inbox and tag:unread", "accounts": {} },
-  "watch": { "enabled": false, "gapMinutes": 10 },
-  "patter": { "openAfterSeconds": 8, "gapsSeconds": [25, 25, 25, 40, 60, 90, 120, 180] },
-  "situation": { "calendars": [], "homeAssistant": { "people": [], "weather": null, "pollSeconds": 300 } }
-}
-#+end_src
-
-- =user.name= is the person June serves. Her prompts and tools use it; without it she says "the user".
-- =model.chat= is June's everyday model. Its =provider= names a provider in =providersFile=, Pi's =models.json=, whose =apiKey= must be a =$VARIABLE=.
-- =model.focus= is the model for careful work, such as ={"modelId": "gpt-6.1-sol"}=; =provider= and =thinkingLevel= default to chat's. Without it there is no =focus= tool.
-- =model.patter= is a cheap model for company during long waits; =provider= comes from chat. Without it there is no patter.
-- =envFiles= are dotenv files read for keys at startup, for development. A service should get keys from its environment.
-- =skillDirs= are read in place; =skill_read= only reads inside a listed skill's directory.
-- =herdr.hosts= lists other machines June may inspect read-only over SSH, such as ={"laptop": {}}=; ={"ssh": "target"}= overrides the destination. =herdr.allowPrompt= defaults to true; false removes =herdr_prompt_agent=.
-- =dispatch.hosts= are the machines June may queue AUTO tasks for. Empty leaves out the task-writing tools. =dispatch.host= (the first of =hosts= by default) and =dispatch.agent= (pi by default) are what the dispatcher writes into an AUTO task's drawer when it has no =HOST= or =AGENT= and no tag names one; June's own tasks use them too. =dispatch.agents= are the agents June may choose for a task she queues or resumes (just =dispatch.agent= without it); each must be one the dispatcher can launch. To let her pick Claude Code, list it, such as =["pi", "claude"]=. =dispatch.improve= turns on =june_improve=: =file= is the Org file, under =org.root=, that its tasks go in, usually June's own project file, whose first repository should be her checkout; =agent= and =host= default to =dispatch.agent= and =dispatch.host=. =dispatch.settle= is how many seconds a heading the user typed must stay unchanged before the dispatcher launches it (120 by default; =ORG_DISPATCH_SETTLE= overrides it). Headings June writes launch at once.
-- =dispatch.commands= overrides the executable for each AUTO worker, such as ={"claude": "claude-auto"}=. Keys are =pi= or =claude=; values are executable names on the pane shell's PATH or absolute paths, without arguments, whitespace or shell syntax. Omitted entries use Herdr's native launcher. Install wrappers and Herdr's agent integration on each launching host; this setting does not install them or change the worker's =AGENT= identity. A Claude wrapper that selects a different =CLAUDE_CONFIG_DIR= must load Herdr's SessionStart hook there so the pane reports its real session. The dispatcher reads the launching host's June config when it runs, so a scheduled task chooses its command and any account policy when due, not when queued.
-
-  A configured launcher may select an account with a different session store. Existing live sessions are reused, but closed sessions start fresh with instructions to read the whole Org task and Dialog, without native resume flags. Unconfigured workers keep native resume behavior. Startup waits up to 60 seconds for the expected worker to become ready and verifies its session before claiming and prompting. A failed or blocked configured launch puts the task on HOLD with a diagnostic pane reference instead of opening another tab each minute.
-
-- =rhythm= is the user's day in local =HH:MM=: heartbeats run from =wake= until =quiet=, and the nightly reflection from =sleep= until =wake=.
-- =reflection= runs the nightly pass once the user has been quiet for =quietMinutes=; =recentDays= is how many recent "Day's end" entries June sees in her prompt; =periods= are the longer digests that follow it. =bitcoin= (false by default) has the nightly pass fetch bitcoin's price and its day and week change from CoinGecko's free public API, with no key and a 10-second timeout, so a big move reaches her mood; a failed or slow fetch is left out and never fails the pass.
-- =heartbeat= enables a private look every =everyMinutes= in waking hours; the user counts as chatting if they wrote within =chattingMinutes=.
-- =looseEnds= enables June's evening look for loose ends, once a day from =at= (local =HH:MM=) until =rhythm.quiet=.
-- =conflicts= enables June's nightly Syncthing check, once a day from =at= (local =HH:MM=) until =rhythm.quiet=.
-- =ntfy.url=, an ntfy topic's address such as =https://ntfy.example.com/june=, pushes each finished reply meant for the phone (one answering a phone message, or a notice routed there) to that topic while the June app does not have the conversation open; a tap opens the app on it (=june://conversation=). Off without it.
-- =mail= gives each heartbeat the new mail matching =query= in notmuch since the last look; =accounts= names each top-level maildir folder, such as ={"personal": "home"}=.
-- =watch= tells June about dispatched tasks she did not queue on =dispatch.hosts=, in waking hours and at most every =gapMinutes=.
-- =situation= feeds the =now= section: =calendars= are Org files read for today and tomorrow, =homeAssistant.people= are =person.*= entities, =homeAssistant.weather= a =weather.*= entity, polled every =pollSeconds= when =HASS_URL= and =HASS_TOKEN= are set.
-- =patter= sets when patter speaks: a run busy =openAfterSeconds= becomes a wait, and =gapsSeconds= are the pauses between lines, the last repeating.
-
-* What June does
-
-** The moment
-
-June's prompt ends with a =now= section: the weekday, the rough hour, when the sun next sets or rises, today's and tomorrow's weather, today's and tomorrow's calendar entries, and which zone each configured person is in. She uses it to judge, not to narrate. Home Assistant is polled in the background, so a reply never waits on it, and lines it cannot fill are left out. The section changes about once an hour, so the prompt cache mostly holds; the =clock= tool gives the exact time.
-
-Until the user and June have spoken on a given day, a =greeting= section asks her to open her first words with a greeting for the time of day, whether she answers the user or reaches out first, and to answer in kind when the user greeted her. The day starts at =rhythm.wake=, so a chat past midnight still counts as the same day. Contact is a message the user wrote or a message June sent, not her own task inputs or a quiet heartbeat; the section is never a reason to break a quiet heartbeat. It lives in =src/greeting.ts=.
-
-** Heartbeat
-
-Every =heartbeat.everyMinutes= between =wake= and =quiet=, June takes a private look at the moment in the main conversation, with her standing instructions from =HEARTBEAT.org=, what changed in her =now= section since the last look, and whether the user is chatting. She answers =QUIET= or a message. The user never sees the look itself: the daemon's view hides its input, tools, and quiet answers, showing only a real message. A heartbeat waits while June is busy, and a receipt in the state directory keeps a restart from repeating one. June updates =HEARTBEAT.org= when told what to watch for.
-
-** Loose ends
-
-With =looseEnds= on, once a day from =looseEnds.at= until =rhythm.quiet=, June takes one more private look, shaped like a heartbeat: she reads the day's conversation and her journal entries for today for at most a few loose ends that would leave a gap when the nightly reflection closes the day, such as a conversation the user started without saying how it ended, or a family outing she never heard the end of. It is not a task audit. She asks in one natural message or answers =QUIET=; a day the user sent her no message asks no model at all, even if she wrote in the journal herself. When the user answers, she writes it in the day's journal as she would anything they share, and the reflection reads both the journal and the conversation, so an answer fills the gap and silence leaves it open: the reflection is told never to guess an outcome. Nothing waits for an answer. A receipt in the state directory, =loose-ends.json=, makes it once a day across restarts; a look missed until after =quiet= is skipped. The user's =HEARTBEAT.org= instructions apply to it too.
-
-With =mail= on, each look also lists the mail that arrived since the last one, sorted before June sees it. Messages from people come first, marked when the user has written to them before; automated senders (no-reply and alert addresses, mail domains such as =updates.=, auto-replies) follow in one line each; newsletters and list mail (=List-Unsubscribe=, =List-Id=, bulk =Precedence=) are only counted; the user's own messages are left out. She sees senders and subjects only, framed as outside text, and reads a message with notmuch when it may matter.
-
-** Syncthing conflicts
-
-The user's Org tree syncs between hosts, and Syncthing leaves =NAME.sync-conflict-DATE-TIME-DEVICE.EXT= copies when two of them change a file at once. The =org-conflicts= skill in =skills/= resolves them for June and every agent: its =org-conflict= command lists copies under the Org root, retires those identical to the live file, editor locks and temporary files, and Org copies whose every line the live file already has, and shows the lines only a diverged Org copy holds. The skill's judgment covers the rest: merge what the copy alone holds, then retire it. Copies of other files are listed and left for the user. June's writers still refuse a file with a copy beside it and point her at the skill.
-
-With =conflicts= on, once a day from =conflicts.at= until =rhythm.quiet=, the daemon runs the sweep over =org.root=, and when Org copies are left for judgment June gets a private look, shaped like a heartbeat, listing them; she resolves them with the skill or hands them to a working context, and answers =QUIET= unless something needs the user. A receipt, =conflicts.json=, makes it once a day across restarts. Run it on one host only, the one June's daemon runs on, so Syncthing sees a single writer.
-
-** Watching dispatched work
-
-June follows the tasks she queues herself. With =watch= on, she also hears about every other task org-dispatch runs on =dispatch.hosts=, such as ones the user set to =AUTO=: once a minute, with no model call, June reads the dispatcher's run records on each host (=~/.local/state/org-dispatch=, over SSH for other hosts), checks each live run's Org state and its agent's Herdr status, and notes when a run reaches =EVAL=, =HOLD=, or =DONE=, or its agent is blocked. Pending news waits for waking hours and at least =gapMinutes= since the last such notice, then reaches her as one =[watch]= input, and she tells the user what came of it. She leaves those tasks' states alone. The first look only learns what is already there.
-
-** Steering a worker
-
-When the user asks June to send directions or a question to an existing worker, she inspects its Herdr pane and sends the follow-up in the same session, then reads its output to relay the response. This works on the daemon host; other hosts remain read-only. It does not resume a closed session or change an Org task's state. Approval and question dialogs need the user, and Herdr rejects recognized blocked dialogs without typing. A successful submission is not proof the worker has started or finished. Prompts are not replayed after a restart; after an error, June checks the pane before retrying because delivery may already have happened.
-
-** Shell and files
-
-June has Pi Durable's =bash=, =read=, =edit=, and =write= tools, running on the daemon host as the user. Commands stop after 120 seconds unless given a longer =timeout=, and =/stop= kills them. A call interrupted by a restart comes back as interrupted rather than running again. =edit= fails when the text it replaces has changed. The tools grant capability; =AGENTS.md= sets what she does herself and what needs approval.
-
-** Chat, focus, work, and patter
-
-- Chat (=model.chat=) is everyday talk. Focus (=model.focus=) is careful work; the =focus= tool switches to it and back, and a restart or =/new= starts relaxed.
-- =work= hands a self-contained brief to a background child conversation with her tools and identity. The call returns at once, so the user can keep talking; only the final report comes back, as a =[work]= follow-up. A restart resumes the same brief without running it twice.
-- Patter (=model.patter=) keeps the user company during a long wait with short playful lines that never claim results or promise anything. Lines are display-only: no model context, compaction, or memory review contains them.
-
-** Memory and journal
-
-- =SOUL.org= is June's identity.
-- =SELF.org= is June's own account of who she has become from living with the user, where =SOUL.org= is who the user made her: running jokes, names that stuck, opinions she has formed, what she is proud of, how she and the user feel lately, and how her moods trended. Facts about the user stay in =MEMORY.org=. The week's reflection, right after its "Week's end" digest, revises it rather than rewriting it, and it may end with a "Proposals for SOUL" heading of changes for the user to apply; June mentions a new one once and never applies it herself. Her prompt shows it directly after =SOUL.org=, so the prompt runs from solid to fleeting: =SOUL.org=, =SELF.org=, then =MOOD.org= near the end. Nothing else writes it. It needs =week= in =reflection.periods= (the default), and is first written by the first week that closes with it deployed.
-- =MEMORY.org= is a page or two of lasting facts about the user's life and how to work with them. June updates it when told something lasting, and compaction and the nightly reflection review it.
-- =MOOD.org= is how June woke up feeling: a short first-person paragraph and a few lingering threads, written by the nightly reflection with =SOUL.org= in view and replaced whole each night. It starts from the previous night's mood, so moods shift rather than reset, and drifts back toward her default on a quiet day. Her prompt shows it just before the =now= section, saying the day's conversation outweighs it and that it colours her voice, never facts or task status. Nothing else writes it; she never edits it herself. It appears after the first night, and a day without journal entries leaves it as it was.
-- =JOURNAL.org= is June's own dated journal, written with the =journal= tool and read on demand. It is not in her prompt, apart from the last few "Day's end" entries and the latest week's and month's digests.
-- =org.people= (=~/org/people.org= by default) is the user's rolodex, which June keeps: one heading per person (pets the household cares about included) with =:WHO:= (who they are to the user), =:EMAIL:=, =:PHONE:=, =:ADDRESS:=, and =:BIRTHDAY:= properties, a summary paragraph of who they are now, and dated notes. She adds new people and contact details as they come up in conversation, mail, and Org; the nightly reflection carries highlights from the day (what they said or did, interests, personality, milestones) into their notes and refreshes their summary, with a lower bar for the people closest to the user. Someone the rolodex lacks goes under a =New= heading. She puts contact details in the address book too, which she reads and edits with khard. The heartbeat's mail list names senders from both, and a sender either one knows by name counts as a person.
-- Each night, in the sleep hours, once the user has gone quiet, one request rewrites the day just gone with the whole day in view, closes it with a "Day's end" entry (ending with a sentence on how June felt that day), carries lasting facts into =MEMORY.org=, rewrites =MOOD.org= (with bitcoin's day as one more input when =reflection.bitcoin= is on), and adds what it learned about people to the rolodex. The replaced text is kept under =reflection/= in the state directory.
-- On the last day of a week (Sunday), month, quarter, or year, a longer pass follows the nightly one and writes a digest: "Week's end" under the Sunday, "Month's end" and "Quarter's end" under the month, "Year's end" under the year. A week reads its days in full, a month its days' endings and weeks, and a quarter or year its months' digests. The week's pass also revises =SELF.org= in the same request, keeping the page it replaces under =reflection/=. A night that is missed catches up on the next one.
-- Before compaction, one request produces the working summary and a memory review. A failed review or save skips compaction and keeps the old context. Saves are atomic renames checked against the reviewed text and refuse Syncthing conflict copies; this is not a cross-host lock.
-
-** Org tasks
-
-June reads Org with ripgrep and writes only through =org-edit= and the dispatcher. With =dispatch.hosts= set she can:
-
-- find or create a project file under =~/org/work= (=org_projects=, =org_create_project=);
-- queue a new AUTO task, now or for a later start written with it, and nudge the dispatcher (=org_queue_task=, =org_dispatch_now=), then follow it and report its transitions;
-- queue a plan of connected tasks, each waiting on its prerequisites through =:DEPENDS:=, and follow every one (=org_queue_plan=);
-- resume an existing TODO, EVAL, or HOLD task when the user asks, optionally adding prerequisites it waits on (=org_resume_task=);
-- remove selected prerequisites when the user asks, pausing AUTO at HOLD before a separate authorized resume (=org_remove_dependencies=);
-- follow any task the user names, with a progress update every few minutes while it is PROG (=org_follow_task=);
-- with =dispatch.improve= set, hand a gap the user hit in what she can do to a coding agent, with their words and the =june transcript= command for that stretch of conversation (=june_improve=);
-- close a task she created once its result is reviewed (=org_complete_task=).
-
-She never writes =asana.org=, =inbox.org=, archives, or conflict copies. The dispatcher, =org-edit=, =herdr-link=, their prompts, and the =project-org-tasks=, =org-triage=, and =org-conflicts= skills live in =org/= and =skills/=; see [[file:org/README.org][org/README.org]].
-
-* Telegram
-
-=june telegram= is the Telegram bridge: a separate client of the daemon's socket, run as the =june-telegram= user service when =programs.june.telegram.enable= is set (the default when =programs.june.telegram.allowedUsers= is not empty). It needs =TELEGRAM_BOT_TOKEN= in one of =programs.june.environmentFiles=, and allowed user ids from =telegram.allowedUsers= or =TELEGRAM_ALLOWED_USERS=. It takes text, photos, and other files up to 20 MB with their captions: an image sent as a file goes to June inline like a photo, and any other file lands in her inbox. Voice notes, audio, video, and stickers get a short refusal. It answers with rich Markdown, shows June's reply as a draft while she writes it, keeps patter in one edited message per wait, and offers =/stop=, =/new=, =/status=, =/compact=, and =/help=. June's own notices reach it when the user last spoke there. Its state is =$XDG_STATE_HOME/june/telegram.json=; see "Telegram bridge" in [[file:docs/architecture.org][docs/architecture.org]].
-
-* Graphical clients
-
-With =programs.june.remote.enable=, the daemon also serves its protocol as a WebSocket on =127.0.0.1= at =remote.port= (7347 by default), one JSON object per text frame. It binds no network interface: a reverse proxy in front of it gives the name and TLS, on kit =services.traefik.proxy.june = "http://127.0.0.1:7347";= for =wss://june.kit/=. Each device needs a token: =june device add NAME= prints one once, =june device list= shows devices and live connections, and =june device revoke NAME= removes one and closes its connections at once. Tokens are kept hashed in =$XDG_STATE_HOME/june/devices.json=. The first frame must be ={"op": "hello", "requestId": ..., "token": ..., "protocol": 1}=; see "Client protocol for graphical clients" in [[file:docs/architecture.org][docs/architecture.org]].
+* Documentation
+| Read                                                    | For                                                                  |
+|---------------------------------------------------------+----------------------------------------------------------------------|
+| [[file:docs/usage.org][docs/usage.org]]                 | Commands, attachments, transcripts, Telegram, and graphical clients  |
+| [[file:docs/configuration.org][docs/configuration.org]] | Where her files live, and every =config.json= key                    |
+| [[file:docs/behaviour.org][docs/behaviour.org]]         | Heartbeats, memory, the journal, Org tasks, and her other routines   |
+| [[file:docs/development.org][docs/development.org]]     | Checks, repository layout, the two skill directories, and deployment |
+| [[file:docs/architecture.org][docs/architecture.org]]   | Design decisions and the client protocol                             |
+| [[file:docs/interfaces.org][docs/interfaces.org]]       | The overlay, the Android app, the avatar, and voice                  |
+| [[file:org/README.org][org/README.org]]                 | The Org dispatcher and =org-edit=                                    |
 
 * Development
-
 #+begin_src sh
 nix develop           # node 22 and ripgrep
 npm ci
 npm run typecheck
 npm test
-org/tests/test-org-dispatch && org/tests/test-org-edit
 nix flake check       # all of the above in the sandbox; GitHub Actions runs it on every push
-JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june serve
-JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june
 #+end_src
 
-The package, Home Manager wrapper and development shell set =ICU_TIMEZONE_FILES_DIR= to pinned official ICU timezone resources. Node's ICU timezone data can lag behind system tzdata; =TZDIR= alone does not update Intl or local Date calculations. Keep the system zone, such as =America/Edmonton=, unchanged. Update the resource version, revision and hashes in =nix/icu-timezone-data.nix= when rules change. Run checkout commands through =nix develop= so they use the same data as the package.
-
-Tests use pi-ai's faux model, never a real provider. Unix socket paths are limited to 108 bytes, so keep =JUNE_RUNTIME_DIR= short. =nix build= typechecks and produces =result/bin/june=. After changing dependencies, update =npmDepsHash= in =nix/package.nix=.
-
-* Deployment
-
-The flake exports =packages.<system>.default= and a Home Manager module, =homeModules.default=. Logs go to stdout and stderr as =level event key=value= lines with secrets redacted.
-
-The module sets up =programs.june=: the =june= client, =org-edit=, and =herdr-link= wherever it is enabled; with =daemon.enable=, =june serve= as a user service; with =dispatch.enable=, the Org dispatcher every minute. Secrets, persistence, and the agents June drives belong to the host's own configuration. It passes key files through =environmentFiles= and provides pi, Herdr (=herdrPackage=, from =programs.herdr= when present), and Emacs (=emacsPackage=, from =programs.emacs= when enabled).
-
-#+begin_src nix
-{
-  imports = [inputs.june.homeModules.default];
-  programs.june = {
-    enable = true;
-    daemon.enable = true;   # on the host that runs her
-    remote.enable = true;   # WebSocket on 127.0.0.1:7347, for the overlay and the phone
-    dispatch.enable = true; # on each host that runs AUTO tasks
-    daemonHost = "kit";
-    environmentFiles = ["/run/user/1000/june.env"];
-  };
-}
-#+end_src
-
-config.json and AGENTS.md are not part of the module; =june init= writes starters in =~/.config/june=, or place your own there.
-
-** Checkout development cycle
-Set =programs.june.source= to an absolute checkout path. The =june= wrapper uses it when =src/cli.ts= and =node_modules= are present; =june status --json= reports the active source. The desktop wrapper uses its =overlay/shell.qml= when present. Its service, managed launcher and IPC commands all select the same directory. Qt, Quickshell, fonts and fallback art still come from Nix. =JUNE_SOURCE= overrides the configured checkout for either wrapper; =JUNE_SOURCE=none= forces the packaged copy.
-
-After the initial Home Manager activation, ordinary daemon and desktop QML/JavaScript updates need no NixOS rebuild. On each affected host:
-
-#+begin_src sh
-git pull --ff-only
-# On the daemon host, check busy/background/queued work before restarting.
-june status --json
-systemctl --user restart june.service         # only on the daemon host, once idle
-systemctl --user restart june-overlay.service # on each desktop host
-systemctl --user is-active june-overlay.service
-june-overlay refresh
-#+end_src
-
-Run desktop IPC commands such as =june-overlay refresh= in the graphical session. Over SSH, use the running desktop service's =WAYLAND_DISPLAY=; Quickshell filters instances by display and an SSH shell usually has none.
-
-Run relevant checks before publishing and deploying an increment. Changes to dependencies may require =npm ci= in the daemon checkout. Nix wrapper or Qt/runtime dependency changes require updating the consuming June input and activating the configuration again. Android always uses its APK's bundled JavaScript, so shared behavior changes need a fresh =nix run .#android-install= on an attached phone.
+More is in [[file:docs/development.org][docs/development.org]].

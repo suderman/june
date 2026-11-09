@@ -1,0 +1,56 @@
+#+TITLE: Using June
+
+The commands and clients you use to talk to June. For setup see [[file:configuration.org][configuration]]; for what she does on her own see [[file:behaviour.org][behaviour]].
+
+* Commands
+#+begin_src sh
+june                 # terminal client attached to the primary conversation
+june ask "What are my agents doing?"
+june ask --json "..."    # {"requestId","status","text","reason"}
+echo "..." | june ask -
+june status [--json] # daemon, model, and conversation state; no model call
+june transcript --since 16:20 --detail  # the conversation as text; see below
+june usage [--since WHEN] [--json]      # what June uses, and her art picks
+june device add NAME # allow a device on the WebSocket; also list, revoke
+june doctor          # configuration and dependency checks
+june init [NAME]     # copy the starting files into place
+june serve           # the daemon
+june telegram        # the Telegram bridge, a client of the daemon
+#+end_src
+
+Exit codes: 0 answered, 1 unanswered or failed, 2 usage, 3 daemon not running. In the client, Enter sends (as a steer while June is working), Shift+Enter queues a follow-up, Alt+Enter starts a new line, Up and Down recall earlier prompts, Esc runs =/stop=, Ctrl+D detaches.
+
+* Attach images
+To attach a screenshot in the terminal client, press Ctrl+V or Shift+Insert on a Wayland desktop. June inserts an =[image N]= marker; add a message or send the image alone. Delete the marker to leave it out. Text on the clipboard still pastes as text. Clipboard access uses =wl-paste= from =wl-clipboard=, included in the Nix package. If the terminal handles Shift+Insert itself, configure that key to send Ctrl+V to June.
+
+Pasting an image file path also attaches it. Quote paths with spaces or escape the spaces with backslashes. Supported files are PNG, JPEG, WebP, GIF, and BMP. Up to ten images can accompany one message, with a 20 MiB limit per source file and 20 MiB total after preparation. Images are resized to fit the model and stored in the conversation; the transcript shows their count. A missing or invalid file, or a text-only model, leaves the draft unsent. Clipboard markers recalled from history need a fresh paste. This attachment handling is for the interactive client, not =june ask=.
+
+With Herdr, Ctrl+V can upload a clipboard image from the connecting machine and paste its path on the daemon host. June attaches that file through the same image-path handling; she does not need direct access to the connecting machine's clipboard. Herdr must intercept the paste key for this upload, so June's Shift+Insert binding alone does not add Shift+Insert uploads to Herdr. Over plain SSH without a clipboard-uploading client, paste a path to an image already on the daemon host. June refuses direct clipboard access over SSH rather than read the daemon host's unrelated clipboard.
+
+* Read the conversation
+=june transcript= prints the recent conversation as text for a reader outside the terminal, such as a worker looking into something June could not do. It shows the last 200 entries by default, or the last =--last N=, or those since =--since= =30m=, =2h=, =1d=, =16:20=, or a date. The plain view is what the terminal shows, with one line per thinking block and each tool call; =--detail= adds her full thinking, tool arguments and output (clipped at 2,000 characters), and her private heartbeat, watch, work, and follow looks, marked private. =--json= prints the raw entries. It reads through the daemon socket, so the conversation stays on the daemon's host; elsewhere it runs there over SSH, as =june ask= does.
+
+=june transcript --search WORDS= searches June's whole timeline, back to her first day, newest first: the user's messages exactly as sent, her replies, patter, and one line per tool call, each with its entry id. Every word must appear, in any case, and a "quoted phrase" as it is; =--since=, =--until=, =--kinds user,june,patter,action,note= and =--last N= narrow it, and =--oldest= searches from the first day forward, for when something was first said. =--around ID [--before N] [--after N]= shows the conversation around an entry. =--hide ID[-ID]=, =--unhide= and =--hidden= leave entries out of the timeline, transcripts and views; they stay in the database. June searches the same timeline with her =timeline= tool.
+
+* Slash commands
+The terminal client and =june ask= share these slash commands:
+
+| Command                   | Effect                                                                                 |
+|---------------------------+----------------------------------------------------------------------------------------|
+| =/new=                    | Stop the run, drop queued messages, start a fresh context. History stays in storage. |
+| =/stop=                   | Stop the current run; queued messages continue.                                        |
+| =/compact [instructions]= | Compact the context now.                                                               |
+| =/status=                 | Model, state, queue, context use, and spend.                                           |
+| =/help=                   | List the commands.                                                                     |
+
+The terminal client and =june ask= also support =/reload=, which rescans the skill directories and rereads =SOUL.org=, =MEMORY.org=, and =AGENTS.md= without a model call or restart. Code, =config.json=, provider, and environment changes need a daemon restart.
+
+There is one conversation, so =/new= and =/compact= from any surface affect all of them. Detaching or losing the connection never stops work, and the client reconnects by itself. From another machine, =june= runs on the daemon host over SSH (see =JUNE_DAEMON_HOST=).
+
+* Telegram
+=june telegram= is the Telegram bridge: a separate client of the daemon's socket, run as the =june-telegram= user service when =programs.june.telegram.enable= is set (the default when =programs.june.telegram.allowedUsers= is not empty). It needs =TELEGRAM_BOT_TOKEN= in one of =programs.june.environmentFiles=, and allowed user ids from =telegram.allowedUsers= or =TELEGRAM_ALLOWED_USERS=. It takes text, photos, and other files up to 20 MB with their captions: an image sent as a file goes to June inline like a photo, and any other file lands in her inbox. Voice notes, audio, video, and stickers get a short refusal. It answers with rich Markdown, shows June's reply as a draft while she writes it, keeps patter in one edited message per wait, and offers =/stop=, =/new=, =/status=, =/compact=, and =/help=. June's own notices reach it when the user last spoke there. Its state is =$XDG_STATE_HOME/june/telegram.json=; see "Telegram bridge" in [[file:architecture.org][architecture]].
+
+* Graphical clients
+With =programs.june.remote.enable=, the daemon also serves its protocol as a WebSocket on =127.0.0.1= at =remote.port= (7347 by default), one JSON object per text frame. It binds no network interface: a reverse proxy in front of it gives the name and TLS, on kit =services.traefik.proxy.june = "http://127.0.0.1:7347";= for =wss://june.kit/=. Each device needs a token: =june device add NAME= prints one once, =june device list= shows devices and live connections, and =june device revoke NAME= removes one and closes its connections at once. Tokens are kept hashed in =$XDG_STATE_HOME/june/devices.json=. The first frame must be ={"op": "hello", "requestId": ..., "token": ..., "protocol": 1}=; see "Client protocol for graphical clients" in [[file:architecture.org][architecture]].
+
+The desktop client is a Hyprland overlay, enabled per host with =programs.june.overlay.enable=, =url=, and =tokenFile=. The phone client is an Android app, installed from the flake with =nix run .#android-install=. Both are designed in [[file:interfaces.org][interfaces]].

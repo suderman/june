@@ -1,0 +1,81 @@
+#+TITLE: Developing and deploying June
+
+* Development
+#+begin_src sh
+nix develop           # node 22 and ripgrep
+npm ci
+npm run typecheck
+npm test
+org/tests/test-org-dispatch && org/tests/test-org-edit
+nix flake check       # all of the above in the sandbox; GitHub Actions runs it on every push
+JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june serve
+JUNE_STATE_DIR=/tmp/june-dev JUNE_RUNTIME_DIR=$XDG_RUNTIME_DIR/june-dev bin/june
+#+end_src
+
+The package, Home Manager wrapper and development shell set =ICU_TIMEZONE_FILES_DIR= to pinned official ICU timezone resources. Node's ICU timezone data can lag behind system tzdata; =TZDIR= alone does not update Intl or local Date calculations. Keep the system zone, such as =America/Edmonton=, unchanged. Update the resource version, revision and hashes in =nix/icu-timezone-data.nix= when rules change. Run checkout commands through =nix develop= so they use the same data as the package.
+
+Tests use pi-ai's faux model, never a real provider. Unix socket paths are limited to 108 bytes, so keep =JUNE_RUNTIME_DIR= short. =nix build= typechecks and produces =result/bin/june=. After changing dependencies, update =npmDepsHash= in =nix/package.nix=.
+
+* Repository layout
+| Path              | Holds                                                                             |
+|-------------------+-----------------------------------------------------------------------------------|
+| =src/=            | The daemon, the terminal client, the Telegram bridge, and June's tools            |
+| =overlay/=        | The Hyprland overlay, and the panel layout logic shared with the phone            |
+| =android/=        | The Android app                                                                   |
+| =org/=            | The Org dispatcher and =org-edit=; see [[file:../org/README.org][org/README.org]] |
+| =art/=            | =june-art=, which finishes generated art and drives ComfyUI                       |
+| =skills/=         | Skills that ship with June                                                        |
+| =.agents/skills/= | Skills for working on this repository                                             |
+| =templates/=      | Starting files, and the base avatar set                                           |
+| =nix/=            | The packages and the Home Manager module                                          |
+| =docs/=           | These notes                                                                       |
+
+* The two skill directories
+The two directories differ in what ships. =skills/= is part of June: the Nix package copies it, =programs.june= installs it to =~/.config/june/skills=, and every install needs it, because June's task handling relies on those skills. =~/.agents/skills.json= lists each one with two paths, the checkout first and the installed copy second.
+
+=.agents/skills/= is tooling for working on this repository and does not ship. =june-art= there depends on one personal setup: a GPU host, Org art records, and a canon sheet. Pi finds it from inside the checkout. Its entry in =skills.json= has the checkout path alone, which links it for agents working elsewhere on hosts that have the checkout.
+
+Put a skill in =skills/= when a June install needs it, and in =.agents/skills/= when only work on this repository does.
+
+* Art tooling
+=nix run .#art -- run= drives ComfyUI with a budget, a ledger, and checks on each graph. =nix run .#art -- colours= applies colour fixes to a set of poses. Both are described in =.agents/skills/june-art=, along with the runbooks and the lessons from earlier runs. Finished art lives outside the repository.
+
+* Deployment
+The flake exports =packages.<system>.default= and a Home Manager module, =homeModules.default=. Logs go to stdout and stderr as =level event key=value= lines with secrets redacted.
+
+The module sets up =programs.june=: the =june= client, =org-edit=, and =herdr-link= wherever it is enabled; with =daemon.enable=, =june serve= as a user service; with =dispatch.enable=, the Org dispatcher every minute. Secrets, persistence, and the agents June drives belong to the host's own configuration. It passes key files through =environmentFiles= and provides pi, Herdr (=herdrPackage=, from =programs.herdr= when present), and Emacs (=emacsPackage=, from =programs.emacs= when enabled).
+
+#+begin_src nix
+{
+  imports = [inputs.june.homeModules.default];
+  programs.june = {
+    enable = true;
+    daemon.enable = true;   # on the host that runs her
+    remote.enable = true;   # WebSocket on 127.0.0.1:7347, for the overlay and the phone
+    dispatch.enable = true; # on each host that runs AUTO tasks
+    daemonHost = "kit";
+    environmentFiles = ["/run/user/1000/june.env"];
+  };
+}
+#+end_src
+
+config.json and AGENTS.md are not part of the module; =june init= writes starters in =~/.config/june=, or place your own there.
+
+* Checkout development cycle
+Set =programs.june.source= to an absolute checkout path. The =june= wrapper uses it when =src/cli.ts= and =node_modules= are present; =june status --json= reports the active source. The desktop wrapper uses its =overlay/shell.qml= when present. Its service, managed launcher and IPC commands all select the same directory. Qt, Quickshell, fonts and fallback art still come from Nix. =JUNE_SOURCE= overrides the configured checkout for either wrapper; =JUNE_SOURCE=none= forces the packaged copy.
+
+After the initial Home Manager activation, ordinary daemon and desktop QML/JavaScript updates need no NixOS rebuild. On each affected host:
+
+#+begin_src sh
+git pull --ff-only
+# On the daemon host, check busy/background/queued work before restarting.
+june status --json
+systemctl --user restart june.service         # only on the daemon host, once idle
+systemctl --user restart june-overlay.service # on each desktop host
+systemctl --user is-active june-overlay.service
+june-overlay refresh
+#+end_src
+
+Run desktop IPC commands such as =june-overlay refresh= in the graphical session. Over SSH, use the running desktop service's =WAYLAND_DISPLAY=; Quickshell filters instances by display and an SSH shell usually has none.
+
+Run relevant checks before publishing and deploying an increment. Changes to dependencies may require =npm ci= in the daemon checkout. Nix wrapper or Qt/runtime dependency changes require updating the consuming June input and activating the configuration again. Android always uses its APK's bundled JavaScript, so shared behavior changes need a fresh =nix run .#android-install= on an attached phone.
