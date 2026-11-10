@@ -4,14 +4,17 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { WebSocket } from "ws";
 // @ts-expect-error The desktop client's modules are plain JavaScript, shared with QML.
 import { panels } from "../desktop/strip.mjs";
 // @ts-expect-error As above.
 import { lines as consoleLines } from "../desktop/console.mjs";
 import { inboxFile } from "../src/daemon.ts";
 import { shownFiles } from "../src/shown.ts";
+import { Client, type Reply } from "../src/protocol.ts";
+import { applyChanges, diff, fold, PRIVATE, type ViewItem } from "../src/transcript.ts";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
-import { ask, attachView, openTestDaemon, tempDir, until } from "./helpers.ts";
+import { ask, attachView, openTestDaemon, routed, tempDir, until } from "./helpers.ts";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGP4z8DAAMIM/4EAAB/uBfsL2WiLAAAAAElFTkSuQmCC", "base64");
 
@@ -56,6 +59,82 @@ test("June shows a picture and a snippet beside her reply: the view draws them o
 	assert.equal(card.length, 1, "shows in a row make one card");
 	assert.deepEqual(card[0].files.map((f: any) => [f.id, f.n, f.name, f.preview]).sort(), shown.map((i) => [i.id, 0, i.kind === "shown" ? i.files[0]!.name : "", i.kind === "shown" && i.files[0]!.mimeType === "image/png" ? "picture" : "text"]).sort(), "each file keeps the show it came from, for its address");
 	assert.ok(consoleLines(panel).some((l: any) => l.text === "shown: snippet.nix (29 B)"), "the console says it in words");
+});
+
+test("explicit show results are public during private looks, without exposing their tools or inputs", () => {
+	const file = { name: "panel.png", mimeType: "image/png", size: PNG.length, path: "/inbox/panel.png" };
+	const result = (id: number, toolName = "show", isError = false, text = `[shown ${JSON.stringify(file)}]`) => ({
+		id, kind: "pi.tool-result", model: [{ toolCallId: `c${id}`, toolName, isError, content: [{ type: "text", text }] }],
+	});
+	for (const source of PRIVATE) for (const legacy of [false, true]) {
+		const input = legacy ? { id: 1, kind: "pi.user", model: [{ content: `[${source}] private report` }] } : { id: 1, kind: "june.input", data: { source, text: "private report" } };
+		const entries = [input, result(2), result(3, "show", true), result(4, "bash"), result(5, "show", false, "no marker")];
+		const before = fold([input], {});
+		const normal = fold(entries, {});
+		const detailed = fold(entries, {}, false, { detail: true });
+		const expected = [{ kind: "shown", id: "2", files: [{ name: file.name, mimeType: file.mimeType, size: file.size }] }];
+		assert.deepEqual(normal.items, expected, `${source}, legacy=${legacy}: only the explicit successful show is public, even without a reply`);
+		assert.deepEqual(detailed.items.filter(i => i.kind === "shown"), expected);
+		assert.ok(detailed.items.filter(i => i.kind !== "shown").every(i => "private" in i && i.private));
+		assert.deepEqual(applyChanges(before.items, diff(before.items, normal.items, new Map())), normal.items);
+		assert.deepEqual(fold(entries, {}), normal, "replay is stable");
+	}
+});
+
+test("a work report shows two pictures beside the reply, through live updates, detail and reconnect", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const pictures = [join(tmp.dir, "desktop.png"), join(tmp.dir, "mobile.png")];
+	await Promise.all(pictures.map(path => writeFile(path, PNG)));
+	const faux = fauxProvider();
+	faux.setResponses(routed([
+		fauxAssistantMessage([fauxToolCall("work", { brief: "Prepare the pictures." })], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Getting the pictures."),
+		fauxAssistantMessage([...pictures.map(path => fauxToolCall("show", { path })), fauxToolCall("show", { path: join(tmp.dir, "gone.png") })], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Here are both pictures."),
+	], [fauxAssistantMessage("The pictures are ready.")]));
+	const daemon = await openTestDaemon({ ...tmp, faux, config: { remote: { port: 0 } } });
+	t.after(() => daemon.close());
+	const view = await attachView(tmp.paths.socket);
+	t.after(() => view.close());
+	await ask(tmp.paths.socket, "show both pictures", "work-pictures", "gui");
+	await until(() => view.items().some(i => i.kind === "assistant" && i.text === "Here are both pictures."));
+	const shown = view.items().filter(i => i.kind === "shown");
+	assert.equal(shown.length, 2);
+	assert.ok(shown.every(i => !i.private));
+	assert.ok(!view.items().some(i => i.kind === "tool" && i.name === "show"), "private tool calls and failures stay hidden");
+	const cards = (items: readonly ViewItem[]) => panels(items).flatMap((p: any) => p.elements).filter((e: any) => e.kind === "shown");
+	const files = cards(view.items()).flatMap((e: any) => e.files);
+	assert.deepEqual(files.map((f: any) => f.name).sort(), ["desktop.png", "mobile.png"]);
+	assert.ok(files.every((f: any) => f.preview === "picture"));
+	const full = await view.detail(true);
+	assert.equal(full.type, "view");
+	assert.deepEqual(view.items().filter(i => i.kind === "shown"), shown);
+	assert.deepEqual(cards(view.items()), cards(shown), "detail does not hide or duplicate the cards");
+	await view.detail(false);
+	const again = await attachView(tmp.paths.socket);
+	t.after(() => again.close());
+	assert.deepEqual(again.items(), view.items(), "reconnect recovers both cards without rerunning show");
+
+	// A paired fixture device fetches the bytes through the real HTTP file route.
+	const client = await Client.open(tmp.paths.socket);
+	t.after(() => client.close());
+	const added = await client.request({ op: "device", requestId: "pair", action: "add", name: "show-probe" });
+	assert.ok(added.type === "devices" && added.token);
+	const port = (await daemon.status()).remote!.port;
+	const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
+	t.after(() => ws.terminate());
+	await new Promise<void>(resolve => ws.once("open", resolve));
+	const hello = new Promise<Reply>(resolve => ws.once("message", data => resolve(JSON.parse(data.toString()))));
+	ws.send(JSON.stringify({ op: "hello", requestId: "hello", protocol: 1, token: added.token }));
+	const reply = await hello;
+	assert.ok(reply.type === "hello" && reply.attached);
+	for (const item of shown) {
+		const response: Response = await fetch(`http://127.0.0.1:${port}${reply.attached}${item.id}/file/0`);
+		assert.equal(response.status, 200);
+		assert.equal(response.headers.get("content-type"), "image/png");
+		assert.deepEqual(Buffer.from(await response.arrayBuffer()), PNG);
+	}
 });
 
 test("a text file without a known extension shows as text, and a path that is not there fails plainly", async (t) => {

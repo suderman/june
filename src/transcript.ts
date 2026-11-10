@@ -11,7 +11,7 @@ import { shownFiles } from "./shown.ts";
 export const QUIET = "QUIET";
 export const isQuiet = (text: string) => /^\s*QUIET\.?\s*$/i.test(text);
 
-/** June's own looks, by their june.input source or [tag]: only a real message to the user shows, never the prompt or her tools. */
+/** June's own looks, by their june.input source or [tag]: only her messages and explicitly shown files are public. */
 export const PRIVATE = new Set(["heartbeat", "watch", "work", "follow"]);
 
 /** June's own inputs whose answer goes where the notice was routed, recorded as `surface` in its june.input data. */
@@ -108,7 +108,8 @@ type Block = { type: string; text?: string; thinking?: string; name?: string; ar
 /**
  * Fold the entries a client holds and the view's documents into items. Inside one of June's private looks (a heartbeat,
  * a watch or work report, a followed task) only her final words show, and only when they are a message rather than the
- * quiet answer; her tools, thinking, and streaming reply stay out, unless `detail` asks for them, marked private.
+ * quiet answer. Explicitly shown files are public too; her tools, thinking, and streaming reply stay out, unless
+ * `detail` asks for them, marked private.
  */
 export function fold(entries: readonly Entry[], docs: Readonly<Record<string, unknown>>, earlier = false, options: FoldOptions = {}): Folded {
 	const detail = options.detail === true;
@@ -218,18 +219,20 @@ export function fold(entries: readonly Entry[], docs: Readonly<Record<string, un
 				break;
 			}
 			case "pi.tool-result": {
-				if (hidden && !detail) break;
-				const callId = String(message?.toolCallId ?? id);
-				const status = message?.isError ? ("error" as const) : ("done" as const);
 				const output = textOf(message?.content);
-				const error = message?.isError ? output.split("\n")[0] : undefined;
-				const done = { status, ...(error ? { error } : {}), ...(detail ? { output } : {}) };
-				const known = tools.get(callId);
-				if (known !== undefined) Object.assign(known, done);
-				// The call itself is before the transcript the client holds.
-				else items.push({ kind: "tool", id: `call:${callId}`, name: message?.toolName ?? "tool", summary: "", ...done, ...mark(!hidden) });
+				if (!hidden || detail) {
+					const callId = String(message?.toolCallId ?? id);
+					const status = message?.isError ? ("error" as const) : ("done" as const);
+					const error = message?.isError ? output.split("\n")[0] : undefined;
+					const done = { status, ...(error ? { error } : {}), ...(detail ? { output } : {}) };
+					const known = tools.get(callId);
+					if (known !== undefined) Object.assign(known, done);
+					// The call itself is before the transcript the client holds.
+					else items.push({ kind: "tool", id: `call:${callId}`, name: message?.toolName ?? "tool", summary: "", ...done, ...mark(!hidden) });
+				}
+				// Show explicitly sends a file to the user, even when called while answering a private work report.
 				const shown = message?.toolName === "show" && !message?.isError ? shownFiles(output) : [];
-				if (shown.length > 0) items.push({ kind: "shown", id, files: shown.map((f) => ({ name: f.name, size: f.size, mimeType: f.mimeType, ...(f.language ? { language: f.language } : {}) })), ...mark(!hidden) });
+				if (shown.length > 0) items.push({ kind: "shown", id, files: shown.map((f) => ({ name: f.name, size: f.size, mimeType: f.mimeType, ...(f.language ? { language: f.language } : {}) })) });
 				break;
 			}
 			case "pi.reset":
