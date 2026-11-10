@@ -213,6 +213,8 @@ export type PlanRequest = {
 
 export type PlannedTask = { key: string; id: string; file: string; title: string; host: string; depends: string[] };
 
+export type LiveContent = { target: string; actions: string; limits: string };
+
 export type ResumeRequest = {
 	file: string;
 	heading: string;
@@ -222,6 +224,10 @@ export type ResumeRequest = {
 	agent?: string;
 	/** `id:UUID` prerequisites to add in the same save, so the task never sits AUTO without them. */
 	depends?: readonly string[];
+	/** Required when granting, retaining or revoking live-content approval. */
+	revision?: string;
+	/** Omit to retain approval for unchanged scope; "none" revokes it. Never grants code deployment. */
+	liveContent?: LiveContent | "none";
 	note: string;
 	key: string;
 };
@@ -440,7 +446,18 @@ export class Dispatch {
 		const task = await this.#org.read(request.file, request.heading);
 		const properties = task.text.split(/\n\*+ /, 1)[0]!;
 		const replay = properties.split("\n").some((line) => line.trim() === `:JUNE_REQUEST: ${request.key}`);
+		if (request.liveContent !== undefined && request.liveContent !== "none") {
+			for (const field of ["target", "actions", "limits"] as const) {
+				const value = request.liveContent[field];
+				if (typeof value !== "string" || !value.trim() || value.length > 4000 || /\p{Cc}/u.test(value))
+					throw new Error(`liveContent.${field} must be one non-empty line, at most 4000 characters`);
+			}
+		}
+		if (request.revision !== undefined && !/^[0-9a-f]{64}$/.test(request.revision)) throw new Error("revision must be the SHA256 returned by org_read_task");
 		if (!replay) {
+			if ((request.liveContent !== undefined || /^:LIVE_CONTENT(?:_SCOPE)?:/m.test(properties)) && !request.revision)
+				throw new Error("Live-content approval needs the fresh revision from org_read_task, including when retaining or revoking it");
+			if (request.revision && request.revision !== task.revision) throw new Error("task revision changed; read the task and Dialog again");
 			for (const host of new Set(task.herdrSessions.map((session) => session.host))) {
 				const agents = await herdr.agents(host);
 				if (agents.some((agent) => ["working", "blocked"].includes(agent.status) && task.herdrSessions.some((session) => session.host === host && session.session === agent.session)))
@@ -452,9 +469,13 @@ export class Dispatch {
 			"--request", request.key, "--host", request.host, ...(request.agent ? ["--agent", request.agent] : []),
 			// Only when asked, so a plain resume still works with an org-edit that predates --depends.
 			...(request.depends?.length ? ["--depends", request.depends.join(" ")] : []),
+			...(request.liveContent === undefined ? [] : ["--live-content", request.liveContent === "none" ? "none" : JSON.stringify(request.liveContent)]),
+			...(request.revision ? ["--revision", request.revision] : []),
 			"--note", request.note.trim(),
 		], 120_000).catch((error: Error) => {
 			// Parsing options precedes any edit, so an older org-edit refuses without writing.
+			if (/unknown option --(?:live-content|revision)/.test(error.message))
+				throw new Error(`The installed org-edit cannot carry scoped live-content approval yet and wrote nothing; ${user()} needs to update June's Nix input and activate the matching Org commands and prompts on all launching hosts. Do not retry without the permission fields or hand-edit protected properties.`);
 			if (/unknown option --depends/.test(error.message))
 				throw new Error(`The installed org-edit cannot add dependencies yet and wrote nothing; ${user()} needs to update June's Nix input and rebuild. Do not resume the task without them, since it would launch early.`);
 			throw error;
@@ -773,7 +794,7 @@ export function createDispatchExtension(
 			}),
 			defineTool({
 				name: "org_resume_task",
-				description: `When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and deploy off, and select one host. Refuse an active agent or an unconfirmed stop. To switch a running task, use org_stop_task first, never raw terminal keys or manual state edits; re-read after its confirmed stop, then pass the requested agent here. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work. To resume it later rather than now, first set its SCHEDULED with org_set_date while it is still TODO, EVAL, or HOLD, then resume: the dispatcher holds it until then. Never date a task that is already AUTO. When ${user()} wants it to wait for other tasks, pass their IDs in depends: org-edit adds them to :DEPENDS: in the same save that sets AUTO, after refusing missing or duplicate IDs, the task itself, and cycles, so it never launches early. The dispatcher then launches it only once every prerequisite is DONE, never at EVAL, and waiting costs nothing. Edges the task already has are kept. To remove selected edges, first use org_remove_dependencies, which pauses AUTO at HOLD; re-read scope and Dialog and resolve any prose gates before resuming.${agentNote}`,
+				description: `When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and code deployment off, and select one host. For explicitly approved live content work, pass liveContent with the exact target, allowed actions and limits, plus the fresh revision from org_read_task. This permits only those content operations, never a theme/plugin deploy, database push, system activation or install. The note must record the user's approval and identify any older production/manual-only gate it supersedes. Existing approval is retained only for unchanged ID, title, directory and Scope, and needs a fresh revision on each new resume; omit liveContent to retain it or pass none to revoke it. Re-read all scope, checklist and Dialog changes before retaining approval; material changes elsewhere need renewed confirmation. Changed scope or malformed approval is refused, never broadened silently. Do not ask again for approval already given for unchanged work. No approval is inferred from AUTO, a HOLD question, or a review verdict. Refuse an active agent or an unconfirmed stop. To switch a running task, use org_stop_task first, never raw terminal keys or manual state edits; re-read after its confirmed stop, then pass the requested agent here. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work. To resume it later rather than now, first set its SCHEDULED with org_set_date while it is still TODO, EVAL, or HOLD, then resume: the dispatcher holds it until then. Never date a task that is already AUTO. When ${user()} wants it to wait for other tasks, pass their IDs in depends: org-edit adds them to :DEPENDS: in the same save that sets AUTO, after refusing missing or duplicate IDs, the task itself, and cycles, so it never launches early. The dispatcher then launches it only once every prerequisite is DONE, never at EVAL, and waiting costs nothing. Edges the task already has are kept. To remove selected edges, first use org_remove_dependencies, which pauses AUTO at HOLD; re-read scope and Dialog and resolve any prose gates before resuming.${agentNote}`,
 				parameters: obj({
 					file: str({ description: "Org agenda file under ~/org" }),
 					heading: str({ description: "Exact title or id:UUID, as org_read_task accepts" }),
@@ -782,6 +803,12 @@ export function createDispatchExtension(
 					agent: agentParameter(`Only when ${user()} asks for a different agent: ${agents.join(" or ")}. Omit to keep the task's agent`),
 					note: str({ description: `One line recording ${user()}'s request and any answer or revised scope, naming ${user()} rather than writing you` }),
 					depends: opt(arr(str(), { description: "id:UUID of existing Org tasks that must be DONE before this one launches, read with org_read_task first; added to any it already has" })),
+					revision: opt(str({ description: "Exact org_read_task revision; required for granting, retaining or revoking scoped live-content approval" })),
+					liveContent: opt(union([lit("none"), obj({
+						target: str({ description: "Exact live site and named page/content/templates; no credentials" }),
+						actions: str({ description: "Only the content reads/writes, backups, targeted rollback, CSS/cache and verification the user approved" }),
+						limits: str({ description: "Preservation, backup/rollback requirements and exclusions; no code deploy, database push, activation or system install" }),
+					})], { description: "Only explicit user approval, including approval already recorded for unchanged scope. Omit to retain a valid grant; none revokes it. Each field is one line, at most 4000 characters" })),
 				}),
 				replay: "safe",
 				execute: async (args, api, context) => {

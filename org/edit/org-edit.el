@@ -174,13 +174,15 @@ For EVAL, DONE or HOLD, --headline LINE binds a fresh worker report to this writ
 June uses --request KEY --host HOST --note TEXT to resume a task once, --agent
 AGENT to change who runs it, and --depends \"id:A id:B\" to add prerequisites in
 the same save, so the dispatcher never sees the task AUTO without them.
+Scoped content approval uses --live-content JSON|none and --revision SHA256;
+it leaves DEPLOY=no and retains only approval bound to unchanged task scope.
 Coding workers must not set AUTO; that permission lives in instructions."
   (let* ((args command-line-args-left)
          (file (pop args)) (heading (pop args)) (state (upcase (or (pop args) "")))
-         expected request host agent note depends headline result)
+         expected request host agent note depends headline revision live-content grant result)
     (setq command-line-args-left nil)
     (unless (and file heading (not (string-empty-p state)))
-      (error "usage: org-edit todo FILE HEADING STATE [--expect STATE] [--headline LINE] [--request KEY --host HOST [--agent AGENT] [--depends REFS] --note TEXT]"))
+      (error "usage: org-edit todo FILE HEADING STATE [--expect STATE] [--headline LINE] [--request KEY --host HOST [--agent AGENT] [--depends REFS] [--revision SHA256] [--live-content JSON|none] --note TEXT]"))
     (while args
       (let ((flag (pop args)) (value (pop args)))
         (unless (and value (not (string-empty-p value))) (error "missing value for %s" flag))
@@ -192,10 +194,17 @@ Coding workers must not set AUTO; that permission lives in instructions."
           ("--note" (setq note value))
           ("--depends" (setq depends (split-string value)))
           ("--headline" (setq headline (org-dispatch--validate-headline value)))
+          ("--revision" (setq revision value))
+          ("--live-content" (setq live-content value))
           (_ (error "unknown option %s" flag)))))
     (when (and headline (not (member state '("EVAL" "DONE" "HOLD"))))
       (error "--headline is only for EVAL, DONE, or HOLD"))
-    (when (or request host agent note depends)
+    (when (and revision (not (string-match-p "\\`[0-9a-f]\\{64\\}\\'" revision)))
+      (error "revision must be SHA256 from org_read_task"))
+    (when (and live-content (not revision)) (error "live-content needs --revision from org_read_task"))
+    (when (and live-content (not (equal live-content "none")))
+      (setq grant (org-dispatch--parse-live-content live-content)))
+    (when (or request host agent note depends live-content revision)
       (unless (and (equal state "AUTO") request host note (member expected '("TODO" "EVAL" "HOLD")))
         (error "resuming needs AUTO, --expect TODO|EVAL|HOLD, --request, --host, and --note"))
       (unless (member host org-dispatch-hosts) (error "unknown dispatcher host %s" host))
@@ -213,6 +222,17 @@ Coding workers must not set AUTO; that permission lives in instructions."
          (unless replay
            (when (and expected (not (equal expected (org-get-todo-state))))
              (error "expected %s, found %s; read the task again" expected (org-get-todo-state)))
+           (when (and request (or (org-entry-get nil "LIVE_CONTENT") (org-entry-get nil "LIVE_CONTENT_SCOPE"))
+                      (not revision))
+             (error "retaining or revoking live-content approval needs --revision from org_read_task"))
+           (when (and revision
+                      (not (equal revision (secure-hash 'sha256 (encode-coding-string
+                                             (replace-regexp-in-string "\n+\\'" "" (org-dispatch--subtree-text)) 'utf-8)))))
+             (error "task revision changed; read the task and Dialog again"))
+           (when request
+             (if live-content
+                 (when grant (org-dispatch--live-content-scope))
+               (org-dispatch--live-content)))
            ;; Keywords are buffer-local, and a file may set its own.
            (unless (member state org-todo-keywords-1)
              (error "STATE is one of %s" (string-join org-todo-keywords-1 " ")))
@@ -236,8 +256,21 @@ Coding workers must not set AUTO; that permission lives in instructions."
              (org-entry-put nil "JUNE_REQUEST" request)
              (org-entry-put nil "REVIEW" "yes")
              (org-entry-put nil "DEPLOY" "no")
+             (when live-content
+               (if grant
+                   (progn
+                     (org-entry-put nil "LIVE_CONTENT" (decode-coding-string (json-serialize grant) 'utf-8))
+                     (org-entry-put nil "LIVE_CONTENT_SCOPE" (org-dispatch--live-content-scope)))
+                 (org-entry-delete nil "LIVE_CONTENT")
+                 (org-entry-delete nil "LIVE_CONTENT_SCOPE")))
              (when depends (org-entry-put nil "DEPENDS" (string-join depends " ")))
-             (org-dispatch--append "Dialog" (org-dispatch--entry "June" note)))
+             (org-dispatch--append "Dialog" (org-dispatch--entry "June" note))
+             (when live-content
+               (org-dispatch--append "Dialog" (org-dispatch--entry "June"
+                 (if grant
+                     (format "Scoped live-content approval: target %s; actions %s; limits %s. Code deployment remains forbidden."
+                             (alist-get 'target grant) (alist-get 'actions grant) (alist-get 'limits grant))
+                   "Scoped live-content approval revoked. Production access needs separate approval.")))))
            (org-dispatch--headline headline state)
            (org-todo state))
          (when request

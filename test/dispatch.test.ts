@@ -634,6 +634,115 @@ async function removalFixture() {
 	return { ...f, dispatch, options, run, remove, revision, init, runtime, bin };
 }
 
+const liveContent = {
+	target: "https://example.invalid/records/ and six new Elementor section templates",
+	actions: "Back up, reconcile current content, split the three tables into English/Français tabs, publish and verify; regenerate affected CSS/cache",
+	limits: "Preserve records, downloads and surrounding content; targeted rollback only; no staging, theme/plugin deploy, database push or client mail",
+};
+
+test("scoped live-content approval crosses real resume and prompt rendering without granting deploy", { skip: !hasEmacs }, async (t) => {
+	const f = await removalFixture();
+	t.after(f.cleanup);
+	const original = `* HOLD Live records\nSCHEDULED: <2026-11-10 Tue>\n:PROPERTIES:\n:ID: resume123\n:HOST: kit\n:AGENT: pi\n:DIR: ${f.dir}\n:END:\nHistorical manual-only publication gate.\n\n** Scope\nSplit the three live tables into language tabs.\n\n** Checklist\n- [ ] Back up and verify.\n\n** Dialog\n- Agent [2026-11-10 Tue 14:25]: Production access conflicts with the run policy.\n`;
+	await writeFile(f.project, original);
+	const resume = { file: request.file, heading: "id:resume123", expected: "HOLD" as const, host: "kit", note: "Alex approved this targeted live content edit, superseding the old manual-only gate, not a code deployment.", key: "inst:live1", liveContent };
+	await f.dispatch.resume({ ...resume, revision: await f.revision() }, idleHerdr);
+	const auto = await readFile(f.project, "utf8");
+	assert.match(auto, /^:DEPLOY: +no$/m);
+	assert.match(auto, /^:REVIEW: +yes$/m);
+	assert.match(auto, /^SCHEDULED: <2026-11-10 Tue>$/m);
+	assert.deepEqual(JSON.parse(/^:LIVE_CONTENT: +(.+)$/m.exec(auto)![1]!), liveContent);
+	assert.match(auto, /Historical manual-only publication gate/);
+	assert.match(auto, /- Agent .*Production access conflicts/);
+	assert.match(auto, /- June .*Scoped live-content approval.*example.invalid.*English\/Français/);
+	const render = () => execFileSync("emacs", ["-Q", "--batch", "-l", f.options.env.ORG_DISPATCH_EL, "--eval",
+		`(progn (find-file ${JSON.stringify(f.project)}) (org-mode) (goto-char (point-min)) (let ((task (org-dispatch--task))) (princ (org-dispatch--render "task" task (list (cons "DIALOG" (org-dispatch--dialog-block task t)))))))`,
+	], { ...f.options, env: { ...f.options.env, ORG_DISPATCH_PROMPTS: fileURLToPath(new URL("../org/prompts", import.meta.url)) } });
+	const prompt = render();
+	assert.match(prompt, /Scoped live-content authorization/);
+	for (const text of Object.values(liveContent)) assert.ok(prompt.includes(text));
+	assert.match(prompt, /Do not deploy code, push a database, activate, or install anything system-wide/);
+	assert.match(prompt, /already approved.*do not ask again/);
+	assert.match(prompt, /unless the scoped live-content authorization explicitly allows that action/);
+	assert.doesNotMatch(prompt, /Deploying is allowed/);
+	assert.doesNotMatch(prompt, /\{\{[A-Z]+\}\}/);
+	for (const altered of [
+		auto.replace("Live records", "Other records"),
+		auto.replace("resume123", "different-task"),
+		auto.replace(`:DIR: ${f.dir}`, ":DIR: /tmp"),
+		auto.replace(/^:LIVE_CONTENT_SCOPE:.*\n/m, ""),
+		auto.replace(/^:LIVE_CONTENT:.*$/m, ":LIVE_CONTENT: broken"),
+	]) {
+		await writeFile(f.project, altered);
+		assert.throws(render, /live-content/i);
+	}
+	await writeFile(f.project, auto);
+	// A replay after work finishes cannot regrant AUTO or overwrite newer scope/history.
+	f.run(["org-edit", "todo", f.project, resume.heading, "EVAL"]);
+	const evaluated = await readFile(f.project, "utf8");
+	await f.dispatch.resume({ ...resume, revision: "0".repeat(64) }, idleHerdr);
+	assert.equal(await readFile(f.project, "utf8"), evaluated);
+	// A fresh object/process preserves the grant for the same scope, with a fresh read.
+	await new Dispatch(new Org(f.root), f.config, async (argv) => f.run(argv)).resume({ ...resume, expected: "EVAL", liveContent: undefined, key: "inst:live2", revision: await f.revision() }, idleHerdr);
+	assert.ok(render().includes(liveContent.target));
+	f.run(["org-edit", "todo", f.project, resume.heading, "HOLD"]);
+	await writeFile(f.project, (await readFile(f.project, "utf8")).replace("Split the three live tables", "Replace all live tables"));
+	const changed = await readFile(f.project, "utf8");
+	await assert.rejects(f.dispatch.resume({ ...resume, liveContent: undefined, key: "inst:live3", revision: await f.revision() }, idleHerdr), /live-content.*scope changed/i);
+	assert.equal(await readFile(f.project, "utf8"), changed);
+	assert.throws(render, /live-content.*scope changed/i);
+	await f.dispatch.resume({ ...resume, key: "inst:live4", revision: await f.revision() }, idleHerdr);
+	assert.ok(render().includes(liveContent.target), "explicit reconfirmation binds approval to the new scope");
+	f.run(["org-edit", "todo", f.project, resume.heading, "HOLD"]);
+	await assert.rejects(f.dispatch.resume({ ...resume, liveContent: undefined, key: "inst:live5" }, idleHerdr), /revision/);
+	await f.dispatch.resume({ ...resume, liveContent: "none", key: "inst:live5", revision: await f.revision() }, idleHerdr);
+	const revoked = await readFile(f.project, "utf8");
+	assert.doesNotMatch(revoked, /^:LIVE_CONTENT/m);
+	assert.match(revoked, /Scoped live-content approval revoked/);
+	assert.match(render(), /Do not deploy, activate, or install anything system-wide/);
+	assert.doesNotMatch(render(), /Scoped live-content authorization/);
+});
+
+test("live-content resume fails closed for stale reads, bad grants and older installed commands", { skip: !hasEmacs }, async (t) => {
+	const f = await removalFixture();
+	t.after(f.cleanup);
+	const original = `* HOLD Live records\n:PROPERTIES:\n:ID: resume123\n:END:\n\n** Scope\nSplit tables.\n`;
+	await writeFile(f.project, original);
+	const resume = { file: request.file, heading: "id:resume123", expected: "HOLD" as const, host: "kit", note: "Alex approved only this targeted content edit.", key: "inst:live", liveContent };
+	for (const revision of [undefined, "bad", "0".repeat(64)]) {
+		await assert.rejects(f.dispatch.resume({ ...resume, revision }, idleHerdr), /revision|org_read_task/);
+		assert.equal(await readFile(f.project, "utf8"), original);
+	}
+	const revision = await f.revision();
+	for (const field of ["target", "actions", "limits"] as const) {
+		for (const bad of ["", "two\nlines", " ", "x\ry", "x\ty", "x".repeat(4001)]) {
+			await assert.rejects(f.dispatch.resume({ ...resume, revision, liveContent: { ...liveContent, [field]: bad } }, idleHerdr), /liveContent/);
+			assert.equal(await readFile(f.project, "utf8"), original);
+		}
+	}
+	// Exercise the protected CLI boundary directly, not just TypeScript validation.
+	const args = ["org-edit", "todo", f.project, resume.heading, "AUTO", "--expect", "HOLD", "--request", "cli:live", "--host", "kit", "--note", resume.note];
+	for (const value of ['{}', 'null', '[1,2,3]', '{"target":"x","actions":"y","limits":"z","deploy":true}', '{"target":"x","actions":"y","limits":"two\\nlines"}']) {
+		assert.throws(() => f.run([...args, "--revision", revision, "--live-content", value]), /live-content/);
+		assert.equal(await readFile(f.project, "utf8"), original);
+	}
+	assert.throws(() => f.run([...args, "--live-content", JSON.stringify(liveContent)]), /revision/);
+	assert.equal(await readFile(f.project, "utf8"), original);
+	assert.throws(() => f.run([...args, "--revision", "0".repeat(64), "--live-content", JSON.stringify(liveContent)]), /revision changed/);
+	assert.equal(await readFile(f.project, "utf8"), original);
+	const concurrent = `${original}\n** Dialog\n- Alex [2026-11-10 Tue 15:00]: Keep the newest record.\n`;
+	const racing = new Dispatch(new Org(f.root), f.config, async (argv) => {
+		await writeFile(f.project, concurrent);
+		return f.run(argv);
+	});
+	await assert.rejects(racing.resume({ ...resume, revision }, idleHerdr), /revision changed/);
+	assert.equal(await readFile(f.project, "utf8"), concurrent);
+	await writeFile(f.project, original);
+	const old = new Dispatch(new Org(f.root), f.config, async () => { throw new Error("unknown option --live-content"); });
+	await assert.rejects(old.resume({ ...resume, revision }, idleHerdr), /installed org-edit.*live-content.*wrote nothing/i);
+	assert.equal(await readFile(f.project, "utf8"), original);
+});
+
 test("June-created TODO ownership survives real resume, repeated runs and completion without claiming reused tasks", { skip: !hasEmacs }, async (t) => {
 	const f = await removalFixture();
 	t.after(f.cleanup);

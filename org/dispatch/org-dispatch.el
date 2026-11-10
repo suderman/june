@@ -12,7 +12,7 @@
 ;; naming a known host or agent fills it, else June's configured default, and
 ;; the dispatcher writes it when it claims the task, as it does ID. Once set,
 ;; tags are decoration. SCHEDULED delays a task; a repeater makes it recur.
-;; Other settings are properties: REVIEW, DEPLOY, BRANCH, MODEL, DIR, and
+;; Other settings are properties: REVIEW, DEPLOY, LIVE_CONTENT, BRANCH, MODEL, DIR, and
 ;; RETRY, the number of times an agent may return the task to AUTO later.
 ;; DEPENDS lists id:UUID prerequisites; every one must be DONE before launch.
 ;; While an agent works on it, a PROG task carries the :auto: tag.
@@ -484,6 +484,48 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
               (t (list :problem (format "no %s, and the default %s is not one of %s"
                                         property default (string-join known ", ")))))))))
 
+(defun org-dispatch--parse-live-content (text)
+  "Read the bounded content approval in TEXT, never a deployment flag."
+  (let ((grant (condition-case nil (json-parse-string text :object-type 'alist)
+                 (error (error "invalid live-content JSON")))))
+    (unless (and (listp grant) (= (length grant) 3) (seq-every-p #'consp grant)
+                 (seq-every-p (lambda (key)
+                               (let ((value (alist-get key grant)))
+                                 (and (stringp value) (<= (length value) 4000)
+                                      (not (string-empty-p (string-trim value)))
+                                      (not (string-match-p "[[:cntrl:]]" value)))))
+                             '(target actions limits)))
+      (error "live-content needs only target, actions and limits, each one non-empty line of at most 4000 characters"))
+    grant))
+
+(defun org-dispatch--live-content-scope ()
+  "Bind content approval to this task's ID, title, directory and unique Scope."
+  (let ((level (1+ (org-outline-level)))
+        (end (save-excursion (org-end-of-subtree t t)))
+        (count 0) scope)
+    (save-excursion
+      (forward-line 1)
+      (while (re-search-forward (format "^%s Scope[ \t]*$" (regexp-quote (make-string level ?*))) end t)
+        (setq count (1+ count))
+        (setq scope (string-trim (buffer-substring-no-properties
+                                 (line-beginning-position 2) (save-excursion (org-end-of-subtree t t)))))))
+    (unless (and (= count 1) (not (string-empty-p scope)))
+      (error "live-content approval needs one non-empty Scope section"))
+    (secure-hash 'sha256 (json-serialize (vector (org-entry-get nil "ID")
+                                                (org-get-heading t t t t)
+                                                (org-entry-get nil "DIR") scope)))))
+
+(defun org-dispatch--live-content ()
+  "Return valid saved approval, or refuse malformed or changed scope."
+  (let ((text (org-entry-get nil "LIVE_CONTENT"))
+        (scope (org-entry-get nil "LIVE_CONTENT_SCOPE")))
+    (when (or text scope)
+      (unless (and text scope) (error "incomplete live-content approval; reconfirm or revoke it"))
+      (let ((grant (org-dispatch--parse-live-content text)))
+        (unless (equal scope (org-dispatch--live-content-scope))
+          (error "live-content approval scope changed; reconfirm or revoke it"))
+        grant))))
+
 (defun org-dispatch--task ()
   "Describe the entry at point."
   (let* ((host (org-dispatch--resolve "HOST" org-dispatch-hosts
@@ -492,6 +534,8 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
                                        (org-dispatch--default "agent" "pi")))
          (section (org-dispatch--section-bounds "Sessions"))
          (dir (org-entry-get nil "DIR"))
+         (live-content (condition-case err (org-dispatch--live-content)
+                         (error (list (cons 'error (error-message-string err))))))
          sessions)
     ;; Only the Sessions section names this run's sessions; LOGBOOK holds past runs.
     (when section
@@ -509,7 +553,7 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
           :todo (org-get-todo-state)
           :host (plist-get host :value)
           :agent (plist-get agent :value)
-          :problem (or (plist-get host :problem) (plist-get agent :problem))
+          :problem (or (plist-get host :problem) (plist-get agent :problem) (alist-get 'error live-content))
           :fill (append (when (plist-get agent :fill) (list (cons "AGENT" (plist-get agent :value))))
                         (when (plist-get host :fill) (list (cons "HOST" (plist-get host :value)))))
           :scheduled (org-get-scheduled-time (point))
@@ -520,6 +564,7 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
           :review-loop (and (or (org-entry-get nil "DEV_REVIEW") (org-entry-get nil "REVIEW_PARENT")) t)
           :review (not (equal (downcase (or (org-entry-get nil "REVIEW") "yes")) "no"))
           :deploy (equal (downcase (or (org-entry-get nil "DEPLOY") "no")) "yes")
+          :live-content live-content
           :branch (org-entry-get nil "BRANCH")
           :model (or (org-entry-get nil "MODEL")
                      (when (equal (plist-get agent :value) "pi") org-dispatch-model))
@@ -925,6 +970,7 @@ and the durable no-nudge state for inspection."
   (eq 0 (call-process "git" nil nil nil "-C" dir "rev-parse" "--git-dir")))
 
 (defun org-dispatch--policy (task)
+  (when-let* ((err (alist-get 'error (plist-get task :live-content)))) (error "%s" err))
   (string-join
    (delq nil
          (list
@@ -941,9 +987,15 @@ and the durable no-nudge state for inspection."
                             where branch)
                   (format "- Commit %s and push it to the current branch, unless the task itself says not to." where))
               "- No repository belongs to this task; there is nothing to commit."))
-          (if (plist-get task :deploy)
-              "- Deploying is allowed when the task calls for it."
-            "- Do not deploy, activate, or install anything system-wide.")
+          (if-let* ((grant (plist-get task :live-content)))
+              (format (concat "- Scoped live-content authorization, already approved by Jon: do not ask again for these unchanged actions.\n"
+                              "  - Target: %s\n  - Allowed content operations: %s\n  - Limits: %s\n"
+                              "  - This approval supersedes older manual-only, ask-before-production and no-deploy wording only for these named content operations. Preserve all backup, current-content reconciliation, rollback and verification requirements. Hold if scope or approval is unclear or materially changed.\n"
+                              "  - Do not deploy code, push a database, activate, or install anything system-wide. Theme/plugin deployments and unrelated live changes remain forbidden. This grant does not waive review or permit client communications.")
+                      (alist-get 'target grant) (alist-get 'actions grant) (alist-get 'limits grant))
+            (if (plist-get task :deploy)
+                "- Deploying is allowed when the task calls for it."
+              "- Do not deploy, activate, or install anything system-wide."))
           (when (plist-get task :repeat)
             (concat "- This task repeats. The heading body is standing instructions: do not edit it"
                     " or add Scope, Checklist, or other sections. The finish note becomes the run's"
