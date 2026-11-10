@@ -37,3 +37,15 @@ Check her face, not just her body's lean. All four curious-standing-lean seeds o
 
 ** Correct the failed limb instruction without claiming the direction was fixed
 All four first pout seeds on 2026-11-09 put her hands behind her body. One four-seed retry explicitly placed both forearms across the blouse and each hand on the opposite upper arm, with hidden hands in the negative. All four drew visibly folded arms, but none achieved the requested looking-away face. Seed 103803 became =pout-standing-folded-front=, not the directional inventory entry. A successful hand correction is not evidence of successful yaw.
+
+** Use the reviewed side pair for a left-facing experiment
+The existing =june-directional-side-body.png= and =june-directional-side-face.png= inputs, paired with an upright head and nose pointing viewer-left, produced genuinely turned idle, wry and pout candidates in tall batch 2 on 2026-11-09. Selected seeds 112102, 112201 and 112302 retained June's outfit and headset without mirroring or new crops. This supports left yaw with that pair, not right yaw or a new reference family. Resolve its historical hashes through the later approved body/face promotion records before use.
+
+** Say where a facepalm touches
+The first four facepalm seeds in tall batch 2 rested the hand at her cheek or ear. One four-seed retry specified palm across the brow, fingers reaching the hairline and no cheek/ear support. Seed 113602 clearly performs the forehead gesture. The useful correction was contact location, not more seeds of the same prompt.
+
+** Closed eyes can break a bashful direct gaze, but change the feeling
+All four initial downcast-clasp seeds in tall batch 2 still looked at the viewer. One retry asked for a lowered head and closed eyes. Seed 113802 stopped the flirtatious eye contact, but its pinched mouth reads anxious rather than softly smiling. Report that tradeoff; successful gaze correction does not certify the intended emotion.
+
+** Specify a modest opening without adding another garment
+Tall batch 2 replaced the blouse's open-collar phrase with a modestly open neckline, collar open at the throat and chest covered by the blouse. The eleven selected poses kept the rose blouse without the deep opening of the first tall batch or a dark undershirt. Keep the identity and outfit wording otherwise unchanged.
