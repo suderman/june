@@ -23,6 +23,18 @@ import {
 import { Client, COMMANDS, parseCommand, type Reply } from "./protocol.ts";
 import { applyChanges, type ViewItem, type ViewState } from "./transcript.ts";
 import { orgToMarkdown } from "./org.ts";
+import { emacsCall, linkKind } from "../desktop/strip.mjs";
+import { runProcess, type Run } from "./tools/herdr.ts";
+
+/** Use the desktop's link rules and file arguments; never pass a link through a shell. */
+export async function openTuiLink(url: string, run: Run = runProcess): Promise<void> {
+	const kind = linkKind(url);
+	if (kind === null) throw new Error("June cannot open that kind of link");
+	let argv = ["xdg-open", url];
+	if (kind === "file") argv = emacsCall(url);
+	else if (kind === "herdr") argv = ["herdr-link", "jump", url];
+	await run(argv, 30_000);
+}
 
 /** A command's reply. Like a Telegram command reply, it is not part of the conversation; a reconnect drops it. */
 type CommandReply = { kind: "reply"; id: string; command: string; text: string };
@@ -206,7 +218,14 @@ class TranscriptView extends Container {
 }
 
 export async function runTui(socketPath: string): Promise<void> {
-	const tui = new TuiAltScreen(new ProcessTerminal(), false);
+	const tui = new TuiAltScreen(new ProcessTerminal(), false, undefined, {
+		openUrl: (url) => {
+			void openTuiLink(url).catch((error) => {
+				flash = `Link failed: ${error instanceof Error ? error.message : String(error)}`;
+				redraw();
+			});
+		},
+	});
 	const transcript = new Transcript();
 	const header = new Line();
 	const view = new TranscriptView();

@@ -22,7 +22,7 @@
   timezoneData = callPackage ./icu-timezone-data.nix {};
   src = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test ../skills];
+    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test ../skills ../desktop/strip.mjs ../desktop/strip.d.mts];
   };
   # The tests also cover org-dispatch and org-edit, whose Emacs Lisp lives beside the daemon.
   testSrc = lib.fileset.toSource {
@@ -48,7 +48,7 @@ in
       runHook preInstall
       npm prune --omit=dev --no-save
       mkdir -p $out/lib/june $out/bin
-      cp -r package.json src templates skills node_modules $out/lib/june/
+      cp -r package.json src templates skills desktop node_modules $out/lib/june/
       makeWrapper ${nodejs}/bin/node $out/bin/june \
         --set ICU_TIMEZONE_FILES_DIR ${timezoneData} \
         --add-flags "--disable-warning=ExperimentalWarning $out/lib/june/src/cli.ts" \

@@ -12,7 +12,27 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { orgToMarkdown } from "../src/org.ts";
 import { plain } from "../src/plain.ts";
 import { fold } from "../src/transcript.ts";
-import { compactingStatus, Transcript } from "../src/tui.ts";
+import { compactingStatus, openTuiLink, Transcript } from "../src/tui.ts";
+
+test("terminal clicks use desktop file routing, session jumps and web opening without a shell", async () => {
+	const calls: string[][] = [];
+	const run = async (argv: readonly string[]) => { calls.push([...argv]); return ""; };
+	await openTuiLink("file:~/org/notes & plans.org::*A heading", run);
+	await openTuiLink("file:/tmp/notes.org::x) (shell-command 'bad')", run);
+	await openTuiLink("herdr:kit/pi:00000000-0000-0000-0000-000000000000@w1:p2", run);
+	await openTuiLink("https://example.com/?q=a&b=c", run);
+	assert.deepEqual(calls, [
+		["emacsclient", "-r", "-n", "--eval", '(june-open "~/org/notes & plans.org" "*A heading")'],
+		["emacsclient", "-r", "-n", "--eval", '(june-open "/tmp/notes.org" "x) (shell-command \'bad\')")'],
+		["herdr-link", "jump", "herdr:kit/pi:00000000-0000-0000-0000-000000000000@w1:p2"],
+		["xdg-open", "https://example.com/?q=a&b=c"],
+	]);
+	for (const url of ["javascript:alert(1)", "file:relative.org", "file:~/org/a\nb.org", "herdr:kit/pi:not-a-session"]) {
+		await assert.rejects(openTuiLink(url, run), /cannot open that kind of link/);
+	}
+	assert.equal(calls.length, 4, "rejected links run nothing");
+	await assert.rejects(openTuiLink("file:~/org/a.org", async () => { throw new Error("Emacs server unavailable"); }), /Emacs server unavailable/);
+});
 
 // A valid 2x2 PNG, with red, green, blue and white pixels.
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGP4z8DAAMIM/4EAAB/uBfsL2WiLAAAAAElFTkSuQmCC";

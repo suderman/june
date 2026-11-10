@@ -16,6 +16,11 @@ The plan builds on these seams rather than beside them.
 - Notifications. An ntfy server already runs on the tailnet for Herdr.
 - Network. The desktop and the phone are on the same tailnet. The desktop already shares its Hyprland session over it.
 
+* Terminal links
+The terminal client handles primary-button clicks on rendered hyperlinks. It uses the desktop's link rules: file links call =june-open= through =emacsclient= with the path and search as Lisp strings, session links call =herdr-link jump=, and web links use =xdg-open=. Unsupported schemes run nothing. Opener failures appear in the terminal status line.
+
+These commands run where the terminal client runs. When =june= attaches through SSH, that is the daemon host, not the machine displaying the terminal. Restart the terminal client to load changes; no daemon restart is needed.
+
 * Clients and protocol
 ** Recommended
 - Keep the existing Request and Reply shapes and add only what new clients need. No second protocol, no separate gateway service.
