@@ -150,7 +150,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				})
 			: undefined;
 		// June's working context does the work only: no memory review, task queueing, patter, or messages to the user.
-		const childless = [memory, ...extensions.filter((e) => e.name === "dispatch"), ...(patter ? [patter.extension] : [])];
+		const childless = [memory, show, ...extensions.filter((e) => e.name === "dispatch"), ...(patter ? [patter.extension] : [])];
 		const work = createWorkExtension(config, () => childless);
 		for (const extension of [prompt.extension, greeting.extension, memory, show, work, keptImages, ...(patter ? [patter.extension] : []), ...extensions]) registry.install(extension);
 

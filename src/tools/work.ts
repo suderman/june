@@ -32,6 +32,7 @@ type WorkInput ={ brief: string; model: ModelChoice; call: string };
 
 const WORKER = `You are June's working context, running one brief from your main conversation. The user does not see this conversation and cannot answer here.
 Do the work with your tools, then end with one report for your main thread: the answer or outcome first, then the evidence that matters (commands, paths, findings), what you changed, and anything unresolved or needing the user's decision. Keep it concise and leave out dead ends unless they matter.
+You cannot show cards to the user from this private conversation. Return file paths in your report for main June to show beside her reply. Save snippets or page screenshots to files first if the user needs to see them.
 You cannot queue, resume, or close Org tasks, and you cannot ask the user anything. If the brief needs a decision or an approval, stop and say so in the report instead of acting.`;
 
 const agentOf = (m: ModelChoice) => ({ model: { provider: m.provider, modelId: m.modelId }, thinkingLevel: m.thinkingLevel as never });

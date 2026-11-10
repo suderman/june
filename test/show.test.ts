@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { configure, defineExtension, defineTool } from "@earendil-works/pi-durable";
+import { obj } from "@earendil-works/pi-schema";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, type ToolResultMessage } from "@earendil-works/pi-ai";
 import { WebSocket } from "ws";
 // @ts-expect-error The desktop client's modules are plain JavaScript, shared with QML.
 import { panels } from "../desktop/strip.mjs";
@@ -11,6 +13,7 @@ import { panels } from "../desktop/strip.mjs";
 import { lines as consoleLines } from "../desktop/console.mjs";
 import { inboxFile } from "../src/daemon.ts";
 import { shownFiles } from "../src/shown.ts";
+import { createShowExtension } from "../src/tools/show.ts";
 import { Client, type Reply } from "../src/protocol.ts";
 import { applyChanges, diff, fold, PRIVATE, type ViewItem } from "../src/transcript.ts";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
@@ -87,18 +90,24 @@ test("a work report shows two pictures beside the reply, through live updates, d
 	const pictures = [join(tmp.dir, "desktop.png"), join(tmp.dir, "mobile.png")];
 	await Promise.all(pictures.map(path => writeFile(path, PNG)));
 	const faux = fauxProvider();
+	let workerPrompt = "";
 	faux.setResponses(routed([
 		fauxAssistantMessage([fauxToolCall("work", { brief: "Prepare the pictures." })], { stopReason: "toolUse" }),
 		fauxAssistantMessage("Getting the pictures."),
 		fauxAssistantMessage([...pictures.map(path => fauxToolCall("show", { path })), fauxToolCall("show", { path: join(tmp.dir, "gone.png") })], { stopReason: "toolUse" }),
 		fauxAssistantMessage("Here are both pictures."),
-	], [fauxAssistantMessage("The pictures are ready.")]));
+	], [(ctx) => {
+		workerPrompt = JSON.stringify(ctx.messages.filter(m => m.role === "system"));
+		return fauxAssistantMessage(`The pictures are ready at ${pictures.join(" and ")}. Show them in your reply.`);
+	}]));
 	const daemon = await openTestDaemon({ ...tmp, faux, config: { remote: { port: 0 } } });
 	t.after(() => daemon.close());
 	const view = await attachView(tmp.paths.socket);
 	t.after(() => view.close());
 	await ask(tmp.paths.socket, "show both pictures", "work-pictures", "gui");
 	await until(() => view.items().some(i => i.kind === "assistant" && i.text === "Here are both pictures."));
+	assert.doesNotMatch(workerPrompt, /"name":"show"/, "workers cannot promise cards from a conversation clients never read");
+	assert.match(workerPrompt, /return.*paths.*main.*show/i, "the worker knows the supported handoff");
 	const shown = view.items().filter(i => i.kind === "shown");
 	assert.equal(shown.length, 2);
 	assert.ok(shown.every(i => !i.private));
@@ -135,6 +144,51 @@ test("a work report shows two pictures beside the reply, through live updates, d
 		assert.equal(response.headers.get("content-type"), "image/png");
 		assert.deepEqual(Buffer.from(await response.arrayBuffer()), PNG);
 	}
+});
+
+test("an existing worker with show enabled gets an honest refusal before any file is saved", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	// Restore the inherited tool configuration an already-running worker can retain across an upgrade.
+	const legacy = defineExtension({ name: "legacy-worker-fixture", tools: [defineTool({
+		name: "restore_show", description: "Restore show in this worker for the legacy-configuration fixture.", parameters: obj({}), replay: "safe",
+		execute: async (_args, api, context) => {
+			await api.commit(tx => configure(tx, api.conversationId, { extensions: { add: [createShowExtension(join(tmp.paths.state, "inbox"), "kit")] } }), context);
+			return { output: [{ type: "text", text: "Legacy worker configuration restored." }] };
+		},
+	})] });
+	const faux = fauxProvider();
+	let workerResults: ToolResultMessage[] = [];
+	faux.setResponses(routed([
+		fauxAssistantMessage([fauxToolCall("work", { brief: "Try to show a snippet." })], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Checking."),
+		fauxAssistantMessage("The worker cannot show cards directly."),
+	], [
+		fauxAssistantMessage([fauxToolCall("restore_show", {})], { stopReason: "toolUse" }),
+		fauxAssistantMessage([
+			fauxToolCall("show", { text: "Must stay private", name: "worker.txt" }),
+			fauxToolCall("show", { path: join(tmp.dir, "missing.png") }),
+			fauxToolCall("show", { url: "file:///not-a-page" }),
+		], { stopReason: "toolUse" }),
+		(ctx) => {
+			workerResults = ctx.messages.filter((m): m is ToolResultMessage => m.role === "toolResult" && m.toolName === "show");
+			return fauxAssistantMessage("Return file paths to the main thread instead of showing them here.");
+		},
+	]));
+	const daemon = await openTestDaemon({ ...tmp, faux, extensions: [legacy] });
+	t.after(() => daemon.close());
+	const view = await attachView(tmp.paths.socket);
+	t.after(() => view.close());
+	await ask(tmp.paths.socket, "test worker display", "worker-display", "gui");
+	await until(() => view.items().some(i => i.kind === "assistant" && i.text === "The worker cannot show cards directly."));
+	assert.equal(workerResults.length, 3);
+	for (const result of workerResults) {
+		assert.equal(result.isError, true);
+		assert.match(JSON.stringify(result.content), /only.*main conversation.*[Rr]eturn.*paths.*report/);
+		assert.doesNotMatch(JSON.stringify(result.content), /Shown to|\[shown /);
+	}
+	await assert.rejects(stat(join(tmp.paths.state, "inbox")), { code: "ENOENT" }, "a refused show creates no inbox copy");
+	assert.equal(view.items().filter(i => i.kind === "shown").length, 0);
 });
 
 test("a text file without a known extension shows as text, and a path that is not there fails plainly", async (t) => {

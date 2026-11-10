@@ -93,7 +93,10 @@ export function createShowExtension(inbox: string, host: string) {
 		}),
 		// A rerun after a restart finds what the first run saved, under the same call.
 		replay: "safe",
-		execute: async (args, api) => {
+		execute: async (args, api, context) => {
+			// Existing workers can retain show in their saved configuration after an upgrade.
+			const conversation = await api.commit(tx => tx.conversation(api.conversationId), context);
+			if (conversation?.owner) throw new Error("show works only in the main conversation. Return file paths in your report so main June can show them beside her reply; nothing was shown here.");
 			const path = args.path?.trim() ? args.path.trim().replace(/^~(?=\/|$)/, process.env.HOME ?? "~") : undefined;
 			const text = args.text ?? "";
 			const url = args.url?.trim() || undefined;
