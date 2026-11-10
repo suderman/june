@@ -15,7 +15,7 @@ Hand-measured boxes on 2026-11-08 ran 1.57 to 1.88 times the eye-to-chin distanc
 Forehead-to-chin faces of about 150 px in an 832x1536 source were sharp and held their expression at full panel size after ingest. Judge the expression at that size anyway. Evidence: idle-standing-attentive, seed 91002.
 
 ** Do not reject a candidate for its floor shadow
-Most candidates drew one despite the prompt and negative. ToonOut removed it in all six cut-outs on 2026-11-08, so judge the cut-out.
+Most candidates drew one despite the prompt and negative. ToonOut removed it in all six cut-outs on 2026-11-08, so judge the cut-out. It does not always remove it: nails 115503 on 2026-11-09 kept grey wisps beside the front boot that only a native boot crop showed. The fix was to clear only the alpha of grey, low-saturation pixels (saturation under 0.3, value over 0.35) in a small box outside the boot. The boot outline and RGB were untouched. Inspect every cut-out's boots at native size.
 
 ** The skirt colour wanders
 "Dark charcoal-plum" came out olive, charcoal or brown across seeds, and canon is plum-brown. Treat this as a job for colour normalization, not a reason to re-roll.
@@ -49,3 +49,21 @@ All four initial downcast-clasp seeds in tall batch 2 still looked at the viewer
 
 ** Specify a modest opening without adding another garment
 Tall batch 2 replaced the blouse's open-collar phrase with a modestly open neckline, collar open at the throat and chest covered by the blouse. The eleven selected poses kept the rose blouse without the deep opening of the first tall batch or a dark undershirt. Keep the identity and outfit wording otherwise unchanged.
+
+** Name her figure in every prompt, not only the one Jon flagged
+Jon rejected the 2026-11-09 shrug for its cleavage and large chest. Adding "slender adult figure with a modest natural bust like the reference" plus =large breasts, busty= in the negative fixed all four redraw seeds without flattening her. In the same run, the surprised prompt lacked the figure line, and three of four seeds ballooned. The earcup's forward lean exaggerated the bust until a retry added the line. Put it in every prompt.
+
+** Keep the boom away from a wide-open mouth
+Three of four first unhinged seeds on 2026-11-09 drew the headset boom as a black gag over her open mouth. The retry placed the boom "angled down beside her cheek well away from her open mouth", with =gag, mouth covered, microphone covering mouth= in the negative. None of the four retry seeds repeated the fault.
+
+** Text does not make lopsided gag eyes
+Eight seeds asked for one huge eye and one small crooked eye with mismatched pupils. Every one drew symmetric eyes, and the result read as manic glee. Promising that face needs a different method, such as an edit pass or a sketch reference. More seeds will not produce it.
+
+** Spell out worried brows for a cringe
+All four first cringe seeds paired the clenched-teeth grimace with lowered, angry brows and fists. The retry asked for worried brows "raised high and slanted upward in the middle" and limp, curled hands, and put =angry, furrowed brows, fists= in the negative. Three of four then read as cringing, not angry.
+
+** Baked reaction marks still appear
+Two of four hair-twirl seeds drew a thought puff or squiggle beside her head, despite =decorative marks= in the negative. Reject those seeds, and put reaction marks in the manifest's =marks=, which the renderer draws.
+
+** A bored look stays on the object
+For the nail inspection, Jon preferred 115501, whose eyes never leave her hand, over 115503's half-lidded sideways glance, which the agent had picked. For bored or absorbed performances, a gaze fixed on the prop reads stronger than a knowing look aside.

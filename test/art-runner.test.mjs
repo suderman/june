@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { assertRunLocation, client, comparePixels, contactSheet, driftOf, edgeContact, recolor, combineMasks, initRun, listPipelines, loadPipeline, raiseRun, readLedger, readRun, refusal, renderPipeline, renderTemplate, resumeRun, seedsOf, stopRun, submit, uploadFile, validateGraph } from "../art/runner.mjs";
+import { assertRunLocation, client, comparePixels, contactSheet, driftOf, edgeContact, recolor, combineMasks, makeMasks, initRun, listPipelines, loadPipeline, raiseRun, readLedger, readRun, refusal, renderPipeline, renderTemplate, resumeRun, seedsOf, stopRun, submit, uploadFile, validateGraph } from "../art/runner.mjs";
 
 const SCHEMAS = {
 	KSampler: { input: { required: { seed: ["INT", {}], model: ["MODEL", {}], sampler_name: [["er_sde", "euler"], {}] } }, output: ["LATENT"] },
@@ -225,6 +225,25 @@ test("an upload is named by its content, inside the run's folder", async (t) => 
 	assert.equal(await uploadFile(dir, file, api), "june-art/r/uploaded.png");
 	assert.match(state.uploads[0], /picture-[0-9a-f]{12}\.png/);
 	assert.match(state.uploads[0], /name="subfolder"\r\n\r\njune-art\/r/);
+});
+
+test("masks for a re-staged pose are segmented from its new picture, not the first one flattened", async (t) => {
+	const { state, api } = await comfy(t);
+	const dir = newRun(t);
+	const set = join(dir, "..", "set");
+	mkdirSync(join(set, "source"), { recursive: true });
+	const plan = join(dir, "..", "plan.json");
+	writeFileSync(plan, JSON.stringify({ poses: { pose: [{ item: "blouse" }] } }));
+	const source = join(set, "source", "pose.png");
+	const hashes = [];
+	const exitCode = process.exitCode;
+	t.after(() => (process.exitCode = exitCode));
+	for (const colour of ["red", "blue"]) {
+		execFileSync("magick", ["-size", "4x4", `xc:${colour}`, source]);
+		await makeMasks(dir, set, plan, { api, force: true, pollMs: 1 });
+		hashes.push(state.uploads.at(-1).match(/pose-([0-9a-f]{12})\.png/)[1]);
+	}
+	assert.notEqual(hashes[0], hashes[1]);
 });
 
 test("a recolour changes only matching pixels in its region, keeps shading, and never touches alpha", (t) => {

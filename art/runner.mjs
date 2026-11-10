@@ -614,7 +614,8 @@ export async function makeMasks(dir, set, planPath, { api = client(readRun(dir).
 			try {
 				const source = existsSync(join(set, "colour-originals", `${name}.png`)) ? join(set, "colour-originals", `${name}.png`) : join(set, "source", `${name}.png`);
 				const flat = join(dir, "flat", `${name}.png`);
-				if (!existsSync(flat)) magick([source, "-background", "#ece7dd", "-flatten", "-alpha", "off", flat]);
+				// Flatten every time: a pose re-staged under the same name must not be segmented from its old picture.
+				magick([source, "-background", "#ece7dd", "-flatten", "-alpha", "off", flat]);
 				const image = await uploadFile(dir, flat, api);
 				const includes = [];
 				for (const prompt of [merged.segment].flat()) includes.push(await wanted(name, prompt, image));
