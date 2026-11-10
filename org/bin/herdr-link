@@ -38,22 +38,40 @@ on_host() {
 }
 
 # Find the session file on its host and set the directory and resume command.
+# Claude keeps sessions in its config directory, and an account launcher such
+# as claude-work fixes CLAUDE_CONFIG_DIR to ~/.claude-work. Resume through the
+# launcher that owns the directory holding the session: claude-NAME for
+# ~/.claude-NAME, else claude-direct (or claude) with CLAUDE_CONFIG_DIR set.
 find_session() {
   local found
   found=$(on_host sh -s -- "$agent" "$session" <<'EOF'
+f= run=
 case $1 in
-  claude) f=$(ls ~/.claude/projects/*/"$2".jsonl 2>/dev/null | head -n1) ;;
+  claude)
+    for d in ~/.claude ~/.claude-*; do
+      f=$(ls "$d"/projects/*/"$2".jsonl 2>/dev/null | head -n1)
+      [ -n "$f" ] && break
+    done
+    [ -n "$f" ] || exit 1
+    case ${d##*/} in
+      .claude-*) launcher=claude-${d##*/.claude-} ;;
+      *) launcher= ;;
+    esac
+    if [ -n "$launcher" ] && command -v "$launcher" >/dev/null 2>&1; then run=$launcher
+    elif command -v claude-direct >/dev/null 2>&1; then run="CLAUDE_CONFIG_DIR='$d' claude-direct"
+    else run="CLAUDE_CONFIG_DIR='$d' claude"; fi ;;
   pi) f=$(ls ~/.local/state/pi/sessions/*/*_"$2".jsonl ~/.pi/agent/sessions/*/*_"$2".jsonl 2>/dev/null | head -n1) ;;
 esac
 [ -n "$f" ] || exit 1
-printf '%s\n%s\n%s\n' "$(grep -m1 -o '"cwd":"[^"]*"' "$f" | cut -d'"' -f4)" "$f" \
-  "$(jq -r 'select(.type == "session_info" or .type == "custom-title") | .name // .customTitle // empty' "$f" | tail -n1)"
+printf '%s\n%s\n%s\n%s\n' "$(grep -m1 -o '"cwd":"[^"]*"' "$f" | cut -d'"' -f4)" "$f" \
+  "$(jq -r 'select(.type == "session_info" or .type == "custom-title") | .name // .customTitle // empty' "$f" | tail -n1)" \
+  "$run"
 EOF
   ) || die "session $agent:$session not found on $host"
   cwd=$(sed -n 1p <<<"$found")
   name=$(sed -n 3p <<<"$found")
   case $agent in
-    claude) cmd="claude --resume $session" ;;
+    claude) cmd="$(sed -n 4p <<<"$found") --resume $session" ;;
     pi) cmd="pi --session $(sed -n 2p <<<"$found")" ;;
   esac
 }

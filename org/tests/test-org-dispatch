@@ -339,13 +339,46 @@ printf '{"type":"user","cwd":"/tmp"}\n{"type":"custom-title","customTitle":"auto
   >"$HOME/.claude/projects/x/$FAKE_SESSION.jsonl"
 printf '* EVAL Fix the thing\n** Sessions\n- [[herdr:kit/claude:%s@w1:p1][claude@kit/2026-10-26T1500]]\n' "$FAKE_SESSION" \
   >"$HOME/org/work/suderman/june/june.org"
+# Account launchers fix CLAUDE_CONFIG_DIR, so the default directory resumes
+# through claude-direct with the directory named.
+printf '#!/bin/sh\nexit 0\n' >"$fixture/bin/claude-direct"
+chmod +x "$fixture/bin/claude-direct"
 rm -f "$FAKE_HERDR_LOG" "$FAKE_HERDR_LOG.started"
 FAKE_AGENT=claude FAKE_WORKSPACES='[{"label":"[8] June","workspace_id":"w-june"}]' \
   "$org/bin/herdr-link" attach "herdr:$(</proc/sys/kernel/hostname)/claude:$FAKE_SESSION@w1:p1" >/dev/null 2>&1 || true
 calls=$(cat "$FAKE_HERDR_LOG")
 check "herdr-link reopens Claude in the linking file's workspace" has "$calls" '^tab create --workspace w-june --cwd /tmp --label Fix the thing --focus$'
-check "herdr-link resumes Claude by ID" has "$calls" "^pane run p-tab claude --resume $FAKE_SESSION$"
+check "herdr-link resumes Claude by ID in its config directory" has "$calls" "^pane run p-tab CLAUDE_CONFIG_DIR='$HOME/.claude' claude-direct --resume $FAKE_SESSION$"
 check "herdr-link attaches to the resumed Claude pane" has "$calls" '^agent attach p-live --takeover$'
+# Historical links still route to native resume after immediate archive. Herdr
+# and agent startup are mocked; no real historical session is reopened here.
+mv "$HOME/org/work/suderman/june/june.org" "$HOME/org/work/suderman/june/archive.org"
+before=$(sha256sum "$HOME/org/work/suderman/june/archive.org" "$HOME/.claude/projects/x/$FAKE_SESSION.jsonl" "$HOME/.pi/agent/sessions/x/2026_$FAKE_SESSION.jsonl")
+rm -f "$FAKE_HERDR_LOG" "$FAKE_HERDR_LOG.started"
+FAKE_AGENT=claude FAKE_WORKSPACES='[]' \
+  "$org/bin/herdr-link" attach "herdr:$(</proc/sys/kernel/hostname)/claude:$FAKE_SESSION@w1:p1" >/dev/null 2>&1
+calls=$(cat "$FAKE_HERDR_LOG")
+check "archived Claude link still routes to native resume" has "$calls" "^pane run .* claude-direct --resume $FAKE_SESSION$"
+calls=$(reopen '[]')
+check "archived pi link still routes to its saved session file" has "$calls" "^pane run .* pi --session .*2026_$FAKE_SESSION.jsonl$"
+check "historical resume routing preserves Org and both saved sessions" test "$before" = "$(sha256sum "$HOME/org/work/suderman/june/archive.org" "$HOME/.claude/projects/x/$FAKE_SESSION.jsonl" "$HOME/.pi/agent/sessions/x/2026_$FAKE_SESSION.jsonl")"
+# A session under ~/.claude-NAME resumes through that account's claude-NAME.
+mkdir -p "$HOME/.claude-team/projects/x"
+mv "$HOME/.claude/projects/x/$FAKE_SESSION.jsonl" "$HOME/.claude-team/projects/x/"
+printf '#!/bin/sh\nexit 0\n' >"$fixture/bin/claude-team"
+chmod +x "$fixture/bin/claude-team"
+rm -f "$FAKE_HERDR_LOG" "$FAKE_HERDR_LOG.started"
+FAKE_AGENT=claude FAKE_WORKSPACES='[]' \
+  "$org/bin/herdr-link" attach "herdr:$(</proc/sys/kernel/hostname)/claude:$FAKE_SESSION@w1:p1" >/dev/null 2>&1
+calls=$(cat "$FAKE_HERDR_LOG")
+check "herdr-link resumes an account session through its launcher" has "$calls" "^pane run .* claude-team --resume $FAKE_SESSION$"
+rm -f "$fixture/bin/claude-team"
+rm -f "$FAKE_HERDR_LOG" "$FAKE_HERDR_LOG.started"
+FAKE_AGENT=claude FAKE_WORKSPACES='[]' \
+  "$org/bin/herdr-link" attach "herdr:$(</proc/sys/kernel/hostname)/claude:$FAKE_SESSION@w1:p1" >/dev/null 2>&1
+calls=$(cat "$FAKE_HERDR_LOG")
+check "herdr-link names the directory when the account launcher is missing" has "$calls" "^pane run .* CLAUDE_CONFIG_DIR='$HOME/.claude-team' claude-direct --resume $FAKE_SESSION$"
+rm -rf "$HOME/.claude-team" "$fixture/bin/claude-direct"
 printf '#!/bin/sh\nexit 1\n' >"$fixture/bin/herdr"
 
 # Launch and watch tests exercise the real Org edits and state, with only Herdr mocked.
@@ -577,6 +610,40 @@ cat >"$fixture/launch-tests.el" <<'EOF'
          (org-dispatch--edit (plist-get task :file) (plist-get task :id)
                              (lambda () (should (= 2 (how-many "herdr:kit/claude:" (point-min) (point-max)))))))))))
 
+(ert-deftest closed-claude-sessions-resume-through-their-account-launcher ()
+  ;; claude-auto may choose either account; only the session's own launcher can
+  ;; resume it. A missing launcher keeps the fresh-restart fallback.
+  (let* ((bin (make-temp-file "launchers" t))
+         (exec-path (cons bin exec-path))
+         (dir (expand-file-name "~/.claude-acct/projects/x")))
+    (unwind-protect
+        (test-with-herdr
+         (let ((test-agent "claude"))
+           (test-with-command "claude" "claude-auto"
+             (make-directory dir t)
+             (write-region "{}\n" nil (expand-file-name (concat test-session ".jsonl") dir))
+             (should-not (org-dispatch--claude-launcher test-session))
+             (let ((launcher (expand-file-name "claude-acct" bin)))
+               (write-region "" nil launcher)
+               (set-file-modes launcher #o755))
+             (should (equal (org-dispatch--claude-launcher test-session) "claude-acct"))
+             (should-not (org-dispatch--claude-launcher "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+             (let ((task (test-task test-agent t)))
+               (should (org-dispatch--launch task))
+               (let ((run (seq-find (lambda (args) (equal (seq-take args 2) '("pane" "run"))) test-calls)))
+                 (should (string-prefix-p "command claude-acct " (nth 3 run)))
+                 (should (string-search (concat "--resume " test-session) (nth 3 run))))
+               (should-not (seq-find (lambda (args) (and (equal (seq-take args 2) '("agent" "prompt"))
+                                                       (string-search "fresh session" (nth 3 args)))) test-calls)))
+             ;; A live pane is still reused without starting anything.
+             (setq test-calls nil)
+             (let ((task (test-task test-agent t)) (test-live t))
+               (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))
+               (should (org-dispatch--launch task))
+               (should-not (seq-find (lambda (args) (equal (seq-take args 2) '("pane" "run"))) test-calls))))))
+      (delete-directory (expand-file-name "~/.claude-acct") t)
+      (delete-directory bin t))))
+
 (ert-deftest custom-startup-waits-for-readiness-and-refuses-wrong-workers ()
   (test-with-herdr
    (let ((polls 0) (test-agent "claude"))
@@ -697,6 +764,9 @@ check "launch, resume, session identity, and watch for pi and Claude" \
 
 check "dependencies, handoffs, and recoverable plan queuing" \
   emacs -Q --batch -l "$org/dispatch/org-dispatch.el" -l "$org/tests/dependencies.el"
+
+check "pane retirement eligibility, stability, races and reopening" \
+  emacs -Q --batch -l "$org/dispatch/org-dispatch.el" -l "$org/tests/retirement.el"
 
 check "safe task interruption, parking, replay and reassignment" \
   emacs -Q --batch -L "$org/dispatch" -L "$org/edit" -l "$org/tests/stop.el"

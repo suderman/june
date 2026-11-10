@@ -3,6 +3,7 @@
 ;; Batch entry points:
 ;;   org-dispatch-run      watch running tasks, then launch eligible ones
 ;;   org-dispatch-scan     print the tasks this host would launch
+;;   org-dispatch-reconcile --dry-run, show which panes an enabled run would retire
 ;;   org-dispatch-plan     SPEC.json, queue a requested plan without starting agents
 ;;   org-dispatch-finish   ID STATE [NOTE] [--headline LINE], used by the agent to end its task
 ;;   org-dispatch-retry    ID WHEN NOTE, used by the agent to try again later
@@ -187,6 +188,20 @@ Create the workspace when it is missing; its first tab then hosts the task."
       (org-dispatch--herdr "tab" "rename" (alist-get 'tab_id pane) label))
     pane))
 
+(defun org-dispatch--claude-launcher (uuid)
+  "Account launcher for the Claude config directory holding session UUID.
+A launcher such as claude-work fixes CLAUDE_CONFIG_DIR to ~/.claude-work, so
+only claude-NAME can resume a session saved under ~/.claude-NAME. Return nil
+when the session is elsewhere or that launcher is missing."
+  (seq-some (lambda (dir)
+              (let ((launcher (and (string-match "/\\.claude-\\([^/]+\\)\\'" dir)
+                                   (concat "claude-" (match-string 1 dir)))))
+                (and launcher
+                     (file-expand-wildcards (format "%s/projects/*/%s.jsonl" dir uuid))
+                     (executable-find launcher)
+                     launcher)))
+            (file-expand-wildcards "~/.claude-*" t)))
+
 (defun org-dispatch--session-file (uuid)
   (car (append (file-expand-wildcards
                 (format "~/.local/state/pi/sessions/*/*_%s.jsonl" uuid) t)
@@ -199,10 +214,11 @@ Create the workspace when it is missing; its first tab then hosts the task."
 
 ;;; Org
 
-(defun org-dispatch--agenda-files ()
+(defun org-dispatch--agenda-files (&optional read-only)
   "Jon's `org-agenda-files', read by loading his Emacs config in batch.
 Cache the list, and reuse the last good one when the config fails to load,
-so a half-edited config does not stop dispatching."
+so a half-edited config does not stop dispatching.
+READ-ONLY leaves the cache alone."
   (let ((cache (expand-file-name "agenda-files" org-dispatch-state-dir))
         files)
     (when (file-readable-p org-dispatch-emacs-init)
@@ -217,8 +233,9 @@ so a half-edited config does not stop dispatching."
     (if files
         (progn
           (setq files (nreverse files))
-          (make-directory org-dispatch-state-dir t)
-          (with-temp-file cache (insert (string-join files "\n"))))
+          (unless read-only
+            (make-directory org-dispatch-state-dir t)
+            (with-temp-file cache (insert (string-join files "\n")))))
       (org-dispatch--log "could not read org-agenda-files from %s; using %s"
                          org-dispatch-emacs-init
                          (if (file-exists-p cache) "the cached list" org-dispatch-root))
@@ -882,7 +899,38 @@ replaying the same key and spec; missing prerequisites block partial plans."
                 (json-parse-buffer :object-type 'plist :null-object nil :false-object nil)))
             (directory-files org-dispatch-state-dir t "\\`[0-9a-f-]+\\.json\\'"))))
 
+(defun org-dispatch--remember-pane (state)
+  "Keep historical allocation evidence after STATE leaves the active watcher.
+A reused live pane has no allocated tab. Neither these receipts nor Org links
+prove exclusive current ownership or authorize a Herdr close."
+  (when (and (plist-get state :pane) (plist-get state :session)
+             (not (string-empty-p (or (plist-get state :tab) ""))))
+    (let* ((dir (expand-file-name "panes" org-dispatch-state-dir))
+           (receipt (list :host org-dispatch-host :id (plist-get state :id)
+                          :agent (plist-get state :agent) :session (plist-get state :session)
+                          :pane (plist-get state :pane) :tab (plist-get state :tab)))
+           (file (expand-file-name (concat (secure-hash 'sha256 (prin1-to-string receipt)) ".json") dir)))
+      (unless (file-exists-p file)
+        (make-directory dir t)
+        (let ((temp (make-temp-file (expand-file-name ".pane-" dir))))
+          (unwind-protect
+              (progn
+                (with-temp-file temp (insert (json-serialize receipt)))
+                (rename-file temp file t))
+            (when (file-exists-p temp) (delete-file temp))))))))
+
+(defun org-dispatch--pane-receipts ()
+  "Read allocation receipts without changing active watcher state."
+  (let ((dir (expand-file-name "panes" org-dispatch-state-dir)))
+    (when (file-directory-p dir)
+      (mapcar (lambda (file)
+                (with-temp-buffer
+                  (insert-file-contents file)
+                  (json-parse-buffer :object-type 'plist :null-object nil :false-object nil)))
+              (directory-files dir t "\\`[0-9a-f]+\\.json\\'")))))
+
 (defun org-dispatch--save-state (state)
+  (org-dispatch--remember-pane state)
   (make-directory org-dispatch-state-dir t)
   (let ((temp (make-temp-file (expand-file-name ".state-" org-dispatch-state-dir))))
     (unwind-protect
@@ -1131,7 +1179,11 @@ and the durable no-nudge state for inspection."
              (agent (plist-get task :agent))
              (resume (plist-get task :session))
              (pane (and resume (org-dispatch--live-pane resume agent)))
-             (command (unless pane (org-dispatch--command agent)))
+             ;; A closed Claude session resumes through its own account's
+             ;; launcher; a custom chooser such as claude-auto may pick another.
+             (native (and resume (not pane) (equal agent "claude")
+                          (org-dispatch--claude-launcher resume)))
+             (command (unless pane (or native (org-dispatch--command agent))))
              (tab nil)
              (label (truncate-string-to-width (concat "auto · " (plist-get task :heading)) 60))
              (state (list :id id :file (plist-get task :file) :heading (plist-get task :heading)
@@ -1162,7 +1214,7 @@ and the durable no-nudge state for inspection."
                              (when (plist-get task :model) (list "--model" (plist-get task :model)))
                              ;; A custom launcher may choose another account with a separate
                              ;; session store. Closed sessions restart from the Org record.
-                             (when (and resume (not command))
+                             (when (and resume (or native (not command)))
                                (if (equal agent "claude")
                                    (list "--resume" resume)
                                  (list "--session" (or (org-dispatch--session-file resume) resume)))))))
@@ -1185,11 +1237,11 @@ and the durable no-nudge state for inspection."
                     (org-dispatch--prompt
                      pane (org-dispatch--render
                            "task" task `(("DIALOG" . ,(concat
-                                                      (when (and command resume)
+                                                      (when (and command resume (not native))
                                                         "This is a fresh session, not a native resume. Read the whole Org task and Dialog before continuing.\n\n")
                                                       (org-dispatch--dialog-block task resume))))))
                   (error (org-dispatch--log "prompt failed for %s: %s" id (error-message-string err))))
-                (org-dispatch--log "%s %s: %s in %s" (cond ((and command resume) "restarted") (resume "resumed") (t "launched"))
+                (org-dispatch--log "%s %s: %s in %s" (cond ((and command resume (not native)) "restarted") (resume "resumed") (t "launched"))
                                    id (plist-get task :heading) pane)
                 t))
           (error
@@ -1226,14 +1278,9 @@ and the durable no-nudge state for inspection."
   (org-dispatch--log "held %s: %s" (plist-get state :id) reason))
 
 (defun org-dispatch--todo-state (state)
-  "Current TODO keyword of STATE's heading, or nil when it is gone."
-  (let ((file (if (file-exists-p (plist-get state :file))
-                  (plist-get state :file)
-                (org-dispatch--find (plist-get state :id)))))
-    (when file
-      (setq state (plist-put state :file file))
-      (ignore-errors
-        (org-dispatch--edit file (plist-get state :id) #'org-get-todo-state)))))
+  "Current unique TODO keyword across live files and archives, else nil.
+The original file may still exist after its heading has been archived."
+  (plist-get (gethash (plist-get state :id) (org-dispatch--dependency-index)) :todo))
 
 (defun org-dispatch--uncertain-launch (state reason)
   "Reserve STATE's worktree before parking an uncertain review-loop startup."
@@ -1247,6 +1294,7 @@ and the durable no-nudge state for inspection."
   (org-dispatch--notify (concat "HOLD · " (plist-get state :heading)) reason))
 
 (defun org-dispatch--watch (state)
+  (org-dispatch--remember-pane state)
   (let* ((id (plist-get state :id))
          (pane (plist-get state :pane))
          (todo (org-dispatch--todo-state state))
@@ -1260,16 +1308,9 @@ and the durable no-nudge state for inspection."
       ;; Explicit stops never nudge, expire, or close the worker's tab.
       nil)
      ((equal (plist-get state :status) "finished")
-      ;; Close tabs this dispatcher opened once their work is accepted. Older
-      ;; runs recorded a whole workspace instead.
+      ;; Allocation receipts outlive this active slot. Herdr protocol 22 has
+      ;; no identity/generation-bound conditional close, even for idle agents.
       (unless (member status '("working" "blocked"))
-        (when (member todo '("DONE" "AUTO"))
-          (let ((tab (or (plist-get state :tab) ""))
-                (workspace (or (plist-get state :workspace) "")))
-            (cond ((not (string-empty-p tab))
-                   (ignore-errors (org-dispatch--herdr "tab" "close" tab)))
-                  ((not (string-empty-p workspace))
-                   (ignore-errors (org-dispatch--herdr "workspace" "close" workspace))))))
         (org-dispatch--drop-state id)))
      ((not (equal (plist-get state :status) "running"))
       ;; A launch that died part way leaves a "starting" entry behind.
@@ -1281,13 +1322,11 @@ and the durable no-nudge state for inspection."
             (org-dispatch--uncertain-launch state "Startup did not publish a complete worker claim within ten minutes.")
           (org-dispatch--drop-state id))))
      ((null todo)
-      (org-dispatch--log "dropped %s: heading not found" id)
-      (org-dispatch--drop-state id))
+      ;; Missing/duplicate IDs include archive copy gaps. Keep the receipt and
+      ;; slot for a later pass; absence is not permission to touch the worker.
+      (org-dispatch--log "waiting for unique task record: %s" id))
      ((not (equal todo "PROG"))
-      ;; Jon changed the state while the agent ran.
-      (when (member status '("working" "blocked"))
-        (ignore-errors (org-dispatch--herdr "agent" "send-keys" pane "esc"))
-        (org-dispatch--log "interrupted %s: Jon set %s" id todo))
+      ;; A state change is not identity-bound permission to interrupt a pane.
       (ignore-errors (org-dispatch--edit (plist-get state :file) id #'org-dispatch--untag-auto))
       (org-dispatch--drop-state id))
      ((> (- (float-time) (plist-get state :started)) org-dispatch-time-limit)
@@ -1325,6 +1364,250 @@ and the durable no-nudge state for inspection."
           (org-dispatch--log "nudged %s (%d of %d)" id (1+ nudges) org-dispatch-max-nudges)))))
      (t (setq state (plist-put state :blocked 0))
         (org-dispatch--save-state (plist-put state :idle 0))))))
+
+;;; Pane retirement
+
+;; A dispatcher-launched agent carries the Herdr name auto-ID8-HHMMSS, which
+;; Herdr keeps with that exact occupant and clears when it exits, is replaced or
+;; Herdr restarts. Closed pane IDs are never reused. A pane is retired only when
+;; that name, its Org session link and an unchanged observation from the previous
+;; run all agree, then closed after one last read of the name. Jon accepted the
+;; remaining race: input reaching the pane in the moment between that read and
+;; the close is lost with the turn it started. Saved history is never touched.
+
+(defun org-dispatch--retirement-records (agenda &optional needles)
+  "Read task identities and local session links across AGENDA and archives.
+Include ID-less tasks as blockers. Nested task links can conservatively count
+as shared; links never establish dispatcher ownership. With NEEDLES, parse
+only files whose text contains one of those strings."
+  (let (records)
+    (dolist (file (org-dispatch--lookup-files agenda))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (when (or (null needles)
+                  (seq-some (lambda (needle) (save-excursion (goto-char (point-min)) (search-forward needle nil t)))
+                            needles))
+          (setq buffer-file-name file)
+          (org-mode)
+          (let ((hash (secure-hash 'sha256 (current-buffer)))
+                (conflict (file-expand-wildcards
+                           (concat (file-name-sans-extension file) ".sync-conflict-*.org"))))
+            (org-map-entries
+             (lambda ()
+               (when (or (org-entry-get nil "ID") (org-get-todo-state))
+                 (let ((text (org-dispatch--subtree-text)) (start 0) sessions)
+                   (while (string-match
+                           (concat "herdr:" (regexp-quote org-dispatch-host)
+                                   "/\\(pi\\|claude\\):\\([0-9a-f-]+\\)\\(?:@[^] \n]+\\)?\\]") text start)
+                     (push (cons (match-string 1 text) (match-string 2 text)) sessions)
+                     (setq start (match-end 0)))
+                   (push (list :id (org-entry-get nil "ID") :file file :hash hash
+                               :todo (org-get-todo-state) :repeat (and (org-get-repeat) t)
+                               :review-loop (and (or (org-entry-get nil "DEV_REVIEW")
+                                                     (org-entry-get nil "REVIEW_PARENT")) t)
+                               :conflict (and conflict t) :sessions (delete-dups sessions))
+                         records)))))))))
+    (nreverse records)))
+
+(defun org-dispatch--observed-session (pane)
+  "Return PANE's exact supported agent/session pair, else nil."
+  (let* ((session (alist-get 'agent_session pane))
+         (kind (alist-get 'agent pane))
+         (value (alist-get 'value session))
+         (uuid "[0-9a-f]\\{8\\}-[0-9a-f]\\{4\\}-[0-9a-f]\\{4\\}-[0-9a-f]\\{4\\}-[0-9a-f]\\{12\\}"))
+    (when (and (stringp value) (equal kind (alist-get 'agent session))
+               (cond ((equal kind "pi")
+                      (string-match (concat "_\\(" uuid "\\)\\.jsonl\\'") value))
+                     ((equal kind "claude")
+                      (string-match (concat "\\`\\(" uuid "\\)\\'") value))))
+      (cons kind (match-string 1 value)))))
+
+(defun org-dispatch--pane-observation (agent)
+  "Identity and lifecycle fields of a Herdr AGENT row that must not change."
+  (mapcar (lambda (key) (cons key (alist-get key agent)))
+          '(pane_id terminal_id tab_id name agent agent_session agent_status
+            state_change_seq completion_seq focused revision)))
+
+(defun org-dispatch--name-id8 (name)
+  "The task ID prefix in a dispatcher agent NAME, or nil for any other name."
+  (let ((case-fold-search nil))
+    (and (stringp name) (string-match "\\`auto-\\([0-9a-f]\\{8\\}\\)-[0-9]\\{6\\}\\'" name)
+         (match-string 1 name))))
+
+(defun org-dispatch--id8 (id)
+  (let ((hex (replace-regexp-in-string "[^0-9a-f]" "" (or id ""))))
+    (and (>= (length hex) 8) (substring hex 0 8))))
+
+(defun org-dispatch--reopenable (session)
+  "Non-nil when SESSION (AGENT . UUID) can be reopened from its Org link."
+  (pcase (car session)
+    ("pi" (org-dispatch--session-file (cdr session)))
+    ("claude" (org-dispatch--claude-launcher (cdr session)))))
+
+(defun org-dispatch--retire-file ()
+  (expand-file-name "retire.json" org-dispatch-state-dir))
+
+(defun org-dispatch--retire-seen ()
+  "Observations of eligible panes saved by the previous enabled run.
+An unreadable file counts as none, which only restarts the wait."
+  (let ((file (org-dispatch--retire-file)))
+    (when (file-readable-p file)
+      (ignore-errors
+        (with-temp-buffer
+          (insert-file-contents file)
+          (json-parse-buffer :object-type 'alist :null-object nil :false-object nil))))))
+
+(defun org-dispatch--retire-save (rows)
+  (make-directory org-dispatch-state-dir t)
+  (let ((temp (make-temp-file (expand-file-name ".retire-" org-dispatch-state-dir))))
+    (unwind-protect
+        (progn
+          (with-temp-file temp
+            (insert (json-serialize
+                     (vconcat (mapcar (lambda (row) (plist-get row :observation)) rows))
+                     :null-object :null :false-object :false)))
+          (rename-file temp (org-dispatch--retire-file) t))
+      (when (file-exists-p temp) (delete-file temp)))))
+
+(defun org-dispatch--reconcile-panes (agenda &optional seen)
+  "Classify live Herdr agents for retirement without changing anything.
+Each row is :eligible when every check passes on this run, and :stable when
+SEEN, the previous run's observations, holds the same observation."
+  (let* ((list (lambda () (org-dispatch--get (org-dispatch--herdr "agent" "list") 'result 'agents)))
+         (agents (funcall list))
+         (_ (unless (vectorp agents) (error "Herdr did not return an agent array")))
+         (needles (delete-dups
+                   (delq nil (mapcan (lambda (agent)
+                                       (list (org-dispatch--name-id8 (alist-get 'name agent))
+                                             (cdr (org-dispatch--observed-session agent))))
+                                     agents))))
+         (records (and needles (org-dispatch--retirement-records agenda needles)))
+         (receipts (org-dispatch--pane-receipts))
+         (states (org-dispatch--states))
+         (again (funcall list))
+         (changed (and needles (not (equal records (org-dispatch--retirement-records agenda needles)))))
+         rows)
+    (seq-doseq (agent agents)
+      (let* ((id (alist-get 'pane_id agent))
+             (name (alist-get 'name agent))
+             (id8 (org-dispatch--name-id8 name))
+             (session (org-dispatch--observed-session agent))
+             (tasks (and session (seq-filter (lambda (record)
+                                              (member session (plist-get record :sessions))) records)))
+             (task (car tasks))
+             (allocations (seq-filter (lambda (receipt)
+                                        (and (equal (plist-get receipt :host) org-dispatch-host)
+                                             (equal (plist-get receipt :pane) id))) receipts))
+             (status (alist-get 'agent_status agent))
+             (observation (org-dispatch--pane-observation agent))
+             reasons)
+        (unless id8 (push "no dispatcher agent name; not launched by this dispatcher or Herdr restarted" reasons))
+        (unless session (push "unsupported or missing agent session identity" reasons))
+        (when (and session id8)
+          (unless tasks (push "no matching task session link" reasons))
+          (when (cdr tasks) (push "session shared by multiple task records" reasons))
+          (dolist (task tasks)
+            (let ((task-id (plist-get task :id)))
+              (unless task-id (push "task has no stable ID" reasons))
+              (when (and task-id (> (seq-count (lambda (record) (equal task-id (plist-get record :id))) records) 1))
+                (push "duplicate task ID" reasons)))
+            (unless (equal (plist-get task :todo) "DONE")
+              (push (concat "task is " (or (plist-get task :todo) "without TODO state")) reasons))
+            (when (plist-get task :repeat) (push "repeating task has future runs" reasons))
+            (when (plist-get task :review-loop) (push "linked review workflow needs coordinator" reasons))
+            (when (plist-get task :conflict) (push "task file has a Syncthing conflict copy" reasons)))
+          (when (and task (not (cdr tasks)) (not (equal id8 (org-dispatch--id8 (plist-get task :id)))))
+            (push "agent name belongs to a different task" reasons))
+          (when (and task (not (cdr tasks)) allocations
+                     (not (seq-find (lambda (receipt)
+                                      (and (equal (plist-get receipt :id) (plist-get task :id))
+                                           (equal (plist-get receipt :agent) (car session))
+                                           (equal (plist-get receipt :session) (cdr session))))
+                                    allocations)))
+            (push "allocation receipt names a different task or session" reasons))
+          (unless (org-dispatch--reopenable session)
+            (push "saved session cannot be reopened from its link" reasons)))
+        (unless (member status '("idle" "done"))
+          (push (concat "agent is " (or status "unknown")) reasons))
+        (when (eq (alist-get 'focused agent) t) (push "pane is focused" reasons))
+        (when (and session (> (seq-count (lambda (a) (equal session (org-dispatch--observed-session a))) agents) 1))
+          (push "session appears in multiple live panes" reasons))
+        (when (seq-find (lambda (state) (or (equal (plist-get state :pane) id)
+                                            (and session (equal (plist-get state :session) (cdr session)))))
+                        states)
+          (push "pane belongs to an active dispatcher run" reasons))
+        (when changed (push "Org records changed during inventory" reasons))
+        (unless (equal observation
+                       (org-dispatch--pane-observation
+                        (or (seq-find (lambda (a) (equal (alist-get 'pane_id a) id)) again) '((none . t)))))
+          (push "agent identity or lifecycle changed during inventory" reasons))
+        (let ((eligible (null reasons))
+              (stable (and (seq-find (lambda (old) (equal old observation)) seen) t)))
+          (when (and id8 (not reasons) (not stable))
+            (push "not yet seen unchanged by a previous run" reasons))
+          (push (list :pane id :name name :agent (car session) :session (cdr session) :status status
+                      :eligible eligible :stable stable :close (and eligible stable)
+                      :tasks (vconcat (mapcar (lambda (task)
+                                               (list :id (plist-get task :id) :file (plist-get task :file)
+                                                     :todo (plist-get task :todo))) tasks))
+                      :skip (vconcat (delete-dups (nreverse reasons)))
+                      :observation observation)
+                rows))))
+    (nreverse rows)))
+
+(defun org-dispatch--retire-panes (agenda)
+  "Close panes that stayed eligible and unchanged since the previous run.
+Run only under the dispatcher lock, which June's Org commands share. Save this
+run's eligible observations for the next one. Return the closed rows."
+  (let* ((rows (org-dispatch--reconcile-panes agenda (org-dispatch--retire-seen)))
+         (eligible (seq-filter (lambda (row) (plist-get row :eligible)) rows))
+         closed)
+    ;; Save first: a crash below must not let a later run skip the second look.
+    (org-dispatch--retire-save (seq-remove (lambda (row) (plist-get row :close)) eligible))
+    (dolist (row eligible)
+      (when (plist-get row :close)
+        (condition-case err
+            (let ((now (org-dispatch--get (org-dispatch--herdr "agent" "get" (plist-get row :name))
+                                          'result 'agent)))
+              ;; The name resolves only to the occupant the dispatcher named.
+              (if (not (equal (org-dispatch--pane-observation now) (plist-get row :observation)))
+                  (org-dispatch--log "kept pane %s (%s): changed at the final check"
+                                     (plist-get row :pane) (plist-get row :name))
+                (org-dispatch--herdr "pane" "close" (plist-get row :pane))
+                (push row closed)
+                (org-dispatch--log "retired pane %s (%s) for DONE task %s; reopen with herdr-link attach herdr:%s/%s:%s"
+                                   (plist-get row :pane) (plist-get row :name)
+                                   (plist-get (aref (plist-get row :tasks) 0) :id)
+                                   org-dispatch-host (plist-get row :agent) (plist-get row :session))))
+          (error (org-dispatch--log "kept pane %s (%s): %s" (plist-get row :pane) (plist-get row :name)
+                                    (error-message-string err))))))
+    (nreverse closed)))
+
+(defun org-dispatch--retire-enabled ()
+  "Non-nil when June's config sets dispatch.retire to true."
+  (eq (org-dispatch--default "retire" nil) t))
+
+(defun org-dispatch-reconcile ()
+  "Print the retirement inventory, using saved observations. Change nothing."
+  (unless (equal command-line-args-left '("--dry-run"))
+    (error "only reconcile --dry-run is supported; enabled runs retire panes"))
+  (setq command-line-args-left nil)
+  (let ((agenda (let ((standard-output #'external-debugging-output))
+                  (org-dispatch--agenda-files t))))
+    (princ (json-serialize
+            (vconcat (mapcar (lambda (row)
+                               (let ((row (org-plist-delete (copy-sequence row) :observation)))
+                                 (dolist (key '(:eligible :stable :close))
+                                   (setq row (plist-put row key (if (plist-get row key) t :false))))
+                                 (dolist (key '(:name :agent :session :status))
+                                   (setq row (plist-put row key (or (plist-get row key) :null))))
+                                 (plist-put row :tasks
+                                            (vconcat (mapcar (lambda (task)
+                                                               (plist-put (copy-sequence task) :id
+                                                                          (or (plist-get task :id) :null)))
+                                                             (plist-get row :tasks))))))
+                             (org-dispatch--reconcile-panes agenda (org-dispatch--retire-seen))))))
+    (princ "\n")))
 
 ;;; Entry points
 
@@ -1422,6 +1705,11 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
         (org-dispatch--watch state)
       (error (org-dispatch--log "watch failed for %s: %s"
                                 (plist-get state :id) (error-message-string err)))))
+  ;; Before launching, so a task resumed in this run starts in a pane it owns.
+  (when (org-dispatch--retire-enabled)
+    (condition-case err
+        (org-dispatch--retire-panes (org-dispatch--agenda-files))
+      (error (org-dispatch--log "pane retirement failed: %s" (error-message-string err)))))
   (dolist (task (org-dispatch--eligible (org-dispatch--tasks) (org-dispatch--states)))
     (org-dispatch--launch task)))
 
