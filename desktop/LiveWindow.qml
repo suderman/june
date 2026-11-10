@@ -1,4 +1,4 @@
-// Live June: the overlay's minimised form, in the focused screen's bottom-right corner. Her card shows what she is
+// Live June: the desktop client's minimised form, in the focused screen's bottom-right corner. Her card shows what she is
 // doing right now; it grows leftward to hold her latest reply or the user's input. It takes the keyboard only while the
 // input is open, and only where it draws does it take the mouse. The shell decides the state (see live.mjs) and when
 // she shows; see "Live June" in docs/interfaces.org.

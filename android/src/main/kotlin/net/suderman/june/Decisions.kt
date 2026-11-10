@@ -7,7 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * The decisions the phone shares with the desktop overlay: the overlay's .mjs modules bundled as assets/june.js (a global `June`)
+ * The decisions the phone shares with the desktop client: its .mjs modules bundled as assets/june.js (a global `June`)
  * and run in QuickJS. Calls pass JSON in and take JSON back, so the JavaScript sees the same plain objects it does in
  * QML. One engine per screen; close it with the screen.
  */

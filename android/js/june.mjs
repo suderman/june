@@ -1,15 +1,15 @@
-// The decisions the phone shares with the desktop overlay, bundled into one script (june.js, a global `June`) for
+// The decisions the phone shares with the desktop client, bundled into one script (june.js, a global `June`) for
 // QuickJS: which panels the conversation makes, how each is laid out, how it is lit, what live June is doing, and the
-// console look. The modules stay in overlay/, written in the plain JavaScript both QML and QuickJS run; see "What the
+// console look. The modules stay in desktop/, written in the plain JavaScript both QML and QuickJS run; see "What the
 // phone shares with the desktop" in docs/interfaces.org. Below them, the phone's own glue: it keeps the strip's memory
 // and the avatar set's poses in the engine between calls, and hands back layouts ready to draw.
-import { excerpt } from "../../overlay/Code.mjs";
-import * as compose from "../../overlay/compose.mjs";
-import * as looks from "../../overlay/console.mjs";
-import * as light from "../../overlay/light.mjs";
-import * as live from "../../overlay/live.mjs";
-import * as scenery from "../../overlay/scenery.mjs";
-import * as strip from "../../overlay/strip.mjs";
+import { excerpt } from "../../desktop/Code.mjs";
+import * as compose from "../../desktop/compose.mjs";
+import * as looks from "../../desktop/console.mjs";
+import * as light from "../../desktop/light.mjs";
+import * as live from "../../desktop/live.mjs";
+import * as scenery from "../../desktop/scenery.mjs";
+import * as strip from "../../desktop/strip.mjs";
 
 export { compose, light, live, looks, scenery, strip };
 
@@ -22,7 +22,7 @@ let chibiArt = {};
 
 /**
  * Read the avatar sets: the app's base set, and the daemon's (Jon's art) when it has one, which wins where both name a
- * piece, as the overlay merges its sets. Base urls are paths in the app's assets; the daemon's start with `daemon:`.
+ * piece, as the desktop client merges its sets. Base urls are paths in the app's assets; the daemon's start with `daemon:`.
  */
 export function setArt(manifest, daemon) {
 	const sets = (daemon ? [[daemon, "daemon:"], [manifest, ""]] : [[manifest, ""]]).map(([m, prefix]) => ({
@@ -46,7 +46,7 @@ export function setArt(manifest, daemon) {
 /** The strip for the view: its panels, composed with June's pose and side, oldest first. */
 export function panels(items, state, holding) {
 	const composed = compose.composeStrip(strip.panels(items), state, poses, memory, holding === true);
-	// Tool calls carry their caption line, as the overlay's chips and cards show them.
+	// Tool calls carry their caption line, as the desktop client's chips and cards show them.
 	for (const panel of composed) {
 		panel.takeMenu = compose.takeMenu(panel);
 		for (const e of panel.elements) {

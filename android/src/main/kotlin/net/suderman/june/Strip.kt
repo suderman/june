@@ -193,7 +193,7 @@ class Avatar(private val context: Context) {
 
 /**
  * The conversation as a comic strip, drawn from the decisions the phone shares with the desktop (Decisions.kt): the
- * view's items become composed panels, each panel's elements are measured here with the overlay's faces and padding,
+ * view's items become composed panels, each panel's elements are measured here with the desktop client's faces and padding,
  * and the layout engine places them. See "What the phone shares with the desktop" in docs/interfaces.org.
  */
 @Composable
@@ -214,7 +214,7 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
         // count, which crashed the app (and June's hands with it) when the view changed under the lock screen.
         val shown = panels
         val count = shown.length()
-        // Built from the bottom, newest first, as the overlay's list is: the newest panel stays in view as it settles
+        // Built from the bottom, newest first, as the desktop client's list is: the newest panel stays in view as it settles
         // its height, with no scrolling after it.
         // A picture or file the user sent, previewed over the strip while open.
         var viewing by remember { mutableStateOf<Pair<List<Previewing>, Int>?>(null) }
@@ -260,7 +260,7 @@ val LocalLeave = androidx.compose.runtime.staticCompositionLocalOf<() -> Unit> {
 /**
  * A picture or file the user's message brought, over the strip on a dark ground: a picture fitted to the screen, a PDF a
  * page at a time as the daemon renders them (‹ ›), a text file's words, or only the name of any other file. "open in
- * browser" hands its address to the phone's browser; ✕ or a tap on the ground closes it. The overlay's Preview.qml
+ * browser" hands its address to the phone's browser; ✕ or a tap on the ground closes it. The desktop client's Preview.qml
  * does the same on the desktop.
  */
 @Composable
@@ -520,7 +520,7 @@ private fun FileCards(item: JSONObject, el: JSONObject, files: org.json.JSONArra
 
 /**
  * What June showed: every file served at `<result id>/file/<n>`, pictures as polaroids fanned across the top and the
- * rest as document cards below, loose with no container, each opening the preview over all of them, as the overlay does.
+ * rest as document cards below, loose with no container, each opening the preview over all of them, as the desktop client does.
  */
 @Composable
 private fun Shown(el: JSONObject, w: Float) {
@@ -643,7 +643,7 @@ private fun callMark(call: JSONObject) = when (call.optString("status")) {
     else -> "✓" to Look.cardOk
 }
 
-/** Measure one element as the overlay's Panel.qml sizes it, in dp: the width its words take, padding, and minimums. */
+/** Measure one element as the desktop client's Panel.qml sizes it, in dp: the width its words take, padding, and minimums. */
 private fun measure(e: JSONObject, newest: Boolean, textWidth: Float, measurer: TextMeasurer, density: Density): Measured {
     fun natural(text: AnnotatedString, style: TextStyle) = measurer.measure(text, style).size.width / density.density
     fun height(text: AnnotatedString, style: TextStyle, width: Float, lines: Int = Int.MAX_VALUE) =
@@ -668,20 +668,20 @@ private fun measure(e: JSONObject, newest: Boolean, textWidth: Float, measurer: 
             val item = e.getJSONObject("item")
             val marker = natural(AnnotatedString(noteMarkerText(item)), noteMarker)
             val body = AnnotatedString(e.optString("text", item.optString("text")))
-            // Room for the polaroids after the words, as the overlay's note keeps it.
+            // Room for the polaroids after the words, as the desktop client's note keeps it.
             val pictures = min(e.optInt("pictures"), 3)
             val said = body.isNotEmpty()
             val photos = if (pictures > 0) 62f + (pictures - 1) * 16f + (if (said) 12f else 0f) else 0f
             val bodyW = min(natural(body, noteBody) + 2, textWidth - 28 - marker - 8 - photos)
             val h = max(max(height(body, noteBody, bodyW), height(AnnotatedString("›"), noteMarker, marker)), if (pictures > 0) 78f else 0f)
-            // And for its files' cards below, a row each, as the overlay's note keeps them.
+            // And for its files' cards below, a row each, as the desktop client's note keeps them.
             val files = e.optJSONArray("files")?.length() ?: 0
             val cardW = min(260f, textWidth - 28)
             val w = max(marker + 8 + (if (said || (pictures == 0 && files == 0)) bodyW else 0f) + photos, if (files > 0) cardW else 0f)
             Measured(kind, ceil(min(w + 28, textWidth)), ceil(h + 20 + files * 32), e, bodyW, marker)
         }
         "shown" -> {
-            // As the overlay's shown card: polaroids fanned across the top, document cards below, a row each.
+            // As the desktop client's shown card: polaroids fanned across the top, document cards below, a row each.
             val files = e.optJSONArray("files") ?: JSONArray()
             val pictures = (0 until files.length()).count { files.getJSONObject(it).optString("preview") == "picture" }
             val drawn = min(pictures, 3)

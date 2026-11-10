@@ -110,10 +110,10 @@ test("a paired device attaches, sends, and a repeated submit is one message", as
 	c.send({ op: "attach", requestId: "a1" });
 	await c.reply("a1", "view");
 
-	c.send({ op: "submit", requestId: "draft-1", text: "hello from the overlay", source: "gui" });
+	c.send({ op: "submit", requestId: "draft-1", text: "hello from the desktop client", source: "gui" });
 	const first = (await c.reply("draft-1", "accepted")) as Extract<Reply, { type: "accepted" }>;
 	await until(() => lines(items).includes("june: Hi from kit."));
-	assert.deepEqual(lines(items), ["alex: hello from the overlay", "june: Hi from kit."]);
+	assert.deepEqual(lines(items), ["alex: hello from the desktop client", "june: Hi from kit."]);
 	assert.equal(items[0]!.kind === "user" && items[0]!.source, "gui");
 
 	// The same draft again, as after a dropped connection: on a new connection, the same submission.
@@ -121,10 +121,10 @@ test("a paired device attaches, sends, and a repeated submit is one message", as
 	t.after(() => again.ws.terminate());
 	again.send({ op: "hello", requestId: "h2", token, protocol: 1 });
 	await again.reply("h2", "hello");
-	again.send({ op: "submit", requestId: "draft-1", text: "hello from the overlay", source: "gui" });
+	again.send({ op: "submit", requestId: "draft-1", text: "hello from the desktop client", source: "gui" });
 	const second = (await again.reply("draft-1", "accepted")) as Extract<Reply, { type: "accepted" }>;
 	assert.equal(second.submissionId, first.submissionId);
-	c.send({ op: "submit", requestId: "draft-1", text: "hello from the overlay", source: "gui" });
+	c.send({ op: "submit", requestId: "draft-1", text: "hello from the desktop client", source: "gui" });
 	await until(() => c.replies.filter((r) => r.type === "accepted").length === 2);
 	assert.equal(faux.state.callCount, 1, "the repeats never reached the model");
 

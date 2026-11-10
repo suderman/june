@@ -1,9 +1,9 @@
-// Live June: the overlay's minimised form shows what she is doing right now. This module decides which live state
+// Live June: the desktop client's minimised form shows what she is doing right now. This module decides which live state
 // that is, from runtime state and the clock alone, never from a model, and spots the finished reply she should pop up
-// with. QML imports it and test/overlay.test.mjs runs it under Node, so it is plain JavaScript as QML's engine knows
+// with. QML imports it and test/desktop.test.mjs runs it under Node, so it is plain JavaScript as QML's engine knows
 // it: no Array.prototype.at, Object.hasOwn, or object spread. See "Live June" in docs/interfaces.org.
 
-/** Live June's states; a copy of LIVE_STATES in src/avatar.ts, kept in step by test/overlay.test.mjs. */
+/** Live June's states; a copy of LIVE_STATES in src/avatar.ts, kept in step by test/desktop.test.mjs. */
 export const LIVE_STATES = [
 	"typing",
 	"thinking",
@@ -100,7 +100,7 @@ export function excerpt(text, max = 200) {
 
 /**
  * Live June's art from one avatar set, by state, with URLs under `base`: a still, or a sprite sheet with `frames` and
- * `fps`. Lenient where src/avatar.ts is strict: an entry the overlay cannot show is skipped.
+ * `fps`. Lenient where src/avatar.ts is strict: an entry the desktop client cannot show is skipped.
  */
 export function readLive(manifest, base) {
 	const out = {};

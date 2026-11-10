@@ -1,4 +1,4 @@
-// The overlay's WebSocket session, separate from the windows so connection recovery can be tested without a desktop.
+// The desktop client's WebSocket session, separate from the windows so connection recovery can be tested without a desktop.
 import QtQuick
 import QtWebSockets
 
@@ -54,7 +54,7 @@ QtObject {
         link.helloSeen = false;
         ws.sendTextMessage(JSON.stringify({ op: "hello", requestId: link.rid(), token: link.token(), protocol: 1 }));
       } else if (status === WebSocket.Closed || status === WebSocket.Error) {
-        if (status === WebSocket.Error) console.warn("june overlay:", ws.errorString);
+        if (status === WebSocket.Error) console.warn("june desktop:", ws.errorString);
         if (link.linked || link.helloSeen) link.refusals = 0;
         else if (status === WebSocket.Closed) link.refusals += 1;
         link.linked = false;
@@ -75,6 +75,6 @@ QtObject {
   property Timer watchdog: Timer {
     id: deadline
     interval: link.timeoutMs
-    onTriggered: { console.warn("june overlay: connection timed out; reconnecting"); link.refresh(); }
+    onTriggered: { console.warn("june desktop: connection timed out; reconnecting"); link.refresh(); }
   }
 }

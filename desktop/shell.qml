@@ -1,11 +1,11 @@
-// June's Hyprland overlay: a resident Quickshell client that shows the one conversation as a comic strip above
+// June's desktop client: a resident Quickshell client that shows the one conversation as a comic strip above
 // every window, fullscreen ones included, without taking the active window. It talks to the daemon over the WebSocket
 // listener with a device token (see "Client protocol for graphical clients" in docs/architecture.org).
 //
-// Environment, set by the june-overlay wrapper: JUNE_OVERLAY_URL (wss://june.kit/), JUNE_OVERLAY_TOKEN_FILE (a 0600
-// file holding this device's token), JUNE_OVERLAY_FONTS (a directory of the strip's fonts), and JUNE_OVERLAY_ART (avatar
+// Environment, set by the june-desktop wrapper: JUNE_DESKTOP_URL (wss://june.kit/), JUNE_DESKTOP_TOKEN_FILE (a 0600
+// file holding this device's token), JUNE_DESKTOP_FONTS (a directory of the strip's fonts), and JUNE_DESKTOP_ART (avatar
 // set directories, colon-separated, a personal set before the base one; see "Poses" in docs/interfaces.org).
-// One key cycles the overlay (`june-overlay cycle`, for an Alt tap): hidden, live June in the corner with her note
+// One key cycles the desktop client (`june-desktop cycle`, for an Alt tap): hidden, live June in the corner with her note
 // open, the full strip, hidden again; if she popped up by herself, the first press opens her note. Esc dismisses either. `toggle`, `open`, `close`, and `mini` reach each directly.
 // `window` opens the same strip in an ordinary window with this device's toggles (StripWindow.qml).
 // Shared modules must run in QML's JS engine too. Node-only array helpers can blank both looks.
@@ -29,7 +29,7 @@ ShellRoot {
   id: root
 
   property bool shown: false
-  // The windowed strip, and this device's toggles: state while the overlay runs, never written to config.
+  // The windowed strip, and this device's toggles: state while the desktop client runs, never written to config.
   property bool windowShown: false
   // Live June in the corner: off, she never pops up and the key goes straight between hidden and the strip.
   property bool liveEnabled: true
@@ -68,7 +68,7 @@ ShellRoot {
   // Opens a herdr link (herdr-link focuses or resumes the agent's pane in kitty) or a file link (emacsclient).
   Process { id: linker }
   // Opens a link from June's words as Strip.linkKind allows: a web page in the browser, an agent's session through
-  // herdr-link, a file in Emacs through emacsclient. Returns whether it opened, so the overlay can step aside for what did.
+  // herdr-link, a file in Emacs through emacsclient. Returns whether it opened, so the desktop client can step aside for what did.
   function openLink(url) {
     const kind = Strip.linkKind(url);
     if (kind === "web") return Qt.openUrlExternally(url);
@@ -95,12 +95,12 @@ ShellRoot {
   property string toast: ""
   property int seq: 0
 
-  readonly property string url: Quickshell.env("JUNE_OVERLAY_URL") || "wss://june.kit/"
+  readonly property string url: Quickshell.env("JUNE_DESKTOP_URL") || "wss://june.kit/"
   readonly property string host: (/^wss?:\/\/(?:june\.)?([^/:.]+)/.exec(url) ?? [null, "the server"])[1]
-  readonly property string fonts: Quickshell.env("JUNE_OVERLAY_FONTS") || ""
+  readonly property string fonts: Quickshell.env("JUNE_DESKTOP_FONTS") || ""
   readonly property string activity: Strip.activity(view.state, linked)
   // The masthead's plain phrase and the tasks she follows.
-  // Tasks the user dismissed at their signal, for this run of the overlay.
+  // Tasks the user dismissed at their signal, for this run of the desktop client.
   property var seen: []
   readonly property var status: Strip.status(view.state, host, seen)
   function dismiss(key) {
@@ -111,7 +111,7 @@ ShellRoot {
   // June's poses from every avatar set, the first set winning a shared name. The wrapper names the local sets, a
   // personal one (when this machine has it) before the base set from the package; without a local personal set, the
   // daemon's comes first, loaded over HTTP from the path its hello gives this device.
-  readonly property var artDirs: (Quickshell.env("JUNE_OVERLAY_ART") || "").split(":").filter(d => d !== "")
+  readonly property var artDirs: (Quickshell.env("JUNE_DESKTOP_ART") || "").split(":").filter(d => d !== "")
   readonly property bool localPersonal: artDirs.length > 1
   // Each set read, by its place in the order: the daemon's at -1, then the local ones from 0.
   property var artSources: ({})
@@ -151,7 +151,7 @@ ShellRoot {
     request.onreadystatechange = () => {
       if (request.readyState !== XMLHttpRequest.DONE) return;
       if (request.status === 200) addArt(-1, base, request.responseText);
-      else if (request.status !== 404) console.warn("june overlay: the daemon's avatar set did not load:", request.status);
+      else if (request.status !== 404) console.warn("june desktop: the daemon's avatar set did not load:", request.status);
     };
     request.open("GET", base + "manifest.json");
     request.send();
@@ -163,7 +163,7 @@ ShellRoot {
       const manifest = JSON.parse(text);
       sources[order] = { poses: Compose.readPoses(manifest, base), live: Live.readLive(manifest, base), chibi: Live.readChibi(manifest, base), scenery: Scenery.readScenery(manifest, base) };
     }
-    catch (e) { console.warn("june overlay: no usable avatar set at", base); sources[order] = { poses: [], live: {}, chibi: {}, scenery: null }; }
+    catch (e) { console.warn("june desktop: no usable avatar set at", base); sources[order] = { poses: [], live: {}, chibi: {}, scenery: null }; }
     artSources = sources;
     const ordered = Object.keys(sources).map(Number).sort((a, b) => a - b).map(k => sources[k]);
     const art = {};
@@ -418,7 +418,7 @@ ShellRoot {
     }
   }
 
-  FileView { id: tokenFile; path: Quickshell.env("JUNE_OVERLAY_TOKEN_FILE") || ""; blockLoading: true }
+  FileView { id: tokenFile; path: Quickshell.env("JUNE_DESKTOP_TOKEN_FILE") || ""; blockLoading: true }
 
   Connection {
     id: connection
@@ -442,7 +442,7 @@ ShellRoot {
   }
   function say(text) { toast = text; toastTimer.restart(); }
 
-  // Pictures and files waiting for the next message, shared by the overlay's balloon and the strip window's: pasted,
+  // Pictures and files waiting for the next message, shared by the desktop client's balloon and the strip window's: pasted,
   // dropped or picked, read by attach.sh, held to the daemon's limits by attach.mjs, and sent with the words.
   property var outbox: []
   property var pasteFallback: null
@@ -568,11 +568,11 @@ ShellRoot {
     exclusionMode: ExclusionMode.Ignore
     color: "transparent"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "june-overlay"
+    WlrLayershell.namespace: "june-desktop"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     onVisibleChanged: if (visible) composer.focusInput()
 
-    // Esc closes a preview first, then hides from anywhere in the overlay, even after a click put the focus in a balloon
+    // Esc closes a preview first, then hides from anywhere in the desktop client, even after a click put the focus in a balloon
     // to select its words.
     Shortcut { sequence: "Escape"; onActivated: preview.open ? preview.close() : root.hide() }
     // The arrow keys turn a PDF's pages in the preview, then step through what the message brought.
@@ -593,9 +593,9 @@ ShellRoot {
       anchors.top: parent.top
       anchors.bottom: parent.bottom
       width: Math.min(Theme.stripWidth, parent.width - 32)
-      // A picker for +, drawn inside the overlay: as a window of its own it would open under the overlay's layer.
+      // A picker for +, drawn inside the desktop client: as a window of its own it would open under the desktop client's layer.
       FileDialog {
-        id: overlayPicker
+        id: filePicker
         title: "Attach for June"
         fileMode: FileDialog.OpenFiles
         popupType: Popup.Item
@@ -715,11 +715,11 @@ ShellRoot {
         attachments: root.outbox
         unattach: index => root.unattach(index)
         paste: fallback => root.pasteInto(fallback)
-        pick: () => overlayPicker.open()
+        pick: () => filePicker.open()
       }
     }
 
-    // A picture or file a note brought, over everything in the overlay until closed.
+    // A picture or file a note brought, over everything in the desktop client until closed.
     Preview {
       id: preview
       anchors.fill: parent

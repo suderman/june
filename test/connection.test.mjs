@@ -15,8 +15,8 @@ test("Qt renders artifact beats in both looks, bounds previews and copies full l
 	const dir = await mkdtemp(join(tmpdir(), "june-artifacts-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await mkdir(join(dir, "ui"));
-	for (const file of ["Artifact.qml", "ArtifactButton.qml", "ArtifactIcon.qml", "Preview.qml", "ConsolePanel.qml", "Panel.qml", "Balloon.qml", "Backdrop.qml", "Scenery.qml", "FileCard.qml", "Code.mjs", "console.mjs", "compose.mjs", "strip.mjs", "light.mjs", "live.mjs", "scenery.mjs"]) await copyFile(new URL(`../overlay/${file}`, import.meta.url), join(dir, "ui", file));
-	const theme = (await readFile(new URL("../overlay/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
+	for (const file of ["Artifact.qml", "ArtifactButton.qml", "ArtifactIcon.qml", "Preview.qml", "ConsolePanel.qml", "Panel.qml", "Balloon.qml", "Backdrop.qml", "Scenery.qml", "FileCard.qml", "Code.mjs", "console.mjs", "compose.mjs", "strip.mjs", "light.mjs", "live.mjs", "scenery.mjs"]) await copyFile(new URL(`../desktop/${file}`, import.meta.url), join(dir, "ui", file));
+	const theme = (await readFile(new URL("../desktop/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
 	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\n");
 	await writeFile(join(dir, "tst_artifacts.qml"), `
@@ -124,7 +124,7 @@ test("Quickshell clipboard writes preserve NBSP, CRLF and Unicode separators wit
 	await writeFile(join(dir, "shell.qml"), `
 import QtQuick
 import Quickshell
-import ${JSON.stringify(new URL("../overlay", import.meta.url).href)}
+import ${JSON.stringify(new URL("../desktop", import.meta.url).href)}
 ShellRoot {
   Item {
     id: root
@@ -164,7 +164,7 @@ test("Qt reconnects a silent socket, reattaches for a fresh view, and supports m
 	t.after(() => { for (const ws of server.clients) ws.terminate(); server.close(); });
 	const dir = await mkdtemp(join(tmpdir(), "june-connection-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
-	const source = new URL("../overlay", import.meta.url).href;
+	const source = new URL("../desktop", import.meta.url).href;
 	await writeFile(join(dir, "main.qml"), `
 import QtQuick
 import ${JSON.stringify(source)}
@@ -235,7 +235,7 @@ test("Qt retries a socket that opens but never answers hello", { skip: !qml, tim
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await writeFile(join(dir, "main.qml"), `
 import QtQuick
-import ${JSON.stringify(new URL("../overlay", import.meta.url).href)}
+import ${JSON.stringify(new URL("../desktop", import.meta.url).href)}
 Item {
   Connection {
     url: "ws://127.0.0.1:${server.address().port}"
@@ -259,9 +259,9 @@ test("Qt's right-click take menu preserves left selection, targets the reply, an
 	const dir = await mkdtemp(join(tmpdir(), "june-menu-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await mkdir(join(dir, "ui"));
-	for (const file of ["TakeMenu.qml", "compose.mjs", "strip.mjs"]) await copyFile(new URL(`../overlay/${file}`, import.meta.url), join(dir, "ui", file));
+	for (const file of ["TakeMenu.qml", "compose.mjs", "strip.mjs"]) await copyFile(new URL(`../desktop/${file}`, import.meta.url), join(dir, "ui", file));
 	// Only Quickshell's singleton wrapper is replaced; use the actual palette and menu with Qt Quick Test.
-	const theme = (await readFile(new URL("../overlay/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
+	const theme = (await readFile(new URL("../desktop/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
 	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\n");
 	await writeFile(join(dir, "tst_take.qml"), `
@@ -356,8 +356,8 @@ test("Qt's file card shows the file's name and size, asks to open it by its url,
 	const dir = await mkdtemp(join(tmpdir(), "june-file-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await mkdir(join(dir, "ui"));
-	await copyFile(new URL("../overlay/FileCard.qml", import.meta.url), join(dir, "ui", "FileCard.qml"));
-	const theme = (await readFile(new URL("../overlay/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
+	await copyFile(new URL("../desktop/FileCard.qml", import.meta.url), join(dir, "ui", "FileCard.qml"));
+	const theme = (await readFile(new URL("../desktop/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
 	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\nFileCard 1.0 FileCard.qml\n");
 	await writeFile(join(dir, "tst_file.qml"), `
@@ -421,8 +421,8 @@ test("Qt's preview shows a picture over the strip, hands it to the desktop on re
 	const dir = await mkdtemp(join(tmpdir(), "june-preview-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await mkdir(join(dir, "ui"));
-	for (const file of ["Preview.qml", "Code.mjs"]) await copyFile(new URL(`../overlay/${file}`, import.meta.url), join(dir, "ui", file));
-	const theme = (await readFile(new URL("../overlay/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
+	for (const file of ["Preview.qml", "Code.mjs"]) await copyFile(new URL(`../desktop/${file}`, import.meta.url), join(dir, "ui", file));
+	const theme = (await readFile(new URL("../desktop/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
 	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\nPreview 1.0 Preview.qml\n");
 	// A 2x2 PNG, served as a file url as the daemon serves an https one.

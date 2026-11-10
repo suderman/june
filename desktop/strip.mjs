@@ -1,6 +1,6 @@
-// The overlay's logic without Qt: it keeps the folded view, groups it into comic panels, turns June's Markdown into
+// The desktop client's logic without Qt: it keeps the folded view, groups it into comic panels, turns June's Markdown into
 // the rich text a balloon shows, and reads what the user typed. QML imports it (`import "strip.mjs" as Strip`), and
-// test/overlay.test.mjs runs it under Node, so it uses nothing but the language, as far as QML's engine knows it: no
+// test/desktop.test.mjs runs it under Node, so it uses nothing but the language, as far as QML's engine knows it: no
 // Array.prototype.at, Object.hasOwn, or object spread.
 
 /** A fresh copy of the view after `reply`, a `view` reply from the daemon; any other reply returns `view` as it was. */
@@ -247,7 +247,7 @@ export function markup(text, style = {}) {
 const COMMANDS = new Set(["stop", "compact", "status", "reload", "help"]);
 
 /**
- * What the user's balloon asks for: a message to submit, a command, or a refusal shown in place. The overlay never
+ * What the user's balloon asks for: a message to submit, a command, or a refusal shown in place. The desktop client never
  * offers /new: one conversation, and a fresh context is the terminal's to start.
  */
 export function readInput(text) {
@@ -256,7 +256,7 @@ export function readInput(text) {
 	const match = /^\/([a-z]+)(?:\s+([\s\S]*))?$/.exec(trimmed);
 	if (match !== null) {
 		const name = match[1];
-		if (name === "new") return { kind: "refuse", message: "/new belongs to the terminal; the overlay keeps the one conversation." };
+		if (name === "new") return { kind: "refuse", message: "/new belongs to the terminal; the desktop client keeps the one conversation." };
 		if (COMMANDS.has(name)) return { kind: "command", name, args: (match[2] ?? "").trim() };
 	}
 	return { kind: "submit", text };

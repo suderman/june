@@ -1,4 +1,4 @@
-// The strip in an ordinary window, for the launcher: the same conversation and panels as the overlay, with a row of
+// The strip in an ordinary window, for the launcher: the same conversation and panels as the desktop client, with a row of
 // toggles for this device's state (nothing written to config). Narrowed below 480 px it shows the strip's stacked
 // layout, the phone's. Ctrl+N and Ctrl+P page, Ctrl+R refreshes, Ctrl+W closes. See "The windowed strip" in docs/interfaces.org.
 import QtQuick
@@ -32,7 +32,7 @@ FloatingWindow {
   Shortcut { sequences: ["Right", "PgDown"]; enabled: preview.paging || preview.stepping; onActivated: preview.next() }
   Shortcut { sequences: ["Left", "PgUp"]; enabled: preview.paging || preview.stepping; onActivated: preview.previous() }
 
-  // The column the strip lives in: the window's width, up to the overlay's, centred on a wide window.
+  // The column the strip lives in: the window's width, up to the desktop client's, centred on a wide window.
   Item {
     id: column
     anchors.top: parent.top
@@ -56,7 +56,7 @@ FloatingWindow {
       quiet: win.shell.quiet
     }
 
-    // This device's toggles: state for now, gone when the overlay restarts.
+    // This device's toggles: state for now, gone when the desktop client restarts.
     Flow {
       id: toggles
       anchors.top: masthead.bottom

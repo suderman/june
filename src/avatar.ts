@@ -105,7 +105,7 @@ export type Pose = {
 	special?: boolean;
 };
 /**
- * Live June's states: what the overlay's minimised form shows her doing right now, chosen from runtime state and the
+ * Live June's states: what the desktop client's minimised form shows her doing right now, chosen from runtime state and the
  * clock, never by a model. Busy states follow the run; `pop-in`, `handing-note`, and `waking` play once on arrival;
  * idle states follow the time of day and how long she has been idle.
  */

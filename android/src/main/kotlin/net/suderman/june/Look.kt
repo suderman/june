@@ -6,7 +6,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 
-/** The strip's colours and faces, as overlay/Theme.qml has them for the comic look in light. */
+/** The strip's colours and faces, as desktop/Theme.qml has them for the comic look in light. */
 object Look {
     val ink = Color(0xFF1B1A1F)
     val paper = Color(0xFFF6F1E7)

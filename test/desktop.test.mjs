@@ -1,21 +1,21 @@
-// The overlay's logic without Qt: the view and its panels (overlay/strip.mjs) and the comic layout engine
-// (overlay/compose.mjs), which its QML imports. Plain JavaScript, so tsc leaves it out.
+// The desktop client's logic without Qt: the view and its panels (desktop/strip.mjs) and the comic layout engine
+// (desktop/compose.mjs), which its QML imports. Plain JavaScript, so tsc leaves it out.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { activity, applyView, beats, caption, emptyView, fileSize, markup, panels, previewKind, readInput, status, noteText } from "../overlay/strip.mjs";
-import { ACTIVITIES, FALLBACK, aimTail, mergePoses, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, panelLayout, jagged, liveActivity, metrics, picked, plan, readPoses, selectionMoment, standIn, takeMenu } from "../overlay/compose.mjs";
+import { activity, applyView, beats, caption, emptyView, fileSize, markup, panels, previewKind, readInput, status, noteText } from "../desktop/strip.mjs";
+import { ACTIVITIES, FALLBACK, aimTail, mergePoses, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, panelLayout, jagged, liveActivity, metrics, picked, plan, readPoses, selectionMoment, standIn, takeMenu } from "../desktop/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
-import { PAGE, pageTarget, rest, step, wheel } from "../overlay/scroll.mjs";
-import { CALM_GROUND, LONG_SHARE, PATTERNS, TIMES, WEATHER_MS, backdrop, cutaway, fallingPath, graded, hourOf, look, moment, patternPath, place, skyLook, sunFor, sunKeys, sunTimes } from "../overlay/light.mjs";
-import { MAX_PROPS, focusBlur, panelScene, SEASONS as SCENE_SEASONS, SETTINGS as SCENE_SETTINGS, SPOTS, choosePlate, chooseProps, chooseRoom, mergeScenery, placeProps, placeRoom, readScenery, roomPoint, season } from "../overlay/scenery.mjs";
+import { PAGE, pageTarget, rest, step, wheel } from "../desktop/scroll.mjs";
+import { CALM_GROUND, LONG_SHARE, PATTERNS, TIMES, WEATHER_MS, backdrop, cutaway, fallingPath, graded, hourOf, look, moment, patternPath, place, skyLook, sunFor, sunKeys, sunTimes } from "../desktop/light.mjs";
+import { MAX_PROPS, focusBlur, panelScene, SEASONS as SCENE_SEASONS, SETTINGS as SCENE_SETTINGS, SPOTS, choosePlate, chooseProps, chooseRoom, mergeScenery, placeProps, placeRoom, readScenery, roomPoint, season } from "../desktop/scenery.mjs";
 import { SEASONS, SETTINGS, SPOTS as AVATAR_SPOTS } from "../src/avatar.ts";
-import { DND_MODE, MODES_CALL, SCHEMES, SCHEME_CALL, isDark, parseModes, parseScheme, quietIn, setQuietCall } from "../overlay/desktop.mjs";
-import { FACES, LOOKS, face, liveFace, lines as consoleLines } from "../overlay/console.mjs";
-import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent } from "../overlay/live.mjs";
+import { DND_MODE, MODES_CALL, SCHEMES, SCHEME_CALL, isDark, parseModes, parseScheme, quietIn, setQuietCall } from "../desktop/desktop.mjs";
+import { FACES, LOOKS, face, liveFace, lines as consoleLines } from "../desktop/console.mjs";
+import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent } from "../desktop/live.mjs";
 
 import { replyParts } from "../src/artifact.ts";
-import { excerpt as codeExcerpt, html as codeHtml } from "../overlay/Code.mjs";
+import { excerpt as codeExcerpt, html as codeHtml } from "../desktop/Code.mjs";
 import { panels as phonePanels, consoleStrip as phoneConsole } from "../android/js/june.mjs";
 
 test("artifacts remain whole beats on desktop and phone, including console, replay and streaming", () => {
@@ -179,7 +179,7 @@ test("input reads commands, refuses /new, and submits anything else; the badge s
 	assert.equal(activity(idle, true), "");
 });
 
-test("the overlay's expression chains match the daemon's vocabulary", () => {
+test("the desktop client's expression chains match the daemon's vocabulary", () => {
 	assert.deepEqual(Object.keys(FALLBACK).sort(), Object.keys(EXPRESSIONS).filter((e) => e !== "idle").sort());
 	for (const name of [...Object.keys(EXPRESSIONS), "no-such-face"]) assert.deepEqual(chain(name), fallbacks(name), name);
 });
@@ -195,7 +195,7 @@ test("June's activity in the live panel comes from runtime state: thinking, then
 	assert.equal(liveActivity(busy, panel("user", { kind: "june", text: "", streaming: true })), "thinking", "a reply with no words yet");
 	assert.equal(liveActivity({ ...busy, running: false, compacting: true }, panel("user")), "working", "tidying up while compacting");
 	assert.equal(liveActivity({ ...busy, running: false }, panel("user", "tools")), null, "no run: the panel settles");
-	assert.deepEqual(ACTIVITIES, [...POSE_ACTIVITIES], "the overlay's activities match the daemon's");
+	assert.deepEqual(ACTIVITIES, [...POSE_ACTIVITIES], "the desktop client's activities match the daemon's");
 });
 
 test("activity poses show only while she is doing it, never as a reaction", () => {
@@ -508,9 +508,9 @@ test("a balloon and its tail are one closed outline from any side, and a burst s
 });
 
 test("the shared modules use only JavaScript that QML's engine runs", async () => {
-	// Each of these loaded under Node but failed in Quickshell, blanking the overlay.
+	// Each of these loaded under Node but failed in Quickshell, blanking the desktop client.
 	for (const file of ["strip.mjs", "compose.mjs", "live.mjs", "scroll.mjs", "light.mjs", "scenery.mjs", "console.mjs", "desktop.mjs", "Code.mjs"]) {
-		const source = (await readFile(new URL(`../overlay/${file}`, import.meta.url), "utf8")).replace(/^\s*(\/\/|\*).*$/gm, "");
+		const source = (await readFile(new URL(`../desktop/${file}`, import.meta.url), "utf8")).replace(/^\s*(\/\/|\*).*$/gm, "");
 		assert.doesNotMatch(source, /\.at\(/, `${file}: Array.prototype.at`);
 		assert.doesNotMatch(source, /\.flatMap\(/, `${file}: Array.prototype.flatMap`);
 		assert.doesNotMatch(source, /Object\.hasOwn\(/, `${file}: Object.hasOwn`);
@@ -533,7 +533,7 @@ test("live June's state follows the run: thinking, digging or delegating, typing
 	assert.equal(liveState({ view: { items: [], state: busy }, linked: false, now }), "offline");
 	assert.equal(at([ask], busy, { once: { state: "pop-in", until: now.getTime() + 1000 } }), "pop-in", "a one-shot plays first");
 	assert.equal(at([ask], busy, { once: { state: "pop-in", until: now.getTime() - 1 } }), "thinking", "then the run shows again");
-	assert.deepEqual(LIVE, [...LIVE_STATES], "the overlay's live states match the daemon's");
+	assert.deepEqual(LIVE, [...LIVE_STATES], "the desktop client's live states match the daemon's");
 });
 
 test("idle, she sips her mug, then reads, doodles, listens to music in the evening, and snoozes late", () => {
@@ -749,7 +749,7 @@ test("abstract patterns fill the panel, and focus lines and a burst centre on he
 	assert.ok(Math.hypot(x - 150, y - 120) >= 70, "lines start clear of her face");
 });
 
-test("the sun rises and sets on the overlay's clock for home's location, and the day's light follows it", () => {
+test("the sun rises and sets on the desktop client's clock for home's location, and the day's light follows it", () => {
 	// Calgary, to a tenth of a degree, as the daemon sends it. Published times: 5:20 and 21:58 at midsummer, 8:37 and
 	// 16:32 at midwinter (local clock, daylight time in summer).
 	const hm = (h) => Math.round(h * 60);
@@ -791,7 +791,7 @@ test("the window's sky greys with cloud, drops the sun and stars, and lets rain 
 
 const scenery = readScenery(manifest, "file:///set/");
 
-test("the overlay's settings, seasons, and spots match the daemon's, and the base set's scenery reads whole", () => {
+test("the desktop client's settings, seasons, and spots match the daemon's, and the base set's scenery reads whole", () => {
 	assert.deepEqual(SCENE_SETTINGS, [...SETTINGS]);
 	assert.deepEqual(SCENE_SEASONS, [...SEASONS]);
 	assert.deepEqual(SPOTS, [...AVATAR_SPOTS]);
@@ -1227,7 +1227,7 @@ test("a panel's scene is decided once for every client: the hour's light, her ro
 });
 
 test("a gesture is seen past the words or framed wider, and the director's pick is never swapped", async () => {
-	const { readPoses, panelLayout, gestureShown, framingsShowing, composeStrip, availableAt } = await import("../overlay/compose.mjs");
+	const { readPoses, panelLayout, gestureShown, framingsShowing, composeStrip, availableAt } = await import("../desktop/compose.mjs");
 	const pose = (expression, gestures, extra = {}) => ({ file: "x.webp", size: [2560, 2662], expression, face: [0.4, 0.195, 0.23, 0.27], mouth: [0.51, 0.4], facing: "front", gestures, ...extra });
 	const at = Date.UTC(2026, 10, 5, 12);
 	const manifest = {
@@ -1269,7 +1269,7 @@ test("a gesture is seen past the words or framed wider, and the director's pick 
 });
 
 test("restricted action art gets an illustration before losing its performance", async () => {
-	const { gestureShown } = await import("../overlay/compose.mjs");
+	const { gestureShown } = await import("../desktop/compose.mjs");
 	// Measured canvases and gesture boxes from accepted 2026-11-08 art, not enlarged face boxes or deleted hands.
 	const entry = (size, face, mouth, gestures, extra = {}) => ({ file: "action.webp", expression: "determined", size, face, mouth, mirror: false, framings: ["waist"], gestures: gestures.map((box, i) => ({ name: `part-${i}`, box, primary: i === 0 })), ...extra });
 	const entries = {

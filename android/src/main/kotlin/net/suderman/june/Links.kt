@@ -18,7 +18,7 @@ object Links {
     /** HOST/AGENT:SESSION[@PANE], as org/bin/herdr-link stamps it and src/tools/org.ts reads it. */
     private val HERDR = Regex("""^herdr:([a-z0-9-]+)/([a-z]+):([0-9a-f-]{36})(?:@([A-Za-z0-9:]+))?$""")
 
-    /** file:PATH or file:PATH::SEARCH, PATH from ~ or /, as overlay/strip.mjs linkKind reads it. */
+    /** file:PATH or file:PATH::SEARCH, PATH from ~ or /, as desktop/strip.mjs linkKind reads it. */
     private val FILE = Regex("""^file:(~/|/)[^\n<>"]*$""")
 
     fun opens(url: String): Boolean = url.startsWith("https://") || url.startsWith("http://") || HERDR.matches(url) || FILE.matches(url)

@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { admit, MAX_PICTURE_BASE64, parse, payload, readCommand } from "../overlay/attach.mjs";
+import { admit, MAX_PICTURE_BASE64, parse, payload, readCommand } from "../desktop/attach.mjs";
 
 const run = promisify(execFile);
-const script = new URL("../overlay/attach.sh", import.meta.url).pathname;
+const script = new URL("../desktop/attach.sh", import.meta.url).pathname;
 // A 2x2 PNG.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGP4z8DAAMIM/4EAAB/uBfsL2WiLAAAAAElFTkSuQmCC", "base64");
 const tools = await run("bash", ["-c", "command -v magick file wl-paste"]).then(() => true, () => false);

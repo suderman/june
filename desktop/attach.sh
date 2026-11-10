@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pictures and files the user attaches on the desktop, read for the overlay (attach.mjs), which QML cannot do itself.
+# Pictures and files the user attaches on the desktop, read for the desktop client (attach.mjs), which QML cannot do itself.
 #
 #   attach.sh read PATH...  each path as one line (below)
 #   attach.sh paste         the clipboard: a picture (a screenshot) as one line, or files copied in a file manager as

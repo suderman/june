@@ -13,8 +13,8 @@
     packages = forAll (pkgs:
       {
         default = pkgs.callPackage ./nix/package.nix {};
-        # The Hyprland overlay, a Quickshell config with its own Qt modules and fonts.
-        overlay = pkgs.callPackage ./nix/overlay.nix {};
+        # The desktop client, a Quickshell config with its own Qt modules and fonts.
+        desktop = pkgs.callPackage ./nix/desktop.nix {};
         # june-art: finishes generated art into an avatar set outside the repository.
         art = pkgs.callPackage ./nix/art.nix {};
       }

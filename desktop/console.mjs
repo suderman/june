@@ -1,7 +1,7 @@
 // The console look: the same strip as plain lines in a terminal style, for when June should look professional rather
 // than cute (a client meeting). Each expression from the vocabulary is a text face, an emoticon rather than an emoji;
 // tools, patter, and notices are marked lines. No art, rooms, light, or marks. QML imports it and
-// test/overlay.test.mjs runs it under Node, so it is plain JavaScript as QML's engine knows it: no
+// test/desktop.test.mjs runs it under Node, so it is plain JavaScript as QML's engine knows it: no
 // Array.prototype.at, Object.hasOwn, or object spread. See "The console look" in docs/interfaces.org.
 import { chain } from "./compose.mjs";
 import { caption, noteText } from "./strip.mjs";

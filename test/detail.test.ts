@@ -60,13 +60,13 @@ test("stored kitty reads as tui, and every reply keeps the markup June wrote, fo
 		said(2, [{ type: "text", text: "Use =june= *now*." }]),
 		input(3, "telegram", "from the bridge"),
 		said(4, [{ type: "text", text: "Use `june` *now*." }]),
-		input(5, "gui", "from the overlay"),
+		input(5, "gui", "from the desktop client"),
 		said(6, [{ type: "text", text: "Use =june= *now*." }]),
 	];
 	const items = fold(entries, {}).items;
 	assert.deepEqual(
 		items.map((i) => (i.kind === "user" ? `${i.source} › ${i.text}` : i.kind === "assistant" ? i.text : i.kind)),
-		["tui › old terminal", "Use =june= *now*.", "telegram › from the bridge", "Use `june` *now*.", "gui › from the overlay", "Use =june= *now*."],
+		["tui › old terminal", "Use =june= *now*.", "telegram › from the bridge", "Use `june` *now*.", "gui › from the desktop client", "Use =june= *now*."],
 	);
 });
 

@@ -26,7 +26,7 @@ def main():
         parser.error("this proof expects a pose supporting waist framing")
     output = args.out.expanduser().resolve()
     output.mkdir(parents=True, exist_ok=False)
-    for source in (repo / "overlay").iterdir():
+    for source in (repo / "desktop").iterdir():
         if source.suffix in [".qml", ".mjs"] and source.name != "shell.qml":
             (output / source.name).symlink_to(source)
     template = Path(__file__).with_name("panel.qml")

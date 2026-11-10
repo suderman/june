@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render poses in private panels through the checkout's actual Panel.qml, and report how each framed.
 
-Uses its own Xvfb, never the user's display or running overlay. Writes proof.png and results.json into a NEW directory.
+Uses its own Xvfb, never the user's display or running desktop client. Writes proof.png and results.json into a NEW directory.
 """
 import argparse
 import json
@@ -16,17 +16,17 @@ HERE = Path(__file__).resolve().parent
 
 
 def wrapper_environment():
-    """Read Quickshell and Qt paths from the installed june-overlay wrapper, without running it."""
-    wrapper = shutil.which("june-overlay")
+    """Read Quickshell and Qt paths from the installed june-desktop wrapper, without running it."""
+    wrapper = shutil.which("june-desktop")
     if not wrapper:
-        sys.exit("june-overlay is not on PATH; the proof needs its Quickshell and Qt paths")
+        sys.exit("june-desktop is not on PATH; the proof needs its Quickshell and Qt paths")
     text = Path(wrapper).resolve().read_text()
-    found = dict(re.findall(r'^export (PATH|QML2_IMPORT_PATH|QT_PLUGIN_PATH|JUNE_OVERLAY_FONTS)="?([^"\n]*)"?$', text, re.M))
+    found = dict(re.findall(r'^export (PATH|QML2_IMPORT_PATH|QT_PLUGIN_PATH|JUNE_DESKTOP_FONTS)="?([^"\n]*)"?$', text, re.M))
     clean = lambda value: value.split("${")[0].split(":$")[0].rstrip(":")
     qs = next((Path(p) / "qs" for p in clean(found["PATH"]).split(":") if (Path(p) / "qs").exists()), None)
     if qs is None:
-        sys.exit("no qs found in the june-overlay wrapper's PATH")
-    return qs, {key: clean(found[key]) for key in ("QML2_IMPORT_PATH", "QT_PLUGIN_PATH", "JUNE_OVERLAY_FONTS") if key in found}
+        sys.exit("no qs found in the june-desktop wrapper's PATH")
+    return qs, {key: clean(found[key]) for key in ("QML2_IMPORT_PATH", "QT_PLUGIN_PATH", "JUNE_DESKTOP_FONTS") if key in found}
 
 
 def find_xvfb():
@@ -73,7 +73,7 @@ def main():
         sys.exit(f"not in {art}/manifest.json: {', '.join(missing)}")
     args.out.mkdir(parents=True)
     out = args.out.resolve()
-    for source in (args.repo / "overlay").iterdir():
+    for source in (args.repo / "desktop").iterdir():
         if source.suffix in (".qml", ".mjs") and source.name != "shell.qml":
             (out / source.name).symlink_to(source.resolve())
     shutil.copyfile(HERE / "proof-panels.qml", out / "shell.qml")

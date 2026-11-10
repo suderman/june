@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { emacsCall, linkKind, markup } from "../overlay/strip.mjs";
+import { emacsCall, linkKind, markup } from "../desktop/strip.mjs";
 
 const herdr = "herdr:kit/claude:af748c8e-1d51-43b5-89c9-20cf5b7adb73@w4Z:p39";
 

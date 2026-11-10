@@ -1,6 +1,6 @@
 // Momentum scrolling for the strip: a wheel notch glides and slows instead of jumping a step, and a touchpad scroll
 // follows the fingers and coasts on when they lift. QML feeds it wheel events and frame ticks; it returns how far to
-// move. Plain JavaScript as QML's engine knows it, tested in test/overlay.test.mjs. Distances add to Flickable's contentY:
+// move. Plain JavaScript as QML's engine knows it, tested in test/desktop.test.mjs. Distances add to Flickable's contentY:
 // negative moves up, toward the earlier panels, as a wheel turned away from the user does.
 
 // A notch of a mouse wheel is 120 units of angle; each unit adds this much speed, in px/s.

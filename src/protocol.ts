@@ -9,7 +9,7 @@ import type { TimelineItem } from "./timeline.ts";
 import type { Change, ViewItem, ViewState } from "./transcript.ts";
 
 /**
- * June's clients, in three letters: the terminal client in any emulator, one-shot commands, the Hyprland overlay, and the
+ * June's clients, in three letters: the terminal client in any emulator, one-shot commands, the desktop client, and the
  * Android app; and the Telegram bridge. `kitty` is what the terminal sent before it was `tui`, and is recorded as `tui`.
  */
 export const SOURCES = ["tui", "cli", "gui", "apk", "telegram"] as const;

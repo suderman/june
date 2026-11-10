@@ -13,7 +13,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 
-// June writes Org, and the phone shows it as the overlay's balloons do (markup in overlay/strip.mjs): *bold*, /italic/,
+// June writes Org, and the phone shows it as the desktop client's balloons do (markup in desktop/strip.mjs): *bold*, /italic/,
 // _underline_, +strike+, =verbatim= and ~code~, links as [[url][label]] or [[url]], #+begin_src blocks monospaced, and
 // headings without their stars. Org's emphasis needs a space or opening punctuation before its marker and closing
 // punctuation after, so /home/alex/ stays a path and snake_case_name a name. Markdown's **bold**, `code` and

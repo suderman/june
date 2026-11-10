@@ -1,7 +1,7 @@
 // June's room behind her: a room drawn with its window cut out, the season's view through that window under the hour's
 // sky, and props brought out by the weather, the season, or a holiday. An avatar set's manifest describes the art under
 // `backgrounds`; this module reads it leniently, chooses, and places, and Scenery.qml paints. QML imports it and
-// test/overlay.test.mjs runs it under Node, so it is plain JavaScript as QML's engine knows it: no Array.prototype.at,
+// test/desktop.test.mjs runs it under Node, so it is plain JavaScript as QML's engine knows it: no Array.prototype.at,
 // Object.hasOwn, or object spread. See "Rooms, windows, and props" in docs/interfaces.org.
 import { SETTINGS, hash } from "./compose.mjs";
 import { WEATHER_MS, backdrop as chooseBackdrop, hourOf, look, moment, skyLook, sunFor } from "./light.mjs";
@@ -19,7 +19,7 @@ const point = (p) => Array.isArray(p) && p.length === 2 && fraction(p[0]) && fra
 const monthDay = (s) => typeof s === "string" && /^\d\d-\d\d$/.test(s);
 
 /**
- * One set's rooms, window views, and props, with image URLs under `base`. An entry the overlay cannot use is skipped, so
+ * One set's rooms, window views, and props, with image URLs under `base`. An entry the desktop client cannot use is skipped, so
  * one bad entry never blanks a panel.
  */
 export function readScenery(manifest, base) {

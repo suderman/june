@@ -26,7 +26,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseManifest } from "../src/avatar.ts";
-import { FRAMINGS, frame, framingsShowing, readPoses } from "../overlay/compose.mjs";
+import { FRAMINGS, frame, framingsShowing, readPoses } from "../desktop/compose.mjs";
 import { FONT, recolor, runCommand } from "./runner.mjs";
 import { CROWN_CUT_SHARE, MAX_WIDTH, gesturePreservation, kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "./layout.mjs";
 

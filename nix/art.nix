@@ -1,6 +1,6 @@
 # june-art: finish approved generated images into an avatar set kept outside the repository (art/june-art.mjs). It
-# checks each manifest with the daemon's own rules (src/avatar.ts) and frames contact sheets as the overlay does
-# (overlay/compose.mjs), so it ships those two files beside its own.
+# checks each manifest with the daemon's own rules (src/avatar.ts) and frames contact sheets as the desktop client does
+# (desktop/compose.mjs), so it ships those two files beside its own.
 {
   lib,
   writeShellApplication,
@@ -11,7 +11,7 @@
 }: let
   src = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [../art ../src/avatar.ts ../overlay/compose.mjs];
+    fileset = lib.fileset.unions [../art ../src/avatar.ts ../desktop/compose.mjs];
   };
 in
   writeShellApplication {

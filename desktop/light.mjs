@@ -3,7 +3,7 @@
 // grade falls on the ground and, more gently, on June, and never on the words. Behind her stands her room (Scenery.qml,
 // or a tint without room art), a calm ground for a serious or gentle reply, a procedural abstract background for a rare
 // face, or, while she works, a cutaway of the work itself drawn from her tool calls. QML imports it and
-// test/overlay.test.mjs runs it under Node, so it is plain JavaScript as QML's engine knows it: no Array.prototype.at,
+// test/desktop.test.mjs runs it under Node, so it is plain JavaScript as QML's engine knows it: no Array.prototype.at,
 // Object.hasOwn, or object spread. See "Light and backgrounds" in docs/interfaces.org.
 import { hash, picked } from "./compose.mjs";
 import { DELEGATING } from "./live.mjs";

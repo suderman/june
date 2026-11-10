@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CANVAS, FACE, MARGIN, gesturePreservation, kindOf, mouthOf, parseBox, parseNumbers, placeChibi, placeCover, placePose, placeProp, windowOf } from "../art/layout.mjs";
-import { gestureShown } from "../overlay/compose.mjs";
+import { gestureShown } from "../desktop/compose.mjs";
 
 const close = (a, b, tolerance = 0.002) => assert.ok(Math.abs(a - b) <= tolerance, `${a} is not within ${tolerance} of ${b}`);
 

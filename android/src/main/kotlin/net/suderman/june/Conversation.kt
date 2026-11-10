@@ -58,7 +58,7 @@ import androidx.compose.ui.unit.sp
 
 /**
  * The conversation in the assistant session: a plain first pass, the newest at the bottom, the words to send below.
- * The phone's comic strip comes later, from the overlay's shared decisions; see "What the phone shares with the
+ * The phone's comic strip comes later, from the desktop client's shared decisions; see "What the phone shares with the
  * desktop" in docs/interfaces.org. A tap above the sheet puts June away.
  */
 /**

@@ -382,7 +382,7 @@ class Hands : AccessibilityService() {
         bar?.visibility = android.view.View.VISIBLE
     }
 
-    /** The overlay column, made on first need: the bar (a tap stops her) and the card of her words (a tap closes it). */
+    /** The desktop client column, made on first need: the bar (a tap stops her) and the card of her words (a tap closes it). */
     private fun ensureOverlay() {
         if (overlay != null) return
         val column = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }
@@ -421,7 +421,7 @@ class Hands : AccessibilityService() {
             .onFailure { Log.w(TAG, "hands: no overlay: $it") }
     }
 
-    /** Remove the overlay once neither the bar nor her words show, so it never sits over the screen empty. */
+    /** Remove the desktop client once neither the bar nor her words show, so it never sits over the screen empty. */
     private fun tidy() {
         if (bar?.visibility == android.view.View.VISIBLE || said?.visibility == android.view.View.VISIBLE) return
         overlay?.let { runCatching { windowManager().removeView(it) } }

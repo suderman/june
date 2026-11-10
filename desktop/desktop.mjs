@@ -1,6 +1,6 @@
 // What the desktop says about how June should behave and look: mako's do-not-disturb mode and the portal's colour
 // scheme, both read over D-Bus with busctl. The shell polls them; this module reads busctl's replies and builds its
-// calls. QML imports it and test/overlay.test.mjs runs it under Node, so it is plain JavaScript as QML's engine knows
+// calls. QML imports it and test/desktop.test.mjs runs it under Node, so it is plain JavaScript as QML's engine knows
 // it: no Array.prototype.at, Object.hasOwn, or object spread. See "Do not disturb and dark mode" in docs/interfaces.org.
 
 /** mako's mode that holds notifications back; June keeps to it too. */

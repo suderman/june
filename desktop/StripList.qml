@@ -1,5 +1,5 @@
 // The strip itself: the panels newest at the bottom, with momentum scrolling (scroll.mjs) and paging, staying on the
-// newest panel unless the reader has scrolled away. The overlay and the windowed app each hold one over the same model.
+// newest panel unless the reader has scrolled away. The desktop client and the windowed app each hold one over the same model.
 import QtQuick
 import "scroll.mjs" as Scroll
 

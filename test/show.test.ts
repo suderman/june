@@ -4,10 +4,10 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
-// @ts-expect-error The overlay's modules are plain JavaScript, shared with QML.
-import { panels } from "../overlay/strip.mjs";
+// @ts-expect-error The desktop client's modules are plain JavaScript, shared with QML.
+import { panels } from "../desktop/strip.mjs";
 // @ts-expect-error As above.
-import { lines as consoleLines } from "../overlay/console.mjs";
+import { lines as consoleLines } from "../desktop/console.mjs";
 import { inboxFile } from "../src/daemon.ts";
 import { shownFiles } from "../src/shown.ts";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";

@@ -1,11 +1,11 @@
 // The comic layout engine: given a panel's width, June's pose, and the measured sizes of its balloons and notes, it
 // decides where everything goes. The art is framed like a hero image, scaled and cropped by the face box rather than
 // sizing the panel; the panel's height comes from its words. QML measures the text and draws; this module holds every
-// decision, so test/overlay.test.mjs can check the compositions without Qt. Plain JavaScript as QML's engine knows
+// decision, so test/desktop.test.mjs can check the compositions without Qt. Plain JavaScript as QML's engine knows
 // it: no Array.prototype.at, Object.hasOwn, or object spread. See "Look: a comic strip" and "Poses" in
 // docs/interfaces.org for the contract with the art.
 
-/** Each expression's fallback; a copy of src/avatar.ts, kept in step by test/overlay.test.mjs. */
+/** Each expression's fallback; a copy of src/avatar.ts, kept in step by test/desktop.test.mjs. */
 export const FALLBACK = {
 	warm: "idle",
 	wry: "idle",
@@ -42,7 +42,7 @@ export const MARK_SHAPES = {
 	vein: { stroke: "#d0342c", fill: "transparent", path: "M 14 38 Q 38 38 38 14 M 62 14 Q 62 38 86 38 M 86 62 Q 62 62 62 86 M 38 86 Q 38 62 14 62" },
 	steam: { stroke: "#7b7f8c", fill: "#ffffff", path: "M 20 70 C 4 70 4 46 22 46 C 22 28 46 24 54 38 C 64 22 92 30 86 52 C 100 58 94 80 76 78 C 70 92 44 92 40 80 C 32 86 20 82 20 70 Z" },
 };
-// What a pose can show her doing; a copy of POSE_ACTIVITIES in src/avatar.ts, kept in step by test/overlay.test.mjs.
+// What a pose can show her doing; a copy of POSE_ACTIVITIES in src/avatar.ts, kept in step by test/desktop.test.mjs.
 export const ACTIVITIES = ["thinking", "working", "watching"];
 /** Where a pose has her: at her desk, on the couch, in the kitchen, or standing. A copy of SETTINGS in src/avatar.ts. */
 export const SETTINGS = ["desk", "couch", "kitchen", "standing"];
@@ -98,7 +98,7 @@ const crownCut = (pose) => pose.figure !== null && pose.figure !== undefined && 
 
 /**
  * The usable poses of one avatar set, with image URLs under `base`. Lenient where src/avatar.ts is strict: a pose the
- * overlay cannot place is skipped, so one bad entry never blanks the strip.
+ * desktop client cannot place is skipped, so one bad entry never blanks the strip.
  */
 export function readPoses(manifest, base) {
 	const out = [];
@@ -200,7 +200,7 @@ export function liveActivity(state, panel) {
 	return "thinking";
 }
 
-// Until the daemon sends June's expression (see "Send expression and activity to clients"), the overlay picks one from
+// Until the daemon sends June's expression (see "Send expression and activity to clients"), the desktop client picks one from
 // what it can see. Listening faces only, never a reaction: the stand-in has not read her reply, and a laugh or a smirk on
 // a serious reply reads as meant until the director's face replaces it.
 const STAND_IN = ["idle", "curious"];

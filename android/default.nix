@@ -27,11 +27,11 @@
   tools = "${home}/build-tools/${buildTools}";
   jdk = "${jdk17_headless}/lib/openjdk";
 
-  # The overlay's decision modules as one script for QuickJS (js/june.mjs), so the phone decides as the desktop does.
+  # The desktop client's decision modules as one script for QuickJS (js/june.mjs), so the phone decides as the desktop does.
   decisions = let
     src = lib.fileset.toSource {
       root = ../.;
-      fileset = lib.fileset.unions [./js (lib.fileset.fileFilter (file: file.hasExt "mjs") ../overlay)];
+      fileset = lib.fileset.unions [./js (lib.fileset.fileFilter (file: file.hasExt "mjs") ../desktop)];
     };
   in
     runCommand "june-decisions.js" {nativeBuildInputs = [esbuild];} ''
@@ -50,7 +50,7 @@
     sed -i 's/\.svg"/.webp"/g' $out/manifest.json
   '';
 
-  # The strip's lettering, display, and caption faces, as the overlay uses them.
+  # The strip's lettering, display, and caption faces, as the desktop client uses them.
   fonts = "${google-fonts.override {fonts = ["ShantellSans" "DelaGothicOne" "ZenKakuGothicNew"];}}/share/fonts/truetype";
 
   apk = stdenv.mkDerivation (finalAttrs: {
