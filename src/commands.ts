@@ -1,5 +1,5 @@
 // Slash commands, answered by the daemon for any client. /reload is terminal-only.
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Message, Models, Usage } from "@earendil-works/pi-ai";
 import { estimateContextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { type Conversation, type Harness, InboxDoc, LiveDoc, UsageDoc, type UsageState, UserEntry } from "@earendil-works/pi-durable";

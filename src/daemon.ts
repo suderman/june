@@ -3,7 +3,7 @@
 import { chmodSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, sep } from "node:path";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT as BG, withAbortSignal } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import {

@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Conversation } from "@earendil-works/pi-durable";
 import { SOURCES } from "./protocol.ts";
 import { isQuiet, PRIVATE, sourceName, summarize, textOf } from "./transcript.ts";

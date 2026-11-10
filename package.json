@@ -15,11 +15,11 @@
     "test": "node --test --test-concurrency=1 test/coding.test.ts test/config.test.ts test/daemon.test.ts test/dispatch.test.ts test/follow.test.ts test/heartbeat.test.ts test/loose.test.ts test/conflicts.test.ts test/show.test.ts test/ntfy.test.ts test/usage.test.ts test/highlight.test.ts test/history.test.ts test/timeline.test.ts test/kept-images.test.ts test/mail.test.ts test/memory.test.ts test/mood.test.ts test/self.test.ts test/bitcoin.test.ts test/patter.test.ts test/greeting.test.ts test/people.test.ts test/situation.test.ts test/watch.test.ts test/write.test.ts test/tools.test.ts test/tui.test.ts test/work.test.ts test/avatar.test.ts test/view.test.ts test/detail.test.ts test/notify.test.ts test/telegram.test.ts test/inbox.test.ts test/pdf.test.ts test/timezone.test.ts test/remote.test.ts test/phone.test.ts test/expression.test.ts test/desktop.test.mjs test/links.test.mjs test/attach.test.mjs test/connection.test.mjs test/art.test.mjs test/art-runner.test.mjs"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.5.0",
-    "@earendil-works/pi-ai": "1.5.0",
-    "@earendil-works/pi-durable": "1.5.0",
-    "@earendil-works/pi-schema": "1.5.0",
-    "@earendil-works/pi-tui": "1.5.0",
+    "@earendil-works/chord": "1.5.2",
+    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-durable": "1.5.2",
+    "@earendil-works/pi-schema": "1.5.2",
+    "@earendil-works/pi-tui": "1.5.2",
     "grammy": "1.46.0",
     "highlight.js": "^11.12.0",
     "ws": "8.21.0"
