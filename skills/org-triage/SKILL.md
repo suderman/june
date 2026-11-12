@@ -3,7 +3,7 @@ name: org-triage
 description: >
   Turns pasted messages, email, and rough notes from ~/org/inbox.org into TODO
   headings in the right Org file: a project under ~/org/work, a file under
-  ~/org/life, or ~/org/todo.org. Checks for an existing heading first and
+  ~/org/life, ~/org/finance/finance.org, or ~/org/todo.org. Checks for an existing heading first and
   never writes to inbox.org. Use when Jon pastes text to capture, says
   "triage this", "make a TODO from this", or "triage my inbox", or when mail
   review turns up something he has to act on.
@@ -50,9 +50,10 @@ Pick the first destination that clearly fits:
 1. **A project** at `~/org/work/<domain>/<project>/<project>.org`. Use
    `project-org-tasks` to find it and follow its rules for first-level
    headings, placed newest first after the preamble.
-2. **A life file** directly under `~/org/life`. Read it first and add the
-   TODO under its most relevant existing heading, matching its heading
-   depth, wording, and style.
+2. **A life file** directly under `~/org/life`, or
+   `~/org/finance/finance.org` for household money, taxes, bills, and
+   accounts. Read it first and add the TODO under its most relevant
+   existing heading, matching its heading depth, wording, and style.
 3. **`~/org/todo.org`**, as a first-level TODO, newest first. It is a flat
    list: never add category headings to it.
 
@@ -68,7 +69,7 @@ Before creating a heading, search the destination, then the live Org files
 (not archives) for the same matter:
 
 ```sh
-rg -n -i 'distinctive words' ~/org/work ~/org/life ~/org/todo.org -g '*.org' -g '!archive*'
+rg -n -i 'distinctive words' ~/org/work ~/org/life ~/org/finance/finance.org ~/org/todo.org -g '*.org' -g '!archive*'
 ```
 
 When one exists, update it: add the new facts, dates, and source, and keep
