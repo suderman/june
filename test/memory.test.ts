@@ -444,6 +444,7 @@ test("June's prompt carries the last few days' endings and says where to look fu
 	assert.ok(prompt.includes(`rg -n -A1 "^\\*+ (Week|Month|Quarter|Year)'s end"`), "with a way to list the long view");
 	assert.match(prompt, /shares a photo with people in it, think about who they probably are/, "family in photos are worth a guess");
 	assert.match(prompt, /Being asked whether you recognize someone is an invitation/);
+	assert.match(prompt, /when they say the photo shows someone else's child or friend, take them at their word/, "what they say outweighs a resemblance");
 	assert.match(prompt, /never guess who an unfamiliar person is, and never claim more certainty than the clues give/);
 });
 
