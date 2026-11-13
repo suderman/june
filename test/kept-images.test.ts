@@ -9,7 +9,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type Message, type Tr
 import { obj } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { expireImages, GONE, keepImage, restoreImage, restoreMessages } from "../src/kept-images.ts";
-import { createPayloadsExtension } from "../src/payloads.ts";
+import { createPayloadsExtension, withoutCacheKeyForImages } from "../src/payloads.ts";
 import { Client } from "../src/protocol.ts";
 import { createCodingExtension } from "../src/tools/coding.ts";
 import { ask, openTestDaemon, routed, tempDir, until } from "./helpers.ts";
@@ -190,4 +190,20 @@ test("request bodies are saved only while the payloads directory exists, and nev
 	assert.equal(files.length, 1);
 	assert.match(files[0]!, /-m\.json$/);
 	assert.deepEqual(JSON.parse(await readFile(join(dir, files[0]!), "utf8")), { input: "two" });
+});
+
+test("a turn whose newest message carries an image goes without its cache key; other turns keep it", () => {
+	const text = { role: "user", content: [{ type: "input_text", text: "hi" }] };
+	const photo = { role: "user", content: [{ type: "input_text", text: "look" }, { type: "input_image", image_url: "data:image/jpeg;base64,AA==" }] };
+	const reply = { type: "message", role: "assistant", content: [{ type: "output_text", text: "ok" }] };
+	const keyed = (input: unknown[]) => ({ model: "m", prompt_cache_key: "k", input });
+	assert.deepEqual(withoutCacheKeyForImages(keyed([text, photo])), { model: "m", input: [text, photo] }, "the photo turn drops the key");
+	assert.deepEqual(withoutCacheKeyForImages(keyed([text, photo, reply, { type: "function_call_output", output: "x" }])), { model: "m", input: [text, photo, reply, { type: "function_call_output", output: "x" }] }, "and so does the rest of that turn, after a tool call");
+	const later = keyed([photo, reply, text]);
+	assert.equal(withoutCacheKeyForImages(later), later, "a later text turn keeps it");
+	const plain = { model: "m", input: [photo] };
+	assert.equal(withoutCacheKeyForImages(plain), plain, "a body without a key is left alone");
+	const handler = (createPayloadsExtension("/nonexistent/payloads", (error) => assert.fail(error.message)).hooks![0] as { handlers: { beforeProviderRequest: (request: { model: { id: string }; payload: unknown }) => unknown } }).handlers.beforeProviderRequest;
+	assert.deepEqual(handler({ model: { id: "m" }, payload: keyed([photo]) }), { payload: { model: "m", input: [photo] } }, "the hook sends the body without the key");
+	assert.equal(handler({ model: { id: "m" }, payload: keyed([text]) }), undefined, "and leaves other requests untouched");
 });
