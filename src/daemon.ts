@@ -32,6 +32,7 @@ import { validateImages } from "./images.ts";
 import { describeFiles, saveFiles, startInboxExpiry, typeOf, validateFiles } from "./inbox.ts";
 import { createMemoryExtension } from "./memory.ts";
 import { createKeptImagesExtension, startImageExpiry } from "./kept-images.ts";
+import { createPayloadsExtension } from "./payloads.ts";
 import { Hidden, KINDS, Timeline } from "./timeline.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
 import { createGreeting } from "./greeting.ts";
@@ -138,6 +139,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const show = createShowExtension(`${paths.state}/inbox`, config.herdr.host);
 		const images = `${paths.state}/images`;
 		const keptImages = createKeptImagesExtension(images, (error) => log.warn("image_keep_failed", { error: error.message }));
+		const payloads = createPayloadsExtension(`${paths.state}/payloads`, (error) => log.warn("payload_dump_failed", { error: error.message }));
 		const greeting = createGreeting({ wake: config.rhythm.wake });
 		const patter = config.model.patter
 			? createPatter({
@@ -152,7 +154,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		// June's working context does the work only: no memory review, task queueing, patter, or messages to the user.
 		const childless = [memory, show, ...extensions.filter((e) => e.name === "dispatch"), ...(patter ? [patter.extension] : [])];
 		const work = createWorkExtension(config, () => childless);
-		for (const extension of [prompt.extension, greeting.extension, memory, show, work, keptImages, ...(patter ? [patter.extension] : []), ...extensions]) registry.install(extension);
+		for (const extension of [prompt.extension, greeting.extension, memory, show, work, keptImages, payloads, ...(patter ? [patter.extension] : []), ...extensions]) registry.install(extension);
 
 		const workdir = `${paths.state}/files`;
 		mkdirSync(workdir, { recursive: true, mode: 0o700 });

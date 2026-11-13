@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
@@ -9,6 +9,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type Message, type Tr
 import { obj } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { expireImages, GONE, keepImage, restoreImage, restoreMessages } from "../src/kept-images.ts";
+import { createPayloadsExtension } from "../src/payloads.ts";
 import { Client } from "../src/protocol.ts";
 import { createCodingExtension } from "../src/tools/coding.ts";
 import { ask, openTestDaemon, routed, tempDir, until } from "./helpers.ts";
@@ -174,4 +175,19 @@ test("images in June's working context are kept the same way", async (t) => {
 	db.close();
 	assert.ok(rows.some((r) => /kept image [0-9a-f]{64}/.test(r.record)));
 	assert.ok(!rows.some((r) => r.record.includes(pixel)), "no conversation in the database holds the bytes");
+});
+
+test("request bodies are saved only while the payloads directory exists, and never change the request", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const dir = join(tmp.dir, "payloads");
+	const before = (createPayloadsExtension(dir, (error) => assert.fail(error.message)).hooks![0] as { handlers: { beforeProviderRequest: (request: { model: { id: string }; payload: unknown }) => unknown } }).handlers.beforeProviderRequest;
+	assert.equal(before({ model: { id: "m" }, payload: { input: "one" } }), undefined);
+	assert.equal(existsSync(dir), false, "off by default: nothing is written and no directory is made");
+	await mkdir(dir);
+	assert.equal(before({ model: { id: "m" }, payload: { input: "two" } }), undefined, "the payload goes out unchanged");
+	const files = await readdir(dir);
+	assert.equal(files.length, 1);
+	assert.match(files[0]!, /-m\.json$/);
+	assert.deepEqual(JSON.parse(await readFile(join(dir, files[0]!), "utf8")), { input: "two" });
 });
