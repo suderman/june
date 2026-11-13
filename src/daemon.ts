@@ -536,6 +536,7 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 								text: request.text,
 								...(images.length ? { imageCount: images.length } : {}),
 								...(seen.some((found) => found?.names.length) ? { imagePeople: [...new Set(seen.flatMap((found) => found?.names ?? []))] } : {}),
+								...(seen.some((found) => found?.original) ? { imageTaken: seen.flatMap((found) => (found?.original ? [{ takenAt: found.original.takenAt, ...(found.original.place ? { place: found.original.place } : {}) }] : [])) } : {}),
 								...(saved.length ? { files: saved.map(({ name, size, path, mimeType }) => ({ name, size, path, mimeType })) } : {}),
 							},
 						},

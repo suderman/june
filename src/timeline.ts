@@ -63,7 +63,10 @@ export class TimelineFold {
 				const said = String(entry.data?.text ?? "");
 				// Names the user's photo library matched in the images (src/immich.ts), so search and the night can see who was there.
 				const people = Array.isArray(entry.data?.imagePeople) ? entry.data.imagePeople.map(String).join(", ") : "";
-				return item("user", count || files.length ? `${said}${count ? ` [${count} image${count === 1 ? "" : "s"}${people ? `: ${people}` : ""}]` : ""}` : said, source, files);
+				// And when and where the library's original was taken, so a photo from yesterday is not filed under today.
+				const taken = Array.isArray(entry.data?.imageTaken) && typeof entry.data.imageTaken[0]?.takenAt === "string" ? entry.data.imageTaken[0] : undefined;
+				const when = taken ? `; taken ${stamp(new Date(taken.takenAt))}${taken.place ? `, ${taken.place}` : ""}` : "";
+				return item("user", count || files.length ? `${said}${count ? ` [${count} image${count === 1 ? "" : "s"}${people ? `: ${people}` : ""}${when}]` : ""}` : said, source, files);
 			}
 			case "pi.user": {
 				// Before June recorded june.input, a Telegram message was an untagged user message.
@@ -297,6 +300,9 @@ export function renderTimeline(items: readonly TimelineItem[], options: { user?:
 		})
 		.join("\n");
 }
+
+/** A local "YYYY-MM-DD HH:MM". */
+const stamp = (at: Date) => `${at.toLocaleDateString("en-CA")} ${at.toTimeString().slice(0, 5)}`;
 
 const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
