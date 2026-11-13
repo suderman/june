@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { immichFrom, scan, seenNote } from "../src/immich.ts";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { immichFrom, scan, seenNote, watchImmich } from "../src/immich.ts";
 import { TimelineFold } from "../src/timeline.ts";
 
 const image = { type: "image" as const, data: Buffer.from("jpeg bytes").toString("base64"), mimeType: "image/jpeg" };
@@ -73,4 +76,33 @@ test("the timeline shows who the library recognized in a photo", () => {
 	const fold = new TimelineFold();
 	const [item] = fold.push({ id: 7, kind: "june.input", model: [{ timestamp: 1 }], data: { source: "apk", text: "storytime", imageCount: 1, imagePeople: ["Sam", "Mum"] } });
 	assert.equal(item!.text, "storytime [1 image: Sam, Mum]");
+});
+
+test("the watch counts Immich down until a ping answers, records each check, and a failed scan marks it down", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "june-immich-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const file = join(dir, "immich.json");
+	let answer: "pong" | "refused" = "pong";
+	const pinged: string[] = [];
+	const fake = (async (input: string) => {
+		pinged.push(input);
+		if (answer === "refused") throw new Error("connect ECONNREFUSED");
+		return new Response(JSON.stringify({ res: "pong" }), { status: 200 });
+	}) as unknown as typeof fetch;
+	const watch = watchImmich(immich, { file, everyMs: 20, fetch: fake });
+	t.after(() => watch.stop());
+	assert.equal(watch.up(), false, "down until the first ping answers");
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	assert.equal(watch.up(), true);
+	assert.equal(pinged[0], "https://photos.test/api/server/ping", "the ping needs no key");
+	assert.equal(JSON.parse(await readFile(file, "utf8")).up, true);
+	watch.down(new Error("a scan failed"));
+	assert.equal(watch.up(), false, "a failed scan marks it down at once");
+	assert.deepEqual((({ up, error }) => ({ up, error }))(JSON.parse(await readFile(file, "utf8"))), { up: false, error: "a scan failed" });
+	await new Promise((resolve) => setTimeout(resolve, 40));
+	assert.equal(watch.up(), true, "and the next ping brings it back");
+	answer = "refused";
+	await new Promise((resolve) => setTimeout(resolve, 40));
+	assert.equal(watch.up(), false);
+	assert.match(JSON.parse(await readFile(file, "utf8")).error, /ECONNREFUSED/);
 });

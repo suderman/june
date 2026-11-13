@@ -3,7 +3,9 @@
 // photo about half the time at best; given the names Immich matched, she used them every time. The photo is uploaded
 // as an archived asset, Immich's face recognition matches it against the people the user has named, and the asset is
 // deleted for good. Nothing leaves the user's network. With IMMICH_URL and IMMICH_API_KEY unset it does nothing, and
-// any failure or a slow scan just leaves the names out.
+// any failure or a slow scan just leaves the names out. A watch pings Immich every few minutes so a photo never waits
+// on a server that is down, and the delete runs after June has the photo.
+import { writeFileSync } from "node:fs";
 import type { ImageContent } from "@earendil-works/pi-ai";
 
 export type Immich = { url: string; key: string };
@@ -66,8 +68,8 @@ export async function scan(
 		options.warn?.(error as Error);
 		return undefined;
 	} finally {
-		if (id !== undefined)
-			await call("DELETE", "/assets", JSON.stringify({ ids: [id], force: true }), "application/json").catch((error) => options.warn?.(error as Error));
+		// Not awaited: June need not wait for the cleanup. A failed delete leaves an archived june-scan asset behind.
+		if (id !== undefined) void call("DELETE", "/assets", JSON.stringify({ ids: [id], force: true }), "application/json").catch((error) => options.warn?.(error as Error));
 	}
 }
 
@@ -80,4 +82,37 @@ export function seenNote(seen: Seen | undefined, user: string, which?: number): 
 	const names = seen.names.length === 1 ? seen.names[0] : `${seen.names.slice(0, -1).join(", ")} and ${seen.names.at(-1)}, left to right`;
 	const rest = seen.unknown === 0 ? "" : `, plus ${faces(seen.unknown)} it does not know`;
 	return `[${user}'s photo library recognized in ${where}: ${names}${rest}.]`;
+}
+
+export type ImmichWatch = { up(): boolean; down(error: Error): void; stop(): void };
+
+/**
+ * Whether Immich answered its last ping, checked now and every `everyMs`, with the result written to `file` for a
+ * person to read. A scan that fails marks it down at once, so later photos skip it until a ping succeeds again. Until
+ * the first ping answers it counts as down, which costs at most the names on a photo sent in the first second.
+ */
+export function watchImmich(immich: Immich, options: { file: string; everyMs?: number; fetch?: typeof fetch; warn?: (error: Error) => void }): ImmichWatch {
+	const get = options.fetch ?? fetch;
+	let up = false;
+	const record = (ok: boolean, error?: string) => {
+		up = ok;
+		try {
+			writeFileSync(options.file, `${JSON.stringify({ up: ok, url: immich.url, checkedAt: new Date().toISOString(), ...(error ? { error } : {}) })}\n`);
+		} catch (failure) {
+			options.warn?.(failure as Error);
+		}
+	};
+	const ping = async () => {
+		try {
+			const response = await get(`${immich.url}/api/server/ping`, { signal: AbortSignal.timeout(5_000) });
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			record(true);
+		} catch (error) {
+			record(false, (error as Error).message);
+		}
+	};
+	void ping();
+	const timer = setInterval(() => void ping(), options.everyMs ?? 5 * 60_000);
+	timer.unref?.();
+	return { up: () => up, down: (error) => record(false, error.message), stop: () => clearInterval(timer) };
 }
