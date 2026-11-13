@@ -49,6 +49,8 @@ test("the first night writes MOOD.org from nothing, told what moves June and to 
 	assert.match(system, /Moods shift, they do not reset/);
 	assert.match(system, /never despair or self-pity/);
 	assert.match(system, /dark flash of jealousy/);
+	assert.match(system, /never an open task or a to-do list/, "threads are feelings, not tasks");
+	assert.match(system, /Keep at most three/);
 	assert.match(system, /never earns approval by flattery/);
 	assert.match(system, /the journal day, MEMORY\.org, and MOOD\.org, never SOUL\.org/);
 	assert.equal(readFileSync(f.mood, "utf8"), `${woke}\n`);

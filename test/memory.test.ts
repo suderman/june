@@ -11,8 +11,9 @@ import { runCommand } from "../src/commands.ts";
 import { createMemoryExtension, MemoryReview } from "../src/memory.ts";
 import { createPromptExtension } from "../src/prompt.ts";
 import { entryUnder, insertEntry, latestEntry, putDigest } from "../src/journal.ts";
-import { dayFor, gather, lastClosed, periodLabel } from "../src/reflect.ts";
+import { dayFor, dayTranscript, gather, lastClosed, periodLabel } from "../src/reflect.ts";
 import { Client } from "../src/protocol.ts";
+import { setUser } from "../src/user.ts";
 import { ask, openTestDaemon, tempDir, testConfig, until, type Faux } from "./helpers.ts";
 
 const lesson = "#+TITLE: Memory\n\n* 2026-10-26 Trust and judgment\nAlex said: judge when to act directly, rather than force delegation by missing tools.\n\nI had mistaken delegation for a universal rule. Use available tools for bounded checks, delegate sustained work, and keep approval rules. Source: conversation 1.\n";
@@ -441,6 +442,9 @@ test("June's prompt carries the last few days' endings and says where to look fu
 	assert.ok(prompt.includes(`rg -n -A1 "^\\*\\*\\* YYYY-MM|^\\*\\*\\*\\* Day's end"`), "with a way to skim a month");
 	assert.match(prompt, /Your last week and month, from the longer reflections:\n- The week ending 2026-10-25 Sunday: A week of birthdays and church\./);
 	assert.ok(prompt.includes(`rg -n -A1 "^\\*+ (Week|Month|Quarter|Year)'s end"`), "with a way to list the long view");
+	assert.match(prompt, /shares a photo with people in it, think about who they probably are/, "family in photos are worth a guess");
+	assert.match(prompt, /Being asked whether you recognize someone is an invitation/);
+	assert.match(prompt, /never guess who an unfamiliar person is, and never claim more certainty than the clues give/);
 });
 
 test("June writes her journal with a tool, under today's date", async (t) => {
@@ -543,7 +547,11 @@ test("the nightly reflection waits while Alex is still talking, and refuses a da
 	const text = `#+TITLE: June's journal\n\n* ${date.slice(0, 4)}\n** ${date.slice(0, 7)}\n*** ${date}\n**** 18:04 Meeting Biscuit\nAlex shared a photo of Biscuit.\n`;
 	await writeFile(journal, text);
 	const faux = fauxProvider();
-	faux.setResponses([fauxAssistantMessage("hi"), fauxAssistantMessage(JSON.stringify({ day: "**** Biscuit\nNo heading.", memory: null }))]);
+	let night = "";
+	faux.setResponses([fauxAssistantMessage("hi there"), (ctx) => {
+		night = String(ctx.messages.at(-1)!.content);
+		return fauxAssistantMessage(JSON.stringify({ day: "**** Biscuit\nNo heading.", memory: null }));
+	}]);
 	const daemon = await openTestDaemon({
 		...tmp,
 		faux,
@@ -557,10 +565,31 @@ test("the nightly reflection waits while Alex is still talking, and refuses a da
 	clock += 61 * 60_000;
 	await until(() => faux.state.callCount === 2);
 	await new Promise((r) => setTimeout(r, 100));
+	assert.match(JSON.parse(night).conversation, /#\d+ \S+ \d\d:\d\d Alex \(cli\): still up\n#\d+ \S+ \d\d:\d\d June: hi there/, "the night reads the day from the timeline");
 	assert.equal(readFileSync(journal, "utf8"), text, "a revised day without its heading is refused");
 	assert.ok(!existsSync(join(tmp.paths.state, "reflection.json")), "and the night is not marked done");
 });
 
+
+test("the night's transcript keeps the talk and patter whole and trims what June did", () => {
+	setUser("Alex");
+	const at = new Date(2026, 9, 27, 17, 25).getTime();
+	const text = dayTranscript([
+		{ id: 1, at, kind: "user", source: "apk", text: "yep. recognize him?" },
+		{ id: 2, at, kind: "patter", text: "the fort has a very accomplished little builder in it." },
+		{ id: 3, at, kind: "action", text: `bash command=${"x".repeat(500)}` },
+		{ id: 4, at, kind: "june", source: "apk", text: "that's Sam, isn't it?" },
+	]);
+	assert.match(text, /Alex \(apk\): yep\. recognize him\?/);
+	assert.match(text, /June \(patter\): the fort has a very accomplished little builder in it\./);
+	assert.match(text, /June did: bash command=x+…\n/);
+	assert.ok(text.split("\n")[2]!.length < 260, "a tool call is trimmed");
+	assert.match(text, /June: that's Sam, isn't it\?$/);
+	const long = dayTranscript(Array.from({ length: 3000 }, (_, i) => ({ id: i + 1, at, kind: "june" as const, text: `line ${i} ${"y".repeat(100)}` })));
+	assert.ok(long.length <= 200_000, "a long day fits the budget");
+	assert.match(long, /^#\d+ /, "and starts at a whole item");
+	assert.match(long, /line 2999 y+$/, "keeping its end");
+});
 
 test("digests close their date-tree node, are rewritten in place, and later days still file before a month's end", () => {
 	let text = "#+TITLE: June's journal\n\n* 2026\n** 2026-10 October\n*** 2026-10-25 Sunday\n**** 09:00 Church\nChurch.\n\n**** Day's end\nA quiet Sunday.\n\n*** 2026-10-26 Monday\n**** 09:00 Work\nWork.\n";

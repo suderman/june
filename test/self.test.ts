@@ -66,6 +66,9 @@ test("the first week writes SELF.org from nothing, told what the page holds and 
 	assert.match(system, /Revise the page, do not rewrite it/);
 	assert.match(system, /A week rarely changes who you are/);
 	assert.match(system, /never because this week did not mention it/);
+	assert.match(system, /how far you trust each worker or tool after how its work actually turned out/, "experience shapes judgment, not only voice");
+	assert.match(system, /one result nudges a judgment, a pattern settles it/);
+	assert.match(system, /not as a recap of what happened/);
 	assert.match(system, /When you have none yet, never answer null: write a first page/);
 	assert.match(system, /never contradicts or revises it/);
 	assert.match(system, /Never drift toward flattering Alex/);
@@ -178,6 +181,7 @@ test("the page sits directly after SOUL, below it in authority, with the rule on
 	assert.match(text, /never edit it/);
 	assert.match(text, /mention a new one to them once/);
 	assert.match(text, /never apply one yourself/);
+	assert.match(text, /shape your choices, such as which worker gets a job and how closely you check what comes back/);
 });
 
 test("without SELF.org the prompt has no page, and a conflict copy is reported", async (t) => {

@@ -225,7 +225,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			(await root.context(BG)).messages.findLast((m) => m.role === "user" && !/^\[(\/stop|work|follow|reminder|heartbeat|watch)\b/.test(typeof m.content === "string" ? m.content : m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ")))?.timestamp ?? 0;
 		const stopSituation = situation.start();
 		const stopReflection = config.reflection.enabled
-			? createReflection({ models: options.models, model: config.model.chat, config: config.reflection, window: { start: config.rhythm.sleep, end: config.rhythm.wake }, files: prompt.files, people: config.org.people, state: paths.state, log, ...options.reflectionClock }).start(harness, root)
+			? createReflection({ models: options.models, model: config.model.chat, config: config.reflection, window: { start: config.rhythm.sleep, end: config.rhythm.wake }, files: prompt.files, people: config.org.people, timeline: () => timeline, state: paths.state, log, ...options.reflectionClock }).start(harness, root)
 			: undefined;
 		const stopHeartbeat = config.heartbeat.enabled
 			? createHeartbeat({

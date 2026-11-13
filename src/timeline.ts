@@ -170,6 +170,12 @@ export class Timeline {
 		return { items: found.slice(0, limit), more: found.length > limit };
 	}
 
+	/** Every visible item from `since` until `until`, oldest first, with no limit: a whole day for the nightly reflection. */
+	async span(since: number, until: number, context: Context): Promise<TimelineItem[]> {
+		await this.catchUp(context);
+		return this.#visible().filter((item) => item.at >= since && item.at < until);
+	}
+
 	/** The items around entry `id`, oldest first: the item at it, or the next one when it has none, and its neighbours. */
 	async around(id: number, before = 5, after = 5, context: Context): Promise<{ items: TimelineItem[]; more: boolean }> {
 		await this.catchUp(context);

@@ -41,6 +41,12 @@ test("a note lands after a person's last note, dated and sourced, and nothing el
 	);
 });
 
+test("a note the model already dated gets the date once", () => {
+	const out = applyPeople(rolodex, "2026-10-28", [{ name: "Sam Rivera", notes: ["2026-10-28: Built a fort.", "2026-10-01: Lost a tooth."] }]);
+	assert.match(out, /^- 2026-10-28: Built a fort\. Source/m);
+	assert.match(out, /^- 2026-10-28: 2026-10-01: Lost a tooth\. Source/m, "another date is the note's own and stays");
+});
+
 test("a summary goes right under the drawer: replaced when there is one, added when there is none", () => {
 	const replaced = applyPeople(rolodex, "2026-10-28", [{ name: "Robin Rivera", summary: "Runs a bakery from home and just hired help." }]);
 	assert.equal(replaced, rolodex.replace("Runs a bakery from home. Loves early mornings.", "Runs a bakery from home and just hired help."), "tags on the heading do not stop a match");

@@ -54,7 +54,8 @@ const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 export function applyPeople(text: string, date: string, updates: readonly PersonUpdate[]): string {
 	let lines = text.replace(/\n+$/, "").split("\n");
 	for (const update of updates) {
-		const notes = (update.notes ?? []).map(oneLine).filter(Boolean).map((note) => `- ${date}: ${/[.!?"')\]]$/.test(note) ? note : `${note}.`} Source: June's journal, ${date}.`);
+		// The model sometimes starts a note with the date the line already carries.
+		const notes = (update.notes ?? []).map((note) => oneLine(note).replace(new RegExp(`^${date}:\\s*`), "")).filter(Boolean).map((note) => `- ${date}: ${/[.!?"')\]]$/.test(note) ? note : `${note}.`} Source: June's journal, ${date}.`);
 		const summary = update.summary ? oneLine(update.summary) : undefined;
 		if (notes.length === 0 && summary === undefined) continue;
 		const at = findPerson(lines, update.name);
