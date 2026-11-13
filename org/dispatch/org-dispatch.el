@@ -888,6 +888,12 @@ replaying the same key and spec; missing prerequisites block partial plans."
 
 ;;; Local state
 
+(defun org-dispatch--write-json (file object)
+  "Write OBJECT to FILE as UTF-8 JSON, decoding the serializer's bytes first."
+  (let ((coding-system-for-write 'utf-8-unix))
+    (with-temp-file file
+      (insert (decode-coding-string (json-serialize object) 'utf-8)))))
+
 (defun org-dispatch--state-file (id)
   (expand-file-name (concat id ".json") org-dispatch-state-dir))
 
@@ -915,7 +921,7 @@ prove exclusive current ownership or authorize a Herdr close."
         (let ((temp (make-temp-file (expand-file-name ".pane-" dir))))
           (unwind-protect
               (progn
-                (with-temp-file temp (insert (json-serialize receipt)))
+                (org-dispatch--write-json temp receipt)
                 (rename-file temp file t))
             (when (file-exists-p temp) (delete-file temp))))))))
 
@@ -935,7 +941,7 @@ prove exclusive current ownership or authorize a Herdr close."
   (let ((temp (make-temp-file (expand-file-name ".state-" org-dispatch-state-dir))))
     (unwind-protect
         (progn
-          (with-temp-file temp (insert (json-serialize state)))
+          (org-dispatch--write-json temp state)
           (rename-file temp (org-dispatch--state-file (plist-get state :id)) t))
       (when (file-exists-p temp) (delete-file temp)))))
 
@@ -1462,10 +1468,8 @@ An unreadable file counts as none, which only restarts the wait."
   (let ((temp (make-temp-file (expand-file-name ".retire-" org-dispatch-state-dir))))
     (unwind-protect
         (progn
-          (with-temp-file temp
-            (insert (json-serialize
-                     (vconcat (mapcar (lambda (row) (plist-get row :observation)) rows))
-                     :null-object :null :false-object :false)))
+          (org-dispatch--write-json
+           temp (vconcat (mapcar (lambda (row) (plist-get row :observation)) rows)))
           (rename-file temp (org-dispatch--retire-file) t))
       (when (file-exists-p temp) (delete-file temp)))))
 
@@ -1696,7 +1700,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
          (t (push task eligible)))))
     (unless dry-run
       (make-directory org-dispatch-state-dir t)
-      (with-temp-file file (insert (json-serialize new))))
+      (org-dispatch--write-json file new))
     (append (nreverse eligible) (nreverse reports))))
 
 (defun org-dispatch-run ()

@@ -427,6 +427,63 @@ cat >"$fixture/launch-tests.el" <<'EOF'
      (cl-letf (((symbol-function 'org-dispatch--herdr) #'test-herdr))
        ,@body)))
 
+(ert-deftest unicode-state-and-pane-receipts-round-trip ()
+  (test-with-herdr
+   (let* ((org-dispatch-state-dir (expand-file-name "unicode-state" org-dispatch-state-dir))
+          (text "Jérôme's café 東京 é 🐈")
+          (state (list :id "00000000-0000-0000-0000-000000000098"
+                       :heading text :file (expand-file-name (concat text ".org") org-dispatch-root)
+                       :agent "pi" :pane "p-unicode" :tab text :session test-session)))
+     (dolist (status '("starting" "running" "finished"))
+       (setq state (plist-put state :status status))
+       (org-dispatch--save-state state)
+       (should (equal (org-dispatch--states) (list state)))
+       (let ((coding-system-for-write 'utf-16)) (org-dispatch--save-state state))
+       (with-temp-buffer
+         (set-buffer-multibyte nil)
+         (insert-file-contents-literally (org-dispatch--state-file (plist-get state :id)))
+         (should (equal (buffer-string)
+                        (encode-coding-string (decode-coding-string (json-serialize state) 'utf-8)
+                                              'utf-8-unix)))))
+     (let ((receipts (org-dispatch--pane-receipts)))
+       (should (= (length receipts) 1))
+       (should (equal (plist-get (car receipts) :tab) text))))))
+
+(ert-deftest unicode-retirement-observations-round-trip ()
+  (let* ((org-dispatch-state-dir (expand-file-name "unicode-retire" org-dispatch-state-dir))
+         (observation '((heading . "Jérôme 東京 🐈") (file . "/tmp/café.org"))))
+    (org-dispatch--retire-save (list (list :observation observation)))
+    (should (equal (org-dispatch--retire-seen) (vector observation)))
+    (org-dispatch--retire-save nil)
+    (should (equal (org-dispatch--retire-seen) []))))
+
+(ert-deftest unicode-title-settles-launches-and-survives-state-reload ()
+  (dolist (test-agent '("pi" "claude"))
+    (test-with-herdr
+     (let* ((title "Respond to Jérôme 東京 é 🐈")
+            (task (test-task test-agent))
+            (file (plist-get task :file))
+            (org-dispatch-settle 0))
+       (org-dispatch--edit file (plist-get task :id)
+                           (lambda () (org-edit-headline title) (org-entry-delete nil "ID")))
+       (setq task (org-dispatch--edit file nil #'org-dispatch--task title))
+       ;; Without an ID, the settling key contains the title. A second pass reads it back.
+       (dotimes (_ 2)
+         (should (equal (org-dispatch--eligible (list task) nil) (list task))))
+       (with-temp-buffer
+         (insert-file-contents (org-dispatch--pending-file))
+         (should (gethash (concat file "::" title) (json-parse-buffer))))
+       (should (org-dispatch--launch task))
+       (let ((state (car (org-dispatch--states))))
+         (should (equal (plist-get state :heading) title))
+         (should (equal (plist-get state :status) "running"))
+         (org-dispatch--edit file (plist-get state :id)
+                             (lambda ()
+                               (should (equal (org-get-heading t t t t) title))
+                               (should (equal (org-get-todo-state) "PROG")))))
+       (should (seq-find (lambda (args) (and (equal (seq-take args 2) '("agent" "prompt"))
+                                           (string-search title (nth 3 args)))) test-calls))))))
+
 (ert-deftest session-formats-and-agent-identity ()
   (test-with-herdr
    (dolist (test-agent '("pi" "claude"))
