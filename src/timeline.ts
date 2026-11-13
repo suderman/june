@@ -61,7 +61,9 @@ export class TimelineFold {
 				const count = Number(entry.data?.imageCount ?? 0);
 				const files = Array.isArray(entry.data?.files) ? entry.data.files.map((f: any) => ({ name: String(f?.name ?? ""), path: String(f?.path ?? "") })) : [];
 				const said = String(entry.data?.text ?? "");
-				return item("user", count || files.length ? `${said}${count ? ` [${count} image${count === 1 ? "" : "s"}]` : ""}` : said, source, files);
+				// Names the user's photo library matched in the images (src/immich.ts), so search and the night can see who was there.
+				const people = Array.isArray(entry.data?.imagePeople) ? entry.data.imagePeople.map(String).join(", ") : "";
+				return item("user", count || files.length ? `${said}${count ? ` [${count} image${count === 1 ? "" : "s"}${people ? `: ${people}` : ""}]` : ""}` : said, source, files);
 			}
 			case "pi.user": {
 				// Before June recorded june.input, a Telegram message was an untagged user message.
