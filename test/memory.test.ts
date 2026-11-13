@@ -445,6 +445,7 @@ test("June's prompt carries the last few days' endings and says where to look fu
 	assert.match(prompt, /shares a photo with people in it, think about who they probably are/, "family in photos are worth a guess");
 	assert.match(prompt, /Being asked whether you recognize someone is an invitation/);
 	assert.match(prompt, /if you said so earlier in this conversation, that was a mistake, so make the guess now/, "an earlier refusal in context does not bind her");
+	assert.match(prompt, /Work out who is in it before you write about it in your journal, and name them there, marking a guess as a guess/, "the journal gets her guess, not \"one of the boys\"");
 	assert.match(prompt, /when they say the photo shows someone else's child or friend, take them at their word/, "what they say outweighs a resemblance");
 	assert.match(prompt, /never guess who an unfamiliar person is, and never claim more certainty than the clues give/);
 });
