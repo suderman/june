@@ -122,7 +122,9 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
         dismissal = null
         stopWatchingUnlock()
         link.close()
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+        // Stopped, not just paused: Compose pauses its frame clock only on stop, and the hidden sheet's badge animation
+        // otherwise kept the main thread busy around the clock. The next show resumes through start.
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
         Log.i(TAG, "session hidden")
     }
 
