@@ -39,7 +39,11 @@ import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import kotlin.math.roundToInt
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
@@ -97,20 +101,51 @@ fun Conversation(link: Link, locked: Boolean, screen: Screen?, dismiss: () -> Un
     var origin by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val palette = pagePalette()
     MaterialTheme(colorScheme = if (palette.dark) darkColorScheme() else lightColorScheme()) {
+      // Swipes on the header (Swipes.kt): June full screen opens as the lock-screen prompt does, close puts the sheet
+      // away, and an app opens with the sheet stepping aside. While locked only up (unlock) and down (close) work,
+      // whatever is set, since no other app opens over the lock screen.
+      val swipe = remember { Swipe() }
+      val allowed: (Swipes.Direction) -> Boolean = { d ->
+          if (locked) d == Swipes.Direction.UP || d == Swipes.Direction.DOWN else Swipes.does(Swipes.get(context, d), fullScreen = false)
+      }
+      val act: (Swipes.Direction) -> Unit = { d ->
+          if (locked) {
+              if (d == Swipes.Direction.UP) unlock() else dismiss()
+          } else when (val action = Swipes.get(context, d)) {
+              Swipes.Action.Full -> unlock()
+              Swipes.Action.Close -> dismiss()
+              is Swipes.Action.App -> Swipes.open(context, action.pkg)?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() } ?: dismiss()
+              Swipes.Action.None -> {}
+          }
+      }
       Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionOnScreen() }) {
+        SwipeHints(swipe, palette) { d -> if (locked) null else Swipes.get(context, d).takeIf { Swipes.does(it, fullScreen = false) }?.let { Swipes.label(context, it) } }
         Column(Modifier.fillMaxSize()) {
+            // Above the sheet a tap puts June away; it gives way as the sheet is swiped up toward full screen.
             Spacer(
-                Modifier.weight(0.25f).fillMaxWidth()
+                Modifier.fillMaxWidth()
+                    .layout { measurable, constraints ->
+                        val rise = (-swipe.offset.value.y).coerceAtLeast(0f)
+                        val height = (constraints.maxHeight * 0.25f - rise).roundToInt().coerceAtLeast(0)
+                        val placeable = measurable.measure(constraints.copy(minHeight = height, maxHeight = height))
+                        layout(placeable.width, height) { placeable.place(0, 0) }
+                    }
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = dismiss),
             )
             Surface(
-                Modifier.weight(0.75f).fillMaxWidth(),
+                Modifier.weight(1f).fillMaxWidth()
+                    .onSizeChanged { swipe.size = it }
+                    .graphicsLayer {
+                        translationX = swipe.offset.value.x
+                        translationY = swipe.offset.value.y.coerceAtLeast(0f)
+                    },
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 color = palette.page,
                 contentColor = palette.pageInk,
             ) {
+                val handle = Modifier.swipeHandle(swipe, allowed, act)
                 // A file opened from the strip goes to another app, which this sheet would cover: it hides once that app opens.
-                if (locked) Prompt("Unlock to talk to June", unlock) else androidx.compose.runtime.CompositionLocalProvider(LocalLeave provides dismiss) { Sheet(link, screen = screen, fromSheet = true) }
+                if (locked) Prompt("Unlock to talk to June", unlock, handle) else androidx.compose.runtime.CompositionLocalProvider(LocalLeave provides dismiss) { Sheet(link, screen = screen, fromSheet = true, header = handle) }
             }
         }
         // Where the fingerprint is read: the phone's own reader stays live under the session, and unlocking there
@@ -145,19 +180,20 @@ private fun fingerprintSensor(context: android.content.Context): FloatArray? = r
 }.getOrNull()
 
 @Composable
-private fun Prompt(text: String, onClick: () -> Unit) {
-    Box(Modifier.fillMaxSize().clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+private fun Prompt(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize().clickable(onClick = onClick), contentAlignment = Alignment.Center) {
         Text(text, style = MaterialTheme.typography.headlineSmall)
     }
 }
 
 /**
  * The conversation itself: the status line, the items newest last, and the words to send; `settings` opens June's
- * settings. It pads itself above the keyboard: neither the app's window (Android 15 and later) nor the session's (set
- * still in JuneSession) moves or shrinks for one.
+ * settings, and `header`, when given, makes the status line a swipe handle (Swipes.kt) with a grab bar above it. It
+ * pads itself above the keyboard: neither the app's window (Android 15 and later) nor the session's (set still in
+ * JuneSession) moves or shrinks for one.
  */
 @Composable
-fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fromSheet: Boolean = false) {
+fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fromSheet: Boolean = false, header: Modifier? = null) {
     val list = rememberLazyListState()
     val shown = link.items.filter { !it.private }
     // Stay on the newest item as the conversation grows.
@@ -187,7 +223,12 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     val links = remember(leave) { Links.Handler(context, leave) }
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides links) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
-        Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.fillMaxWidth().then(header ?: Modifier)) {
+        if (header != null) Box(
+            Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp).size(width = 36.dp, height = 4.dp)
+                .background(palette.muted.copy(alpha = 0.5f), RoundedCornerShape(50)),
+        )
+        Row(Modifier.fillMaxWidth().padding(top = if (header != null) 8.dp else 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             val ready = decisions
             if (ready != null && avatar != null) {
                 LiveBadge(link, ready, avatar)
@@ -208,6 +249,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                     .border(1.5.dp, palette.pageInk, RoundedCornerShape(50)).clickable { LookChoice.set(context, !on) }.padding(horizontal = 10.dp, vertical = 3.dp),
             )
             if (settings != null) Text("settings", color = palette.muted, fontSize = 13.sp, modifier = Modifier.clickable(onClick = settings).padding(start = 12.dp))
+        }
         }
         // The tasks she follows, each with where it stands, under the status line while it is open.
         val followed = detail

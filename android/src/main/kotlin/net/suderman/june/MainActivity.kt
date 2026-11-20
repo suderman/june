@@ -9,7 +9,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -87,6 +98,7 @@ private fun Status(resumed: Int) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         PairingForm()
+        SwipeSettings()
         Button(onClick = { context.startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }) { Text("Open Default apps") }
         Button(onClick = {
             try {
@@ -106,6 +118,65 @@ private fun Status(resumed: Int) {
         Text("Last invocation:", style = MaterialTheme.typography.titleSmall)
         Text(report, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
     }
+}
+
+/**
+ * What each swipe on June's header does (Swipes.kt), in the sheet and the full screen. A tap on a row picks from what
+ * June does herself and the launcher's apps.
+ */
+@Composable
+private fun SwipeSettings() {
+    val context = LocalContext.current
+    var changed by remember { mutableIntStateOf(0) }
+    var choosing by remember { mutableStateOf<Swipes.Direction?>(null) }
+    Text("Swipes on June's header", style = MaterialTheme.typography.titleMedium)
+    for (direction in Swipes.Direction.entries) {
+        val name = remember(changed) { Swipes.label(context, Swipes.get(context, direction)) }
+        Row(Modifier.fillMaxWidth().clickable { choosing = direction }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(direction.label, Modifier.weight(1f))
+            Text(name, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+    val direction = choosing ?: return
+    val apps = remember { Swipes.apps(context) }
+    val pick = { action: Swipes.Action ->
+        Swipes.set(context, direction, action)
+        changed++
+        choosing = null
+    }
+    AlertDialog(
+        onDismissRequest = { choosing = null },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = { choosing = null }) { Text("Cancel") } },
+        title = { Text(direction.label) },
+        text = {
+            LazyColumn(Modifier.heightIn(max = 480.dp)) {
+                items(listOf(Swipes.Action.None, Swipes.Action.Full, Swipes.Action.Close)) { Choice(Swipes.label(context, it), null) { pick(it) } }
+                items(apps, key = { it.first }) { (pkg, label) -> Choice(label, pkg) { pick(Swipes.Action.App(pkg)) } }
+            }
+        },
+    )
+}
+
+/** One choice in the swipe picker, with the app's icon when it is an app. */
+@Composable
+private fun Choice(label: String, pkg: String?, onClick: () -> Unit) {
+    val context = LocalContext.current
+    val size = with(androidx.compose.ui.platform.LocalDensity.current) { 32.dp.roundToPx() }
+    val icon = remember(pkg) {
+        pkg?.let { runCatching { context.packageManager.getApplicationIcon(it).toImage(size) }.getOrNull() }
+    }
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (icon != null) Image(icon, null, Modifier.size(32.dp)) else Spacer(Modifier.size(32.dp))
+        Text(label, Modifier.padding(start = 12.dp))
+    }
+}
+
+private fun android.graphics.drawable.Drawable.toImage(px: Int): androidx.compose.ui.graphics.ImageBitmap {
+    val bitmap = android.graphics.Bitmap.createBitmap(px, px, android.graphics.Bitmap.Config.ARGB_8888)
+    setBounds(0, 0, px, px)
+    draw(android.graphics.Canvas(bitmap))
+    return bitmap.asImageBitmap()
 }
 
 /**

@@ -5,6 +5,8 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -14,10 +16,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 
 /**
  * June's conversation full screen, connected while it is in front. Opened from the session's lock-screen prompt, it
@@ -37,13 +42,38 @@ class ConversationActivity : ComponentActivity() {
             androidx.compose.runtime.SideEffect {
                 androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = !palette.dark
             }
+            // Swipes on the header (Swipes.kt): close sends June to the back, staying in recents, and an app opens over
+            // her. June full screen does nothing here.
+            val swipe = remember { Swipe() }
+            val allowed: (Swipes.Direction) -> Boolean = { Swipes.does(Swipes.get(this, it), fullScreen = true) }
+            val act: (Swipes.Direction) -> Unit = { d ->
+                when (val action = Swipes.get(this, d)) {
+                    Swipes.Action.Close -> moveTaskToBack(true)
+                    is Swipes.Action.App -> Swipes.open(this, action.pkg)?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
+                    Swipes.Action.Full, Swipes.Action.None -> {}
+                }
+            }
             MaterialTheme(colorScheme = if (palette.dark) darkColorScheme() else androidx.compose.material3.lightColorScheme()) {
                 Surface(Modifier.fillMaxSize(), color = palette.page, contentColor = palette.pageInk) {
-                    Box(Modifier.statusBarsPadding()) {
-                        if (locked) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Unlock to talk to June", style = MaterialTheme.typography.headlineSmall) }
-                        } else {
-                            Sheet(link, settings = { startActivity(android.content.Intent(this@ConversationActivity, MainActivity::class.java)) })
+                    Box(Modifier.fillMaxSize()) {
+                        SwipeHints(swipe, palette) { d -> Swipes.get(this@ConversationActivity, d).takeIf { Swipes.does(it, fullScreen = true) }?.let { Swipes.label(this@ConversationActivity, it) } }
+                        // The page moves with a swipe over the hints, so it is painted: they show only where it uncovers.
+                        Box(
+                            Modifier.fillMaxSize().onSizeChanged { swipe.size = it }
+                                .graphicsLayer {
+                                    translationX = swipe.offset.value.x
+                                    translationY = swipe.offset.value.y
+                                }
+                                .background(palette.page).statusBarsPadding(),
+                        ) {
+                            if (locked) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Unlock to talk to June", style = MaterialTheme.typography.headlineSmall) }
+                            } else {
+                                Sheet(
+                                    link, settings = { startActivity(android.content.Intent(this@ConversationActivity, MainActivity::class.java)) },
+                                    header = Modifier.swipeHandle(swipe, allowed, act),
+                                )
+                            }
                         }
                     }
                 }
