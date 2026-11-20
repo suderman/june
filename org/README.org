@@ -157,6 +157,13 @@ On an existing live chain, deploy the dependency-aware dispatcher to every host 
 
 Runtime state lives in =~/.local/state/org-dispatch= on each host and is not synced. Repeating tasks keep 14 run entries in =:LOGBOOK:=; older ones move to =archive.org= beside the task's file.
 
+** Correcting a queued start
+When Jon corrects the start of an AUTO task, June reads the whole task and Dialog with =org_read_task=, then uses =org_reschedule_task= with its ID, fresh revision, new time and a note recording what Jon changed. Give a future Calgary date as =YYYY-MM-DD HH:MM= in 24-hour time, or =YYYY-MM-DD= for midnight. If the corrected time has passed, ask for a new time. This tool never means "start now".
+
+=org-edit reschedule-task FILE id:UUID WHEN JSON= takes =revision=, =request= and =note=. It takes the same local flock as =org-dispatch run= and refuses contention rather than waiting behind a launch. Under the lock it checks the revision, unique live agenda ID, local dispatcher ownership, AUTO state and worker status. Stale reads, active or uncertain workers, remote tasks or linked sessions, and existing SCHEDULED ranges, repeaters or delay cookies are refused. Read the task again after a refusal. The lock does not cover direct edits or Syncthing on another host.
+
+The edit replaces SCHEDULED and appends the old and new start to Dialog in one save. It preserves AUTO, task identity, permissions, prerequisites, other planning dates and any existing follow. A replay writes nothing. The regular timer picks up the same task once due and eligible. June does not start a worker or ask Jon to take the task out of AUTO first. General =org-edit schedule= refuses AUTO; do not work around a refusal with direct edits, a duplicate task or a state change.
+
 ** Workers in herdr-core
 The dispatcher starts each worker as the program of its own hc terminal, with =hc run --bg --no-parent=, in the task's directory and with the task as the agent's first message. Before launch it chooses the agent session ID (=--session-id=, or the saved session it resumes) and a run ID for this attempt, and labels the terminal =org.dispatch=HOST=, =org.task=ID=, =org.run=RUN=, =org.agent=AGENT= and =org.session=UUID=. The receipt in =~/.local/state/org-dispatch= keeps the same identity with the terminal address. A terminal address such as =t7= is never reused on its core, but the labels are the proof: every prompt, interrupt, kill and retirement checks all four against the receipt first, and a terminal carrying another run's labels is treated as gone, never touched.
 

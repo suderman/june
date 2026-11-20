@@ -240,6 +240,8 @@ export type StopTaskRequest = {
 	key: string;
 };
 
+type RescheduleRequest = StopTaskRequest & { scheduled: string };
+
 export type RemoveDependenciesRequest = {
 	file: string;
 	heading: string;
@@ -512,6 +514,28 @@ export class Dispatch {
 			return { ...result, file: this.#org.rel(path) };
 		} catch (cause) {
 			throw new Error("org-edit did not confirm the stop; inspect task and worker before reassignment", { cause });
+		}
+	}
+
+	/** Correct an unclaimed AUTO start without changing its state or replacing its follow. */
+	async reschedule(request: RescheduleRequest) {
+		const { file, heading, scheduled, revision, key, note } = request;
+		const path = await this.#target(file);
+		const out = await this.#run([
+			"org-edit", "reschedule-task", path, heading, scheduled, JSON.stringify({ revision, request: key, note }),
+		], 120_000).catch((error: Error) => {
+			if (/usage: org-edit todo\|schedule\|deadline/.test(error.message))
+				throw new Error(`The installed org-edit cannot reschedule AUTO tasks and wrote nothing; ${user()} needs to update June's Nix input and activate it. Do not work around the refusal by editing the task directly.`);
+			throw error;
+		});
+		try {
+			const result = JSON.parse(out.trim().split("\n").at(-1)!) as { id: string; state: string | null; scheduled: string | null; written: boolean };
+			if (heading !== `id:${result.id}` || typeof result.written !== "boolean" ||
+				(result.written && (result.state !== "AUTO" || !START.test(result.scheduled ?? ""))))
+				throw new Error("unexpected reschedule result");
+			return { ...result, file: this.#org.rel(path) };
+		} catch (cause) {
+			throw new Error("org-edit did not confirm the new start; re-read the whole task and Dialog before retrying", { cause });
 		}
 	}
 
@@ -796,7 +820,7 @@ export function createDispatchExtension(
 			}),
 			defineTool({
 				name: "org_resume_task",
-				description: `When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and code deployment off, and select one host. For explicitly approved live content work, pass liveContent with the exact target, allowed actions and limits, plus the fresh revision from org_read_task. This permits only those content operations, never a theme/plugin deploy, database push, system activation or install. The note must record the user's approval and identify any older production/manual-only gate it supersedes. Existing approval is retained only for unchanged ID, title, directory and Scope, and needs a fresh revision on each new resume; omit liveContent to retain it or pass none to revoke it. Re-read all scope, checklist and Dialog changes before retaining approval; material changes elsewhere need renewed confirmation. Changed scope or malformed approval is refused, never broadened silently. Do not ask again for approval already given for unchanged work. No approval is inferred from AUTO, a HOLD question, or a review verdict. Refuse an active agent or an unconfirmed stop. To switch a running task, use org_stop_task first, never raw terminal keys or manual state edits; re-read after its confirmed stop, then pass the requested agent here. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work. To resume it later rather than now, first set its SCHEDULED with org_set_date while it is still TODO, EVAL, or HOLD, then resume: the dispatcher holds it until then. Never date a task that is already AUTO. When ${user()} wants it to wait for other tasks, pass their IDs in depends: org-edit adds them to :DEPENDS: in the same save that sets AUTO, after refusing missing or duplicate IDs, the task itself, and cycles, so it never launches early. The dispatcher then launches it only once every prerequisite is DONE, never at EVAL, and waiting costs nothing. Edges the task already has are kept. To remove selected edges, first use org_remove_dependencies, which pauses AUTO at HOLD; re-read scope and Dialog and resolve any prose gates before resuming.${agentNote}`,
+				description: `When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and code deployment off, and select one host. For explicitly approved live content work, pass liveContent with the exact target, allowed actions and limits, plus the fresh revision from org_read_task. This permits only those content operations, never a theme/plugin deploy, database push, system activation or install. The note must record the user's approval and identify any older production/manual-only gate it supersedes. Existing approval is retained only for unchanged ID, title, directory and Scope, and needs a fresh revision on each new resume; omit liveContent to retain it or pass none to revoke it. Re-read all scope, checklist and Dialog changes before retaining approval; material changes elsewhere need renewed confirmation. Changed scope or malformed approval is refused, never broadened silently. Do not ask again for approval already given for unchanged work. No approval is inferred from AUTO, a HOLD question, or a review verdict. Refuse an active agent or an unconfirmed stop. To switch a running task, use org_stop_task first, never raw terminal keys or manual state edits; re-read after its confirmed stop, then pass the requested agent here. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work. To resume it later rather than now, first set its SCHEDULED with org_set_date while it is still TODO, EVAL, or HOLD, then resume: the dispatcher holds it until then. To correct a task that is already AUTO, use org_reschedule_task instead of resuming it. When ${user()} wants it to wait for other tasks, pass their IDs in depends: org-edit adds them to :DEPENDS: in the same save that sets AUTO, after refusing missing or duplicate IDs, the task itself, and cycles, so it never launches early. The dispatcher then launches it only once every prerequisite is DONE, never at EVAL, and waiting costs nothing. Edges the task already has are kept. To remove selected edges, first use org_remove_dependencies, which pauses AUTO at HOLD; re-read scope and Dialog and resolve any prose gates before resuming.${agentNote}`,
 				parameters: obj({
 					file: str({ description: "Org agenda file under ~/org" }),
 					heading: str({ description: "Exact title or id:UUID, as org_read_task accepts" }),
@@ -829,6 +853,25 @@ export function createDispatchExtension(
 						: " That host's dispatcher will pick it up on its timer.";
 					const waits = result.depends.length ? ` It waits until ${result.depends.map((id) => `id:${id}`).join(", ")} ${result.depends.length === 1 ? "is" : "are"} DONE; tell the user what it waits on.` : "";
 					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\nYou are following this task and will get [follow] reports.${started}${waits} Tell the user you will report back. Existing SCHEDULED dates still apply.` }] };
+				},
+			}),
+			defineTool({
+				name: "org_reschedule_task",
+				description: `When ${user()} explicitly corrects the start time of a queued AUTO task, read the whole task and Dialog with org_read_task and use this tool on its dispatcher host. Change only SCHEDULED, keeping AUTO, the same ID, agent, prerequisites, permissions, and any existing follow. It appends the correction to Dialog and does not start a worker. Requires a future Calgary date and optional 24-hour time. If the corrected time has passed, ask for a new time; never treat that as permission to start now. Refuses claimed tasks, active or uncertain workers, remote tasks, stale reads, and schedules with repeaters, ranges, or delay cookies. If busy or changed, re-read before retrying. Do not park, resume, duplicate, or directly edit the task as a workaround.`,
+				parameters: obj({
+					file: str({ description: "Org agenda file under ~/org" }),
+					heading: str({ description: "id:UUID of the queued AUTO task, from org_read_task" }),
+					revision: str({ description: "Exact revision returned by org_read_task" }),
+					scheduled: str({ description: "Future Calgary start as YYYY-MM-DD HH:MM (24-hour), or YYYY-MM-DD for midnight" }),
+					note: str({ description: `One line recording ${user()}'s schedule correction, including any earlier timing instruction it supersedes` }),
+				}),
+				replay: "safe",
+				execute: async (args, api) => {
+					const result = await dispatch.reschedule({ ...args, key: `${instance}:${api.taskId}` });
+					const note = result.written
+						? "Report the corrected Calgary start. The task stays queued; the timer launches it when eligible, including any prerequisites. No new worker was started."
+						: "This correction was already recorded. Nothing was written on replay; re-read the task before reporting its current state or schedule.";
+					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\n${note}` }] };
 				},
 			}),
 			defineTool({

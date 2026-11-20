@@ -8,6 +8,7 @@
 ;;   org-edit-deadline  FILE HEADING WHEN
 ;;   org-edit-date      WHEN
 ;;   org-edit-update-task FILE HEADING JSON
+;;   org-edit-reschedule-task FILE id:UUID WHEN JSON
 ;;
 ;; Task content updates use a read revision and preserve old wording in Dialog.
 ;; States and dates go through Org, so CLOSED,
@@ -619,11 +620,90 @@ The wrapper holds the launch lock. Replays find the receipt even after a rename.
                         (state . ,(org-get-todo-state)) (written . ,(if replay :false t)))))) t)
     (princ (concat (json-serialize result) "\n"))))
 
+(defun org-edit-reschedule-task ()
+  "Correct an AUTO start with a revision, request and note in JSON.
+The wrapper holds the dispatcher lock through validation and the atomic save."
+  (pcase-let* ((`(,file ,heading ,when ,json) (org-edit--args 4 "reschedule-task FILE id:UUID WHEN JSON"))
+               (spec (json-parse-string json :object-type 'plist))
+               (revision (plist-get spec :revision)) (request (plist-get spec :request))
+               (note (plist-get spec :note))
+               (date "[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}")
+               (clock "\\(?:[01][0-9]\\|2[0-3]\\):[0-5][0-9]")
+               (create-lockfiles t) (file-precious-flag t) (result nil))
+    (unless (and (string-match-p "\\`id:[[:alnum:]][[:alnum:]-]*\\'" heading)
+                 (stringp revision) (string-match-p "\\`[0-9a-f]\\{64\\}\\'" revision)
+                 (stringp request) (not (string-empty-p request))
+                 (stringp note) (not (string-empty-p (string-trim note)))
+                 (not (string-match-p "[\n\r]" (concat request note))))
+      (error "reschedule-task needs id:UUID, revision SHA256, request and one-line note"))
+    (unless (string-match-p (concat "\\`" date "\\(?: " clock "\\)?\\'") when)
+      (error "use a future Calgary date as YYYY-MM-DD or YYYY-MM-DD HH:MM"))
+    (setq file (file-truename file))
+    (when (or (member (file-name-nondirectory file) '("asana.org" "inbox.org" "archive.org"))
+              (string-match-p "/archive/\\|\\.sync-conflict-" file)
+              (not (file-in-directory-p file (org-dispatch--org-root))))
+      (error "not a writable live Org file: %s" file))
+    (when (directory-files (file-name-directory file) nil
+                           (concat "\\`" (regexp-quote (file-name-base file)) "\\.sync-conflict-.*\\.org\\'"))
+      (error "resolve the file's Syncthing conflict copies first"))
+    (org-edit--at
+     file heading
+     (lambda ()
+       (let* ((id (org-entry-get nil "ID"))
+              (state (org-get-todo-state))
+              (old (org-entry-get nil "SCHEDULED"))
+              (text (org-dispatch--subtree-text))
+              (replay (equal request (org-entry-get nil "JUNE_RESCHEDULE"))))
+         (unless replay
+           (unless (equal state "AUTO") (error "only an AUTO task can be rescheduled here; found %s" state))
+           (unless (equal revision (secure-hash 'sha256 (encode-coding-string
+                                   (replace-regexp-in-string "\n+\\'" "" text) 'utf-8)))
+             (error "task revision changed; read the whole task and Dialog again"))
+           (let* ((agenda (mapcar #'file-truename (org-dispatch--agenda-files t)))
+                  (node (gethash id (org-dispatch--dependency-index (org-dispatch--lookup-files agenda))))
+                  (task (org-dispatch--task)))
+             (unless (and (member file agenda) (equal file (plist-get node :file)))
+               (error "reschedule-task needs a unique task ID in a live agenda file"))
+             (unless (and (equal (plist-get task :host) org-dispatch-host) (not (plist-get task :problem)))
+               (error "reschedule on the task's dispatcher host with valid dispatch settings"))
+             (when (plist-get task :review-loop) (error "task has a review contract; ask Jon before rescheduling")))
+           (when (and old (not (string-match-p (concat "\\`<" date "\\(?: [[:alpha:]]+\\)?\\(?: " clock "\\)?>\\'") old)))
+             (error "existing SCHEDULED is not a plain start; keep its range or cookies for Jon to edit"))
+           (org-dispatch--check-stopped-task)
+           (let ((state-file (org-dispatch--state-file id)))
+             (when (file-exists-p state-file)
+               (let ((receipt (with-temp-buffer (insert-file-contents state-file)
+                                                (json-parse-buffer :object-type 'plist))))
+                 (unless (member (plist-get receipt :status) '("finished" "stopped"))
+                   (error "task has active or uncertain dispatcher state; inspect before rescheduling")))))
+           ;; Check historical links too. A remote session cannot be checked under this host's lock.
+           (let ((offset 0))
+             (while (string-match "herdr:\\([^/ \n]+\\)/\\([^: \n]+\\):\\([0-9a-f-]\\{36\\}\\)" text offset)
+               (let ((host (match-string 1 text)) (agent (match-string 2 text)) (session (match-string 3 text)))
+                 (setq offset (match-end 0))
+                 (unless (equal host org-dispatch-host) (error "remote session needs its host's coordinator"))
+                 (org-dispatch--confirm-settled (list :session session :agent agent)))))
+           (let* ((stamp (org-edit--stamp when)) (time (org-time-string-to-time stamp)))
+             (unless (equal when (format-time-string (if (string-search " " when) "%F %R" "%F") time))
+               (error "%s does not occur in Calgary time" when))
+             (unless (time-less-p (current-time) time)
+               (error "start must still be in the future in Calgary time; read again and ask for a new time"))
+             (org-add-planning-info 'scheduled stamp)
+             (org-back-to-heading t)
+             (org-entry-put nil "JUNE_RESCHEDULE" request)
+             (org-dispatch--append "Dialog" (org-dispatch--entry "June"
+               (format "Rescheduled from %s to %s. %s" (or old "no scheduled start") stamp note)))))
+         (setq result `((id . ,id) (state . ,(or state :null)) (scheduled . ,(or (org-entry-get nil "SCHEDULED") :null))
+                        (written . ,(if replay :false t)))))) t)
+    (princ (concat (json-serialize result) "\n"))))
+
 (defun org-edit--planning (keyword usage)
   "Set or remove the KEYWORD planning date: FILE HEADING WHEN, or none."
   (pcase-let ((`(,file ,heading ,when) (org-edit--args 3 usage)))
     (org-edit--at file heading
                   (lambda ()
+                    (when (and (equal keyword "SCHEDULED") (equal (org-get-todo-state) "AUTO"))
+                      (error "use reschedule-task to change a queued AUTO start"))
                     (if (equal (downcase when) "none")
                         (org-add-planning-info nil nil (intern (downcase keyword)))
                       ;; A string keeps the time and cookies. Not org-entry-put: in Org 9.8

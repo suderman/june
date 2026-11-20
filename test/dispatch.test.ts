@@ -826,6 +826,118 @@ test("real review wrapper creates one isolated exact-hash task and refuses ordin
 	assert.equal(git("status", "--porcelain"), "");
 });
 
+const reschedule = { file: request.file, heading: "id:resume123", scheduled: "2036-11-20 11:38", note: "Jon meant 11:38 a.m., not 11:38 p.m.", key: "inst:reschedule1" };
+const scheduledTask = () => removableTask().replace("SCHEDULED: <2026-11-10 Tue>", "DEADLINE: <2036-11-21 Fri> SCHEDULED: <2036-11-20 Thu 23:38>").replace(":AGENT: pi\n", ":AGENT: pi\n:JUNE_REQUEST: original:1\n:RETRY: 2\n:REVIEW: no\n:DEPLOY: yes\n");
+
+test("reschedule reports an outdated org-edit without a fallback write", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	const calls: string[][] = [];
+	const old = new Dispatch(new Org(f.root), f.config, async (argv) => {
+		calls.push([...argv]);
+		throw new Error("org-edit reschedule-task /project id:resume123: usage: org-edit todo|schedule|deadline");
+	});
+	const revision = "a".repeat(64);
+	await assert.rejects(old.reschedule({ ...reschedule, revision }), /installed org-edit cannot reschedule AUTO tasks and wrote nothing/);
+	assert.deepEqual(calls, [["org-edit", "reschedule-task", f.project, reschedule.heading, reschedule.scheduled,
+		JSON.stringify({ revision, request: reschedule.key, note: reschedule.note })]]);
+});
+
+test("reschedule changes only the queued start and records the correction; replay cannot requeue or undo it", { skip: !hasEmacs }, async (t) => {
+	const f = await removalFixture();
+	t.after(f.cleanup);
+	const original = scheduledTask();
+	await writeFile(f.project, original);
+	const revision = await f.revision();
+	const input = { ...reschedule, revision };
+	const result = await f.dispatch.reschedule(input);
+	assert.deepEqual(result, { file: reschedule.file, id: "resume123", state: "AUTO", scheduled: "<2036-11-20 Thu 11:38>", written: true });
+	const changed = await readFile(f.project, "utf8");
+	assert.ok(changed.includes("DEADLINE: <2036-11-21 Fri>"));
+	assert.match(changed, /^- June .*Rescheduled from <2036-11-20 Thu 23:38> to <2036-11-20 Thu 11:38>\. Jon meant 11:38 a\.m\., not 11:38 p\.m\.$/m);
+	assert.equal(changed.replace(/^.*SCHEDULED:.*$/m, original.split("\n")[1]!).replace(/^:JUNE_RESCHEDULE:.*\n/m, "").replace(/^- June .*\n/m, ""), original);
+
+	const eligibility = (when: string) => execFileSync("emacs", ["-Q", "--batch", "-l", f.options.env.ORG_DISPATCH_EL, "--eval", `(let* ((now (org-time-string-to-time ${JSON.stringify(when)}))
+		(real-float-time (symbol-function 'float-time)))
+		(cl-letf (((symbol-function 'float-time) (lambda (&optional time) (funcall real-float-time (or time now)))))
+			(prin1 (mapcar (lambda (task) (or (plist-get task :dependency) (plist-get task :id)))
+				(org-dispatch--eligible (org-dispatch--tasks (list ${JSON.stringify(f.project)})) nil t)))))`], f.options).trim();
+	assert.match(eligibility("<2036-11-20 Thu 11:38>"), /waiting on/, "the new time does not bypass prerequisites");
+	const ready = changed.replaceAll("* TODO ", "* DONE ");
+	await writeFile(f.project, ready);
+	assert.equal(eligibility("<2036-11-20 Thu 11:37>"), "nil");
+	assert.equal(eligibility("<2036-11-20 Thu 11:38>"), '("resume123")', "the old evening time no longer holds the task");
+
+	const later = await f.dispatch.reschedule({ ...input, revision: await f.revision(), key: "inst:reschedule2", scheduled: "2036-11-20 13:00" });
+	assert.equal(later.scheduled, "<2036-11-20 Thu 13:00>");
+	assert.equal(eligibility("<2036-11-20 Thu 11:38>"), "nil", "a delay takes effect at the old due time");
+	const delayed = await readFile(f.project, "utf8");
+	await assert.rejects(f.dispatch.reschedule(input), /revision changed/, "an older request cannot undo a newer one");
+	const progressed = delayed.replace("* AUTO ", "* PROG ");
+	await writeFile(f.project, progressed);
+	assert.equal((await f.dispatch.reschedule({ ...input, key: "inst:reschedule2", scheduled: "2036-11-20 13:00" })).written, false);
+	assert.equal(await readFile(f.project, "utf8"), progressed);
+
+	const unscheduled = original.replace(" SCHEDULED: <2036-11-20 Thu 23:38>", "");
+	await writeFile(f.project, unscheduled);
+	assert.equal((await f.dispatch.reschedule({ ...input, revision: await f.revision(), key: "inst:reschedule3", scheduled: "2036-11-21" })).scheduled, "<2036-11-21 Fri>");
+	assert.match(await readFile(f.project, "utf8"), /Rescheduled from no scheduled start to <2036-11-21 Fri>/);
+});
+
+test("reschedule refuses unsafe states and dates without writing, even when a claim wins the race", { skip: !hasEmacs }, async (t) => {
+	const f = await removalFixture();
+	t.after(f.cleanup);
+	const original = scheduledTask();
+	const move = async (scheduled = reschedule.scheduled) => f.dispatch.reschedule({ ...reschedule, scheduled, revision: await f.revision() });
+	for (const [text, error] of [
+		[original.replace("* AUTO ", "* PROG "), /only an AUTO task/],
+		[original.replace("* AUTO ", "* HOLD "), /only an AUTO task/],
+		[original.replace(":HOST: kit", ":HOST: cog"), /dispatcher host/],
+		[original.replace("23:38>", "23:38 +1w>"), /existing SCHEDULED/],
+		[original.replace("23:38>", "23:38-23:59>"), /existing SCHEDULED/],
+		[original.replace("23:38>", "23:38 -2d>"), /existing SCHEDULED/],
+		[original.replace(":ID: keep", ":ID: resume123"), /unique task ID/],
+		[original.replace(":RETRY: 2", ":JUNE_STOP_REQUEST: pending"), /stop is pending/],
+		[original.replace(":RETRY: 2", ":REVIEW_PARENT: a-parent"), /review contract/],
+		[original.replace("herdr:kit/", "herdr:cog/"), /remote session/],
+	] as const) {
+		await writeFile(f.project, text);
+		await assert.rejects(move(), error);
+		assert.equal(await readFile(f.project, "utf8"), text);
+	}
+	await writeFile(f.project, original);
+	const writes = new OrgWrites(new Org(f.root), f.config, async (argv) => f.run(argv));
+	await assert.rejects(writes.setDate(request.file, reschedule.heading, "scheduled", "none"), /Use org_reschedule_task/);
+	assert.throws(() => f.run(["org-edit", "schedule", f.project, reschedule.heading, "none"]), /use reschedule-task/);
+	for (const [when, error] of [
+		["none", /YYYY-MM-DD/], ["2036-11-20 24:30", /YYYY-MM-DD/], ["2036-11-20 11:38 +1w", /YYYY-MM-DD/],
+		["2036-02-30", /no such date/], ["2026-03-08 02:30", /does not occur/], ["2000-01-01 11:38", /future/],
+	] as const) await assert.rejects(move(when), error);
+	const revision = await f.revision();
+	const locked = new Dispatch(new Org(f.root), f.config, async (argv) => execFileSync("flock", ["-n", join(f.runtime, "org-dispatch.lock"), "bash", fileURLToPath(new URL("../org/edit/org-edit", import.meta.url)), ...argv.slice(1)], f.options));
+	await assert.rejects(locked.reschedule({ ...reschedule, revision }), /dispatcher or task edit busy/);
+	const stateDir = join(f.dir, "state/org-dispatch");
+	await mkdir(stateDir, { recursive: true });
+	for (const status of ["starting", "running", "launch-uncertain", "stopping"]) {
+		await writeFile(join(stateDir, "resume123.json"), JSON.stringify({ status }));
+		await assert.rejects(move(), /active or uncertain dispatcher state|launch ownership is uncertain|stop is pending/);
+	}
+	await writeFile(join(stateDir, "resume123.json"), JSON.stringify({ status: "finished" }));
+	await writeFile(join(f.bin, "hc"), `#!/bin/sh
+case "$1" in
+  ls) echo '{"terminals":[{"address":"t1","state":"live"}]}' ;;
+  get) echo '{"address":"t1","state":"live","status":{"state":"working"},"labels":{"org.agent":"pi","org.session":"01a1176c-3aa6-7717-a4c6-eaa0aa0a0833"}}' ;;
+  *) exit 66 ;;
+esac
+`, { mode: 0o755 });
+	await assert.rejects(move(), /worker t1 is working/);
+	assert.equal(await readFile(f.project, "utf8"), original);
+	const claimed = original.replace("* AUTO ", "* PROG ");
+	const race = new Dispatch(new Org(f.root), f.config, async (argv) => { await writeFile(f.project, claimed); return f.run(argv); });
+	await assert.rejects(race.reschedule({ ...reschedule, revision }), /only an AUTO task|revision changed/);
+	assert.equal(await readFile(f.project, "utf8"), claimed);
+});
+
 test("real org-edit pauses AUTO in one save, preserves other edges and history, and replays without touching later work", { skip: !hasEmacs }, async (t) => {
 	const f = await removalFixture();
 	t.after(f.cleanup);

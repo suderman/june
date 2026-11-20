@@ -63,7 +63,7 @@ test("Org reads a task's SCHEDULED start as Calgary time", async (t) => {
 	assert.equal((await org.byId("aaaaaaaa-0000-4000-8000-000000000004"))?.scheduledAt, Date.UTC(2026, 0, 15, 16, 30), "09:30 MST before the change is 16:30 UTC");
 });
 
-test("org_queue_task with scheduled writes the date with the task, does not start the dispatcher, and reports no stall before it", async (t) => {
+test("queueing and correcting a future start keeps one follow without starting the dispatcher", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const root = join(tmp.dir, "org");
@@ -75,7 +75,18 @@ test("org_queue_task with scheduled writes the date with the task, does not star
 	const runs: string[][] = [];
 	const extension = createDispatchExtension(config, new Org(root), new Herdr(config.herdr, async () => "{}"), "inst", async (args) => {
 		runs.push([...args]);
-		return args[0] === "org-edit" && args[1] === "date" ? "<2036-12-31 Wed 09:30>\n" : "";
+		if (args[0] === "org-edit" && args[1] === "date") return "<2036-12-31 Wed 09:30>\n";
+		assert.deepEqual(args.slice(0, 3), ["org-edit", "reschedule-task", file]);
+		const id = args[3]!.slice(3);
+		const task = await new Org(root).read("todo.org", `id:${id}`);
+		const spec = JSON.parse(args[5]!);
+		assert.equal(spec.revision, task.revision);
+		assert.match(spec.request, /^inst:/);
+		assert.equal(spec.note, "Alex meant the evening.");
+		assert.equal(args[4], "2036-12-31 21:30");
+		const scheduled = "<2036-12-31 Wed 21:30>";
+		await replaceFile(file, (await readFile(file, "utf8")).replace("<2036-12-31 Wed 09:30>", scheduled));
+		return JSON.stringify({ id, state: "AUTO", scheduled, written: true });
 	}, { intervalMs: 40, launchMs: 200, maxMs: 3_600_000 });
 	const faux = fauxProvider();
 	faux.setResponses([
@@ -88,9 +99,22 @@ test("org_queue_task with scheduled writes the date with the task, does not star
 	assert.match(await readFile(file, "utf8"), /^\* AUTO Check docs\nSCHEDULED: <2036-12-31 Wed 09:30>\n:PROPERTIES:\n/m);
 	assert.deepEqual(runs, [["org-edit", "date", "2036-12-31 9:30"]], "nothing starts the dispatcher for a task it would only skip");
 	assert.match(JSON.stringify((await daemon.root.context(BG)).entries), /SCHEDULED for <2036-12-31 Wed 09:30>, Calgary time/, "the tool result tells June when it starts");
+	const followers = async () => (await daemon.harness.inspect(BG)).tasks.filter((task) => task.record.kind === "june.follow").map((task) => task.record.id);
+	const before = await followers();
+	assert.equal(before.length, 1, "it is followed");
+	const id = /^:ID: (.+)$/m.exec(await readFile(file, "utf8"))![1]!;
+	const heading = `id:${id}`;
+	const { revision } = await new Org(root).read("todo.org", heading);
+	faux.setResponses([
+		fauxAssistantMessage([fauxToolCall("org_reschedule_task", { file: "todo.org", heading, revision, scheduled: "2036-12-31 21:30", note: "Alex meant the evening." })], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Moved to the evening."),
+	]);
+	await ask(tmp.paths.socket, "I meant 9:30 p.m.");
+	assert.deepEqual(runs.map((argv) => argv.slice(0, 2)), [["org-edit", "date"], ["org-edit", "reschedule-task"]]);
+	assert.match(JSON.stringify((await daemon.root.context(BG)).entries), /The task stays queued; the timer launches it when eligible/);
 	await new Promise((r) => setTimeout(r, 600));
 	assert.equal((await daemon.root.context(BG)).entries.filter((e) => (e.data as { source?: string })?.source === "follow").length, 0, "no stall report while it waits");
-	assert.equal((await daemon.harness.inspect(BG)).tasks.filter((task) => task.record.kind === "june.follow").length, 1, "it is followed");
+	assert.deepEqual(await followers(), before, "correcting the time did not replace the follow");
 });
 
 test("follow carries only the worker's own headline, verbatim in the model input and notice data", async (t) => {

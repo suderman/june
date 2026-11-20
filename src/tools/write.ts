@@ -175,6 +175,8 @@ export class OrgWrites {
 		const path = await writable(this.#org, this.#config, file);
 		const lines = await this.#org.lines(path);
 		const line = locate(lines, heading, this.#org.rel(path));
+		if (kind === "scheduled" && parseHeading(lines[line - 1]!, line)!.state === "AUTO")
+			throw new Error("Use org_reschedule_task for a queued AUTO start; read the whole task and Dialog first");
 		const out = await this.#run(["org-edit", kind === "scheduled" ? "schedule" : "deadline", path, outline(lines, line).map((h) => h.title).join(" / "), when], 60_000);
 		return { file: this.#org.rel(path), heading: out.trim() };
 	}
@@ -251,7 +253,7 @@ export function createOrgWriteExtension(config: Config, org: Org, instance: stri
 			}),
 			defineTool({
 				name: "org_set_date",
-				description: "Set or remove a heading's SCHEDULED or DEADLINE through Org, which writes the weekday and handles repeaters. Never use it to delay an AUTO task: the dispatcher may launch it first. Queue new agent work with org_queue_task's scheduled instead, and date an existing task before resuming it.",
+				description: "Set or remove a heading's SCHEDULED or DEADLINE through Org, which writes the weekday and handles repeaters. Use org_reschedule_task, not this tool, to change a queued AUTO start. Queue new agent work with org_queue_task's scheduled, and date an existing TODO, EVAL, or HOLD task before resuming it.",
 				parameters: obj({
 					file,
 					heading,
