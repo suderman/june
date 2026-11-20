@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.service.voice.VoiceInteractionSession
 import android.util.Log
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.WindowManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,9 +57,7 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
 
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
-        // The window neither pans nor resizes for the keyboard; the sheet pads itself above it, keeping the status line
-        // in view. Set before the window is up, Android puts it back to pan, which pushed the status line off the top.
-        window.window?.decorView?.post { window.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING) }
+        keepStill()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         // Opening June lets her hands act again after Jon stopped them; while she shows, her hands may close her.
         Hands.resume(context)
@@ -80,6 +79,23 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
         record("locked: $locked")
         record("showFlags: ${describeFlags(showFlags)}")
         record("args: ${describe(args)}")
+    }
+
+    /**
+     * The window neither pans nor resizes for the keyboard; the sheet pads itself above it, keeping the status line in
+     * view. The session adds its window before June can set this, so Android keeps "unspecified" as the window's own
+     * choice and works the mode out again whenever the window goes from hidden to shown, picking pan: the status line
+     * then went off the top. Set once that first frame is laid out, it holds until the next show.
+     */
+    private fun keepStill() {
+        val decor = window.window?.decorView ?: return
+        decor.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                decor.viewTreeObserver.removeOnPreDrawListener(this)
+                window.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+                return true
+            }
+        })
     }
 
     /**
