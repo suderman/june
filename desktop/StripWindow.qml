@@ -54,6 +54,7 @@ FloatingWindow {
       detail: win.shell.status.detail
       onDismissed: (key) => win.shell.dismiss(key)
       quiet: win.shell.quiet
+      browser: win.shell
     }
 
     // This device's toggles: state for now, gone when the desktop client restarts.
@@ -147,6 +148,8 @@ FloatingWindow {
       onPreview: item => preview.show(item)
       onCopyText: text => Quickshell.clipboardText = text
       onLink: url => win.shell.openLink(url)
+      marked: win.shell.markedPanel
+      Connections { target: win.shell; function onLanded(panel) { strip.land(panel); } }
     }
 
     Toast {

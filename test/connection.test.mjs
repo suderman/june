@@ -548,3 +548,105 @@ Item {
 	assert.equal(code, 0, output);
 	assert.match(output, /Totals: 11 passed, 0 failed/);
 });
+
+test("Qt's masthead steps between days and its calendar and search open a day or a moment", { skip: !qml, timeout: 20000 }, async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "june-browse-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	await mkdir(join(dir, "ui"));
+	for (const file of ["Masthead.qml", "Browse.qml", "strip.mjs"]) await copyFile(new URL(`../desktop/${file}`, import.meta.url), join(dir, "ui", file));
+	const theme = (await readFile(new URL("../desktop/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
+	await writeFile(join(dir, "ui", "Theme.qml"), theme);
+	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\nMasthead 1.0 Masthead.qml\nBrowse 1.0 Browse.qml\n");
+	await writeFile(join(dir, "tst_browse.qml"), `
+import QtQuick
+import QtTest
+import "ui"
+Item {
+  id: root
+  width: 700; height: 600
+  QtObject {
+    id: fake
+    property var days: [{ date: "2026-11-10", count: 3 }, { date: "2026-11-17", count: 9 }]
+    property string today: "2026-11-20"
+    property var past: null
+    property var hits: []
+    property bool hitsMore: false
+    property bool searchDone: true
+    property var calls: []
+    function note(call) { calls = calls.concat([call]); }
+    function listDays() { note("days"); }
+    function openDay(date) { note("day " + date); }
+    function openMoment(id) { note("at " + id); }
+    function backToToday() { note("today"); past = null; }
+    function search(words) {
+      note("search " + words);
+      hits = words === "boat" ? [{ id: 38039, at: new Date(2026, 10, 17, 14, 2).getTime(), date: "2026-11-17", kind: "june", text: "the boat leaves at nine" }] : [];
+      searchDone = true;
+    }
+  }
+  Masthead { id: masthead; x: 10; y: 10; width: 680; linked: true; browser: fake }
+  TestCase {
+    name: "Browse"
+    when: windowShown
+    function popup() { return findChild(masthead, "browse"); }
+    function init() { fake.past = null; fake.calls = []; }
+    function cleanup() { popup().close(); tryCompare(popup(), "visible", false); }
+    function test_today_steps_back() {
+      compare(findChild(masthead, "date").text, "today ▾");
+      compare(findChild(masthead, "laterDay").visible, false);
+      compare(findChild(masthead, "backToToday").visible, false);
+      mouseClick(findChild(masthead, "earlierDay"));
+      compare(fake.calls, ["day 2026-11-17"]);
+    }
+    function test_past_day_steps_and_returns() {
+      fake.past = { date: "2026-11-10", items: [], at: "" };
+      // The row lays itself out again before the next frame; a click lands where it then shows.
+      waitForRendering(masthead);
+      compare(findChild(masthead, "date").text, "Tuesday, November 10 ▾");
+      compare(findChild(masthead, "earlierDay").visible, false, "nothing before the first day");
+      mouseClick(findChild(masthead, "laterDay"));
+      compare(fake.calls, ["day 2026-11-17"]);
+      mouseClick(findChild(masthead, "backToToday"));
+      compare(fake.calls, ["day 2026-11-17", "today"]);
+    }
+    function test_calendar_opens_a_day_with_conversation() {
+      mouseClick(findChild(masthead, "date"));
+      tryCompare(popup(), "opened", true);
+      compare(fake.calls, ["search ", "days"]);
+      verify(findChild(popup().contentItem, "monthName").text.indexOf("November") >= 0);
+      const silent = findChild(popup().contentItem, "day-2026-11-12");
+      waitForRendering(silent);
+      mouseClick(silent);
+      compare(fake.calls, ["search ", "days"], "a day without conversation does nothing");
+      const said = findChild(popup().contentItem, "day-2026-11-17");
+      mouseClick(said);
+      compare(fake.calls, ["search ", "days", "day 2026-11-17"]);
+      tryCompare(popup(), "visible", false);
+    }
+    function test_search_opens_a_moment() {
+      mouseClick(findChild(masthead, "date"));
+      tryCompare(popup(), "opened", true);
+      const field = findChild(popup().contentItem, "search");
+      field.forceActiveFocus();
+      keyClick(Qt.Key_B); keyClick(Qt.Key_O); keyClick(Qt.Key_A); keyClick(Qt.Key_T);
+      tryVerify(() => fake.calls.indexOf("search boat") >= 0);
+      compare(fake.calls.filter(c => c.indexOf("search b") === 0), ["search boat"], "one request once typing settles");
+      const hit = findChild(popup().contentItem, "hit-0");
+      verify(hit !== null);
+      waitForRendering(hit);
+      mouseClick(hit);
+      compare(fake.calls[fake.calls.length - 1], "at 38039");
+    }
+  }
+}
+`);
+	const child = spawn(join(dirname(qml), "qmltestrunner"), ["-input", dir], { env: { ...process.env, QT_QPA_PLATFORM: "offscreen", QT_QUICK_BACKEND: "software", QT_QUICK_CONTROLS_STYLE: "Basic", QT_STYLE_OVERRIDE: "", QT_QPA_PLATFORMTHEME: "", QT_FORCE_STDERR_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+	let output = "";
+	for (const stream of [child.stdout, child.stderr]) stream.on("data", (data) => { output += data; });
+	const closed = once(child, "close");
+	t.after(() => child.kill());
+	const [code] = await closed;
+	assert.equal(code, 0, output);
+	assert.match(output, /Totals: 6 passed, 0 failed/);
+	assert.doesNotMatch(output, /TypeError|ReferenceError|Binding loop/);
+});

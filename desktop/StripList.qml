@@ -25,6 +25,9 @@ ListView {
   // The console look instead of the comic strip.
   property bool consoleLook: Theme.consoleLook
 
+  // The panel holding a moment opened from June's history, outlined until another day opens; "" for none.
+  property string marked: ""
+
   // Whether to stay on the newest panel, and the wheel's momentum.
   property bool follow: true
   property var scrollState: Scroll.rest()
@@ -95,14 +98,46 @@ ListView {
     positionViewAtBeginning();
     settle.restart();
   }
+  // A day just opened: its newest panel, or with `panel`, that panel in the middle of the view, landing again once the
+  // panels around it have measured themselves.
+  property string landing: ""
+  Timer { id: settleOnPanel; interval: 120; onTriggered: list.showPanel(list.landing) }
+  function showPanel(panel) {
+    for (let i = 0; i < count; i++) {
+      if (model.get(i).pid !== panel) continue;
+      positionViewAtIndex(i, ListView.Center);
+      return;
+    }
+  }
+  function land(panel) {
+    if (panel === "") { landing = ""; landOnNewest(); return; }
+    follow = false;
+    scrollState = Scroll.rest();
+    glider.running = false;
+    paging.stop();
+    landing = panel;
+    Qt.callLater(showPanel, panel);
+    settleOnPanel.restart();
+  }
 
   // A comic panel, or the same exchange as console lines.
   delegate: Loader {
     id: cell
     required property int index
     required property string json
+    required property string pid
     width: list.width
     sourceComponent: list.consoleLook ? consoleCell : comicCell
+    // The moment opened from June's history.
+    Rectangle {
+      // Inside the panel's edge: the list clips anything wider.
+      anchors.fill: parent
+      z: 9
+      visible: list.marked !== "" && cell.pid === list.marked
+      color: "transparent"
+      border.color: Theme.accent
+      border.width: 4
+    }
     TakeMenu {
       anchors.fill: parent
       z: 10

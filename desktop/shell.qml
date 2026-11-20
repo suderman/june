@@ -72,6 +72,12 @@ ShellRoot {
   function openLink(url) {
     const kind = Strip.linkKind(url);
     if (kind === "web") return Qt.openUrlExternally(url);
+    // A moment in June's history opens here, in the strip, which stays.
+    if (kind === "moment") {
+      openMoment(Strip.momentOf(url));
+      if (!shown && !windowShown) show();
+      return false;
+    }
     if (kind === null || linker.running) return false;
     linker.command = kind === "herdr" ? ["herdr-link", "jump", url] : Strip.emacsCall(url);
     linker.running = true;
@@ -98,7 +104,42 @@ ShellRoot {
   readonly property string url: Quickshell.env("JUNE_DESKTOP_URL") || "wss://june.kit/"
   readonly property string host: (/^wss?:\/\/(?:june\.)?([^/:.]+)/.exec(url) ?? [null, "the server"])[1]
   readonly property string fonts: Quickshell.env("JUNE_DESKTOP_FONTS") || ""
-  readonly property string activity: Strip.activity(view.state, linked)
+  // A past day shows no live activity: what she is doing now belongs to today.
+  readonly property string activity: past ? "" : Strip.activity(view.state, linked)
+
+  // Browsing June's history (Browse.qml): the days with conversation and the day it is now, from the daemon; the past
+  // day on show, fixed, or null for today's live view; and the latest search's hits. A day starts at June's wake.
+  property var days: []
+  property string today: ""
+  property var past: null
+  property var hits: []
+  property bool hitsMore: false
+  property bool searchDone: false
+  property string searchId: ""
+  // The panel holding the moment opened, marked in the strip; "" for none.
+  property string markedPanel: ""
+  // Each strip lands on a day as it opens: on its newest panel, or on the panel holding the moment.
+  signal landed(string panel)
+  function listDays() { send({ op: "days", requestId: rid() }); }
+  function openDay(date) {
+    if (date === today) backToToday();
+    else send({ op: "day", requestId: rid(), date: date });
+  }
+  function openMoment(id) { if (id !== undefined) send({ op: "day", requestId: rid(), at: id }); }
+  function backToToday() {
+    if (past === null) return;
+    past = null;
+    markedPanel = "";
+    sync();
+    landed("");
+  }
+  function search(words) {
+    searchId = rid();
+    hits = [];
+    hitsMore = false;
+    searchDone = words.trim() === "";
+    if (!searchDone) send({ op: "search", requestId: searchId, query: words, limit: 50 });
+  }
   // The masthead's plain phrase and the tasks she follows.
   // Tasks the user dismissed at their signal, for this run of the desktop client.
   property var seen: []
@@ -379,6 +420,10 @@ ShellRoot {
     function light(hour: string): void { const h = Number(hour); root.lightHour = hour === "now" || isNaN(h) ? -1 : h; }
     // The strip in an ordinary window, for the launcher.
     function window(): void { root.windowShown = true; }
+    // June's history: a day by its date (YYYY-MM-DD), a moment by its entry id, or back to today.
+    function day(date: string): void { root.openDay(date); }
+    function at(id: string): void { root.openMoment(Strip.momentOf("june:at/" + id)); }
+    function today(): void { root.backToToday(); }
     // Live June on, off, or flipped (anything else), as the window's toggle does.
     function live(state: string): void { root.liveEnabled = state === "on" ? true : state === "off" ? false : !root.liveEnabled; }
     // Do not disturb on or off (mako's mode when mako runs); anything else flips it.
@@ -487,8 +532,30 @@ ShellRoot {
     }
     if (reply.type === "view") {
       view = Strip.applyView(view, reply);
+      // A fresh view, on attach or at the day's start: the days may have moved on.
+      if (reply.reset === true) listDays();
       sync();
       watchLive();
+      return;
+    }
+    if (reply.type === "days") {
+      days = reply.days;
+      today = reply.today;
+      return;
+    }
+    if (reply.type === "day") {
+      if (reply.today && reply.at === undefined) { backToToday(); return; }
+      past = { date: reply.date, items: reply.items, at: reply.at ?? "" };
+      sync();
+      markedPanel = past.at === "" ? "" : Strip.panelOf(Strip.panels(past.items), past.at);
+      landed(markedPanel);
+      return;
+    }
+    if (reply.type === "search") {
+      if (reply.requestId !== searchId) return;
+      hits = reply.hits;
+      hitsMore = reply.more;
+      searchDone = true;
       return;
     }
     if (reply.type === "reply" || reply.type === "error") {
@@ -513,15 +580,16 @@ ShellRoot {
   Timer { id: faceHold; onTriggered: root.sync() }
 
   function sync() {
-    const list = Strip.panels(view.items);
-    const running = Boolean(view.state.running || view.state.compacting);
+    // A past day is fixed: nothing runs in it.
+    const list = Strip.panels(past ? past.items : view.items);
+    const running = !past && Boolean(view.state.running || view.state.compacting);
     if (syncWasRunning && !running) {
       faceHoldUntil = Date.now() + faceHoldMs;
       faceHold.interval = faceHoldMs + 50;
       faceHold.restart();
     }
     syncWasRunning = running;
-    const composed = Compose.composeStrip(list, view.state, poses, composeMemory, Date.now() < faceHoldUntil);
+    const composed = Compose.composeStrip(list, past ? Strip.emptyView().state : view.state, poses, composeMemory, !past && Date.now() < faceHoldUntil);
     const rows = composed.reverse().map(p => ({ pid: p.id, json: JSON.stringify(p) }));
     let same = rows.length === strip.count;
     for (let i = 0; same && i < rows.length; i++) same = strip.get(i).pid === rows[i].pid;
@@ -552,6 +620,8 @@ ShellRoot {
       if (extra.files.length > 0) request.files = extra.files;
       send(request);
       outbox = [];
+      // Sent from a past day, the message joins today's conversation, so the strip follows it there.
+      backToToday();
     }
     return true;
   }
@@ -647,6 +717,7 @@ ShellRoot {
             detail: root.status.detail
             onDismissed: (key) => root.dismiss(key)
             quiet: root.quiet
+            browser: root
           }
 
           StripList {
@@ -673,6 +744,8 @@ ShellRoot {
             onPreview: item => preview.show(item)
         onCopyText: text => Quickshell.clipboardText = text
             onLink: url => { if (root.openLink(url)) root.hide(); }
+            marked: root.markedPanel
+            Connections { target: root; function onLanded(panel) { list.land(panel); } }
           }
 
           Toast {

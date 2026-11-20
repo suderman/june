@@ -377,3 +377,49 @@ export function activity(state, linked) {
 	if ((state.following ?? 0) > 0) return state.following === 1 ? "following 1 task" : `following ${state.following} tasks`;
 	return "";
 }
+
+// Browsing June's history by day. A day is named "YYYY-MM-DD" by the date its morning falls on, as the daemon names it.
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** A day's name for a header, "Tuesday, November 17", with the year when it is not `today`'s. */
+export function dayLabel(date, today) {
+	const [y, m, d] = date.split("-").map(Number);
+	const day = new Date(y, m - 1, d);
+	const year = typeof today === "string" && today.slice(0, 4) === date.slice(0, 4) ? "" : `, ${y}`;
+	return `${WEEKDAYS[day.getDay()]}, ${MONTHS[m - 1]} ${d}${year}`;
+}
+
+/** A local Date as the "YYYY-MM-DD" a calendar cell stands for. */
+export function dateKey(date) {
+	const pad = (n) => (n < 10 ? `0${n}` : `${n}`);
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/**
+ * The day with conversation before (-1) or after (1) `date`, from the daemon's `days`, or null past either end. Today
+ * counts as after every day, said or not, so stepping forward always reaches it.
+ */
+export function stepDay(days, date, direction, today) {
+	const dates = days.map((d) => d.date).filter((d) => d !== today);
+	if (typeof today === "string") dates.push(today);
+	dates.sort();
+	if (direction < 0) {
+		for (let i = dates.length - 1; i >= 0; i--) if (dates[i] < date) return dates[i];
+		return null;
+	}
+	for (const d of dates) if (d > date) return d;
+	return null;
+}
+
+/** The id of the panel that shows view item `id`, from panels(), or "" when none does (a private look, say). */
+export function panelOf(list, id) {
+	for (const panel of list) {
+		for (const e of panel.elements) {
+			if (e.id === id || e.replyId === id || (e.item && e.item.id === id)) return panel.id;
+			if (e.kind === "tools") for (const tool of e.items) if (tool.id === id) return panel.id;
+		}
+	}
+	return "";
+}

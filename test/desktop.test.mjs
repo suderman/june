@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { activity, applyView, beats, caption, emptyView, fileSize, markup, panels, previewKind, readInput, status, noteText } from "../desktop/strip.mjs";
+import { activity, applyView, beats, caption, dateKey, dayLabel, emptyView, fileSize, markup, panelOf, panels, previewKind, readInput, status, stepDay, noteText } from "../desktop/strip.mjs";
 import { ACTIVITIES, FALLBACK, aimTail, mergePoses, aimTrail, balloonPath, chain, cloudPath, chooseFraming, choosePose, chooseSide, composeStrip, panelLayout, jagged, liveActivity, metrics, picked, plan, readPoses, selectionMoment, standIn, takeMenu } from "../desktop/compose.mjs";
 import { EXPRESSIONS, LIVE_STATES, POSE_ACTIVITIES, fallbacks } from "../src/avatar.ts";
 import { PAGE, pageTarget, rest, step, wheel } from "../desktop/scroll.mjs";
@@ -1447,4 +1447,30 @@ test("a pose's figure box is read leniently and stands her on its bottom, not th
 	const boots = (l, _p) => l.art.y + (STANDING["clipboard-front"].figure[1] + STANDING["clipboard-front"].figure[3]) * l.art.h;
 	assert.ok(unseen.framing !== "full" || boots(unseen) < unseen.height - 100, "without it, a full framing leaves her boots well above the bottom");
 	if (seen.framing === "full") assert.ok(boots(seen) >= seen.height - 1, "with it, a full framing puts her boots on the bottom");
+});
+
+test("browsing June's days: header names, calendar keys, stepping between days with conversation, and a moment's panel", () => {
+	assert.equal(dayLabel("2026-11-17", "2026-11-20"), "Tuesday, November 17");
+	assert.equal(dayLabel("2025-12-31", "2026-11-20"), "Wednesday, December 31, 2025", "another year says so");
+	assert.equal(dateKey(new Date(2026, 0, 5)), "2026-01-05");
+	const days = [{ date: "2026-11-10", count: 3 }, { date: "2026-11-17", count: 9 }, { date: "2026-11-20", count: 2 }];
+	assert.equal(stepDay(days, "2026-11-20", -1, "2026-11-20"), "2026-11-17", "back from today skips silent days");
+	assert.equal(stepDay(days, "2026-11-17", -1, "2026-11-20"), "2026-11-10");
+	assert.equal(stepDay(days, "2026-11-10", -1, "2026-11-20"), null, "nothing before the first day");
+	assert.equal(stepDay(days, "2026-11-10", 1, "2026-11-20"), "2026-11-17");
+	assert.equal(stepDay(days.slice(0, 2), "2026-11-17", 1, "2026-11-21"), "2026-11-21", "forward always reaches today, said or not");
+	assert.equal(stepDay(days, "2026-11-20", 1, "2026-11-20"), null);
+	const items = [
+		{ kind: "user", id: "10", source: "gui", text: "where's the boat?" },
+		{ kind: "tool", id: "11", name: "read", summary: "", status: "done" },
+		{ kind: "assistant", id: "12", text: "At the marina.", streaming: false },
+		{ kind: "user", id: "20", source: "gui", text: "thanks" },
+		{ kind: "assistant", id: "21", text: "Any time.", streaming: false },
+	];
+	const list = panels(items);
+	assert.equal(panelOf(list, "10"), list[0].id);
+	assert.equal(panelOf(list, "11"), list[0].id, "a tool inside a gathered card");
+	assert.equal(panelOf(list, "12"), list[0].id, "a reply by its beats");
+	assert.equal(panelOf(list, "21"), list[1].id);
+	assert.equal(panelOf(list, "99"), "");
 });

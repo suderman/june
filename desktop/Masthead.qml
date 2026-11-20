@@ -1,6 +1,7 @@
 // The strip's masthead: June's name, the connection or what she is doing, and a "meanwhile" card while briefs run.
 import QtQuick
 import QtQuick.Controls
+import "strip.mjs" as Strip
 
 Row {
   id: masthead
@@ -17,12 +18,60 @@ Row {
   signal dismissed(string key)
   // Do not disturb: she stays down until summoned.
   property bool quiet: false
+  // The shell, for browsing June's history from the date (Browse.qml); null leaves the date out.
+  property var browser: null
 
   height: 30
   spacing: 12
   // The follow list hangs below over the strip.
   z: 5
   Text { text: "june"; font.family: Theme.display; font.pixelSize: 22; color: Theme.pageInk; anchors.verticalCenter: parent.verticalCenter }
+  // The day on show: today, live, or a past day, fixed. ‹ and › step between days with conversation, and a click on the
+  // date opens the calendar and search.
+  Row {
+    id: day
+    visible: masthead.browser !== null && masthead.linked
+    anchors.verticalCenter: parent.verticalCenter
+    spacing: 8
+    readonly property var b: masthead.browser
+    readonly property string current: b === null ? "" : b.past ? b.past.date : b.today
+    readonly property string before: b === null || current === "" ? "" : (Strip.stepDay(b.days, current, -1, b.today) ?? "")
+    readonly property string after: b === null || b.past === null ? "" : (Strip.stepDay(b.days, current, 1, b.today) ?? b.today)
+    Text {
+      objectName: "earlierDay"
+      visible: day.before !== ""
+      text: "‹"
+      font.pixelSize: 18; color: Theme.pageInk
+      anchors.verticalCenter: parent.verticalCenter
+      MouseArea { anchors.fill: parent; anchors.margins: -6; cursorShape: Qt.PointingHandCursor; onClicked: day.b.openDay(day.before) }
+    }
+    Text {
+      id: date
+      objectName: "date"
+      text: (day.b !== null && day.b.past ? Strip.dayLabel(day.current, day.b.today) : "today") + " ▾"
+      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
+      color: day.b !== null && day.b.past ? Theme.accent : Theme.muted
+      anchors.verticalCenter: parent.verticalCenter
+      MouseArea { anchors.fill: parent; anchors.margins: -4; cursorShape: Qt.PointingHandCursor; onClicked: calendar.opened ? calendar.close() : calendar.open() }
+      Browse { id: calendar; objectName: "browse"; browser: masthead.browser ?? ({}); y: date.height + 8 }
+    }
+    Text {
+      objectName: "laterDay"
+      visible: day.after !== ""
+      text: "›"
+      font.pixelSize: 18; color: Theme.pageInk
+      anchors.verticalCenter: parent.verticalCenter
+      MouseArea { anchors.fill: parent; anchors.margins: -6; cursorShape: Qt.PointingHandCursor; onClicked: day.b.openDay(day.after) }
+    }
+    Text {
+      objectName: "backToToday"
+      visible: day.b !== null && day.b.past !== null
+      text: "back to today"
+      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13; color: Theme.muted
+      anchors.verticalCenter: parent.verticalCenter
+      MouseArea { anchors.fill: parent; anchors.margins: -4; cursorShape: Qt.PointingHandCursor; onClicked: day.b.backToToday() }
+    }
+  }
   Text {
     id: said
     anchors.verticalCenter: parent.verticalCenter
