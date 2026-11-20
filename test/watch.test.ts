@@ -34,7 +34,7 @@ test("the watch learns what is there, then gathers dispatched news into one noti
 	const write = async (a: string, c: string) => replace(tasks, text(a, c));
 	await write("PROG", "PROG");
 	await writeFile(join(records, "task-mine-0004.json"), JSON.stringify({ id: "task-mine-0004", heading: "June's own", status: "running", started: 100 }));
-	await writeFile(join(records, "task-ship-0001.json"), JSON.stringify({ id: "task-ship-0001", heading: "Ship the site", status: "running", started: 100, pane: "w1:p1" }));
+	await writeFile(join(records, "task-ship-0001.json"), JSON.stringify({ id: "task-ship-0001", heading: "Ship the site", status: "running", started: 100, terminal: "t1" }));
 	await writeFile(join(records, "task-old-0002.json"), JSON.stringify({ id: "task-old-0002", heading: "Old audit", status: "finished", started: 50 }));
 	await writeFile(join(records, "broken.json"), "{not json");
 	let cog: object[] | undefined = [];
@@ -47,7 +47,12 @@ test("the watch learns what is there, then gathers dispatched news into one noti
 			if (runs === undefined) throw new Error("ssh: connect to host: Connection timed out");
 			return runs.map((r) => JSON.stringify(r)).join("\n");
 		}
-		if (argv.includes("agent") && argv.includes("get")) return JSON.stringify({ result: { agent: { agent_status: argv.at(-1) === "w9:p2" && blocked ? "blocked" : "working" } } });
+		// This core has no machines added, so cog's worker is read with cog's own hc over SSH.
+		if (argv[0] === "hc" && argv[1] === "machine") return JSON.stringify({ machines: [] });
+		if (argv.includes("get")) {
+			const address = argv[argv.indexOf("get") + 1];
+			return JSON.stringify({ address, state: "live", status: { state: address === "t9" && blocked ? "blocked" : "working" } });
+		}
 		throw new Error(`unexpected ${argv.join(" ")}`);
 	};
 	let clock = new Date(2026, 9, 28, 12, 0).getTime();
@@ -62,7 +67,7 @@ test("the watch learns what is there, then gathers dispatched news into one noti
 	const daemon = await openTestDaemon({
 		...tmp,
 		faux,
-		config: { dispatch: { hosts: ["kit", "cog", "lux"] }, herdr: { session: "default", host: "kit", hosts: { cog: {}, lux: {} }, allowPrompt: false }, watch: { enabled: true, gapMinutes: 10 } },
+		config: { dispatch: { hosts: ["kit", "cog", "lux"] }, herdr: { host: "kit", hosts: { cog: {}, lux: {} }, allowPrompt: false }, watch: { enabled: true, gapMinutes: 10 } },
 		watchClock: { now: () => (polls++, new Date(clock)), tickMs: 20, home, run },
 	});
 	t.after(() => daemon.close());
@@ -86,7 +91,7 @@ test("the watch learns what is there, then gathers dispatched news into one noti
 	await settled();
 	mine = "EVAL";
 	await write("EVAL", "PROG");
-	cog = [{ id: "task-build-0003", heading: "Fix the build", status: "running", started: 200, pane: "w9:p2" }];
+	cog = [{ id: "task-build-0003", heading: "Fix the build", status: "running", started: 200, terminal: "t9" }];
 	blocked = true;
 	await until(async () => (await pending()) === 2);
 	assert.equal(notices.length, 0, "news waits for waking hours");
@@ -110,7 +115,7 @@ test("the watch learns what is there, then gathers dispatched news into one noti
 
 	// At night news waits for the morning.
 	clock = new Date(2026, 9, 28, 23, 0).getTime();
-	cog = [{ id: "task-build-0003", heading: "Fix the build", status: "running", started: 300, pane: "w9:p2" }];
+	cog = [{ id: "task-build-0003", heading: "Fix the build", status: "running", started: 300, terminal: "t9" }];
 	blocked = false;
 	await write("EVAL", "PROG");
 	await until(async () => (await readFile(ledger, "utf8")).includes(":300"));
@@ -311,7 +316,7 @@ test("stopping the watch drains an in-flight poll before its files can be remove
 				return undefined;
 			} },
 			registry: { snapshot: () => { throw new Error("unused"); } },
-			herdr: { json: async () => undefined }, run: async () => "",
+			herdr: { status: async () => undefined }, run: async () => "",
 			log: createLogger({ sink: (_level, line) => errors.push(line) }), tickMs: 20,
 		}).start(daemon.harness, daemon.root);
 		t.after(async () => {
@@ -372,7 +377,7 @@ test("a task missing for one look keeps its news; only a second miss in a row ma
 			return state === undefined ? undefined : { state, title: "Blink", file: "work.org", herdrSessions: [] } as never;
 		} },
 		registry: { snapshot: () => { throw new Error("unused"); } },
-		herdr: { json: async () => undefined }, run: async () => "",
+		herdr: { status: async () => undefined }, run: async () => "",
 		log: createLogger({ sink: () => {} }), tickMs: 20,
 	}).start(daemon.harness, daemon.root);
 	// Stop this watch before the daemon it polls is closed and its directory removed.

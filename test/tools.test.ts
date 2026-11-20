@@ -138,44 +138,83 @@ test("org paths cannot leave the Org root", async (t) => {
 	await assert.rejects(org.read("/etc/passwd", 1), /not an Org file under/);
 });
 
-const config = { session: "default", host: "kit", hosts: { cog: {} }, allowPrompt: false };
+const config = { host: "kit", hosts: { cog: {}, lux: {} }, allowPrompt: false };
 
-test("herdr runs argv without a shell and summarizes agents", async () => {
+/** An hc failure as the CLI reports it: nonzero exit with a JSON error on stderr. */
+const hcError = (kind: string, message: string) =>
+	Object.assign(new Error(`hc: ${message}`), { stderr: JSON.stringify({ error: { kind, message } }) });
+
+test("herdr runs hc argv without a shell and summarizes agents from their labels", async () => {
 	const calls: string[][] = [];
 	const herdr = new Herdr(config, async (argv) => {
 		calls.push([...argv]);
-		if (argv.includes("workspace")) return JSON.stringify({ result: { workspaces: [{ workspace_id: "w1", label: "[1] june" }] } });
-		return JSON.stringify({
-			result: {
-				agents: [
-					{
-						agent: "pi",
-						agent_status: "blocked",
-						pane_id: "w1:p2",
-						workspace_id: "w1",
-						cwd: "/src/june",
-						agent_session: { value: "/x/2026_01a1176c-3aa6-7717-a4c6-eaa0aa0a0833.jsonl" },
-					},
-				],
-			},
+		if (argv[1] === "machine") return JSON.stringify({ machines: [{ name: "lux", state: "connected" }, { name: "cog", state: "needs_login" }] });
+		if (argv.includes("ls")) return JSON.stringify({
+			terminals: [
+				{ address: "t2", agent: "pi", state: "live", status: "blocked", cwd: "/src/june", where: "june / 2" },
+				{ address: "t3", agent: "zsh", state: "live", cwd: "/home" },
+				{ address: "t4", agent: "claude-code", state: "live", cwd: "/src/x" },
+				{ address: "lux/t1", agent: "pi", state: "live", status: "idle", cwd: "/srv" },
+			],
 		});
+		const address = argv[argv.indexOf("get") + 1];
+		return JSON.stringify(address === "t2"
+			? { address: "t2", state: "live", status: { state: "blocked" }, title: "π - june", foreground: { cwd: "/src/june/sub" },
+				labels: { "org.agent": "pi", "org.session": "01a1176c-3aa6-7717-a4c6-eaa0aa0a0833", "org.task": "task-1" } }
+			: { address, state: "live", status: null, labels: {} });
 	});
 	assert.deepEqual(await herdr.agents("kit"), [
 		{
-			host: "kit",
-			pane: "w1:p2",
-			agent: "pi",
-			status: "blocked",
-			workspace: "[1] june",
-			cwd: "/src/june",
+			host: "kit", terminal: "t2", agent: "pi", status: "blocked", where: "june / 2", cwd: "/src/june/sub",
 			session: "01a1176c-3aa6-7717-a4c6-eaa0aa0a0833",
-			herdrLink: "herdr:kit/pi:01a1176c-3aa6-7717-a4c6-eaa0aa0a0833",
-			focused: false,
+			herdrLink: "herdr:kit/pi:01a1176c-3aa6-7717-a4c6-eaa0aa0a0833@t2",
+			task: "task-1", title: "π - june",
 		},
+		// A live agent that reports no status is unknown, never idle.
+		{ host: "kit", terminal: "t4", agent: "claude", status: "unknown", cwd: "/src/x" },
 	]);
-	assert.deepEqual(calls[0], ["herdr", "--session", "default", "agent", "list"]);
+	assert.deepEqual(calls[0], ["hc", "ls", "--json"]);
+	// An added, connected machine is read natively through this core's hc, by its HOST/t address.
+	calls.length = 0;
+	const lux = await herdr.agents("lux");
+	assert.deepEqual(lux.map((a) => [a.host, a.terminal, a.status]), [["lux", "t1", "idle"]]);
+	assert.ok(calls.every((argv) => argv[0] === "hc"));
+	assert.ok(calls.some((argv) => argv.join(" ") === "hc get lux/t1 --json"));
+	// A machine this core cannot reach goes over SSH, with its own hc.
+	calls.length = 0;
 	await herdr.agents("cog");
-	assert.deepEqual(calls[2]!.slice(0, 6), ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "cog"]);
+	assert.deepEqual(calls.find((argv) => argv[0] === "ssh")!.slice(0, 8), ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "cog", "hc", "ls"]);
+});
+
+test("herdr finds a session's terminal by label and refuses ambiguity", async () => {
+	let rows = [{ address: "t5", state: "live" }];
+	const herdr = new Herdr(config, async (argv) => {
+		if (argv.includes("ls")) {
+			assert.deepEqual(argv, ["hc", "ls", "--json", "--label", "org.session=01a1176c-3aa6-7717-a4c6-eaa0aa0a0833"]);
+			return JSON.stringify({ terminals: rows });
+		}
+		return JSON.stringify({ address: argv[2], state: "live", status: { state: "working" }, labels: {} });
+	});
+	assert.equal((await herdr.session("kit", "01a1176c-3aa6-7717-a4c6-eaa0aa0a0833"))?.address, "t5");
+	rows = [];
+	assert.equal(await herdr.session("kit", "01a1176c-3aa6-7717-a4c6-eaa0aa0a0833"), undefined);
+	rows = [{ address: "t5", state: "live" }, { address: "t6", state: "live" }];
+	await assert.rejects(herdr.session("kit", "01a1176c-3aa6-7717-a4c6-eaa0aa0a0833"), /runs in 2 terminals/);
+});
+
+test("herdr status is unknown without a report and undefined once the terminal is gone", async () => {
+	let record: unknown = { address: "t1", state: "live", status: null };
+	const herdr = new Herdr(config, async () => {
+		if (record === undefined) throw hcError("not_found", "no terminal t1");
+		return JSON.stringify(record);
+	});
+	assert.equal(await herdr.status("kit", "t1"), "unknown");
+	record = { address: "t1", state: "live", status: { state: "done" } };
+	assert.equal(await herdr.status("kit", "t1"), "done");
+	record = { address: "t1", state: "finished", status: null };
+	assert.equal(await herdr.status("kit", "t1"), undefined);
+	record = undefined;
+	assert.equal(await herdr.status("kit", "t1"), undefined);
 });
 
 test("herdr submits a follow-up as one local argument and propagates blocked errors without retrying", async () => {
@@ -183,18 +222,17 @@ test("herdr submits a follow-up as one local argument and propagates blocked err
 	let blocked = false;
 	const herdr = new Herdr(config, async (argv) => {
 		calls.push([...argv]);
-		return JSON.stringify(blocked
-			? { error: { code: "agent_blocked", message: "Agent is waiting for approval" } }
-			: { result: { submitted: true } });
+		if (blocked) throw hcError("blocked", "t2 is blocked (permission)");
+		return JSON.stringify({ started: true, status: "working", turn: 3 });
 	});
 	const text = "--leave deployment out\nKeep the user's helper; $(touch /tmp/nope)";
-	assert.deepEqual(await herdr.prompt("w1:p2", text), { result: { submitted: true } });
-	assert.deepEqual(calls, [["herdr", "--session", "default", "agent", "prompt", "w1:p2", text]]);
+	assert.deepEqual(await herdr.prompt("t2", text), { started: true, status: "working", turn: 3 });
+	assert.deepEqual(calls, [["hc", "send", "t2", text, "--json"]]);
 	blocked = true;
-	await assert.rejects(herdr.prompt("w1:p2", "continue"), /agent_blocked.*approval/);
+	await assert.rejects(herdr.prompt("t2", "continue"), /blocked.*permission/);
 	assert.equal(calls.length, 2, "one attempt, no fallback to terminal keys");
-	assert.throws(() => herdr.prompt("-bad-target", text), /Invalid Herdr target/);
-	assert.equal(calls.length, 2, "invalid targets never reach Herdr");
+	assert.throws(() => herdr.prompt("-bad-target", text), /Invalid hc terminal/);
+	assert.equal(calls.length, 2, "invalid targets never reach hc");
 });
 
 test("the follow-up tool is optional, returns submission only, and lets June read the worker's response", async (t) => {
@@ -204,16 +242,16 @@ test("the follow-up tool is optional, returns submission only, and lets June rea
 	const calls: string[][] = [];
 	const herdr = new Herdr(cfg.herdr, async (argv) => {
 		calls.push([...argv]);
-		return JSON.stringify({ result: argv.includes("prompt") ? { submitted: true } : { text: "I'll leave deployment out." } });
+		return argv.includes("send") ? JSON.stringify({ started: true }) : "I'll leave deployment out.";
 	});
 	const extension = createHerdrExtension(cfg, herdr);
 	assert.equal(createHerdrExtension({ ...cfg, herdr: config }, herdr).tools!.some((tool) => tool.name === "herdr_prompt_agent"), false);
 	const faux = fauxProvider();
 	faux.setResponses([
-		fauxAssistantMessage([fauxToolCall("herdr_prompt_agent", { target: "w1:p2", text: "Leave deployment out." })], { stopReason: "toolUse" }),
+		fauxAssistantMessage([fauxToolCall("herdr_prompt_agent", { target: "t2", text: "Leave deployment out." })], { stopReason: "toolUse" }),
 		(ctx) => {
-			assert.match(JSON.stringify(ctx.messages.at(-1)), /submitted/);
-			return fauxAssistantMessage([fauxToolCall("herdr_read_agent", { target: "w1:p2" })], { stopReason: "toolUse" });
+			assert.match(JSON.stringify(ctx.messages.at(-1)), /started/);
+			return fauxAssistantMessage([fauxToolCall("herdr_read_agent", { target: "t2" })], { stopReason: "toolUse" });
 		},
 		(ctx) => {
 			assert.match(JSON.stringify(ctx.messages.at(-1)), /leave deployment out/);
@@ -223,11 +261,11 @@ test("the follow-up tool is optional, returns submission only, and lets June rea
 	const daemon = await openTestDaemon({ ...tmp, faux, config: cfg, extensions: [extension] });
 	t.after(() => daemon.close());
 	assert.equal((await ask(tmp.paths.socket, "Tell the worker to leave deployment out.")).text, "The worker agreed to leave deployment out.");
-	assert.equal(calls.filter((argv) => argv.includes("prompt")).length, 1);
+	assert.equal(calls.filter((argv) => argv.includes("send")).length, 1);
 	assert.equal(calls.filter((argv) => argv.includes("read")).length, 1);
 });
 
-test("a Herdr prompt interrupted after submission is not sent again on restart", async (t) => {
+test("an hc prompt interrupted after submission is not sent again on restart", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const cfg = testConfig(tmp.dir, { herdr: { ...config, allowPrompt: true } });
@@ -235,10 +273,10 @@ test("a Herdr prompt interrupted after submission is not sent again on restart",
 	const extension = () => createHerdrExtension(cfg, new Herdr(cfg.herdr, async () => {
 		submissions++;
 		await new Promise((resolve) => setTimeout(resolve, 100));
-		throw new Error("Herdr connection lost after submission");
+		throw new Error("hc connection lost after submission");
 	}));
 	const faux = fauxProvider();
-	faux.setResponses([fauxAssistantMessage([fauxToolCall("herdr_prompt_agent", { target: "w1:p2", text: "Leave deployment out." })], { stopReason: "toolUse" })]);
+	faux.setResponses([fauxAssistantMessage([fauxToolCall("herdr_prompt_agent", { target: "t2", text: "Leave deployment out." })], { stopReason: "toolUse" })]);
 	let daemon = await openTestDaemon({ ...tmp, faux, config: cfg, extensions: [extension()] });
 	t.after(() => daemon.close());
 	const client = await Client.open(tmp.paths.socket);
@@ -257,11 +295,12 @@ test("a Herdr prompt interrupted after submission is not sent again on restart",
 	assert.equal(submissions, 1);
 });
 
-test("herdr rejects bad targets, unknown hosts, and reports Herdr errors", async () => {
-	const herdr = new Herdr(config, async () =>
-		JSON.stringify({ error: { code: "server_not_running", message: "no herdr server" } }),
-	);
-	await assert.rejects(herdr.agents("kit"), /server_not_running/);
-	await assert.rejects(herdr.read("kit", "w1:p1; rm -rf ~", 10), /Invalid Herdr target/);
+test("herdr rejects bad targets, unknown hosts, and reports hc errors", async () => {
+	const herdr = new Herdr(config, async (argv) => {
+		if (argv[1] === "machine") return JSON.stringify({ machines: [] });
+		throw hcError("unavailable", "no core is running");
+	});
+	await assert.rejects(herdr.agents("kit"), /hc on kit: unavailable: no core is running/);
+	await assert.rejects(herdr.read("kit", "t1; rm -rf ~", 10), /Invalid hc terminal/);
 	await assert.rejects(herdr.agents("nowhere"), /Unknown host/);
 });

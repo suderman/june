@@ -159,14 +159,14 @@ Print the heading unless QUIET is non-nil."
     all))
 
 (defun org-edit--worker-p ()
-  "Whether this caller has worker context, not a plain human Herdr shell."
-  (when-let* ((pane (getenv "HERDR_PANE_ID")))
+  "Whether this caller has worker context, not a plain human hc shell.
+An agent sets its own session variable; a terminal the dispatcher or herdr-link
+started carries an org.session label."
+  (when-let* ((terminal (getenv "HC_TERMINAL_ID")))
     (or (getenv "PI_SESSION_ID") (getenv "CLAUDECODE")
-        (let ((result (org-dispatch--get (org-dispatch--herdr "agent" "list") 'result)))
-          (unless (vectorp (alist-get 'agents result))
-            (error "Herdr did not identify the caller; refusing state write"))
-          (seq-some (lambda (agent) (equal pane (alist-get 'pane_id agent)))
-                    (alist-get 'agents result))))))
+        (let ((record (condition-case nil (org-dispatch--hc "get" terminal)
+                        (error (error "hc did not identify the caller; refusing state write")))))
+          (and (org-dispatch--label record 'org.session) t)))))
 
 (defun org-edit-todo ()
   "Set FILE HEADING to STATE, optionally checking --expect STATE.
@@ -283,11 +283,11 @@ Coding workers must not set AUTO; that permission lives in instructions."
     (when request (princ (concat (json-serialize result) "\n")))))
 
 (defun org-edit-stop-task ()
-  "Park a dispatcher task and confirm its exact session settled or exited.
+  "Park a dispatcher task, then stop its exact worker and record the result.
 The wrapper holds the launch lock. A failed stop stays parked and cannot resume."
   (let* ((args command-line-args-left)
          (file (pop args)) (heading (pop args))
-         revision request note state replay confirmed result
+         revision request note state replay confirmed result outcome
          (create-lockfiles t) (file-precious-flag t))
     (setq command-line-args-left nil)
     (unless (and file heading (string-match-p "\\`id:[[:alnum:]][[:alnum:]-]*\\'" heading))
@@ -333,7 +333,7 @@ The wrapper holds the launch lock. A failed stop stays parked and cannot resume.
          (unless confirmed
            (unless (and state (equal (plist-get state :id) id)
                         (equal (plist-get state :file) (plist-get task :file))
-                        (plist-get state :session) (plist-get state :pane)
+                        (plist-get state :session) (plist-get state :terminal)
                         (or replay (equal (plist-get state :session) (plist-get task :session)))
                         (equal (plist-get state :agent) (plist-get task :agent))
                         (or (equal (plist-get state :status) "running")
@@ -372,7 +372,7 @@ The wrapper holds the launch lock. A failed stop stays parked and cannot resume.
                        (equal (plist-get old :status) "stopping"))
               (org-dispatch--save-state (plist-put old :status "stopped")))))))
     (unless confirmed
-      (org-dispatch--interrupt-session state)
+      (setq outcome (org-dispatch--interrupt-session state))
       ;; Re-read after waiting; never overwrite a concurrent worker or editor save.
       (org-edit--at
        file heading
@@ -382,9 +382,16 @@ The wrapper holds the launch lock. A failed stop stays parked and cannot resume.
            (error "task changed during interruption; stop remains unconfirmed"))
          (org-entry-put nil "JUNE_STOPPED" request)
          (org-dispatch--append "Dialog" (org-dispatch--entry
-           "June" "Worker observed settled or exited. Task remains HOLD; reassignment needs a separate authorized resume."))) t)
+           "June" (format "Worker %s %s. Task remains HOLD; reassignment needs a separate authorized resume."
+                          (plist-get state :terminal)
+                          (pcase outcome
+                            ("gone" "had already exited")
+                            ("settled" "was not working and was left running")
+                            ("interrupted" "stopped its turn at the interrupt")
+                            ("killed" "did not stop at the interrupt and was killed")))))) t)
       (org-dispatch--save-state (plist-put state :status "stopped")))
-    (princ (concat (json-serialize (append result '((stopped . t)))) "\n"))))
+    (princ (concat (json-serialize (append result `((stopped . t) (outcome . ,(or outcome "confirmed")))))
+                   "\n"))))
 
 (defun org-edit-remove-dependencies ()
   "Remove selected edges on this host, pausing AUTO before a separate resume.
@@ -449,15 +456,12 @@ keep Dialog append-only, and never change prose or launch a worker here."
                (while (re-search-forward (format "herdr:%s/[^: \n]+:\\([0-9a-f-]+\\)"
                                                 (regexp-quote org-dispatch-host)) end t)
                  (push (match-string 1) sessions)))
-             (when sessions
-               (let ((response (org-dispatch--herdr "agent" "list")))
-                 (unless (assq 'agents (org-dispatch--get response 'result))
-                   (error "Herdr did not return agent status; dependency removal refused"))
-                 (seq-doseq (agent (org-dispatch--get response 'result 'agents))
-                   (when (and (seq-some (lambda (session) (string-search session
-                                          (or (org-dispatch--get agent 'agent_session 'value) ""))) sessions)
-                              (member (org-dispatch--get agent 'agent_status) '("working" "blocked")))
-                     (error "task still has an active agent; wait for it to finish"))))))
+             (dolist (session (delete-dups sessions))
+               (dolist (row (condition-case nil (org-dispatch--session-terminals session)
+                              (error (error "hc did not return terminal status; dependency removal refused"))))
+                 (when (member (org-dispatch--status (org-dispatch--terminal (alist-get 'address row)))
+                               '("working" "blocked" "unknown"))
+                   (error "task still has an active agent; wait for it to finish")))))
            (let* ((index (org-dispatch--dependency-index)) (node (gethash id index)))
              (unless node (error "task ID %s is missing from the agenda" id))
              (when (plist-get node :duplicate) (error "duplicate task ID %s" id))
@@ -578,7 +582,7 @@ The wrapper holds the launch lock. Replays find the receipt even after a rename.
                (let ((host (match-string 1 text)) (agent (match-string 2 text)) (session (match-string 3 text)))
                  (setq offset (match-end 0))
                  (unless (equal host org-dispatch-host) (error "remote session needs its host's coordinator"))
-                 (org-dispatch--interrupt-session (list :session session :agent agent)))))
+                 (org-dispatch--confirm-settled (list :session session :agent agent)))))
            (let ((old-title (org-get-heading t t t t)) old-scope
                  (start (point-marker)) (sections 0))
              (when scope

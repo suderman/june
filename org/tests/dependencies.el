@@ -15,9 +15,9 @@
      (unwind-protect
          (cl-letf (((symbol-function 'org-dispatch--agenda-files) (lambda () dep-files))
                    ((symbol-function 'org-dispatch--notify)
-                    (lambda (title body) (push (list title body) dep-notices)))
-                   ((symbol-function 'org-dispatch--herdr)
-                    (lambda (&rest _) (error "Unexpected Herdr call"))))
+                    (lambda (title body &rest _) (push (list title body) dep-notices)))
+                   ((symbol-function 'org-dispatch--hc)
+                    (lambda (&rest _) (error "Unexpected hc call"))))
            (make-directory org-dispatch-root t)
            ,@body)
        (delete-directory tree t))))

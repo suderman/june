@@ -47,7 +47,7 @@ Put a skill in =skills/= when a June install needs it, and in =.agents/skills/= 
 * Deployment
 The flake exports =packages.<system>.default= and a Home Manager module, =homeModules.default=. Logs go to stdout and stderr as =level event key=value= lines with secrets redacted.
 
-The module sets up =programs.june=: the =june= client, =org-edit=, and =herdr-link= wherever it is enabled; with =daemon.enable=, =june serve= as a user service; with =dispatch.enable=, the Org dispatcher every minute. Secrets, persistence, and the agents June drives belong to the host's own configuration. It passes key files through =environmentFiles= and provides pi, Herdr (=herdrPackage=, from =programs.herdr= when present), and Emacs (=emacsPackage=, from =programs.emacs= when enabled).
+The module sets up =programs.june=: the =june= client, =org-edit=, =herdr-link= and =herdr-notify= wherever it is enabled; with =daemon.enable=, =june serve= as a user service; with =dispatch.enable=, the Org dispatcher every minute. Secrets, persistence, and the agents June drives belong to the host's own configuration. It passes key files through =environmentFiles= and provides pi, herdr-core (=hcPackage=, from =programs.hc= when present), and Emacs (=emacsPackage=, from =programs.emacs= when enabled).
 
 #+begin_src nix
 {

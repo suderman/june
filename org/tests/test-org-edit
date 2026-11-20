@@ -178,9 +178,9 @@ check "resume refuses an unknown agent" has "$out" 'unknown agent cobol'
 # Dependencies added while resuming, checked across agenda files and archives.
 export ORG_DISPATCH_ROOT="$HOME/org/work"
 mkdir -p "$ORG_DISPATCH_ROOT/deps" "$HOME/bin"
-# A failing herdr keeps the scan below away from any real server.
-printf '#!/bin/sh\nexit 1\n' >"$HOME/bin/herdr"
-chmod +x "$HOME/bin/herdr"
+# A failing hc keeps the scan below away from any real core.
+printf '#!/bin/sh\nexit 1\n' >"$HOME/bin/hc"
+chmod +x "$HOME/bin/hc"
 deps="$ORG_DISPATCH_ROOT/deps/deps.org"
 cat >"$deps" <<'EOF2'
 * TODO Align panels

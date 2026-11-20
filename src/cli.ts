@@ -366,9 +366,11 @@ async function doctor(): Promise<number> {
 		if (reply.type !== "status") throw new Error("bad status reply");
 		return `pid ${reply.status.pid}`;
 	});
-	check("herdr", async () => {
-		const out = await runProcess(["herdr", "--session", config!.herdr.session, "status", "server"], 5000);
-		return out.split("\n").filter((l) => /status|version/.test(l)).join(", ");
+	check("hc", async () => {
+		const status = JSON.parse(await runProcess(["hc", "server", "status", "--json"], 5000));
+		const machines = JSON.parse(await runProcess(["hc", "machine", "ls", "--json"], 5000)).machines ?? [];
+		const others = machines.map((m: { name: string; state?: string }) => `${m.name} ${m.state ?? "?"}`).join(", ");
+		return `core ${status.core?.name ?? "?"} ${status.version ?? "?"}, ${status.live ?? 0} live terminals${others ? `; machines: ${others}` : ""}`;
 	});
 	check("org", async () => {
 		accessSync(config!.org.root, constants.R_OK);

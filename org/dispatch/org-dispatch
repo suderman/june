@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run autonomous Org tasks with pi in Herdr.
+# Run autonomous Org tasks with pi or Claude in herdr-core terminals.
 #
 #   org-dispatch [run]                 watch running tasks, then launch eligible ones
 #   org-dispatch scan                  list tasks this host would launch now
-#   org-dispatch reconcile --dry-run   show which panes an enabled run would retire
+#   org-dispatch reconcile --dry-run   show which workers an enabled run would retire
 #   org-dispatch finish ID STATE [NOTE] [--headline LINE]  end as EVAL, HOLD, or DONE
 #   org-dispatch retry ID WHEN NOTE    return a task Jon allowed to retry to AUTO at WHEN
 # The Nix wrapper sets ORG_DISPATCH_EL; from a checkout, use the file beside this one.
@@ -19,7 +19,7 @@ case ${1:-run} in
   run) exec flock -n "${XDG_RUNTIME_DIR:-/tmp}/org-dispatch.lock" "${batch[@]}" -f org-dispatch-run ;;
   scan) exec "${batch[@]}" -f org-dispatch-scan ;;
   reconcile)
-    [[ $# -eq 2 && $2 == --dry-run ]] || { echo "only reconcile --dry-run is supported; enabled runs retire panes" >&2; exit 2; }
+    [[ $# -eq 2 && $2 == --dry-run ]] || { echo "only reconcile --dry-run is supported; enabled runs retire workers" >&2; exit 2; }
     shift
     exec "${batch[@]}" -f org-dispatch-reconcile "$@"
     ;;

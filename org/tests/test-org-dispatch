@@ -24,9 +24,9 @@ export PATH="$fixture/bin:$PATH"
 # Some checks load org-dispatch.el directly, without the script that finds NixOS zone data.
 if [[ -z ${TZDIR:-} && ! -d /usr/share/zoneinfo && -d /etc/zoneinfo ]]; then export TZDIR=/etc/zoneinfo; fi
 mkdir -p "$HOME" "$ORG_DISPATCH_ROOT" "$fixture/bin"
-# A failing herdr keeps notifications and pane lookups away from any real server.
-printf '#!/bin/sh\nexit 1\n' >"$fixture/bin/herdr"
-chmod +x "$fixture/bin/herdr"
+# A failing hc keeps every lookup away from any real core.
+printf '#!/bin/sh\nexit 1\n' >"$fixture/bin/hc"
+chmod +x "$fixture/bin/hc"
 
 dispatch="$org/dispatch/org-dispatch"
 failures=0
@@ -274,114 +274,151 @@ check "a claim fills the default agent" bash -c "[[ \$(grep -c '^:AGENT: *pi$' '
 check "resumed claims clear old results and questions" bash -c "! grep -q '^:HEADLINE' '$claim_file'"
 rm "$claim_file"
 
-# Workspaces: a run opens in the workspace named for its Org file, never a shared "auto" one.
-# This fake herdr records its arguments and answers with fixed panes.
-cat >"$fixture/bin/herdr" <<'EOF'
+# herdr-link: a fake hc records its arguments, knows one project space, and has
+# a live terminal only when FAKE_LIVE names one.
+cat >"$fixture/bin/hc" <<'EOF'
 #!/usr/bin/env bash
-[[ $1 == --session ]] && shift 2
-echo "$*" >>"$FAKE_HERDR_LOG"
-case "$1 $2" in
-  "workspace list") printf '{"result":{"workspaces":%s}}\n' "$FAKE_WORKSPACES" ;;
-  "workspace create") echo '{"result":{"root_pane":{"pane_id":"p-new","tab_id":"t-new"}}}' ;;
-  "tab create") echo '{"result":{"root_pane":{"pane_id":"p-tab","tab_id":"t-tab"}}}' ;;
-  "pane run") touch "$FAKE_HERDR_LOG.started" ;;
-  "agent list")
-    if [[ -e $FAKE_HERDR_LOG.started ]]; then
-      if [[ ${FAKE_AGENT:-pi} == claude ]]; then value=$FAKE_SESSION; else value=x_$FAKE_SESSION.jsonl; fi
-      printf '{"result":{"agents":[{"pane_id":"p-live","agent":"%s","agent_session":{"agent":"%s","value":"%s"}}]}}\n' "${FAKE_AGENT:-pi}" "${FAKE_AGENT:-pi}" "$value"
-    else echo '{"result":{"agents":[]}}'; fi ;;
-  *) echo '{}' ;;
+echo "$*" >>"$FAKE_HC_LOG"
+case "$1" in
+  ls)
+    if [[ "$*" == *org.session=* ]]; then
+      if [[ -n ${FAKE_LIVE:-} ]]; then printf '{"terminals":[{"address":"%s","state":"live"}]}\n' "$FAKE_LIVE"
+      else echo '{"terminals":[]}'; fi
+    else
+      printf '{"terminals":%s}\n' "${FAKE_TERMINALS:-[]}"
+    fi ;;
+  get) echo '{"address":"t-june","state":"live","labels":{"herdr.space":"sp-june","where":"june / 1"}}' ;;
+  run) echo '{"address":"t-new"}' ;;
+  label|attach) ;;
+  *) exit 1 ;;
 esac
 EOF
 # The Nix sandbox has no /usr/bin/env, so point the script at this bash.
-sed -i "1s|.*|#!$BASH|" "$fixture/bin/herdr"
-chmod +x "$fixture/bin/herdr"
-export FAKE_HERDR_LOG="$fixture/herdr.log"
-pane_in() {
-  rm -f "$FAKE_HERDR_LOG" "$FAKE_HERDR_LOG.started"
-  FAKE_WORKSPACES=$1 emacs -Q --batch -l "$org/dispatch/org-dispatch.el" --eval "
-    (princ (alist-get 'pane_id (org-dispatch--project-pane \"/tmp\" \"Fix the thing\" \"june\")))" 2>/dev/null
-  echo
-  cat "$FAKE_HERDR_LOG"
-}
-calls=$(pane_in '[{"label":"[4] auto","workspace_id":"w-auto"},{"label":"[8] june","workspace_id":"w-june"}]')
-check "a run opens as a tab in its project's workspace" has "$calls" "^tab create --workspace w-june --cwd /tmp --label Fix the thing --no-focus$"
-check "a run skips the auto workspace" lacks "$calls" "w-auto"
-check "the tab's pane is returned" has "$calls" "^p-tab$"
-calls=$(pane_in '[{"label":"[4] auto","workspace_id":"w-auto"},{"label":"[5] junebug","workspace_id":"w-bug"}]')
-check "a missing project workspace is created under its name" has "$calls" "^workspace create --cwd /tmp --label june --no-focus$"
-check "only an exact project name matches" lacks "$calls" "w-bug"
-check "the new workspace's tab takes the heading" has "$calls" "^tab rename t-new Fix the thing$"
-
-# herdr-link reopens a dispatched session in the workspace of the Org file that links it.
+sed -i "1s|.*|#!$BASH|" "$fixture/bin/hc"
+chmod +x "$fixture/bin/hc"
+export FAKE_HC_LOG="$fixture/hc.log"
 export FAKE_SESSION=01234567-89ab-cdef-0123-456789abcdef
+host=$(</proc/sys/kernel/hostname)
+june_space='[{"address":"t-june","state":"live","where":"[8] June / 1"},{"address":"t-bug","state":"live","where":"junebug / 1"}]'
+link() { rm -f "$FAKE_HC_LOG"; "$org/bin/herdr-link" attach "herdr:$host/$1:$FAKE_SESSION@w1:p1" >/dev/null 2>&1 || true; cat "$FAKE_HC_LOG" 2>/dev/null; }
+
+# A live session is found by its label and attached, whatever the link's pane hint says.
+calls=$(FAKE_LIVE=t-live link pi)
+check "herdr-link finds a live session by its label" has "$calls" "^ls --json --label org.session=$FAKE_SESSION$"
+check "herdr-link attaches to the labelled terminal" has "$calls" "^attach t-live$"
+check "herdr-link starts nothing for a live session" lacks "$calls" "^run "
+
+# A closed dispatched session reopens in the space of the Org file that links it.
 mkdir -p "$HOME/.pi/agent/sessions/x" "$HOME/org/work/suderman/june"
 printf '{"type":"session","cwd":"/tmp"}\n{"type":"session_info","name":"auto · Fix the thing"}\n' \
   >"$HOME/.pi/agent/sessions/x/2026_$FAKE_SESSION.jsonl"
 printf '* EVAL Fix the thing\n** Sessions\n- [[herdr:kit/pi:%s@w1:p1][pi@kit/2026-10-26T1500]]\n' "$FAKE_SESSION" \
   >"$HOME/org/work/suderman/june/june.org"
-reopen() {
-  rm -f "$FAKE_HERDR_LOG" "$FAKE_HERDR_LOG.started"
-  FAKE_WORKSPACES=$1 "$org/bin/herdr-link" attach "herdr:$(</proc/sys/kernel/hostname)/pi:$FAKE_SESSION@w1:p1" >/dev/null 2>&1 || true
-  cat "$FAKE_HERDR_LOG"
-}
-calls=$(reopen '[{"label":"[4] auto","workspace_id":"w-auto"},{"label":"[8] June","workspace_id":"w-june"}]')
-check "herdr-link reopens in the linking file's workspace" has "$calls" "^tab create --workspace w-june --cwd /tmp --label Fix the thing --focus$"
-check "herdr-link attaches to the resumed pane" has "$calls" "^agent attach p-live --takeover$"
-calls=$(reopen '[]')
-check "herdr-link creates the project workspace when missing" has "$calls" "^workspace create --cwd /tmp --label june --focus$"
+calls=$(FAKE_TERMINALS=$june_space link pi)
+check "herdr-link reopens pi in its project's space, labelled and parentless" has "$calls" \
+  "^run --json --bg --no-parent --cwd /tmp --label org.agent=pi --label org.session=$FAKE_SESSION --label herdr.space=sp-june -- sh -c exec pi --session .*2026_$FAKE_SESSION.jsonl$"
+check "herdr-link reads only the matching project's space" lacks "$calls" "^get --json t-bug"
+check "herdr-link attaches to the reopened terminal" has "$calls" "^attach t-new$"
+calls=$(FAKE_TERMINALS='[]' link pi)
+check "herdr-link reopens without a space when the project has none" has "$calls" "^run --json --bg --no-parent --cwd /tmp --label org.agent=pi --label org.session=$FAKE_SESSION -- "
 rm "$HOME/org/work/suderman/june/june.org"
-calls=$(reopen '[{"label":"[8] june","workspace_id":"w-june"}]')
-check "herdr-link without a linking file opens in the current workspace" has "$calls" "^tab create --cwd /tmp --focus$"
-# Claude stores its display name as custom-title, not pi's session_info.
+calls=$(FAKE_TERMINALS=$june_space link pi)
+check "herdr-link without a linking file opens without a space" lacks "$calls" "herdr.space="
+
+# Claude stores its display name as custom-title, not pi's session_info. Account
+# launchers fix CLAUDE_CONFIG_DIR, so the default directory resumes through
+# claude-direct with the directory named, and status reporting is switched on.
 mkdir -p "$HOME/.claude/projects/x"
 printf '{"type":"user","cwd":"/tmp"}\n{"type":"custom-title","customTitle":"auto · Fix the thing"}\n' \
   >"$HOME/.claude/projects/x/$FAKE_SESSION.jsonl"
-printf '* EVAL Fix the thing\n** Sessions\n- [[herdr:kit/claude:%s@w1:p1][claude@kit/2026-10-26T1500]]\n' "$FAKE_SESSION" \
+printf '* EVAL Fix the thing\n** Sessions\n- [[herdr:kit/claude:%s@t7][claude@kit/2026-10-26T1500]]\n' "$FAKE_SESSION" \
   >"$HOME/org/work/suderman/june/june.org"
-# Account launchers fix CLAUDE_CONFIG_DIR, so the default directory resumes
-# through claude-direct with the directory named.
 printf '#!/bin/sh\nexit 0\n' >"$fixture/bin/claude-direct"
 chmod +x "$fixture/bin/claude-direct"
-rm -f "$FAKE_HERDR_LOG" "$FAKE_HERDR_LOG.started"
-FAKE_AGENT=claude FAKE_WORKSPACES='[{"label":"[8] June","workspace_id":"w-june"}]' \
-  "$org/bin/herdr-link" attach "herdr:$(</proc/sys/kernel/hostname)/claude:$FAKE_SESSION@w1:p1" >/dev/null 2>&1 || true
-calls=$(cat "$FAKE_HERDR_LOG")
-check "herdr-link reopens Claude in the linking file's workspace" has "$calls" '^tab create --workspace w-june --cwd /tmp --label Fix the thing --focus$'
-check "herdr-link resumes Claude by ID in its config directory" has "$calls" "^pane run p-tab CLAUDE_CONFIG_DIR='$HOME/.claude' claude-direct --resume $FAKE_SESSION$"
-check "herdr-link attaches to the resumed Claude pane" has "$calls" '^agent attach p-live --takeover$'
-# Historical links still route to native resume after immediate archive. Herdr
+calls=$(FAKE_TERMINALS=$june_space link claude)
+check "herdr-link reopens Claude in its project's space" has "$calls" "^run .*--label herdr.space=sp-june -- "
+check "herdr-link resumes Claude by ID in its config directory" has "$calls" \
+  "^run .* -- sh -c exec CLAUDE_CONFIG_DIR='$HOME/.claude' claude-direct --resume $FAKE_SESSION --settings "
+check "herdr-link turns on Claude's status reporting" has "$calls" 'CLAUDE_CODE_DISABLE_TERMINAL_TITLE":""'
+# Historical links still route to native resume after immediate archive. hc
 # and agent startup are mocked; no real historical session is reopened here.
 mv "$HOME/org/work/suderman/june/june.org" "$HOME/org/work/suderman/june/archive.org"
 before=$(sha256sum "$HOME/org/work/suderman/june/archive.org" "$HOME/.claude/projects/x/$FAKE_SESSION.jsonl" "$HOME/.pi/agent/sessions/x/2026_$FAKE_SESSION.jsonl")
-rm -f "$FAKE_HERDR_LOG" "$FAKE_HERDR_LOG.started"
-FAKE_AGENT=claude FAKE_WORKSPACES='[]' \
-  "$org/bin/herdr-link" attach "herdr:$(</proc/sys/kernel/hostname)/claude:$FAKE_SESSION@w1:p1" >/dev/null 2>&1
-calls=$(cat "$FAKE_HERDR_LOG")
-check "archived Claude link still routes to native resume" has "$calls" "^pane run .* claude-direct --resume $FAKE_SESSION$"
-calls=$(reopen '[]')
-check "archived pi link still routes to its saved session file" has "$calls" "^pane run .* pi --session .*2026_$FAKE_SESSION.jsonl$"
+calls=$(link claude)
+check "archived Claude link still routes to native resume" has "$calls" "^run .* claude-direct --resume $FAKE_SESSION "
+calls=$(link pi)
+check "archived pi link still routes to its saved session file" has "$calls" "^run .* pi --session .*2026_$FAKE_SESSION.jsonl$"
 check "historical resume routing preserves Org and both saved sessions" test "$before" = "$(sha256sum "$HOME/org/work/suderman/june/archive.org" "$HOME/.claude/projects/x/$FAKE_SESSION.jsonl" "$HOME/.pi/agent/sessions/x/2026_$FAKE_SESSION.jsonl")"
 # A session under ~/.claude-NAME resumes through that account's claude-NAME.
 mkdir -p "$HOME/.claude-team/projects/x"
 mv "$HOME/.claude/projects/x/$FAKE_SESSION.jsonl" "$HOME/.claude-team/projects/x/"
 printf '#!/bin/sh\nexit 0\n' >"$fixture/bin/claude-team"
 chmod +x "$fixture/bin/claude-team"
-rm -f "$FAKE_HERDR_LOG" "$FAKE_HERDR_LOG.started"
-FAKE_AGENT=claude FAKE_WORKSPACES='[]' \
-  "$org/bin/herdr-link" attach "herdr:$(</proc/sys/kernel/hostname)/claude:$FAKE_SESSION@w1:p1" >/dev/null 2>&1
-calls=$(cat "$FAKE_HERDR_LOG")
-check "herdr-link resumes an account session through its launcher" has "$calls" "^pane run .* claude-team --resume $FAKE_SESSION$"
+calls=$(link claude)
+check "herdr-link resumes an account session through its launcher" has "$calls" "^run .* -- sh -c exec claude-team --resume $FAKE_SESSION "
 rm -f "$fixture/bin/claude-team"
-rm -f "$FAKE_HERDR_LOG" "$FAKE_HERDR_LOG.started"
-FAKE_AGENT=claude FAKE_WORKSPACES='[]' \
-  "$org/bin/herdr-link" attach "herdr:$(</proc/sys/kernel/hostname)/claude:$FAKE_SESSION@w1:p1" >/dev/null 2>&1
-calls=$(cat "$FAKE_HERDR_LOG")
-check "herdr-link names the directory when the account launcher is missing" has "$calls" "^pane run .* CLAUDE_CONFIG_DIR='$HOME/.claude-team' claude-direct --resume $FAKE_SESSION$"
-rm -rf "$HOME/.claude-team" "$fixture/bin/claude-direct"
-printf '#!/bin/sh\nexit 1\n' >"$fixture/bin/herdr"
+calls=$(link claude)
+check "herdr-link names the directory when the account launcher is missing" has "$calls" "^run .* CLAUDE_CONFIG_DIR='$HOME/.claude-team' claude-direct --resume $FAKE_SESSION "
+# A deleted session says so instead of starting an empty agent.
+rm -rf "$HOME/.claude-team"
+out=$("$org/bin/herdr-link" attach "herdr:$host/claude:$FAKE_SESSION@t7" 2>&1 || true)
+check "herdr-link reports a session that no longer exists" has "$out" "not found on $host"
+rm -f "$fixture/bin/claude-direct"
+# Stamping labels the calling terminal and links its session.
+rm -f "$FAKE_HC_LOG"
+out=$(HC_TERMINAL_ID=t9 CLAUDE_CODE_SESSION_ID=$FAKE_SESSION PI_SESSION_ID= "$org/bin/herdr-link" stamp "Review Run!")
+check "stamp prints a link with the terminal address" has "$out" "^\[\[herdr:$host/claude:$FAKE_SESSION@t9\]\[claude@$host/[0-9-]*T[0-9]*#review-run\]\]$"
+check "stamp labels the terminal with its session" has "$(cat "$FAKE_HC_LOG")" "^label t9 org.agent=claude org.session=$FAKE_SESSION$"
+out=$(HC_TERMINAL_ID= "$org/bin/herdr-link" stamp 2>&1 || true)
+check "stamp refuses outside an hc terminal" has "$out" "not in an hc terminal"
+printf '#!/bin/sh\nexit 1\n' >"$fixture/bin/hc"
 
-# Launch and watch tests exercise the real Org edits and state, with only Herdr mocked.
+# herdr-notify: a fake hc replays a snapshot and status events, and a fake curl records each notice.
+cat >"$fixture/bin/hc" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  events)
+    echo '{"terminals":[{"address":"t1","status":{"state":"blocked"}}]}'
+    echo '{"params":{"type":"status","terminal":"t1","data":{"status":{"state":"blocked"}}}}'
+    echo '{"params":{"type":"title","terminal":"t2","data":{}}}'
+    echo '{"params":{"type":"status","terminal":"t2","data":{"status":{"state":"working"}}}}'
+    echo '{"params":{"type":"status","terminal":"t2","data":{"status":{"state":"blocked","kind":"permission","msg":"approve Bash: rm"}}}}'
+    echo '{"params":{"type":"status","terminal":"t2","data":{"status":{"state":"blocked","kind":"permission"}}}}'
+    echo '{"params":{"type":"status","terminal":"t2","data":{"status":{"state":"done"}}}}'
+    echo '{"params":{"type":"status","terminal":"t3","data":{"status":{"state":"done"}}}}'
+    echo '{"params":{"type":"status","terminal":"cog/t4","data":{"status":{"state":"blocked","kind":"question"}}}}' ;;
+  get)
+    case "$3" in
+      t2) echo '{"address":"t2","labels":{"where":"june / 1","org.agent":"pi","org.session":"11111111-2222-3333-4444-555555555555"}}' ;;
+      t3) echo '{"address":"t3","labels":{"org.task":"task-1","org.agent":"pi","org.session":"22222222-2222-3333-4444-555555555555"}}' ;;
+      cog/t4) echo '{"address":"cog/t4","name":"helper","labels":{"org.agent":"claude","org.session":"33333333-2222-3333-4444-555555555555"}}' ;;
+      *) echo '{"address":"t1","labels":{}}' ;;
+    esac ;;
+  *) exit 1 ;;
+esac
+EOF
+sed -i "1s|.*|#!$BASH|" "$fixture/bin/hc"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"$FAKE_CURL_LOG"\n' >"$fixture/bin/curl"
+chmod +x "$fixture/bin/hc" "$fixture/bin/curl"
+export FAKE_CURL_LOG="$fixture/curl.log"
+rm -f "$FAKE_CURL_LOG"
+HERDR_NOTIFY_URL=https://ntfy.example/herdr "$org/bin/herdr-notify" watch
+posts=$(cat "$FAKE_CURL_LOG")
+check "herdr-notify ignores what the snapshot already showed" lacks "$posts" "t1"
+check "herdr-notify tells a block once, with its question and session link" bash -c '[[ $(grep -c "Title: Needs you · june / 1" <<<"$1") -eq 1 ]]' _ "$posts"
+check "herdr-notify passes the agent's own words" has "$posts" "Click: herdr:$host/pi:11111111-2222-3333-4444-555555555555@t2 --data-binary approve Bash: rm "
+check "herdr-notify tells an interactive agent's turn ending" has "$posts" "Title: Done · june / 1"
+check "herdr-notify leaves a dispatched worker's turn to the dispatcher" lacks "$posts" "22222222-"
+check "herdr-notify links a remote machine's agent by its host" has "$posts" "Title: Needs you · helper -H Click: herdr:cog/claude:33333333-2222-3333-4444-555555555555@t4 --data-binary It is waiting for an answer\."
+rm -f "$FAKE_CURL_LOG"
+HERDR_NOTIFY_URL=https://ntfy.example/herdr "$org/bin/herdr-notify" send --title "HOLD · Fix" --body "Needs a decision." --link "herdr:kit/pi:x@t9"
+check "herdr-notify send posts a task notice with its link" has "$(cat "$FAKE_CURL_LOG")" "^--fail .* -H Title: HOLD · Fix -H Click: herdr:kit/pi:x@t9 --data-binary Needs a decision\. https://ntfy.example/herdr$"
+out=$(HERDR_NOTIFY_URL= "$org/bin/herdr-notify" send --title x 2>&1 || true)
+check "herdr-notify needs a topic URL" has "$out" "HERDR_NOTIFY_URL is not set"
+rm -f "$fixture/bin/curl"
+printf '#!/bin/sh\nexit 1\n' >"$fixture/bin/hc"
+
+# Launch and watch tests exercise the real Org edits and state, with only hc mocked.
 cat >"$fixture/launch-tests.el" <<'EOF'
 ;;; -*- lexical-binding: t; -*-
 (require 'ert)
@@ -389,27 +426,79 @@ cat >"$fixture/launch-tests.el" <<'EOF'
 (defvar test-session "01234567-89ab-cdef-0123-456789abcdef")
 (defvar test-calls nil)
 (defvar test-agent "pi")
-(defvar test-live nil)
 (defvar test-status "idle")
-(defvar test-start-blocked nil)
+(defvar test-terminals nil "Fake hc terminals: alist of address to record.")
+(defvar test-next 0)
+(defvar test-spawn-fail nil)
+(defvar test-exit-at-start nil)
 
-(defun test-herdr (&rest args)
+(defun test-labels (pairs)
+  (mapcar (lambda (pair) (let ((kv (split-string pair "="))) (cons (intern (car kv)) (cadr kv)))) pairs))
+
+(defun test-terminal (address agent session &optional extra)
+  "Add a live terminal running AGENT's SESSION at ADDRESS."
+  (push (cons address `((address . ,address) (state . "live")
+                        (status (state . ,test-status)) (turn . 1) (status_ms . 1) (pid . 1)
+                        (labels . ,(append (test-labels (list (concat "org.agent=" agent)
+                                                              (concat "org.session=" session)))
+                                           extra))))
+        test-terminals))
+
+(defun test-not-found (address)
+  (signal 'org-dispatch-hc (list "not_found" (format "no terminal %s" address))))
+
+(defun test-hc (&rest args)
   (push args test-calls)
-  (pcase (seq-take args 2)
-    (`("workspace" "list") '((result (workspaces . []))))
-    (`("workspace" "create") '((result (root_pane (pane_id . "p-new") (tab_id . "t-new")))))
-    (`("pane" "get")
-     `((result (pane (agent . ,test-agent) (agent_status . ,test-status)
-                     (agent_session (agent . ,test-agent)
-                                   (value . ,(if (equal test-agent "claude") test-session
-                                               (concat "x_" test-session ".jsonl"))))))))
-    (`("agent" "list")
-     `((result (agents . ,(if test-live
-                             `[((agent . ,test-agent) (pane_id . "p-live")
-                                (agent_session (agent . ,test-agent) (value . ,test-session)))]
-                           [])))))
-    (`("agent" "get") `((result (agent (agent_status . ,test-status)))))
-    (`("agent" "start") (when test-start-blocked (error "agent_not_ready: blocked during startup")))
+  (pcase args
+    (`("run" . ,rest)
+     (when test-spawn-fail (signal 'org-dispatch-hc (list "spawn_failed" "cannot start")))
+     (let* ((address (format "t-new%s" (if (zerop test-next) "" test-next)))
+            (labels nil))
+       (setq test-next (1+ test-next))
+       (while rest
+         (let ((arg (pop rest)))
+           (when (equal arg "--label") (push (pop rest) labels))
+           (when (equal arg "--") (setq rest nil))))
+       (push (cons address `((address . ,address)
+                             (state . ,(if test-exit-at-start "finished" "live"))
+                             (exit_code . ,(and test-exit-at-start 1))
+                             (status . ,(and test-status `((state . ,test-status))))
+                             (turn . 0) (status_ms . 1) (pid . 2)
+                             (labels . ,(test-labels labels))))
+             test-terminals)
+       `((address . ,address))))
+    (`("get" ,address)
+     (or (cdr (assoc address test-terminals)) (test-not-found address)))
+    (`("ls" . ,rest)
+     (let* ((filter (cadr (member "--label" rest)))
+            (kv (and filter (split-string filter "=")))
+            (all (member "--all" rest)))
+       `((terminals . ,(vconcat
+                        (mapcar (lambda (pair)
+                                  ;; Rows as hc ls prints them: no labels, but state and where.
+                                  `((address . ,(car pair)) (state . ,(alist-get 'state (cdr pair)))
+                                    (where . ,(alist-get 'where (alist-get 'labels (cdr pair))))))
+                                (seq-filter (lambda (pair)
+                                              (and (or all (equal (alist-get 'state (cdr pair)) "live"))
+                                                   (or (null kv)
+                                                       (equal (alist-get (intern (car kv))
+                                                                         (alist-get 'labels (cdr pair)))
+                                                              (cadr kv)))))
+                                            test-terminals)))))))
+    (`("label" ,address . ,pairs)
+     (let ((record (or (cdr (assoc address test-terminals)) (test-not-found address))))
+       (setf (alist-get 'labels record)
+             (append (test-labels pairs)
+                     (seq-remove (lambda (old) (assoc (car old) (test-labels pairs)))
+                                 (alist-get 'labels record))))
+       (setf (cdr (assoc address test-terminals)) record)
+       nil))
+    (`("send" ,address ,_)
+     (let ((record (or (cdr (assoc address test-terminals)) (test-not-found address))))
+       (when (equal (org-dispatch--get record 'status 'state) "blocked")
+         (signal 'org-dispatch-hc (list "blocked" "blocked")))
+       '((started . t))))
+    (`("interrupt" ,_) '((outcome . "stopped")))
     (_ nil)))
 
 (defun test-task (agent &optional resume)
@@ -418,22 +507,34 @@ cat >"$fixture/launch-tests.el" <<'EOF'
     (with-temp-file file
       (insert (format "* AUTO Test launch\n:PROPERTIES:\n:ID: 00000000-0000-0000-0000-000000000099\n:HOST: kit\n:AGENT: %s\n:END:\n" agent))
       (when resume
-        (insert (format "\n** Sessions\n- [[herdr:kit/%s:%s@p-old][old]]\n" agent test-session))))
+        (insert (format "\n** Sessions\n- [[herdr:kit/%s:%s@t-old][old]]\n" agent test-session))))
     (org-dispatch--edit file "00000000-0000-0000-0000-000000000099" #'org-dispatch--task)))
 
-(defmacro test-with-herdr (&rest body)
-  `(let ((test-calls nil) (test-live nil) (test-status "idle"))
+(defmacro test-with-hc (&rest body)
+  `(let ((test-calls nil) (test-status "idle") (test-terminals nil) (test-next 0)
+         (test-spawn-fail nil) (test-exit-at-start nil))
      (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))
-     (cl-letf (((symbol-function 'org-dispatch--herdr) #'test-herdr))
+     (cl-letf (((symbol-function 'org-dispatch--hc) #'test-hc)
+               ((symbol-function 'sleep-for) #'ignore))
        ,@body)))
 
-(ert-deftest unicode-state-and-pane-receipts-round-trip ()
-  (test-with-herdr
+(defun test-run-call ()
+  (seq-find (lambda (args) (equal (car args) "run")) test-calls))
+
+(defun test-argv (&optional call)
+  "The agent argv of a recorded hc run CALL."
+  (cdr (member "--" (or call (test-run-call)))))
+
+(defun test-sent (text)
+  (seq-find (lambda (args) (and (equal (car args) "send") (string-search text (nth 2 args)))) test-calls))
+
+(ert-deftest unicode-state-round-trips ()
+  (test-with-hc
    (let* ((org-dispatch-state-dir (expand-file-name "unicode-state" org-dispatch-state-dir))
-          (text "Jérôme's café 東京 é 🐈")
+          (text "Jérôme's café 東京 é 🐈")
           (state (list :id "00000000-0000-0000-0000-000000000098"
                        :heading text :file (expand-file-name (concat text ".org") org-dispatch-root)
-                       :agent "pi" :pane "p-unicode" :tab text :session test-session)))
+                       :agent "pi" :terminal "t-unicode" :run "r" :session test-session)))
      (dolist (status '("starting" "running" "finished"))
        (setq state (plist-put state :status status))
        (org-dispatch--save-state state)
@@ -444,23 +545,21 @@ cat >"$fixture/launch-tests.el" <<'EOF'
          (insert-file-contents-literally (org-dispatch--state-file (plist-get state :id)))
          (should (equal (buffer-string)
                         (encode-coding-string (decode-coding-string (json-serialize state) 'utf-8)
-                                              'utf-8-unix)))))
-     (let ((receipts (org-dispatch--pane-receipts)))
-       (should (= (length receipts) 1))
-       (should (equal (plist-get (car receipts) :tab) text))))))
+                                              'utf-8-unix))))))))
 
 (ert-deftest unicode-retirement-observations-round-trip ()
   (let* ((org-dispatch-state-dir (expand-file-name "unicode-retire" org-dispatch-state-dir))
-         (observation '((heading . "Jérôme 東京 🐈") (file . "/tmp/café.org"))))
+         (observation '("t7" "live" ("id" "run" "pi" "Jérôme 東京 🐈") "idle" 3 12 nil)))
     (org-dispatch--retire-save (list (list :observation observation)))
-    (should (equal (org-dispatch--retire-seen) (vector observation)))
+    (should (equal (mapcar #'org-dispatch--normal-observation (org-dispatch--retire-seen))
+                   (list observation)))
     (org-dispatch--retire-save nil)
-    (should (equal (org-dispatch--retire-seen) []))))
+    (should-not (org-dispatch--retire-seen))))
 
 (ert-deftest unicode-title-settles-launches-and-survives-state-reload ()
   (dolist (test-agent '("pi" "claude"))
-    (test-with-herdr
-     (let* ((title "Respond to Jérôme 東京 é 🐈")
+    (test-with-hc
+     (let* ((title "Respond to Jérôme 東京 é 🐈")
             (task (test-task test-agent))
             (file (plist-get task :file))
             (org-dispatch-settle 0))
@@ -481,22 +580,115 @@ cat >"$fixture/launch-tests.el" <<'EOF'
                              (lambda ()
                                (should (equal (org-get-heading t t t t) title))
                                (should (equal (org-get-todo-state) "PROG")))))
-       (should (seq-find (lambda (args) (and (equal (seq-take args 2) '("agent" "prompt"))
-                                           (string-search title (nth 3 args)))) test-calls))))))
+       ;; The task goes in as the agent's first message, not a send to a booting agent.
+       (should (string-search title (car (last (test-argv)))))))))
 
-(ert-deftest session-formats-and-agent-identity ()
-  (test-with-herdr
+(ert-deftest fresh-launches-label-claim-and-record-the-right-agent ()
+  (test-with-hc
    (dolist (test-agent '("pi" "claude"))
-     (should (equal (org-dispatch--pane-session "p" test-agent) test-session)))
-   (let ((test-agent "pi"))
-     (cl-letf (((symbol-function 'sleep-for) #'ignore))
-       (should-error (org-dispatch--pane-session "p" "claude"))))))
+     (setq test-calls nil test-terminals nil test-next 0)
+     (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))
+     (let ((task (plist-put (test-task test-agent) :model "test-model")))
+       (should (org-dispatch--launch task))
+       (let* ((run (test-run-call))
+              (argv (test-argv run))
+              (state (car (org-dispatch--states)))
+              (session (plist-get state :session)))
+         (should (member "--bg" run))
+         (should (member "--no-parent" run))
+         (should (equal (cadr (member "--cwd" run)) (plist-get task :dir)))
+         (should (member "org.dispatch=kit" run))
+         (should (member (concat "org.task=" (plist-get task :id)) run))
+         (should (member (concat "org.run=" (plist-get state :run)) run))
+         (should (member (concat "org.agent=" test-agent) run))
+         (should (member (concat "org.session=" session) run))
+         (should (string-match-p "\\`[0-9a-f]\\{8\\}-" session))
+         (should-not (equal session (plist-get state :run)))
+         (should (equal (car argv) test-agent))
+         (should (member (if (equal test-agent "claude") "--dangerously-skip-permissions" "--no-approve") argv))
+         (should (equal (and (equal test-agent "claude") (cadr (member "--settings" argv)))
+                        (and (equal test-agent "claude")
+                             "{\"env\":{\"CLAUDE_CODE_DISABLE_TERMINAL_TITLE\":\"\"}}")))
+         (should (equal (cadr (member "--name" argv)) "auto · Test launch"))
+         (should (equal (cadr (member "--model" argv)) "test-model"))
+         (should (equal (cadr (member "--session-id" argv)) session))
+         (should-not (member "--resume" argv))
+         (should (string-search "Test launch" (car (last argv))))
+         (should (equal (plist-get state :agent) test-agent))
+         (should (equal (plist-get state :terminal) "t-new"))
+         (should (equal (plist-get state :host) "kit"))
+         (should (equal (plist-get state :status) "running"))
+         (org-dispatch--edit
+          (plist-get task :file) (plist-get task :id)
+          (lambda ()
+            (should (equal (org-get-todo-state) "PROG"))
+            (should (equal (org-get-tags nil t) '("auto")))
+            (should (string-search (format "herdr:kit/%s:%s@t-new][%s@kit/" test-agent session test-agent)
+                                   (org-dispatch--subtree-text))))))
+       ;; Even if stale AUTO text is scanned, a running record prevents another launch.
+       (should-not (org-dispatch--eligible (list task) (org-dispatch--states) t))))))
 
-(ert-deftest live-pane-matches-the-agent-kind ()
-  (test-with-herdr
-   (let ((test-agent "claude") (test-live t))
-     (should (equal (org-dispatch--live-pane test-session "claude") "p-live"))
-     (should-not (org-dispatch--live-pane test-session "pi")))))
+(ert-deftest launches-show-in-the-project-space-only-when-it-exists ()
+  (test-with-hc
+   (let ((task (test-task "pi")))
+     ;; The project file is launch.org, so a space whose terminals say "launch / ..." is its space.
+     (test-terminal "t-human" "pi" "ffffffff-ffff-ffff-ffff-ffffffffffff"
+                    '((where . "[2] launch / 1") (herdr.space . "sp-launch")))
+     (test-terminal "t-other" "pi" "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+                    '((where . "launchpad / 1") (herdr.space . "sp-other")))
+     (should (org-dispatch--launch task))
+     (should (member "herdr.space=sp-launch" (test-run-call)))
+     (should-not (member "herdr.space=sp-other" (test-run-call))))
+   (setq test-calls nil test-terminals nil)
+   (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))
+   (should (org-dispatch--launch (test-task "pi")))
+   (should-not (seq-find (lambda (arg) (string-prefix-p "herdr.space=" arg)) (test-run-call)))))
+
+(ert-deftest resume-adopts-a-live-terminal-and-does-not-duplicate-the-link ()
+  (test-with-hc
+   (dolist (test-agent '("pi" "claude"))
+     (setq test-calls nil test-terminals nil)
+     (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))
+     (test-terminal "t-live" test-agent test-session)
+     (let ((task (test-task test-agent t)))
+       (should (org-dispatch--launch task))
+       (should-not (test-run-call))
+       (let ((state (car (org-dispatch--states))))
+         (should (equal (plist-get state :terminal) "t-live"))
+         (should (equal (plist-get state :session) test-session))
+         ;; The live terminal now carries this run's labels, and got the task by send.
+         (should (org-dispatch--owns-p state (test-hc "get" "t-live"))))
+       (should (test-sent "Test launch"))
+       (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                           (lambda () (should (= 2 (how-many "herdr:kit/" (point-min) (point-max))))
+                             (should (= 1 (how-many "@t-live\\]" (point-min) (point-max))))))))))
+
+(ert-deftest live-session-matches-the-agent-kind-and-refuses-ambiguity ()
+  (test-with-hc
+   (test-terminal "t-live" "claude" test-session)
+   (should (equal (org-dispatch--live-session test-session "claude") "t-live"))
+   (should-not (org-dispatch--live-session test-session "pi"))
+   (test-terminal "t-twin" "claude" test-session)
+   (should-error (org-dispatch--live-session test-session "claude"))))
+
+(ert-deftest resume-starts-a-closed-session-with-native-flags ()
+  (test-with-hc
+   (dolist (test-agent '("pi" "claude"))
+     (let* ((task (test-task test-agent t))
+            (session-file (expand-file-name (concat "~/.pi/agent/sessions/x/2026_" test-session ".jsonl"))))
+       (make-directory (file-name-directory session-file) t)
+       (with-temp-file session-file (insert "{}\n"))
+       (setq test-calls nil)
+       (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))
+       (should (org-dispatch--launch task))
+       (let ((argv (test-argv)))
+         (should (member (concat "org.session=" test-session) (test-run-call)))
+         (should-not (member "--session-id" argv))
+         (if (equal test-agent "claude")
+             (progn (should (equal (cadr (member "--resume" argv)) test-session))
+                    (should-not (member "--session" argv)))
+           (should (equal (cadr (member "--session" argv)) session-file))
+           (should-not (member "--resume" argv))))))))
 
 (ert-deftest task-resumes-only-the-resolved-agent-and-host ()
   (let* ((task (test-task "claude" t)) (file (plist-get task :file)))
@@ -517,63 +709,6 @@ cat >"$fixture/launch-tests.el" <<'EOF'
       (org-dispatch--edit file (plist-get task :id) (lambda () (org-entry-put nil "MODEL" "sonnet")))
       (should (equal (plist-get (org-dispatch--edit file (plist-get task :id) #'org-dispatch--task) :model)
                      "sonnet")))))
-
-(ert-deftest fresh-launches-claim-and-record-the-right-agent ()
-  (test-with-herdr
-   (dolist (test-agent '("pi" "claude"))
-     (setq test-calls nil)
-     (let ((task (plist-put (test-task test-agent) :model "test-model")))
-       (should (org-dispatch--launch task))
-       (let* ((start (seq-find (lambda (args) (equal (seq-take args 2) '("agent" "start"))) test-calls))
-              (native (cdr (member "--" start)))
-              (state (car (org-dispatch--states))))
-         (should (equal (cadr (member "--kind" start)) test-agent))
-         (should (equal (car native) (if (equal test-agent "claude") "--dangerously-skip-permissions" "--no-approve")))
-         (should (equal (cadr (member "--name" native)) "auto · Test launch"))
-         (should (equal (cadr (member "--model" native)) "test-model"))
-         (should-not (member "--resume" native))
-         (should-not (member "--session" native))
-         (should (equal (plist-get state :agent) test-agent))
-         (should (equal (plist-get state :session) test-session))
-         (should (equal (plist-get state :status) "running")))
-       (org-dispatch--edit
-        (plist-get task :file) (plist-get task :id)
-        (lambda ()
-          (should (equal (org-get-todo-state) "PROG"))
-          (should (equal (org-get-tags nil t) '("auto")))
-          (should (string-search (format "herdr:kit/%s:%s@p-new][%s@kit/" test-agent test-session test-agent)
-                                 (org-dispatch--subtree-text)))))
-       (should (seq-find (lambda (args) (and (equal (seq-take args 2) '("agent" "prompt"))
-                                           (string-search "Test launch" (nth 3 args)))) test-calls))
-       ;; Even if stale AUTO text is scanned, a running record prevents another launch.
-       (should-not (org-dispatch--eligible (list task) (org-dispatch--states) t))))))
-
-(ert-deftest resume-reuses-a-live-pane-and-does-not-duplicate-the-link ()
-  (test-with-herdr
-   (dolist (test-agent '("pi" "claude"))
-     (let ((task (test-task test-agent t)) (test-live t))
-       (setq test-calls nil)
-       (should (org-dispatch--launch task))
-       (should-not (seq-find (lambda (args) (member (cadr args) '("create" "start"))) test-calls))
-       (should (equal (plist-get (car (org-dispatch--states)) :pane) "p-live"))
-       (org-dispatch--edit (plist-get task :file) (plist-get task :id)
-                           (lambda () (should (= 1 (how-many "herdr:kit/" (point-min) (point-max))))))))))
-
-(ert-deftest resume-starts-a-closed-session-with-native-flags ()
-  (test-with-herdr
-   (dolist (test-agent '("pi" "claude"))
-     (let* ((task (test-task test-agent t))
-            (session-file (expand-file-name (concat "~/.pi/agent/sessions/x/2026_" test-session ".jsonl"))))
-       (make-directory (file-name-directory session-file) t)
-       (with-temp-file session-file (insert "{}\n"))
-       (setq test-calls nil)
-       (should (org-dispatch--launch task))
-       (let ((start (seq-find (lambda (args) (equal (seq-take args 2) '("agent" "start"))) test-calls)))
-         (if (equal test-agent "claude")
-             (progn (should (equal (cadr (member "--resume" start)) test-session))
-                    (should-not (member "--session" start)))
-           (should (equal (cadr (member "--session" start)) session-file))
-           (should-not (member "--resume" start))))))))
 
 (defmacro test-with-command (agent command &rest body)
   `(let ((org-dispatch--defaults (make-hash-table :test 'equal))
@@ -602,34 +737,24 @@ cat >"$fixture/launch-tests.el" <<'EOF'
     (should (equal (org-dispatch--command "pi") "/opt/workers/pi"))))
 
 (ert-deftest custom-launches-keep-worker-identity-and-native-flags ()
-  (test-with-herdr
+  (test-with-hc
    (dolist (test-agent '("pi" "claude"))
      (test-with-command test-agent (concat test-agent "-auto")
-       (setq test-calls nil)
+       (setq test-calls nil test-terminals nil)
+       (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))
        (let ((task (plist-put (test-task test-agent) :model "test-model")))
          (should (org-dispatch--launch task))
-         (let ((run (seq-find (lambda (args) (equal (seq-take args 2) '("pane" "run"))) test-calls)))
-           (should (string-prefix-p (concat "command " test-agent "-auto ") (nth 3 run)))
-           (should (string-search (if (equal test-agent "claude") "--dangerously-skip-permissions" "--no-approve") (nth 3 run)))
-           (should (string-search "--model test-model" (nth 3 run))))
-         (should-not (seq-find (lambda (args) (equal (seq-take args 2) '("agent" "start"))) test-calls))
-         (should (seq-find (lambda (args) (equal (seq-take args 2) '("agent" "rename"))) test-calls))
+         (let ((argv (test-argv)))
+           ;; argv goes to hc as a list: no shell, so nothing needs quoting.
+           (should (equal (car argv) (concat test-agent "-auto")))
+           (should (member (if (equal test-agent "claude") "--dangerously-skip-permissions" "--no-approve") argv))
+           (should (equal (cadr (member "--model" argv)) "test-model")))
+         (should (member (concat "org.agent=" test-agent) (test-run-call)))
          (should (equal (plist-get (car (org-dispatch--states)) :agent) test-agent))
          (should (equal (plist-get (car (org-dispatch--states)) :status) "running")))))))
 
-(ert-deftest custom-command-quotes-every-argument-for-the-pane-shell ()
-  (test-with-herdr
-   (let* ((test-agent "claude")
-          (literal "a title'; $(false) \"quoted\" & | > *")
-          (args (list "%s" literal)))
-     (org-dispatch--start-command "p-new" "claude" "printf" args "test-quote")
-     (let ((run (seq-find (lambda (call) (equal (seq-take call 2) '("pane" "run"))) test-calls)))
-       (with-temp-buffer
-         (should (eq 0 (call-process "sh" nil t nil "-c" (nth 3 run))))
-         (should (equal (buffer-string) literal)))))))
-
 (ert-deftest scheduled-tasks-choose-the-command-only-when-due ()
-  (test-with-herdr
+  (test-with-hc
    (let* ((test-agent "claude") (task (test-task test-agent))
           (file (plist-get task :file)) (id (plist-get task :id)))
      (test-with-command "claude" "claude-home"
@@ -643,27 +768,28 @@ cat >"$fixture/launch-tests.el" <<'EOF'
                         (list (org-dispatch--edit file id #'org-dispatch--task)) nil t)))
        (should task)
        (should (org-dispatch--launch task))
-       (should (seq-find (lambda (args) (and (equal (seq-take args 2) '("pane" "run"))
-                                           (string-prefix-p "command claude-auto " (nth 3 args)))) test-calls))))))
+       (should (equal (car (test-argv)) "claude-auto"))))))
 
 (ert-deftest custom-launchers-reuse-live-sessions-but-restart-closed-ones-fresh ()
-  (test-with-herdr
+  (test-with-hc
    (let ((test-agent "claude"))
      (test-with-command "claude" "claude-auto"
-       (let ((task (test-task test-agent t)) (test-live t))
+       (test-terminal "t-live" "claude" test-session)
+       (let ((task (test-task test-agent t)))
          (should (org-dispatch--launch task))
-         (should-not (seq-find (lambda (args) (equal (seq-take args 2) '("pane" "run"))) test-calls))
-         (should (equal (plist-get (car (org-dispatch--states)) :pane) "p-live")))
-       (setq test-calls nil)
-       (let* ((task (test-task test-agent t))
-              (test-session "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+         (should-not (test-run-call))
+         (should (equal (plist-get (car (org-dispatch--states)) :terminal) "t-live")))
+       (setq test-calls nil test-terminals nil)
+       (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))
+       (let* ((task (test-task test-agent t)))
          (should (org-dispatch--launch task))
-         (let ((run (seq-find (lambda (args) (equal (seq-take args 2) '("pane" "run"))) test-calls)))
-           (should-not (string-search "--resume" (nth 3 run)))
-           (should-not (string-search "--session" (nth 3 run))))
-         (should (equal (plist-get (car (org-dispatch--states)) :session) test-session))
-         (should (seq-find (lambda (args) (and (equal (seq-take args 2) '("agent" "prompt"))
-                                             (string-search "fresh session, not a native resume" (nth 3 args)))) test-calls))
+         (let ((argv (test-argv)) (state (car (org-dispatch--states))))
+           (should-not (member "--resume" argv))
+           (should-not (member test-session argv))
+           ;; A fresh session gets its own new ID, labelled and linked.
+           (should-not (equal (plist-get state :session) test-session))
+           (should (equal (cadr (member "--session-id" argv)) (plist-get state :session)))
+           (should (string-search "fresh session, not a native resume" (car (last argv)))))
          (org-dispatch--edit (plist-get task :file) (plist-get task :id)
                              (lambda () (should (= 2 (how-many "herdr:kit/claude:" (point-min) (point-max)))))))))))
 
@@ -674,7 +800,7 @@ cat >"$fixture/launch-tests.el" <<'EOF'
          (exec-path (cons bin exec-path))
          (dir (expand-file-name "~/.claude-acct/projects/x")))
     (unwind-protect
-        (test-with-herdr
+        (test-with-hc
          (let ((test-agent "claude"))
            (test-with-command "claude" "claude-auto"
              (make-directory dir t)
@@ -687,78 +813,82 @@ cat >"$fixture/launch-tests.el" <<'EOF'
              (should-not (org-dispatch--claude-launcher "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
              (let ((task (test-task test-agent t)))
                (should (org-dispatch--launch task))
-               (let ((run (seq-find (lambda (args) (equal (seq-take args 2) '("pane" "run"))) test-calls)))
-                 (should (string-prefix-p "command claude-acct " (nth 3 run)))
-                 (should (string-search (concat "--resume " test-session) (nth 3 run))))
-               (should-not (seq-find (lambda (args) (and (equal (seq-take args 2) '("agent" "prompt"))
-                                                       (string-search "fresh session" (nth 3 args)))) test-calls)))
-             ;; A live pane is still reused without starting anything.
-             (setq test-calls nil)
-             (let ((task (test-task test-agent t)) (test-live t))
+               (let ((argv (test-argv)))
+                 (should (equal (car argv) "claude-acct"))
+                 (should (equal (cadr (member "--resume" argv)) test-session))
+                 (should-not (string-search "fresh session" (car (last argv))))))
+             ;; A live terminal is still adopted without starting anything.
+             (setq test-calls nil test-terminals nil)
+             (test-terminal "t-live" "claude" test-session)
+             (let ((task (test-task test-agent t)))
                (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))
                (should (org-dispatch--launch task))
-               (should-not (seq-find (lambda (args) (equal (seq-take args 2) '("pane" "run"))) test-calls))))))
+               (should-not (test-run-call))))))
       (delete-directory (expand-file-name "~/.claude-acct") t)
       (delete-directory bin t))))
 
-(ert-deftest custom-startup-waits-for-readiness-and-refuses-wrong-workers ()
-  (test-with-herdr
-   (let ((polls 0) (test-agent "claude"))
-     (cl-letf (((symbol-function 'sleep-for) (lambda (&rest _) (setq polls (1+ polls))))
-               ((symbol-function 'org-dispatch--herdr)
+(ert-deftest startup-failures-hold-with-the-terminal-to-inspect ()
+  (dolist (failure '(blocked exited))
+    (test-with-hc
+     (let* ((task (test-task "claude"))
+            (test-status (and (eq failure 'blocked) "blocked"))
+            (test-exit-at-start (eq failure 'exited)))
+       (should-not (org-dispatch--launch task))
+       (should-not (org-dispatch--states))
+       (should-not (seq-find (lambda (args) (equal (car args) "send")) test-calls))
+       (org-dispatch--edit
+        (plist-get task :file) (plist-get task :id)
+        (lambda ()
+          (should (equal (org-get-todo-state) "HOLD"))
+          (should-not (org-get-tags nil t))
+          ;; The chosen session is linked with its terminal, for hc read and a later resume.
+          (should (string-search "@t-new][claude@kit/" (org-dispatch--subtree-text)))
+          (should (string-search (if (eq failure 'blocked) "blocked during startup" "exited during startup")
+                                 (org-dispatch--subtree-text)))
+          (should (string-search "hc read t-new" (org-dispatch--subtree-text)))))
+       (should-not (org-dispatch--eligible (org-dispatch--tasks) nil t))))))
+
+(ert-deftest an-unrunnable-launcher-holds-and-hc-outages-wait ()
+  (test-with-hc
+   (test-with-command "claude" "claude-missing"
+     (let ((task (test-task "claude")) (test-spawn-fail t))
+       (should-not (org-dispatch--launch task))
+       (should-not (org-dispatch--states))
+       (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                           (lambda ()
+                             (should (equal (org-get-todo-state) "HOLD"))
+                             (should-not (org-dispatch--section-bounds "Sessions"))
+                             (should (string-search "claude-missing could not start" (org-dispatch--subtree-text))))))))
+  (test-with-hc
+   (let ((task (test-task "pi")))
+     (cl-letf (((symbol-function 'org-dispatch--hc)
                 (lambda (&rest args)
-                  (let ((test-status (if (< polls 2) "unknown" "idle")))
-                    (apply #'test-herdr args)))))
-       (org-dispatch--start-command "p-new" "claude" "claude-auto" nil "test-ready")
-       (should (= polls 2))))
-   (let ((test-agent "pi"))
-     (should-error (org-dispatch--start-command "p-new" "claude" "wrong-worker" nil "test-wrong")))))
-
-(ert-deftest custom-startup-failures-hold-without-prompting-or-retrying ()
-  (dolist (failure '(blocked wrong-worker timeout missing-session))
-    (test-with-herdr
-     (test-with-command "claude" "claude-auto"
-       (let* ((task (test-task "claude"))
-              (test-agent (if (eq failure 'wrong-worker) "pi" "claude"))
-              (test-status (pcase failure ('blocked "blocked") ('timeout nil) (_ "idle")))
-              (clock 0))
-         (cl-letf (((symbol-function 'float-time) (lambda (&rest _) (setq clock (+ clock 20))))
-                   ((symbol-function 'sleep-for) #'ignore)
-                   ((symbol-function 'org-dispatch--pane-session)
-                    (lambda (&rest _) (error "no session reported"))))
-           (should-not (org-dispatch--launch task)))
-         (should-not (org-dispatch--states))
-         (should-not (seq-find (lambda (args) (equal (seq-take args 2) '("agent" "prompt"))) test-calls))
-         (org-dispatch--edit
-          (plist-get task :file) (plist-get task :id)
-          (lambda ()
-            (should (equal (org-get-todo-state) "HOLD"))
-            (should-not (org-get-tags nil t))
-            (should-not (org-dispatch--section-bounds "Sessions"))
-            (should (string-search (if (eq failure 'blocked) "blocked during startup" "failed during startup")
-                                   (org-dispatch--subtree-text)))))
-         (should-not (org-dispatch--eligible (org-dispatch--tasks) nil t)))))))
-
-(ert-deftest startup-dialog-holds-instead-of-launching-again ()
-  (test-with-herdr
-   (let ((task (plist-put (test-task "claude") :id nil))
-         (test-agent "claude") (test-status "blocked") (test-start-blocked t))
-     (should-not (org-dispatch--launch task))
+                  (if (equal (car args) "run") (signal 'org-dispatch-hc (list "connection" "core is down"))
+                    (apply #'test-hc args)))))
+       (should-not (org-dispatch--launch task)))
      (should-not (org-dispatch--states))
-     (should-not (org-dispatch--tasks))
-     (org-dispatch--edit
-      (plist-get task :file) nil
-      (lambda ()
-        (should (org-entry-get nil "ID"))
-        (should (equal (org-get-todo-state) "HOLD"))
-        (should-not (org-get-tags nil t))
-        (should-not (org-dispatch--section-bounds "Sessions"))
-        (should (string-search "claude is blocked during startup in Herdr pane p-new" (org-dispatch--subtree-text))))
-      "Test launch"))))
+     (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                         (lambda () (should (equal (org-get-todo-state) "AUTO")))))))
+
+(ert-deftest a-worker-without-status-starts-as-unknown-and-is-never-nudged ()
+  (test-with-hc
+   (let* ((task (test-task "claude")) (test-status nil) (clock (float-time))
+          (org-dispatch-nudge-after 0))
+     ;; A clock that moves 5 seconds a call lets the one-minute startup wait run out.
+     (cl-letf (((symbol-function 'float-time) (lambda (&rest _) (setq clock (+ clock 5)))))
+       (should (org-dispatch--launch task))
+       (let ((state (car (org-dispatch--states))))
+         (should (equal (plist-get state :status) "running"))
+         (should (equal (org-dispatch--agent-status state) "unknown"))
+         (dotimes (_ 3) (org-dispatch--watch (car (org-dispatch--states))))
+         (should (car (org-dispatch--states)))
+         (should-not (seq-find (lambda (args) (member (car args) '("send" "interrupt"))) test-calls))
+         (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                             (lambda () (should (equal (org-get-todo-state) "PROG")))))))))
 
 (ert-deftest launch-finds-a-heading-without-an-id-below-one-with-an-id ()
   ;; Jon's typed AUTO has no ID yet; an earlier heading's ID must not stand in for it.
-  (test-with-herdr
+  (test-with-hc
    (let* ((file (expand-file-name "noid.org" org-dispatch-root))
           (test-agent "claude"))
      (make-directory org-dispatch-root t)
@@ -777,28 +907,81 @@ cat >"$fixture/launch-tests.el" <<'EOF'
        (delete-file file)
        (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))))))
 
-(ert-deftest watch-uses-claude-in-blocked-and-missing-notices ()
-  (test-with-herdr
-   (let* ((task (test-task "claude"))
-          (state (list :id (plist-get task :id) :file (plist-get task :file)
-                       :heading "Test launch" :agent "claude" :pane "p-new"
-                       :status "running" :started (float-time) :nudges 0 :blocked 0)))
-     (org-dispatch--edit (plist-get task :file) (plist-get task :id) (lambda () (org-todo "PROG")))
-     (let ((test-status "blocked")) (org-dispatch--watch state))
-     (should (seq-find (lambda (args) (member "claude is waiting on an approval prompt." args)) test-calls))
-     (let ((test-status nil)) (org-dispatch--watch state))
-     (org-dispatch--edit (plist-get task :file) (plist-get task :id)
-                         (lambda ()
-                           (should (equal (org-get-todo-state) "HOLD"))
-                           (should-not (org-get-tags nil t))
-                           (should (string-search "claude is no longer running" (org-dispatch--subtree-text))))))))
+(ert-deftest watch-waits-on-blocked-and-holds-a-missing-worker ()
+  (test-with-hc
+   (let* ((task (test-task "claude")))
+     (should (org-dispatch--launch task))
+     (let ((state (car (org-dispatch--states))))
+       (setf (alist-get 'status (cdr (assoc "t-new" test-terminals))) '((state . "blocked")))
+       (setq test-calls nil)
+       (org-dispatch--watch state)
+       ;; Blocked notices come from herdr-notify's event consumer, not the watcher.
+       (should-not (seq-find (lambda (args) (member (car args) '("send" "interrupt" "kill"))) test-calls))
+       (setf (alist-get 'state (cdr (assoc "t-new" test-terminals))) "finished")
+       (org-dispatch--watch (car (org-dispatch--states)))
+       (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                           (lambda ()
+                             (should (equal (org-get-todo-state) "HOLD"))
+                             (should-not (org-get-tags nil t))
+                             (should (string-search "claude is no longer running in its hc terminal t-new"
+                                                    (org-dispatch--subtree-text)))))))))
+
+(ert-deftest watch-nudges-only-its-own-run-and-ignores-relabelled-terminals ()
+  (test-with-hc
+   (let* ((task (test-task "pi")) (org-dispatch-nudge-after 0) (clock 1000))
+     (should (org-dispatch--launch task))
+     (cl-letf (((symbol-function 'float-time) (lambda (&rest _) (setq clock (+ clock 10)))))
+       (setq test-calls nil)
+       (org-dispatch--watch (car (org-dispatch--states)))
+       (org-dispatch--watch (car (org-dispatch--states)))
+       (should (test-sent "nudge"))
+       ;; Another run's labels on the same address: the watcher treats the worker as gone.
+       (test-hc "label" "t-new" "org.run=someone-else")
+       (setq test-calls nil)
+       (should-not (org-dispatch--worker (car (org-dispatch--states))))
+       (should-error (org-dispatch--prompt (car (org-dispatch--states)) "hello"))
+       (should-not (seq-find (lambda (args) (equal (car args) "send")) test-calls))))))
+
+(ert-deftest stop-interrupts-then-kills-only-the-exact-worker ()
+  (test-with-hc
+   (let ((task (test-task "pi")))
+     (should (org-dispatch--launch task))
+     (let ((state (car (org-dispatch--states))))
+       ;; Settled workers are left running.
+       (should (equal (org-dispatch--interrupt-session state) "settled"))
+       ;; A working agent that stops at the interrupt.
+       (setf (alist-get 'status (cdr (assoc "t-new" test-terminals))) '((state . "working")))
+       (cl-letf (((symbol-function 'test-hc-interrupt) nil))
+         (let ((orig (symbol-function 'org-dispatch--hc)))
+           (cl-letf (((symbol-function 'org-dispatch--hc)
+                      (lambda (&rest args)
+                        (when (equal (car args) "interrupt")
+                          (setf (alist-get 'status (cdr (assoc "t-new" test-terminals))) '((state . "idle"))))
+                        (apply orig args))))
+             (should (equal (org-dispatch--interrupt-session state) "interrupted")))))
+       ;; One that ignores it is killed, after its labels are checked again.
+       (setf (alist-get 'status (cdr (assoc "t-new" test-terminals))) '((state . "working")))
+       (let ((orig (symbol-function 'org-dispatch--hc)) (clock 0))
+         (cl-letf (((symbol-function 'float-time) (lambda (&rest _) (setq clock (+ clock 5))))
+                   ((symbol-function 'org-dispatch--hc)
+                    (lambda (&rest args)
+                      (when (equal (car args) "kill")
+                        (setf (alist-get 'state (cdr (assoc "t-new" test-terminals))) "finished"))
+                      (apply orig args))))
+           (should (equal (org-dispatch--interrupt-session state) "killed"))))
+       (should (seq-find (lambda (args) (equal args '("kill" "t-new"))) test-calls))
+       (should (equal (org-dispatch--interrupt-session state) "gone"))
+       ;; A terminal from another run is never touched.
+       (setq test-terminals nil test-calls nil)
+       (test-terminal "t-other" "pi" (plist-get state :session) '((org.run . "other-run")))
+       (setf (alist-get 'status (cdr (assoc "t-other" test-terminals))) '((state . "working")))
+       (should-error (org-dispatch--interrupt-session state))
+       (should-not (seq-find (lambda (args) (member (car args) '("interrupt" "kill"))) test-calls))))))
 
 (ert-deftest watch-drops-auto-when-jon-changes-the-state-outside-batch-org ()
-  (test-with-herdr
+  (test-with-hc
    (let* ((task (test-task "pi"))
-          (file (plist-get task :file))
-          (state (list :id (plist-get task :id) :file file :heading "Test launch" :agent "pi" :pane "p-new"
-                       :status "running" :started (float-time) :nudges 0 :blocked 0)))
+          (file (plist-get task :file)))
      (should (org-dispatch--launch task))
      ;; As Jon's Emacs would save it, without the dispatcher's hook.
      (with-temp-file file
@@ -806,8 +989,11 @@ cat >"$fixture/launch-tests.el" <<'EOF'
        (goto-char (point-min))
        (should (re-search-forward "^\\* PROG Test launch +:auto:$" nil t))
        (replace-match "* DONE Test launch :auto:"))
-     (org-dispatch--watch state)
+     (setq test-calls nil)
+     (org-dispatch--watch (car (org-dispatch--states)))
      (should-not (org-dispatch--states))
+     ;; A state change elsewhere is not permission to touch the worker.
+     (should-not (seq-find (lambda (args) (member (car args) '("send" "interrupt" "kill"))) test-calls))
      (org-dispatch--edit file (plist-get task :id)
                          (lambda ()
                            (should (equal (org-get-todo-state) "DONE"))
@@ -822,7 +1008,7 @@ check "launch, resume, session identity, and watch for pi and Claude" \
 check "dependencies, handoffs, and recoverable plan queuing" \
   emacs -Q --batch -l "$org/dispatch/org-dispatch.el" -l "$org/tests/dependencies.el"
 
-check "pane retirement eligibility, stability, races and reopening" \
+check "worker retirement eligibility, stability, races and reopening" \
   emacs -Q --batch -l "$org/dispatch/org-dispatch.el" -l "$org/tests/retirement.el"
 
 check "safe task interruption, parking, replay and reassignment" \

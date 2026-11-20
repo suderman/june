@@ -229,11 +229,14 @@ test("resume refuses a working or blocked linked agent, but allows idle and a re
 	await writeFile(f.project, `* HOLD Existing thread\n:PROPERTIES:\n:ID: resume123\n:END:\n\n** Sessions\n- [[herdr:kit/pi:${session}@w1:p1][worker]]\n`);
 	const resume = { file: request.file, heading: "id:resume123", expected: "HOLD" as const, host: "kit", note: "Alex answered.", key: "inst:8" };
 	let status = "working";
-	const herdr = new Herdr(f.config.herdr, async (args) => args.includes("agent")
-		? JSON.stringify({ result: { agents: [{ agent: "pi", agent_status: status, pane_id: "w1:p1", agent_session: { value: `${session}.jsonl` } }] } })
-		: "{}");
+	const herdr = new Herdr(f.config.herdr, async (args) => args.includes("ls")
+		? JSON.stringify({ terminals: [{ address: "t1", agent: "pi", state: "live", status }] })
+		: JSON.stringify({ address: "t1", state: "live", status: { state: status }, labels: { "org.agent": "pi", "org.session": session } }));
 	await assert.rejects(f.dispatch.resume(resume, herdr), /active agent/);
 	status = "blocked";
+	await assert.rejects(f.dispatch.resume(resume, herdr), /active agent/);
+	// A live agent that reports no status may be working; it is never taken for idle.
+	status = "unknown";
 	await assert.rejects(f.dispatch.resume(resume, herdr), /active agent/);
 	assert.equal(f.runs.length, 0, "no edit while an agent needs attention");
 	status = "idle";
@@ -566,7 +569,7 @@ test("removal refuses active linked workers and malformed requests before org-ed
 
 const stopping = { file: request.file, heading: "id:resume123", revision: "a".repeat(64), note: "Jon asked to stop this run and use pi.", key: "inst:stop1" };
 
-test("stop uses the narrow supported operation with no HERDR_ENV, kick or follow", async (t) => {
+test("stop uses the narrow supported operation with no kick or follow", async (t) => {
 	const f = await fixture();
 	t.after(f.cleanup);
 	const result = await f.dispatch.stop(stopping);
@@ -609,18 +612,18 @@ test("review tool forwards exact revision and scopes, maps human checks and refu
 let hasEmacs = false;
 try { execFileSync("emacs", ["--version"], { stdio: "ignore" }); hasEmacs = true; } catch { /* Real-org tests need Emacs; the tool-contract tests above do not. */ }
 
-// Always use this checkout and private state. No service, live Org file or real Herdr call is involved.
+// Always use this checkout and private state. No service, live Org file or real hc call is involved.
 async function removalFixture() {
 	const f = await fixture();
 	const init = join(f.dir, "init.el");
 	await writeFile(init, `(require 'org)\n(setq org-agenda-files (list ${JSON.stringify(f.project)}))\n`);
 	const bin = join(f.dir, "bin");
 	await mkdir(bin);
-	await writeFile(join(bin, "herdr"), '#!/bin/sh\nprintf \'%s\\n\' \'{"result":{"agents":[]}}\'\n', { mode: 0o755 });
+	await writeFile(join(bin, "hc"), '#!/bin/sh\nprintf \'%s\\n\' \'{"terminals":[]}\'\n', { mode: 0o755 });
 	const runtime = join(f.dir, "runtime");
 	await mkdir(runtime);
 	const options = { encoding: "utf8" as const, stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"], env: {
-		...process.env, HERDR_PANE_ID: undefined, HOME: f.dir, PATH: `${bin}:${process.env.PATH}`, ORG_DISPATCH_HOST: "kit", ORG_DISPATCH_ROOT: f.root,
+		...process.env, HC_TERMINAL_ID: undefined, HOME: f.dir, PATH: `${bin}:${process.env.PATH}`, ORG_DISPATCH_HOST: "kit", ORG_DISPATCH_ROOT: f.root,
 		ORG_DISPATCH_EMACS_INIT: init, ORG_EDIT_EL: fileURLToPath(new URL("../org/edit/org-edit.el", import.meta.url)),
 		ORG_DISPATCH_EL: fileURLToPath(new URL("../org/dispatch/org-dispatch.el", import.meta.url)),
 		XDG_STATE_HOME: join(f.dir, "state"), XDG_CONFIG_HOME: join(f.dir, "config"), XDG_RUNTIME_DIR: runtime,
@@ -880,7 +883,7 @@ test("real removal refuses stale or unsafe tasks and repairs only explicitly sel
 	assert.equal(await readFile(f.project, "utf8"), edited, "a concurrent edge edit is not overwritten");
 });
 
-test("real removal serializes against dispatch, refuses active state and Herdr, and detects writes during save", { skip: !hasEmacs }, async (t) => {
+test("real removal serializes against dispatch, refuses active state and agents, and detects writes during save", { skip: !hasEmacs }, async (t) => {
 	const f = await removalFixture();
 	t.after(f.cleanup);
 	await writeFile(f.project, removableTask().replace("** Dialog", "- [[herdr:kit/pi:01a1176c-3aa6-7717-a4c6-eaa0aa0a0088@w9:p2][newer idle run]]\n\n** Dialog"));
@@ -896,7 +899,15 @@ test("real removal serializes against dispatch, refuses active state and Herdr, 
 		assert.equal(await readFile(f.project, "utf8"), before);
 	}
 	await writeFile(join(stateDir, "resume123.json"), JSON.stringify({ status: "finished" }));
-	await writeFile(join(f.bin, "herdr"), '#!/bin/sh\nprintf \'%s\\n\' \'{"result":{"agents":[{"agent_status":"working","agent_session":{"value":"01a1176c-3aa6-7717-a4c6-eaa0aa0a0833"}}]}}\'\n', { mode: 0o755 });
+	// One live terminal carries the task's session and reports working.
+	await writeFile(join(f.bin, "hc"), `#!/bin/sh
+case "$1 $*" in
+  "ls "*org.session=01a1176c-3aa6-7717-a4c6-eaa0aa0a0833*) echo '{"terminals":[{"address":"t1","state":"live","status":"working"}]}';;
+  "ls "*) echo '{"terminals":[]}';;
+  "get "*) echo '{"address":"t1","state":"live","status":{"state":"working"},"labels":{"org.agent":"pi","org.session":"01a1176c-3aa6-7717-a4c6-eaa0aa0a0833"}}';;
+  *) exit 66;;
+esac
+`, { mode: 0o755 });
 	await assert.rejects(f.remove(), /active agent/);
 	assert.equal(await readFile(f.project, "utf8"), before);
 	const history = before.replace("** Sessions", "** Previous runs");
@@ -904,36 +915,37 @@ test("real removal serializes against dispatch, refuses active state and Herdr, 
 	await assert.rejects(f.remove(), /active agent/, "a live historical session is still a worker, even outside Sessions");
 	assert.equal(await readFile(f.project, "utf8"), history);
 	await writeFile(f.project, before);
-	await writeFile(join(f.bin, "herdr"), '#!/bin/sh\nprintf \'%s\\n\' \'{"result":{"agents":[]}}\'\n', { mode: 0o755 });
+	await writeFile(join(f.bin, "hc"), '#!/bin/sh\nprintf \'%s\\n\' \'{"terminals":[]}\'\n', { mode: 0o755 });
 	// Agenda discovery runs in a separate Emacs after the revision check. Simulate an external autosave there.
 	await writeFile(f.init, `(require 'org)\n(setq org-agenda-files (list ${JSON.stringify(f.project)}))\n(write-region "\\n* TODO Concurrent autosave\\n" nil ${JSON.stringify(f.project)} t 'silent)\n`);
 	await assert.rejects(f.remove(), /changed on disk/);
 	assert.equal(await readFile(f.project, "utf8"), `${before}\n* TODO Concurrent autosave\n`);
 });
 
-test("real stop parks without unsafe input, blocks late todo writes, then confirms and reassigns", { skip: !hasEmacs }, async (t) => {
+test("real stop parks first, interrupts only its own worker, blocks late todo writes, and reassigns", { skip: !hasEmacs }, async (t) => {
 	const f = await removalFixture();
 	t.after(f.cleanup);
 	await writeFile(f.project, removableTask("PROG").replace(":AGENT: pi", ":AGENT: claude").replace("herdr:kit/pi:", "herdr:kit/claude:"));
 	const stateDir = join(f.dir, "state/org-dispatch");
 	await mkdir(stateDir, { recursive: true });
 	const stateFile = join(stateDir, "resume123.json");
-	await writeFile(stateFile, JSON.stringify({ id: "resume123", file: f.project, heading: "Existing thread", dir: f.dir, status: "running", agent: "claude", pane: "w9:p1", session: "01a1176c-3aa6-7717-a4c6-eaa0aa0a0833" }));
+	await writeFile(stateFile, JSON.stringify({ id: "resume123", file: f.project, heading: "Existing thread", dir: f.dir, status: "running", agent: "claude", host: "kit", terminal: "t1", run: "run-1", session: "01a1176c-3aa6-7717-a4c6-eaa0aa0a0833" }));
 	const statusFile = join(f.dir, "status");
-	const callsFile = join(f.dir, "keys");
+	const callsFile = join(f.dir, "calls");
 	await writeFile(statusFile, "working\n");
-	await writeFile(join(f.bin, "herdr"), `#!/bin/sh
+	// The worker t1 carries the run's labels. Interrupting it checks that the task was parked first.
+	await writeFile(join(f.bin, "hc"), `#!/bin/sh
 set -eu
-case "$*" in
-  '--session default agent list')
-    read -r status < ${JSON.stringify(statusFile)}
-    printf '{"result":{"agents":[{"agent":"claude","name":"auto-stop-test","pane_id":"w9:p1","agent_status":"%s","agent_session":{"value":"01a1176c-3aa6-7717-a4c6-eaa0aa0a0833"}}]}}\\n' "$status";;
-  '--session default agent send-keys auto-stop-test esc')
+read -r status < ${JSON.stringify(statusFile)}
+case "$1 $*" in
+  "ls "*org.session=01a1176c-3aa6-7717-a4c6-eaa0aa0a0833*) printf '{"terminals":[{"address":"t1","state":"live","status":"%s"}]}\\n' "$status";;
+  "get "*) printf '{"address":"t1","state":"live","status":{"state":"%s"},"labels":{"org.task":"resume123","org.run":"run-1","org.agent":"claude","org.session":"01a1176c-3aa6-7717-a4c6-eaa0aa0a0833"}}\\n' "$status";;
+  "interrupt "*)
     grep -q '^\\* HOLD ' ${JSON.stringify(f.project)}
     grep -q '"status":"stopping"' ${JSON.stringify(stateFile)}
     printf '%s\\n' "$*" >> ${JSON.stringify(callsFile)}
     printf 'idle\\n' > ${JSON.stringify(statusFile)}
-    printf '{}\\n';;
+    printf '{"outcome":"stopped"}\\n';;
   *) exit 66;;
 esac
 `, { mode: 0o755 });
@@ -941,28 +953,26 @@ esac
 	const locked = new Dispatch(new Org(f.root), f.config, async (argv) => execFileSync("flock", ["-n", join(f.runtime, "org-dispatch.lock"), "bash", fileURLToPath(new URL("../org/edit/org-edit", import.meta.url)), ...argv.slice(1)], f.options));
 	await assert.rejects(locked.stop({ ...stopping, revision }), /dispatcher or task edit busy/);
 	await assert.rejects(f.dispatch.stop({ ...stopping, revision: "0".repeat(64) }), /revision changed/);
-	await assert.rejects(f.dispatch.stop({ ...stopping, revision }), /Herdr lacks identity-bound interruption/);
-	assert.equal(JSON.parse(await readFile(stateFile, "utf8")).status, "stopping");
-	const pending = await readFile(f.project, "utf8");
-	assert.match(pending, /^\* HOLD Existing thread$/m);
-	assert.doesNotMatch(pending, /^:JUNE_STOPPED:/m);
-	for (const state of ["EVAL", "HOLD", "DONE", "TODO", "PROG", "AUTO"]) {
-		assert.throws(() => execFileSync("bash", [fileURLToPath(new URL("../org/edit/org-edit", import.meta.url)), "todo", f.project, stopping.heading, state], {
-			...f.options, env: { ...f.options.env, HERDR_PANE_ID: "w9:p1" },
-		}), /task stop is pending or completed/);
-		assert.equal(await readFile(f.project, "utf8"), pending, "late general todo writes leave the task untouched");
-	}
-	await writeFile(statusFile, "idle\n");
 	const result = await f.dispatch.stop({ ...stopping, revision });
-	assert.deepEqual([result.state, result.stopped, result.replay], ["HOLD", true, true]);
+	assert.deepEqual([result.state, result.stopped, result.replay], ["HOLD", true, false]);
+	assert.equal((await readFile(callsFile, "utf8")).trim(), "interrupt --json t1", "one stop key, to exactly the run's terminal");
 	const parked = await readFile(f.project, "utf8");
+	assert.match(parked, /^\* HOLD Existing thread$/m);
+	assert.match(parked, /^:JUNE_STOPPED:/m);
+	assert.match(parked, /Worker t1 stopped its turn at the interrupt\./);
 	assert.match(parked, /^:AGENT: *claude$/m);
 	assert.match(parked, /^:DEPENDS: *id:drop id:keep$/m);
 	assert.ok(parked.includes("Keep this scope. Wait for Drop before making art."));
 	assert.ok(parked.includes("- Jon [2026-11-07 Sat 22:00] Wait for Drop.\n- Agent [2026-11-07 Sat 22:01] Paused for Drop."));
 	assert.equal(JSON.parse(await readFile(stateFile, "utf8")).status, "stopped");
-	await assert.rejects(readFile(callsFile, "utf8"), { code: "ENOENT" });
+	for (const state of ["EVAL", "HOLD", "DONE", "TODO", "PROG", "AUTO"]) {
+		assert.throws(() => execFileSync("bash", [fileURLToPath(new URL("../org/edit/org-edit", import.meta.url)), "todo", f.project, stopping.heading, state], {
+			...f.options, env: { ...f.options.env, HC_TERMINAL_ID: "t1", CLAUDECODE: "1" },
+		}), /task stop is pending or completed/);
+		assert.equal(await readFile(f.project, "utf8"), parked, "late writes from the stopped worker leave the task untouched");
+	}
 	assert.equal((await f.dispatch.stop({ ...stopping, revision })).replay, true);
+	assert.equal((await readFile(callsFile, "utf8")).trim().split("\n").length, 1, "a replay sends nothing");
 	const resumed = await f.dispatch.resume({ file: request.file, heading: stopping.heading, expected: "HOLD", note: "Jon asked to use pi.", agent: "pi", host: "kit", key: "inst:resume2" }, idleHerdr);
 	assert.equal(resumed.written, true);
 	const later = await readFile(f.project, "utf8");
@@ -970,5 +980,4 @@ esac
 	assert.match(later, /^:AGENT: *pi$/m);
 	assert.equal((await f.dispatch.stop({ ...stopping, revision })).state, "AUTO", "old stop replay never parks a new run");
 	assert.equal(await readFile(f.project, "utf8"), later);
-	await assert.rejects(readFile(callsFile, "utf8"), { code: "ENOENT" });
 });

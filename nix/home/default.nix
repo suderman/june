@@ -81,11 +81,29 @@ in {
       default = 7347;
       description = "The loopback port of the WebSocket listener.";
     };
-    herdrPackage = lib.mkOption {
+    hcPackage = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = lib.attrByPath ["programs" "herdr" "package"] null config;
-      defaultText = lib.literalExpression "config.programs.herdr.package, when that option exists";
-      description = "Herdr, which the dispatcher and herdr-link drive.";
+      default = lib.attrByPath ["programs" "hc" "package"] null config;
+      defaultText = lib.literalExpression "config.programs.hc.package, when that option exists";
+      description = "herdr-core, whose hc command the dispatcher, org-edit, herdr-link and herdr-notify drive.";
+    };
+    notify = {
+      url = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "https://ntfy.sh/my-agents";
+        description = "ntfy topic URL for agent notices. The dispatcher posts task-level HOLD and finish notices here; null sends none.";
+      };
+      tokenFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "File holding an ntfy access token, read at each notice. Keep it out of the Nix store.";
+      };
+      watch = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Run herdr-notify watch here, which follows hc events and tells of agents that block or end a turn. Enable it on exactly one host, the one whose hc core has the other machines added, so each event is told once.";
+      };
     };
     emacsPackage = lib.mkOption {
       type = lib.types.package;
@@ -101,8 +119,12 @@ in {
   config = lib.mkIf cfg.enable {
     assertions = [
       {
-        assertion = cfg.herdrPackage != null;
-        message = "programs.june needs Herdr: set programs.june.herdrPackage";
+        assertion = cfg.hcPackage != null;
+        message = "programs.june needs herdr-core: set programs.june.hcPackage";
+      }
+      {
+        assertion = !cfg.notify.watch || cfg.notify.url != null;
+        message = "programs.june.notify.watch needs programs.june.notify.url";
       }
     ];
 

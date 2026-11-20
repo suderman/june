@@ -18,7 +18,8 @@ import type { Org } from "./tools/org.ts";
 import { user } from "./user.ts";
 
 /** One run as org-dispatch records it in ~/.local/state/org-dispatch/<id>.json. */
-export type DispatchRun = { id: string; heading?: string; file?: string; status?: string; started?: number; pane?: string };
+/** A dispatcher receipt. terminal is the hc address of its worker; pane is a receipt from before herdr-core. */
+export type DispatchRun = { id: string; heading?: string; file?: string; status?: string; started?: number; terminal?: string; pane?: string };
 
 /** `missed` marks one look that could not find the task, which only a second look in a row confirms. */
 type Seen = { signal: string; title: string; host: string; file?: string; headlineAt?: number; report?: WorkerHeadline; missed?: true };
@@ -42,7 +43,7 @@ export function createWatch(options: {
 	window: { start: string; end: string };
 	org: Pick<Org, "byId">;
 	registry: { snapshot(): RegistrySnapshot };
-	herdr: Pick<Herdr, "json">;
+	herdr: Pick<Herdr, "status">;
 	run: Run;
 	state: string;
 	log: Logger;
@@ -94,9 +95,9 @@ export function createWatch(options: {
 		const headlineAt = Math.max(task?.headlineAt ?? 0, last?.headlineAt ?? 0);
 		if (task === undefined) return { signal: "missing", title, ...(headlineAt > 0 ? { headlineAt } : {}) };
 		let signal = task.state ?? "none";
-		if (signal === "PROG" && run.status !== "finished" && run.pane) {
-			const got = await options.herdr.json(host, ["agent", "get", run.pane]).catch(() => undefined);
-			if (got?.result?.agent?.agent_status === "blocked") signal = "blocked";
+		if (signal === "PROG" && run.status !== "finished" && run.terminal) {
+			const status = await options.herdr.status(host, run.terminal).catch(() => undefined);
+			if (status === "blocked") signal = "blocked";
 		}
 		// A state-bound stamp must belong to this run and be newer than the last observation.
 		const fresh = task.headline !== undefined && task.headlineAt !== undefined && run.started !== undefined

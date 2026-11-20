@@ -1,10 +1,14 @@
-// Herdr tools: structured reads and user-requested follow-ups through the herdr CLI's JSON API.
+// Herdr tools: structured reads and user-requested follow-ups through herdr-core's CLI, hc.
+// hc runs each agent in a terminal with a permanent address (t7). Another machine's terminals are reached as
+// HOST/t7 when this core has that machine added (`hc machine add HOST`), and over SSH otherwise.
 import { execFile } from "node:child_process";
 import { int, obj, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import type { Config } from "../config.ts";
 
-const TARGET = /^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$/;
+/** A terminal address (t7), a name, or a session label value; never a path or an option. */
+const TARGET = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+const AGENTS = /^(pi|claude|claude-code|codex)$/;
 
 export type Run = (argv: readonly string[], timeoutMs: number) => Promise<string>;
 
@@ -13,13 +17,26 @@ export const runProcess: Run = (argv, timeoutMs) =>
 		execFile(argv[0]!, argv.slice(1), { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
 			if (!error) return resolve(stdout);
 			const failure = new Error(`${argv.slice(0, 4).join(" ")}: ${(stderr || error.message).trim().slice(0, 500)}`);
-			reject(Object.assign(failure, { exitCode: typeof error.code === "number" ? error.code : undefined, stdout }));
+			reject(Object.assign(failure, { exitCode: typeof error.code === "number" ? error.code : undefined, stdout, stderr }));
 		});
 	});
+
+/** An hc terminal record, as `hc get` prints it. */
+export type Terminal = {
+	address: string;
+	state: "live" | "finished";
+	status?: { state?: string; kind?: string; msg?: string } | null;
+	labels?: Record<string, string>;
+	cwd?: string;
+	title?: string;
+	turn?: number;
+	foreground?: { name?: string; cwd?: string } | null;
+};
 
 export class Herdr {
 	readonly #config: Config["herdr"];
 	readonly #run: Run;
+	#machines?: { at: number; names: Promise<Set<string>> };
 
 	constructor(config: Config["herdr"], run: Run = runProcess) {
 		this.#config = config;
@@ -30,89 +47,131 @@ export class Herdr {
 		return [this.#config.host, ...Object.keys(this.#config.hosts)];
 	}
 
-	/** argv for `herdr --session <s> ...args` on `host`; other hosts go over SSH with token-only arguments. */
-	#argv(host: string, args: readonly string[]): string[] {
-		const base = ["herdr", "--session", this.#config.session, ...args];
-		if (host === this.#config.host) return base;
+	/** Machines this core reaches natively, refreshed every half minute. */
+	#native(host: string): Promise<boolean> {
+		if (host === this.#config.host) return Promise.resolve(true);
+		if (this.#machines === undefined || Date.now() - this.#machines.at > 30_000) {
+			const names = this.#run(["hc", "machine", "ls", "--json"], 10_000)
+				.then((out) => new Set<string>((JSON.parse(out).machines ?? []).filter((m: any) => m.state === "connected").map((m: any) => m.name)))
+				.catch(() => new Set<string>());
+			this.#machines = { at: Date.now(), names };
+		}
+		return this.#machines.names.then((names) => names.has(host));
+	}
+
+	/** argv for hc ARGS about HOST: local hc for this host and added machines, else hc over SSH with simple arguments. */
+	async #argv(host: string, args: readonly string[]): Promise<{ argv: string[]; prefix: string }> {
+		if (await this.#native(host)) return { argv: ["hc", ...args], prefix: host === this.#config.host ? "" : `${host}/` };
 		const remote = this.#config.hosts[host];
 		if (remote === undefined) throw new Error(`Unknown host ${host}; known: ${this.hosts().join(", ")}`);
-		if (!base.every((arg) => TARGET.test(arg) || /^--?[a-z-]+$/.test(arg)))
-			throw new Error("Remote Herdr calls take simple arguments only");
-		return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", remote.ssh ?? host, ...base];
+		if (!args.every((arg) => TARGET.test(arg) || /^--?[a-z-]+$/.test(arg) || /^[a-z.]+=[0-9a-f-]+$/.test(arg)))
+			throw new Error("Remote hc calls take simple arguments only");
+		return { argv: ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", remote.ssh ?? host, "hc", ...args], prefix: "" };
 	}
 
-	async json(host: string, args: readonly string[], timeoutMs = 15_000): Promise<any> {
-		const out = await this.#run(this.#argv(host, args), timeoutMs).catch((error: Error & { stdout?: string }) => {
-			if (error.stdout?.trim().startsWith("{")) return error.stdout;
+	async #json(host: string, args: readonly string[], timeoutMs = 15_000): Promise<any> {
+		const { argv } = await this.#argv(host, args);
+		const out = await this.#run(argv, timeoutMs).catch((error: Error & { stderr?: string }) => {
+			const json = (() => { try { return JSON.parse(error.stderr ?? ""); } catch { return undefined; } })();
+			if (json?.error) throw Object.assign(new Error(`hc on ${host}: ${json.error.kind}: ${json.error.message}`), { kind: json.error.kind });
 			throw error;
 		});
-		const json = JSON.parse(out);
-		if (json?.error) throw new Error(`herdr on ${host}: ${json.error.code}: ${json.error.message}`);
-		return json;
+		return out.trim() === "" ? undefined : JSON.parse(out);
 	}
 
-	async text(host: string, args: readonly string[], timeoutMs = 15_000): Promise<string> {
-		return this.#run(this.#argv(host, args), timeoutMs);
+	/** The address hc on this machine uses for HOST's terminal ADDRESS. */
+	async #address(host: string, address: string): Promise<string> {
+		checkTarget(address);
+		return (await this.#argv(host, [])).prefix + address;
+	}
+
+	/** One terminal's full record, or undefined when hc has none. */
+	async terminal(host: string, address: string): Promise<Terminal | undefined> {
+		return this.#json(host, ["get", await this.#address(host, address), "--json"]).catch((error) => {
+			if (error.kind === "not_found") return undefined;
+			throw error;
+		});
+	}
+
+	/** A terminal's reported status, "unknown" while live without one, undefined once it is gone. */
+	async status(host: string, address: string): Promise<string | undefined> {
+		const terminal = await this.terminal(host, address);
+		return terminal?.state === "live" ? (terminal.status?.state ?? "unknown") : undefined;
+	}
+
+	/** Live terminals on HOST carrying LABEL=VALUE, with full records. */
+	async labelled(host: string, label: string, value: string): Promise<Terminal[]> {
+		checkTarget(value);
+		const { prefix } = await this.#argv(host, []);
+		const list = await this.#json(host, ["ls", "--json", "--label", `${label}=${value}`]);
+		const rows = (list?.terminals ?? []).filter((row: any) => row.state === "live" && sameHost(row.address, prefix));
+		return (await Promise.all(rows.map((row: any) => this.#json(host, ["get", row.address, "--json"]).catch(() => undefined))))
+			.filter((terminal): terminal is Terminal => terminal !== undefined);
+	}
+
+	/** The live terminal running agent SESSION on HOST, by its org.session label. */
+	async session(host: string, session: string): Promise<Terminal | undefined> {
+		const live = await this.labelled(host, "org.session", session);
+		if (live.length > 1) throw new Error(`Session ${session} runs in ${live.length} terminals on ${host}`);
+		return live[0];
 	}
 
 	async agents(host: string): Promise<AgentSummary[]> {
-		const [agents, workspaces] = await Promise.all([
-			this.json(host, ["agent", "list"]),
-			this.json(host, ["workspace", "list"]).catch(() => undefined),
-		]);
-		const labels = new Map<string, string>();
-		for (const ws of workspaces?.result?.workspaces ?? []) labels.set(ws.workspace_id, ws.label);
-		return (agents?.result?.agents ?? []).map((agent: any) => summarize(host, agent, labels));
+		const { prefix } = await this.#argv(host, []);
+		const list = await this.#json(host, ["ls", "--json"]);
+		const rows = (list?.terminals ?? []).filter((row: any) =>
+			row.state === "live" && sameHost(row.address, prefix) && (AGENTS.test(row.agent ?? "") || row.status != null));
+		const full = await Promise.all(rows.map((row: any) => this.#json(host, ["get", row.address, "--json"]).catch(() => undefined)));
+		return rows.map((row: any, i: number) => summarize(host, prefix, row, full[i]));
 	}
 
 	async read(host: string, target: string, lines: number): Promise<string> {
-		const args = ["agent", "read", checkTarget(target), "--source", "recent-unwrapped", "--lines", String(lines)];
-		const out = await this.text(host, args);
-		// `agent read` prints JSON in this Herdr version; older ones print text.
-		try {
-			const json = JSON.parse(out);
-			return String(json?.result?.text ?? json?.result?.content ?? out);
-		} catch {
-			return out;
-		}
+		const { argv } = await this.#argv(host, ["read", await this.#address(host, target), "--lines", String(lines)]);
+		return this.#run(argv, 15_000);
 	}
 
+	/** Type TEXT into a local terminal and press Enter; hc refuses one that is blocked on a dialog. */
 	prompt(target: string, text: string): Promise<any> {
-		return this.json(this.#config.host, ["agent", "prompt", checkTarget(target), text]);
+		return this.#json(this.#config.host, ["send", checkTarget(target), text, "--json"]);
 	}
 }
 
 export type AgentSummary = {
 	host: string;
-	pane: string;
+	terminal: string;
 	agent: string;
 	status: string;
-	workspace: string;
+	where?: string;
 	cwd: string;
 	session?: string;
+	task?: string;
 	title?: string;
-	focused: boolean;
 	herdrLink?: string;
 };
 
-function summarize(host: string, agent: any, labels: Map<string, string>): AgentSummary {
-	const session = agent.agent_session?.value as string | undefined;
-	const uuid = session?.match(/[0-9a-f]{8}-[0-9a-f-]{27}/)?.[0];
+function sameHost(address: string, prefix: string): boolean {
+	return prefix === "" ? !address.includes("/") : address.startsWith(prefix);
+}
+
+function summarize(host: string, prefix: string, row: any, full: Terminal | undefined): AgentSummary {
+	const labels = full?.labels ?? {};
+	const terminal = String(row.address).slice(prefix.length);
+	const agent = labels["org.agent"] ?? (row.agent === "claude-code" ? "claude" : String(row.agent ?? "unknown"));
+	const session = labels["org.session"];
 	return {
-		host,
-		pane: agent.pane_id,
-		agent: agent.agent,
-		status: agent.agent_status,
-		workspace: labels.get(agent.workspace_id) ?? agent.workspace_id,
-		cwd: agent.foreground_cwd ?? agent.cwd,
-		...(uuid ? { session: uuid, herdrLink: `herdr:${host}/${agent.agent}:${uuid}` } : {}),
-		...(agent.terminal_title_stripped ? { title: String(agent.terminal_title_stripped).slice(0, 120) } : {}),
-		focused: agent.focused === true,
+		host, terminal, agent,
+		// No reported status is unknown, never idle.
+		status: typeof row.status === "string" ? row.status : (full?.status?.state ?? "unknown"),
+		...(row.where ? { where: String(row.where) } : {}),
+		cwd: full?.foreground?.cwd ?? row.cwd,
+		...(session ? { session, herdrLink: `herdr:${host}/${agent}:${session}@${terminal}` } : {}),
+		...(labels["org.task"] ? { task: labels["org.task"] } : {}),
+		...(full?.title ? { title: String(full.title).slice(0, 120) } : {}),
 	};
 }
 
 function checkTarget(target: string): string {
-	if (!TARGET.test(target)) throw new Error(`Invalid Herdr target ${JSON.stringify(target)}`);
+	if (!TARGET.test(target)) throw new Error(`Invalid hc terminal ${JSON.stringify(target)}`);
 	return target;
 }
 
@@ -128,7 +187,7 @@ export function createHerdrExtension(config: Config, herdr = new Herdr(config.he
 		defineTool({
 			name: "herdr_list_agents",
 			description:
-				"List the coding agents (Pi, Claude, Codex) running in Herdr panes on a machine, with status (working, blocked, done, idle, unknown), workspace, directory, and session link. blocked means the agent waits for a person; idle or done means its terminal settled, not that its task succeeded, so read its output and the task's Org state before reporting success. Inspect agents here to say what they are doing, but leave launching, watching, and nudging them to the dispatcher.",
+				"List the coding agents (Pi, Claude, Codex) running in herdr-core terminals on a machine, with terminal address, status (working, blocked, done, idle, or unknown when the agent reports none), directory, and session link. blocked means the agent waits for a person; idle or done means its terminal settled, not that its task succeeded, so read its output and the task's Org state before reporting success. Unknown is never idle. Inspect agents here to say what they are doing, but leave launching, watching, and nudging them to the dispatcher.",
 			parameters: obj({ host, status: opt(str({ description: "Only agents with this status" })) }),
 			replay: "safe",
 			execute: async (args) => {
@@ -138,15 +197,18 @@ export function createHerdrExtension(config: Config, herdr = new Herdr(config.he
 		}),
 		defineTool({
 			name: "herdr_get_agent",
-			description: "Show one Herdr agent pane in full, by pane id (such as w4Z:p1) or agent name.",
+			description: "Show one agent's herdr-core terminal in full, by its address (such as t7) or name.",
 			parameters: obj({ target: str(), host }),
 			replay: "safe",
-			execute: async (args) =>
-				json((await herdr.json(args.host ?? config.herdr.host, ["agent", "get", checkTarget(args.target)])).result),
+			execute: async (args) => {
+				const terminal = await herdr.terminal(args.host ?? config.herdr.host, args.target);
+				if (terminal === undefined) throw new Error(`No terminal ${args.target}`);
+				return json(terminal);
+			},
 		}),
 		defineTool({
 			name: "herdr_read_agent",
-			description: "Read the recent terminal output of a Herdr agent pane, to see what it is doing or asking.",
+			description: "Read the recent screen and history of an agent's herdr-core terminal, to see what it is doing or asking.",
 			parameters: obj({
 				target: str(),
 				host,
@@ -163,9 +225,9 @@ export function createHerdrExtension(config: Config, herdr = new Herdr(config.he
 		tools.push(
 			defineTool({
 				name: "herdr_prompt_agent",
-				description: `Send a follow-up prompt to an existing agent on ${config.herdr.host}, only when the user explicitly asks. First inspect the agent and its recent output to confirm the target and that it is ready for normal input. Never answer an approval or question dialog with this tool; blocked agents need the user. Herdr rejects recognized blocked dialogs without typing. Success means submitted, not started or finished; read the agent again before reporting its response. An error or restart may follow delivery, so inspect before any retry. The call is not repeated after a restart.`,
+				description: `Send a follow-up prompt to an existing agent on ${config.herdr.host}, only when the user explicitly asks. First inspect the agent and its recent output to confirm the target and that it is ready for normal input. Never answer an approval or question dialog with this tool; blocked agents need the user, and hc refuses to type into them. Success means submitted, not started or finished; read the agent again before reporting its response. An error or restart may follow delivery, so inspect before any retry. The call is not repeated after a restart.`,
 				parameters: obj({ target: str(), text: str({ minLength: 1, maxLength: 4000 }) }),
-				execute: async (args) => json((await herdr.prompt(args.target, args.text)).result ?? { sent: true }),
+				execute: async (args) => json((await herdr.prompt(args.target, args.text)) ?? { sent: true }),
 			}) as never,
 		);
 	}

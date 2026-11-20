@@ -22,7 +22,7 @@ in {
         Type = "simple";
         ExecStart = "${lib.getExe cfg.package} serve";
         EnvironmentFile = cfg.environmentFiles;
-        # Herdr, org-dispatch, Emacs, and ssh come from the profile and system.
+        # hc, org-dispatch, Emacs, and ssh come from the profile and system.
         Environment =
           ["PATH=${config.home.profileDirectory}/bin:/run/current-system/sw/bin"]
           ++ allowedUsers

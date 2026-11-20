@@ -1,31 +1,61 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Stamp and follow Org links to Herdr agent sessions.
+# Stamp and follow Org links to agent sessions running in herdr-core (hc).
 #
-#   herdr-link stamp [TAG]  print an Org link for the calling Herdr pane
-#   herdr-link jump LINK    focus the pane for LINK, resuming the session if needed
-#   herdr-link attach LINK  attach this terminal to that pane, resuming likewise
+#   herdr-link stamp [TAG]  print an Org link for the calling agent's session
+#   herdr-link jump LINK    show the session's terminal, resuming the session if needed
+#   herdr-link attach LINK  attach this terminal to it, resuming likewise
 #   herdr-link pick         choose a live agent on this host and attach to it
 #
-# LINK is [herdr:]HOST/AGENT:SESSION[@PANE]. SESSION is the Claude session ID or
-# the Pi session UUID. PANE is only a fallback hint; the session finds the pane.
+# LINK is [herdr:]HOST/AGENT:SESSION[@WHERE]. SESSION is the Claude session ID or
+# the Pi session UUID; it finds the terminal through hc's org.session label.
+# WHERE records the hc terminal (t7) or old Herdr pane the link was stamped in,
+# for people reading it; only the label proves where the session runs now.
+# The same link works on every client: jump picks the
+# Herdr app on a desktop and hc attach elsewhere, and a phone runs
+# `ssh -t HOST herdr-link attach LINK`, so no client-specific target is stored.
 
 die() {
   echo "herdr-link: $*" >&2
   exit 1
 }
 
+this_host() { cat /proc/sys/kernel/hostname; }
+
 # The label reads AGENT@HOST/YYYY-MM-DDTHHMM, ending in #TAG as a lowercase slug
-# when TAG is given.
+# when TAG is given. Stamping also labels this terminal with its agent and
+# session, so jump, June and the dispatcher can find it again.
 stamp() {
-  [[ -n ${HERDR_PANE_ID:-} ]] || die "not in a Herdr pane"
-  herdr pane get "$HERDR_PANE_ID" | jq -er --arg host "$(</proc/sys/kernel/hostname)" --arg tag "${1:-}" '
-    .result.pane as $p
-    | ($p.agent_session // error("no agent session in this pane")) as $s
-    | ($s.value | if $s.agent == "pi" then capture("_(?<id>[0-9a-f-]{36})\\.jsonl$").id else . end) as $id
-    | ($tag | ascii_downcase | gsub("[^a-z0-9]+"; "-") | gsub("^-|-$"; "") | if . == "" then "" else "#" + . end) as $tag
-    | "[[herdr:\($host)/\($s.agent):\($id)@\($p.pane_id)][\($s.agent)@\($host)/\(now | strflocaltime("%Y-%m-%dT%H%M"))\($tag)]]"'
+  local agent session tag
+  [[ -n ${HC_TERMINAL_ID:-} ]] || die "not in an hc terminal"
+  if [[ -n ${CLAUDE_CODE_SESSION_ID:-} ]]; then
+    agent=claude session=$CLAUDE_CODE_SESSION_ID
+  elif [[ -n ${PI_SESSION_ID:-} ]]; then
+    agent=pi session=$PI_SESSION_ID
+  else
+    die "no agent session in this terminal"
+  fi
+  [[ $session =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || die "unexpected session ID $session"
+  hc label "$HC_TERMINAL_ID" "org.agent=$agent" "org.session=$session" >/dev/null ||
+    die "could not label $HC_TERMINAL_ID"
+  tag=$(tr '[:upper:]' '[:lower:]' <<<"${1:-}" | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g')
+  printf '[[herdr:%s/%s:%s@%s][%s@%s/%s%s]]\n' "$(this_host)" "$agent" "$session" "$HC_TERMINAL_ID" \
+    "$agent" "$(this_host)" "$(date +%Y-%m-%dT%H%M)" "${tag:+#$tag}"
+}
+
+parse() {
+  local rest
+  link=${1#herdr:}
+  host=${link%%/*}
+  rest=${link#*/}
+  rest=${rest%@*}
+  agent=${rest%%:*}
+  session=${rest#*:}
+  [[ $link == */* && $rest == *:* && -n $host && -n $agent && -n $session ]] || die "bad link: $1"
+  [[ $agent =~ ^[a-z]+$ && $session =~ ^[0-9a-f-]+$ ]] || die "bad link: $1"
+  remote=
+  [[ $host == "$(this_host)" ]] || remote=1
 }
 
 # Run a command on the link's host, over ssh when it is not this one.
@@ -35,6 +65,13 @@ on_host() {
   else
     ssh -o ConnectTimeout=5 "$host" "$(printf '%q ' "$@")"
   fi
+}
+
+# Print the address of the live terminal running the link's session, if any.
+# Only the labels count: the hint names where it ran, not where it runs now.
+live_terminal() {
+  on_host hc ls --json --label "org.session=$session" | jq -r '
+    [.terminals[] | select(.state == "live") | .address] | if length > 1 then error("session runs in \(length) terminals") else .[0] // empty end'
 }
 
 # Find the session file on its host and set the directory and resume command.
@@ -67,178 +104,113 @@ printf '%s\n%s\n%s\n%s\n' "$(grep -m1 -o '"cwd":"[^"]*"' "$f" | cut -d'"' -f4)" 
   "$(jq -r 'select(.type == "session_info" or .type == "custom-title") | .name // .customTitle // empty' "$f" | tail -n1)" \
   "$run"
 EOF
-  ) || die "session $agent:$session not found on $host"
+  ) || die "session $agent:$session not found on $host; it may have been deleted"
   cwd=$(sed -n 1p <<<"$found")
   name=$(sed -n 3p <<<"$found")
   case $agent in
-    claude) cmd="$(sed -n 4p <<<"$found") --resume $session" ;;
-    pi) cmd="pi --session $(sed -n 2p <<<"$found")" ;;
+    # Clearing CLAUDE_CODE_DISABLE_TERMINAL_TITLE lets Claude report its status to hc.
+    claude) cmd="$(sed -n 4p <<<"$found") --resume $session --settings '{\"env\":{\"CLAUDE_CODE_DISABLE_TERMINAL_TITLE\":\"\"}}'" ;;
+    pi) cmd="pi --session $(printf '%q' "$(sed -n 2p <<<"$found")")" ;;
   esac
 }
 
-# Open a focused tab in DIR and print its pane. org-dispatch names its agent
-# sessions "auto · HEADING" and opens them in the workspace named for the task's
-# Org file, its project; a reopened run goes back there under the same tab label.
-# The Org file is the one whose Sessions link names this session.
-open_tab() {
-  local dir=$1 label project='' workspace created
-  if [[ $name == "auto · "* ]]; then
+# The herdr-app space a resumed session opens in: the one named for the task's
+# project when its terminals show one, else SPACE (the shown space on a desktop),
+# else none, which keeps it hidden from the app but in hc ls. org-dispatch names
+# its sessions "auto · HEADING"; their project is the Org file whose Sessions
+# link names this session.
+space_for() {
+  local fallback=${1:-} project='' address
+  if [[ ${name:-} == "auto · "* ]]; then
     project=$(grep -rlF --include='*.org' --exclude='archive*' --exclude='*.sync-conflict-*' \
       ":$session@" "$HOME/org" 2>/dev/null | head -n1 || true)
     [[ -z $project ]] || project=$(basename "$project" .org)
   fi
-  if [[ -z $project ]]; then
-    on_host herdr tab create --cwd "$dir" --focus | jq -r .result.root_pane.pane_id
-    return
+  if [[ -n $project ]]; then
+    address=$(on_host hc ls --json | jq -r --arg p "$project" '
+      first(.terminals[] | select((.where // "") | ascii_downcase | sub("^\\[[0-9]+\\] "; "") | startswith(($p | ascii_downcase) + " / ")) | .address) // empty')
+    if [[ -n $address ]]; then
+      on_host hc get --json "$address" | jq -r '.labels["herdr.space"] // empty'
+      return
+    fi
   fi
-  label=${name#auto · }
-  label=${label:0:40}
-  workspace=$(on_host herdr workspace list | jq -r --arg project "$project" '
-    first(.result.workspaces[] | select(.label | ascii_downcase | sub("^\\[[0-9]+\\] "; "") == ($project | ascii_downcase)) | .workspace_id) // empty')
-  if [[ -n $workspace ]]; then
-    on_host herdr tab create --workspace "$workspace" --cwd "$dir" --label "$label" --focus |
-      jq -r .result.root_pane.pane_id
-  else
-    created=$(on_host herdr workspace create --cwd "$dir" --label "$project" --focus)
-    on_host herdr tab rename "$(jq -r .result.root_pane.tab_id <<<"$created")" "$label" >/dev/null
-    jq -r .result.root_pane.pane_id <<<"$created"
-  fi
+  printf '%s\n' "$fallback"
 }
 
-# Raise the window running a Herdr client for this host. Fails if none exists.
-raise() {
-  local pattern clients pid p window address workspace
-  if [[ -z $remote ]]; then
-    pattern='[^ ]*/?herdr( --session [^ ]+)?$'
-  else
-    pattern="[^ ]*/?herdr --remote $host( |$)"
-  fi
-  clients=$(hyprctl clients -j | jq -r '.[] | [.pid, .address, .workspace.name] | @tsv')
-  for pid in $(ps -eo pid=,args= | sed -E 's/^ *//' | grep -E "^[0-9]+ ($pattern)" | cut -d' ' -f1); do
-    p=$pid
-    while [[ $p -gt 1 ]]; do
-      window=$(awk -F'\t' -v p="$p" '$1 == p { print; exit }' <<<"$clients")
-      if [[ -n $window ]]; then
-        IFS=$'\t' read -r _ address workspace <<<"$window"
-        hyprctl dispatch "hl.dsp.focus({ workspace = \"$workspace\" })" >/dev/null
-        hyprctl dispatch "hl.dsp.focus({ window = \"address:$address\" })" >/dev/null
-        return 0
-      fi
-      p=$(ps -o ppid= -p "$p" | tr -d ' ')
-    done
-  done
-  return 1
+# Start the saved session again in a new terminal of its own, labelled so this
+# link finds it. It must not end with whoever ran herdr-link.
+resume() {
+  local space=${1:-} labels=(--label "org.agent=$agent" --label "org.session=$session")
+  [[ -z $space ]] || labels+=(--label "herdr.space=$space")
+  on_host hc run --json --bg --no-parent --cwd "$cwd" "${labels[@]}" -- sh -c "exec $cmd" | jq -r '.address // empty'
 }
 
-# Herdr sends focus commands to the client whose window was focused last, so
-# raise or open that window before focusing anything.
-show() {
-  local launch=(herdr) i
-  [[ -z $remote ]] || launch=(herdr --remote "$host" --remote-keybindings server)
-  if ! raise; then
-    # Clear Herdr's variables so a launch from inside a pane is not nested.
-    setsid -f env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID \
-      kitty --class=Herdr "${launch[@]}" >/dev/null 2>&1
-    for i in {1..20}; do
-      sleep 0.25
-      raise && break
-    done
-    ((i < 20)) || die "no Herdr client window for $host"
-    sleep 1
-  fi
-  sleep 0.3
+# The app window on this desktop, if one is running.
+app_running() {
+  [[ -z $remote && -n ${WAYLAND_DISPLAY:-} ]] && command -v herdr-app >/dev/null && herdr-app status >/dev/null 2>&1
 }
 
-parse() {
-  local rest
-  link=${1#herdr:}
-  pane=
-  host=${link%%/*}
-  rest=${link#*/}
-  if [[ $rest == *@* ]]; then
-    pane=${rest##*@}
-    rest=${rest%@*}
+raise_app() {
+  if command -v hyprctl >/dev/null; then
+    hyprctl dispatch 'hl.dsp.focus({ window = "class:herdr-app" })' >/dev/null 2>&1 || true
   fi
-  agent=${rest%%:*}
-  session=${rest#*:}
-  [[ $link == */* && $rest == *:* && -n $host && -n $agent && -n $session ]] || die "bad link: $1"
-  remote=
-  [[ $host == "$(</proc/sys/kernel/hostname)" ]] || remote=1
-}
-
-# Print the pane running the link's session, if any.
-live_pane() {
-  on_host herdr agent list | jq -r --arg a "$agent" --arg s "$session" '
-    first(.result.agents[] | select(.agent_session.agent == $a and (.agent_session.value | contains($s))) | .pane_id) // empty'
 }
 
 jump() {
-  local link target tab new cwd cmd name=
+  local target space
   parse "$1"
-  target=$(live_pane)
-  if [[ -z $target && -n $pane ]]; then
-    tab=$(on_host herdr pane get "$pane" 2>/dev/null | jq -r '.result.pane.tab_id // empty') || true
+  # No desktop app here, or a session on another host: attach in a terminal.
+  if [[ -n $remote || -z ${WAYLAND_DISPLAY:-} ]] || ! command -v herdr-app >/dev/null; then
+    attach "$1"
   fi
-  [[ -n $target || -n ${tab:-} ]] || find_session
-
-  show
-  if [[ -n $target ]]; then
-    on_host herdr agent focus "$target" >/dev/null
-  elif [[ -n ${tab:-} ]]; then
-    on_host herdr tab focus "$tab" >/dev/null
-  else
-    new=$(open_tab "$cwd")
-    on_host herdr pane run "$new" "$cmd" >/dev/null
+  if ! app_running; then
+    setsid -f herdr-app >/dev/null 2>&1
+    for _ in {1..40}; do app_running && break; sleep 0.25; done
+    app_running || die "the Herdr app did not start"
   fi
+  target=$(live_terminal)
+  if [[ -z $target ]]; then
+    find_session
+    target=$(resume "$(space_for "$(herdr-app status | jq -r '.space // empty')")")
+    [[ -n $target ]] || die "could not resume $agent:$session"
+  elif [[ -z $(hc get --json "$target" | jq -r '.labels["herdr.space"] // empty') ]]; then
+    # A hidden worker: show it in the current space.
+    hc label "$target" "herdr.space=$(herdr-app status | jq -r '.space // empty')" >/dev/null
+  fi
+  raise_app
+  herdr-app 'do' agent.focus --terminal "$target" >/dev/null
 }
 
-# Attach this terminal to one agent pane, as over ssh from a phone. Detaching
-# leaves the agent running and the desktop layout as it was. Herdr allows one
-# attached client per pane, so this one takes over from any stale earlier one.
-attach_pane() {
-  exec env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID \
-    herdr agent attach "$1" --takeover
-}
-
+# Attach this terminal to the session's agent, as over ssh from a phone.
+# Detaching (Ctrl+\) leaves the agent running and the desktop as it was.
 attach() {
-  local link target new cwd cmd name=
+  local target
   parse "$1"
   # Attaching needs a terminal on the link's host, so hand the link to it.
   [[ -z $remote ]] || exec ssh -t "$host" "$(printf '%q ' herdr-link attach "$1")"
-  target=$(live_pane)
+  target=$(live_terminal)
   if [[ -z $target ]]; then
     find_session
-    new=$(open_tab "$cwd")
-    herdr pane run "$new" "$cmd" >/dev/null
-    # Herdr attaches only to a pane it has detected an agent in.
-    for _ in {1..40}; do
-      target=$(live_pane)
-      [[ -z $target ]] || break
-      sleep 0.25
-    done
-    [[ -n $target ]] || die "resumed $agent:$session in $new but Herdr has not detected it"
+    target=$(resume "$(space_for)")
+    [[ -n $target ]] || die "could not resume $agent:$session"
   fi
-  attach_pane "$target"
+  exec hc attach "$target"
 }
 
 # Choose a live agent on this host from a numbered list and attach to it.
 pick() {
   local rows
-  rows=$(jq -rn --argjson ws "$(herdr workspace list)" --argjson tabs "$(herdr tab list)" \
-    --argjson agents "$(herdr agent list)" '
-    def bare: sub("^\\[[0-9]+\\] "; "");
-    ($ws.result.workspaces | map({key: .workspace_id, value: (.label | bare)}) | from_entries) as $w
-    | ($tabs.result.tabs | map({key: .tab_id, value: (.label | bare)}) | from_entries) as $t
-    | $agents.result.agents[]
-    | [.pane_id, "\($w[.workspace_id]) / \($t[.tab_id]) · \(.agent) · \(.agent_status) · \(.cwd | sub("^/home/[^/]+"; "~"))"]
-    | @tsv')
+  rows=$(hc ls --json | jq -r '
+    .terminals[] | select(.state == "live" and ((.status // null) != null or (.agent // "") != ""))
+    | select((.agent // "") | test("^(pi|claude|claude-code|codex)$"))
+    | [.address, "\(.where // (.cwd | sub("^/home/[^/]+"; "~"))) · \(.agent) · \(.status // "unknown")"] | @tsv')
   [[ -n $rows ]] || die "no agents running"
-  mapfile -t panes < <(cut -f1 <<<"$rows")
+  mapfile -t terminals < <(cut -f1 <<<"$rows")
   mapfile -t labels < <(cut -f2 <<<"$rows")
   PS3="agent: "
   select _choice in "${labels[@]}"; do
-    [[ -n ${REPLY//[^0-9]/} && $REPLY -ge 1 && $REPLY -le ${#panes[@]} ]] &&
-      attach_pane "${panes[REPLY - 1]}"
+    [[ -n ${REPLY//[^0-9]/} && $REPLY -ge 1 && $REPLY -le ${#terminals[@]} ]] &&
+      exec hc attach "${terminals[REPLY - 1]}"
   done
 }
 

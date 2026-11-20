@@ -146,12 +146,12 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 	const observe = async (input: FollowInput): Promise<Observation> => {
 		const task = input.file !== undefined ? await org.byHeading(input.file, input.title) : await org.byId(input.id);
 		if (task === undefined) return { state: undefined, missing: true };
-		const session = task.herdrSessions.filter((s) => s.host === input.host && s.pane).at(-1);
+		const session = task.herdrSessions.filter((s) => s.host === input.host).at(-1);
 		let agent: string | undefined;
-		if (task.state === "PROG" && session?.pane) {
-			// An unreachable host only means no Herdr signal this time.
-			const got = await herdr.json(input.host, ["agent", "get", session.pane]).catch(() => undefined);
-			agent = got?.result?.agent?.agent_status;
+		if (task.state === "PROG" && session) {
+			// The session's label finds its terminal. An unreachable host only means no signal this time.
+			const terminal = await herdr.session(input.host, session.session).catch(() => undefined);
+			if (terminal?.state === "live") agent = terminal.status?.state ?? "unknown";
 		}
 		let waiting = false;
 		if (task.state === "AUTO" && input.depends?.length) {

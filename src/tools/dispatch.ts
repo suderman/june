@@ -460,7 +460,8 @@ export class Dispatch {
 			if (request.revision && request.revision !== task.revision) throw new Error("task revision changed; read the task and Dialog again");
 			for (const host of new Set(task.herdrSessions.map((session) => session.host))) {
 				const agents = await herdr.agents(host);
-				if (agents.some((agent) => ["working", "blocked"].includes(agent.status) && task.herdrSessions.some((session) => session.host === host && session.session === agent.session)))
+				// A live agent without a status is unknown, which counts as active.
+				if (agents.some((agent) => ["working", "blocked", "unknown"].includes(agent.status) && task.herdrSessions.some((session) => session.host === host && session.session === agent.session)))
 					throw new Error(`The task still has an active agent on ${host}; wait for it to finish`);
 			}
 		}
@@ -490,7 +491,7 @@ export class Dispatch {
 		}
 	}
 
-	/** Park and interrupt only a dispatcher-owned run, without generic terminal control. */
+	/** Park a dispatcher-owned run, then interrupt or kill exactly its labelled worker. */
 	async stop(request: StopTaskRequest) {
 		if (!/^id:[0-9A-Za-z][0-9A-Za-z-]{0,63}$/.test(request.heading)) throw new Error("heading must be id:UUID of the existing task");
 		if (!/^[0-9a-f]{64}$/.test(request.revision)) throw new Error("revision must be the SHA256 returned by org_read_task");
@@ -506,7 +507,7 @@ export class Dispatch {
 			throw new Error(`${error.message}. A stop may already have parked the task. Read it and inspect the worker; do not reassign or claim it stopped without confirmation. Retry this stop after inspection; the command recovers an existing pending stop.`, { cause: error });
 		});
 		try {
-			const result = JSON.parse(out.trim().split("\n").at(-1)!) as { id: string; title: string; state: string; replay: boolean; stopped: boolean };
+			const result = JSON.parse(out.trim().split("\n").at(-1)!) as { id: string; title: string; state: string; replay: boolean; stopped: boolean; outcome?: string };
 			if (result.stopped !== true) throw new Error("missing stop confirmation");
 			return { ...result, file: this.#org.rel(path) };
 		} catch (cause) {
@@ -529,7 +530,8 @@ export class Dispatch {
 			if (task.revision !== request.revision) throw new Error("task revision changed; read the task and Dialog again");
 			for (const host of new Set(task.herdrSessions.map((session) => session.host))) {
 				const agents = await herdr.agents(host);
-				if (agents.some((agent) => ["working", "blocked"].includes(agent.status) && task.herdrSessions.some((session) => session.host === host && session.session === agent.session)))
+				// A live agent without a status is unknown, which counts as active.
+				if (agents.some((agent) => ["working", "blocked", "unknown"].includes(agent.status) && task.herdrSessions.some((session) => session.host === host && session.session === agent.session)))
 					throw new Error(`The task still has an active agent on ${host}; wait for it to finish`);
 			}
 		}
@@ -779,7 +781,7 @@ export function createDispatchExtension(
 			})]),
 			defineTool({
 				name: "org_stop_task",
-				description: `When ${user()} asks you to stop a running dispatcher task or switch its agent, read the whole task and Dialog, then use this tool first. It runs only on the task's dispatcher host, parks PROG at HOLD, disables dispatcher nudges and confirms the exact session is idle/done or exited. It sends no input. Herdr lacks expected-session/generation-bound interruption, so active working/blocked workers remain unconfirmed: ask the user to interrupt that exact session manually, then retry this tool. Never substitute named or pane-targeted keys or a cooperative stop prompt. Herdr normal prompt/queue delivery also lacks an expected-session/generation precondition; --wait tracks lifecycle, not handling of that instruction, and submission never confirms a stop. No HERDR_ENV is needed: this is the dispatcher's supported task operation, not generic terminal control. It preserves ID, scope, schedule, prerequisites, findings and session history. A failed or uncertain interruption stays parked and blocks resume; inspect the task and worker, never claim it stopped on error. Retry the same tool call after inspection, not raw keys or a duplicate task. Success confirms that run was observed settled or exited, not that June interrupted it or its child processes ended. Re-read the task before org_resume_task with the requested agent, only if ${user()} authorized reassignment. Stop alone never starts work. Remote tasks need that host's June or ${user()}.`,
+				description: `When ${user()} asks you to stop a running dispatcher task or switch its agent, read the whole task and Dialog, then use this tool first. It runs only on the task's dispatcher host and parks PROG at HOLD with dispatcher nudges off before it touches the worker. Then it checks that the worker's hc terminal still carries this run's task, run, agent and session labels, presses its stop key, waits for it to settle, and kills that one terminal only when the agent does not stop. It never touches another terminal, sends no prompt, and records what happened in Dialog: already exited, left running because it was not working, stopped at the interrupt, or killed. An error leaves the task parked and blocks resume, finish and retry; read the task and the worker (herdr_read_agent), then retry the same call, never raw keys or a duplicate task. It preserves ID, scope, schedule, prerequisites, findings and session history; a killed worker's session can still be resumed later. Re-read the task before org_resume_task with the requested agent, only if ${user()} authorized reassignment. Stop alone never starts work. Remote tasks need that host's June or ${user()}.`,
 				parameters: obj({
 					file: str({ description: "Org agenda file under ~/org" }),
 					heading: str({ description: "id:UUID of the running dispatcher task, from org_read_task" }),
@@ -789,7 +791,7 @@ export function createDispatchExtension(
 				replay: "safe",
 				execute: async (args, api) => {
 					const result = await dispatch.stop({ ...args, key: `${instance}:${api.taskId}` });
-					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\nThe original run was observed settled or exited. No input was sent and no work was started. On replay the task may since have moved on; re-read before a separate authorized org_resume_task.` }] };
+					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\nThe original run's worker is stopped; outcome says how. No prompt was sent and no work was started. On replay the task may since have moved on; re-read before a separate authorized org_resume_task.` }] };
 				},
 			}),
 			defineTool({

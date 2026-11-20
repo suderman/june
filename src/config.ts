@@ -66,10 +66,9 @@ export type Config = {
 		readonly improve?: { readonly file: string; readonly agent?: string; readonly host?: string };
 	};
 	readonly herdr: {
-		readonly session: string;
 		/** This machine's name, as Org host tags and herdr: links use it. */
 		readonly host: string;
-		/** Other machines reached read-only over SSH. */
+		/** Other machines, read natively when this hc core has them added, else over SSH. */
 		readonly hosts: Readonly<Record<string, HerdrHost>>;
 		readonly allowPrompt: boolean;
 	};
@@ -174,7 +173,7 @@ const DEFAULTS = {
 	contextCap: 200_000,
 	skillDirs: [] as string[],
 	org: { root: "~/org", agendaFiles: "~/.local/state/org-dispatch/agenda-files", people: "~/org/people.org" },
-	herdr: { session: "default", hosts: {}, allowPrompt: true },
+	herdr: { hosts: {}, allowPrompt: true },
 	rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
 	reflection: { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"], bitcoin: false },
 	heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
@@ -225,7 +224,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 		org: { root: expandHome(org.root), agendaFiles: expandHome(org.agendaFiles), people: expandHome(org.people) },
 		dispatch: dispatch(raw.dispatch),
 		herdr: {
-			session: herdr.session,
+			// hc takes its session from HC_SESSION; an old herdr.session setting is ignored.
 			host: herdr.host ?? shortHostname(),
 			hosts: herdr.hosts,
 			allowPrompt: herdr.allowPrompt === true,

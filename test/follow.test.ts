@@ -10,7 +10,7 @@ import { createDispatchExtension, improveBody } from "../src/tools/dispatch.ts";
 import { createFollowTask, decide, follow, FOLLOW_DEFAULTS, progressDue } from "../src/tools/follow.ts";
 import { Herdr } from "../src/tools/herdr.ts";
 import { createOrgExtension, Org } from "../src/tools/org.ts";
-import { ask, openTestDaemon, tempDir, testConfig, until } from "./helpers.ts";
+import { ask, openTestDaemon, tempDir, testConfig, until, hcStatus } from "./helpers.ts";
 
 const input = { id: "abc12345", title: "Check docs", host: "kit", queuedAt: 0 };
 const min = 60_000;
@@ -109,7 +109,7 @@ test("follow carries only the worker's own headline, verbatim in the model input
 			await mkdir(root);
 			const links = agent ? `** Sessions\n- [[herdr:kit/pi:${session}@p1][old pane]]\n- [[herdr:kit/${agent}:${session}][current, no pane]]\n- [[herdr:cog/pi:${session}@p2][other host]]\n` : "";
 			await writeFile(join(root, "todo.org"), `* ${state} Check docs\nCLOSED: [2026-11-05 Thu 14:00]\n:PROPERTIES:\n${byHeading ? "" : `:ID: ${input.id}\n`}${headline ? `:HEADLINE: ${headline}\n:HEADLINE_STATE: ${state}\n:HEADLINE_AT: 101\n` : ""}:END:\n:LOGBOOK:\n- Old run\n  :HEADLINE: Not this old line.\n:END:\n\n${links}** Outcome\nThe report's evidence.\n*** Child task\n:PROPERTIES:\n:HEADLINE: Not this child's line.\n:END:\n`);
-			const task = createFollowTask(new Org(root), new Herdr(testConfig(tmp.dir).herdr, async () => JSON.stringify({ result: { agent: { agent_status: "blocked" } } })), { intervalMs: 40, launchMs: 60_000, maxMs: 3_600_000 });
+			const task = createFollowTask(new Org(root), new Herdr(testConfig(tmp.dir).herdr, hcStatus("blocked")), { intervalMs: 40, launchMs: 60_000, maxMs: 3_600_000 });
 			const adopted = { ...input, queuedAt: Date.now(), ...(byHeading ? { file: "todo.org" } : {}) };
 			const signal = state === "PROG" ? "blocked" : state;
 			const news = headline && state !== "PROG" ? { title: input.title, signal, headline, ...(agent ? { agent, session } : {}) } : undefined;
@@ -345,11 +345,8 @@ test("June follows a task she did not queue with timed updates until told to sto
 	const session = "01a1875e-87d4-7096-b45c-2f3b924ffc06";
 	await writeFile(file, `#+TITLE: Work\n\n* PROG Refresh content\n** Sessions\n- [[herdr:kit/pi:${session}@w5A:p1][pi@kit]]\n`);
 	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") }, dispatch: { hosts: ["kit"] } };
-	const panes: string[] = [];
-	const herdr = new Herdr(config.herdr, async (args) => {
-		panes.push(args.at(-1)!);
-		return JSON.stringify({ result: { agent: { agent_status: "working" } } });
-	});
+	const calls: string[][] = [];
+	const herdr = new Herdr(config.herdr, hcStatus("working", calls));
 	// A minute is 50 ms and checks are a second apart, so updates every two minutes arrive only by waking on time.
 	const extension = createDispatchExtension(config, new Org(root), herdr, "inst", async () => "", { intervalMs: 1000, launchMs: 60_000, maxMs: 3_600_000, minuteMs: 50 });
 	const faux = fauxProvider();
@@ -370,7 +367,8 @@ test("June follows a task she did not queue with timed updates until told to sto
 	await ask(tmp.paths.socket, "give me updates every 2 minutes on the refresh");
 	await until(async () => (await reports()).length >= 2);
 	assert.match((await reports())[0]!, /regular update .*«Refresh content» \(work.org\).*herdr_read_agent, sending it nothing/);
-	assert.ok(panes.every((pane) => pane === "w5A:p1"), "reads the linked agent's status");
+	assert.ok(calls.some((argv) => argv.join(" ") === `hc ls --json --label org.session=${session}`), "finds the linked session by its label");
+	assert.ok(calls.every((argv) => !argv.includes("w5A:p1")), "never trusts the link's old pane hint");
 
 	await ask(tmp.paths.socket, "stop the updates");
 	await until(async () => !(await daemon.status()).busy);
@@ -439,7 +437,7 @@ test("June reads and closes her own reviewed EVAL task before reporting through 
 	await writeFile(file, "#+TITLE: Todo\n");
 	await writeFile(join(tmp.dir, "agenda"), `${file}\n`);
 	const config = { ...testConfig(tmp.dir), org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") }, dispatch: { hosts: ["kit"] } };
-	const herdr = new Herdr(config.herdr, async () => JSON.stringify({ result: { agent: { agent_status: "working" } } }));
+	const herdr = new Herdr(config.herdr, hcStatus("working"));
 	const edits: string[][] = [];
 	const dispatch = createDispatchExtension(config, new Org(root), herdr, "inst", async (args) => {
 		if (args[0] === "org-edit") {
@@ -722,7 +720,7 @@ test("restart keeps reported HOLD and blocked signals, then reports an offline c
 		await mkdir(root);
 		const session = "01234567-89ab-cdef-0123-456789abcdef";
 		await writeFile(file, `* ${state === "blocked" ? "PROG" : state} Check docs\n:PROPERTIES:\n:ID: ${input.id}\n:END:\n** Sessions\n- [[herdr:kit/pi:${session}@w1:p1][worker]]\n`);
-		const task = createFollowTask(new Org(root), new Herdr(testConfig(tmp.dir).herdr, async () => JSON.stringify({ result: { agent: { agent_status: "blocked" } } })), { ...FOLLOW_DEFAULTS, intervalMs: 150 });
+		const task = createFollowTask(new Org(root), new Herdr(testConfig(tmp.dir).herdr, hcStatus("blocked")), { ...FOLLOW_DEFAULTS, intervalMs: 150 });
 		const extensions = [defineExtension({ name: "follow-restart-test", tasks: [task] })];
 		const faux = fauxProvider();
 		faux.setResponses([fauxAssistantMessage("Needs an answer."), fauxAssistantMessage("Ready for review.")]);

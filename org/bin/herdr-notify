@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Notifications for agents in herdr-core (hc), through ntfy.
+#
+#   herdr-notify send --title TITLE --body BODY [--link LINK]
+#       post one notice, such as the dispatcher's task-level HOLD and finish
+#   herdr-notify watch
+#       follow hc events and post terminal-level notices: an agent that blocks
+#       on a person, and an interactive agent whose turn ended. Run exactly one
+#       watcher, on the machine whose core has the others added, so each event
+#       is told once. A dispatched worker's turn ending is not news; the
+#       dispatcher reports its task when the worker finishes it.
+#
+# HERDR_NOTIFY_URL is the ntfy topic URL; HERDR_NOTIFY_TOKEN_FILE optionally
+# holds an access token. A herdr: link becomes the notice's tap action, which
+# June's Android app and herdr-link open on any client.
+
+die() {
+  echo "herdr-notify: $*" >&2
+  exit 1
+}
+
+post() {
+  local title=$1 body=$2 link=${3:-} headers=()
+  [[ -n ${HERDR_NOTIFY_URL:-} ]] || die "HERDR_NOTIFY_URL is not set"
+  headers=(-H "Title: $title")
+  [[ -z $link ]] || headers+=(-H "Click: $link")
+  if [[ -n ${HERDR_NOTIFY_TOKEN_FILE:-} && -r $HERDR_NOTIFY_TOKEN_FILE ]]; then
+    headers+=(-H "Authorization: Bearer $(<"$HERDR_NOTIFY_TOKEN_FILE")")
+  fi
+  curl --fail --silent --show-error --max-time 20 --output /dev/null "${headers[@]}" --data-binary "$body" "$HERDR_NOTIFY_URL"
+}
+
+send() {
+  local title='' body='' link=''
+  while (($#)); do
+    case $1 in
+      --title) title=$2 ;;
+      --body) body=$2 ;;
+      --link) link=$2 ;;
+      *) die "unknown option $1" ;;
+    esac
+    shift 2
+  done
+  [[ -n $title ]] || die "send needs --title"
+  post "$title" "${body:-$title}" "$link"
+}
+
+host() { cat /proc/sys/kernel/hostname; }
+
+# One notice for a status event, or nothing. A terminal's record supplies its
+# place, its labels and the session link.
+notice() {
+  local terminal=$1 state=$2 kind=$3 msg=$4 record where name agent session machine address link
+  record=$(hc get --json "$terminal" 2>/dev/null) || return 0
+  # Dispatched workers end turns all the time; their task's state is the news.
+  if [[ $state == "done" && -n $(jq -r '.labels["org.task"] // empty' <<<"$record") ]]; then return 0; fi
+  where=$(jq -r '.labels.where // empty' <<<"$record")
+  name=$(jq -r '.name // .title // empty' <<<"$record")
+  agent=$(jq -r '.labels["org.agent"] // empty' <<<"$record")
+  session=$(jq -r '.labels["org.session"] // empty' <<<"$record")
+  if [[ $terminal == */* ]]; then machine=${terminal%%/*} address=${terminal#*/}; else machine=$(host) address=$terminal; fi
+  link=
+  [[ -z $agent || -z $session ]] || link="herdr:$machine/$agent:$session@$address"
+  case $kind in
+    permission) kind="It is waiting for permission." ;;
+    question) kind="It is waiting for an answer." ;;
+    auth) kind="It is waiting for a login." ;;
+    *) kind="It is waiting for a person." ;;
+  esac
+  case $state in
+    blocked) post "Needs you · ${where:-${name:-$terminal}}" "${msg:-$kind}" "$link" ;;
+    done) post "Done · ${where:-${name:-$terminal}}" "${msg:-The agent finished its turn.}" "$link" ;;
+  esac
+}
+
+watch() {
+  local line terminal state kind msg key
+  declare -A last=()
+  # The first line is a snapshot of every terminal: remember, never announce.
+  hc events --json | {
+    read -r line || exit 0
+    while IFS=$'\t' read -r terminal state; do
+      last[$terminal]=$state
+    done < <(jq -r '.terminals[]? | [.address, (.status.state // "")] | @tsv' <<<"$line")
+    while read -r line; do
+      IFS=$'\t' read -r terminal state kind msg < <(jq -r '
+        .params | select(.type == "status") | [.terminal, (.data.status.state // ""), (.data.status.kind // ""), (.data.status.msg // "")] | @tsv' <<<"$line") || continue
+      [[ -n ${terminal:-} ]] || continue
+      key=${last[$terminal]:-}
+      last[$terminal]=$state
+      # Tell a change into blocked or done once; repeats of the same word are not news.
+      [[ $state != "$key" ]] || continue
+      case $state in
+        blocked | done) notice "$terminal" "$state" "$kind" "$msg" || echo "herdr-notify: could not notify about $terminal" >&2 ;;
+      esac
+    done
+  }
+}
+
+case ${1:-} in
+  send) shift; send "$@" ;;
+  watch) [[ $# -eq 1 ]] || die "usage: herdr-notify watch"; watch ;;
+  *) die "usage: herdr-notify send --title TITLE --body BODY [--link LINK] | herdr-notify watch" ;;
+esac

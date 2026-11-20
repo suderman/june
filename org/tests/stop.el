@@ -5,18 +5,39 @@
 (defvar test-stop-file)
 (defvar test-stop-status)
 (defvar test-stop-calls)
+(defvar test-stop-agent "claude")
+(defvar test-stop-run "run-1")
+(defvar test-stop-after-interrupt "idle" "Status the worker settles to when interrupted.")
+(defvar test-stop-kill-works t)
 (defvar test-stop-session "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+(defvar test-stop-labels nil "Labels to use instead of the run's own, to fake a changed identity.")
 (defconst test-stop-id "00000000-0000-0000-0000-000000000099")
 
-(defun test-stop-herdr (&rest args)
+(defun test-stop-record ()
+  "The fake worker t-exact, built from the test variables."
+  `((address . "t-exact") (state . ,(if (equal test-stop-status "gone") "finished" "live"))
+    (status . ,(and (not (member test-stop-status '("gone" "unknown"))) `((state . ,test-stop-status))))
+    (turn . 1) (status_ms . 1) (pid . 7)
+    (labels . ,(or test-stop-labels
+                   `((org.dispatch . "kit") (org.task . ,test-stop-id) (org.run . ,test-stop-run)
+                     (org.agent . ,test-stop-agent) (org.session . ,test-stop-session))))))
+
+(defun test-stop-hc (&rest args)
   (push args test-stop-calls)
   (pcase args
-    (`("agent" "list")
-     `((result . ((agents . ,(if (equal test-stop-status "gone") []
-                              (vector `((pane_id . "p-exact") (name . "auto-stop-test") (agent . "claude")
-                                        (agent_status . ,test-stop-status)
-                                        (agent_session . ((value . ,test-stop-session)))))))))))
-    (_ (error "unexpected Herdr call %S" args))))
+    (`("ls" "--all" "--label" ,filter)
+     `((terminals . ,(if (equal filter (concat "org.session=" (alist-get 'org.session (alist-get 'labels (test-stop-record)))))
+                         (vector `((address . "t-exact") (state . ,(alist-get 'state (test-stop-record)))))
+                       []))))
+    (`("get" "t-exact") (test-stop-record))
+    (`("get" "t-human-shell") '((address . "t-human-shell") (state . "live") (labels)))
+    (`("get" "t-new") `((address . "t-new") (state . "live") (status (state . "working"))
+                        (labels (org.task . ,test-stop-id) (org.run . "run-2") (org.agent . "claude")
+                                (org.session . "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))))
+    (`("get" ,address) (signal 'org-dispatch-hc (list "not_found" (concat "no terminal " address))))
+    (`("interrupt" "t-exact") (setq test-stop-status test-stop-after-interrupt) '((outcome . "stopped")))
+    (`("kill" "t-exact") (when test-stop-kill-works (setq test-stop-status "gone")) '((reason . "killed")))
+    (_ (error "unexpected hc call %S" args))))
 
 (defmacro test-with-stop (&rest body)
   (declare (indent 0))
@@ -24,24 +45,31 @@
           (org-dispatch-root root) (org-dispatch-state-dir (expand-file-name "state" root))
           (org-dispatch-emacs-init (expand-file-name "no-init.el" root))
           (test-stop-file (expand-file-name "task.org" root))
-          (test-stop-status "idle") (test-stop-calls nil)
+          (test-stop-status "idle") (test-stop-calls nil) (test-stop-agent "claude")
+          (test-stop-after-interrupt "idle") (test-stop-kill-works t) (test-stop-labels nil)
           (process-environment (copy-sequence process-environment))
           (test-stop-session "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
      (unwind-protect
          (progn
-           (setenv "HERDR_PANE_ID" nil)
+           ;; Callers count as workers by these too; a test run inside an agent must not inherit them.
+           (setenv "HC_TERMINAL_ID" nil)
+           (setenv "CLAUDECODE" nil)
+           (setenv "PI_SESSION_ID" nil)
            (with-temp-file test-stop-file
              (insert "* PROG Task :auto:\n:PROPERTIES:\n:ID: " test-stop-id
                      "\n:HOST: kit\n:AGENT: claude\n:RETRY: 2\n:DEPENDS: id:keep\n:END:\nBody stays.\n\n** Sessions\n- [[herdr:kit/claude:"
-                     test-stop-session "@p-exact][old worker]]\n\n** Dialog\n- Jon [2026-11-09 Mon 09:39]: use pi\n"))
+                     test-stop-session "@t-exact][old worker]]\n\n** Dialog\n- Jon [2026-11-09 Mon 09:39]: use pi\n"))
            (org-dispatch--save-state
-            (list :id test-stop-id :file test-stop-file :heading "Task" :agent "claude"
-                  :pane "p-exact" :session test-stop-session :status "running" :dir root
+            (list :id test-stop-id :file test-stop-file :heading "Task" :agent "claude" :host "kit"
+                  :terminal "t-exact" :run test-stop-run :session test-stop-session :status "running" :dir root
                   :started (float-time) :nudges 0))
-           (cl-letf (((symbol-function 'org-dispatch--herdr) #'test-stop-herdr)
+           (cl-letf (((symbol-function 'org-dispatch--hc) #'test-stop-hc)
                      ((symbol-function 'sleep-for) #'ignore))
              ,@body))
        (delete-directory root t))))
+
+(defun test-stop-sent (verb)
+  (seq-find (lambda (args) (equal (car args) verb)) test-stop-calls))
 
 (defun test-stop-revision ()
   (org-dispatch--edit test-stop-file test-stop-id
@@ -59,7 +87,8 @@
     (let ((revision (test-stop-revision)))
       (test-stop revision)
       (should (equal (plist-get (car (org-dispatch--states)) :status) "stopped"))
-      (should-not (seq-find (lambda (args) (member "send-keys" args)) test-stop-calls))
+      ;; A settled worker is left running; nothing is typed, interrupted or killed.
+      (should-not (seq-find (lambda (args) (member (car args) '("send" "keys" "interrupt" "kill"))) test-stop-calls))
       (org-dispatch--edit test-stop-file test-stop-id
        (lambda ()
          (should (equal (org-get-todo-state) "HOLD"))
@@ -70,12 +99,45 @@
          (should (string-search "Body stays." (org-dispatch--subtree-text)))
          (should (string-search "old worker" (org-dispatch--subtree-text)))
          (should (string-search "- Jon [2026-11-09 Mon 09:39]: use pi" (org-dispatch--subtree-text)))
+         (should (string-search "Worker t-exact was not working and was left running." (org-dispatch--subtree-text)))
          (should-not (plist-get (org-dispatch--task) :session))))
       (let ((before test-stop-calls))
         (test-stop revision)
         (should (equal test-stop-calls before)))
       (org-dispatch--watch (car (org-dispatch--states)))
       (should (org-dispatch--states)))))
+
+(ert-deftest stop-interrupts-a-working-worker-and-records-it ()
+  (dolist (status '("working" "blocked" "unknown"))
+    (test-with-stop
+      (setq test-stop-status status)
+      (test-stop)
+      (should (equal (test-stop-sent "interrupt") '("interrupt" "t-exact")))
+      (should-not (test-stop-sent "kill"))
+      (should (equal (plist-get (car (org-dispatch--states)) :status) "stopped"))
+      (org-dispatch--edit test-stop-file test-stop-id
+        (lambda ()
+          (should (equal (org-get-todo-state) "HOLD"))
+          (should (org-entry-get nil "JUNE_STOPPED"))
+          (should (string-search "Worker t-exact stopped its turn at the interrupt." (org-dispatch--subtree-text))))))))
+
+(ert-deftest stop-kills-a-worker-that-ignores-the-interrupt ()
+  (test-with-stop
+    (setq test-stop-status "working" test-stop-after-interrupt "working")
+    (test-stop)
+    (should (test-stop-sent "interrupt"))
+    (should (equal (test-stop-sent "kill") '("kill" "t-exact")))
+    (should (equal (plist-get (car (org-dispatch--states)) :status) "stopped"))
+    (org-dispatch--edit test-stop-file test-stop-id
+      (lambda () (should (string-search "did not stop at the interrupt and was killed" (org-dispatch--subtree-text)))))))
+
+(ert-deftest stop-confirms-a-worker-that-already-exited ()
+  (test-with-stop
+    (setq test-stop-status "gone")
+    (test-stop)
+    (should-not (seq-find (lambda (args) (member (car args) '("interrupt" "kill"))) test-stop-calls))
+    (org-dispatch--edit test-stop-file test-stop-id
+      (lambda () (should (string-search "Worker t-exact had already exited." (org-dispatch--subtree-text)))))))
 
 (ert-deftest stop-refuses-stale-remote-duplicate-and-unmanaged-tasks ()
   (test-with-stop
@@ -93,16 +155,26 @@
     (should-error (test-stop))
     (should-not test-stop-calls)))
 
-(ert-deftest stop-does-not-touch-a-replacement-worker ()
-  (test-with-stop
-    (let ((test-stop-session "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
-      (test-stop))
-    (should-not (seq-find (lambda (args) (member "send-keys" args)) test-stop-calls))
-    (should (equal (plist-get (car (org-dispatch--states)) :status) "stopped"))))
+(ert-deftest stop-never-touches-another-runs-terminal ()
+  ;; The run's address now carries another session or run: fail closed, touch nothing.
+  (dolist (labels `(((org.task . ,test-stop-id) (org.run . "run-2") (org.agent . "claude")
+                     (org.session . "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
+                    ((org.task . ,test-stop-id) (org.run . "run-2") (org.agent . "claude")
+                     (org.session . "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+                    nil-labels))
+    (test-with-stop
+      (setq test-stop-status "working"
+            test-stop-labels (if (eq labels 'nil-labels) '((where . "june / 1")) labels))
+      (should-error (test-stop))
+      (should-not (seq-find (lambda (args) (member (car args) '("interrupt" "kill" "send" "keys"))) test-stop-calls))
+      (should (equal (plist-get (car (org-dispatch--states)) :status) "stopping"))
+      (org-dispatch--edit test-stop-file test-stop-id
+        (lambda () (should (equal (org-get-todo-state) "HOLD"))
+          (should-not (org-entry-get nil "JUNE_STOPPED")))))))
 
-(ert-deftest failed-interrupt-stays-parked-and-cannot-resume-finish-or-retry ()
+(ert-deftest failed-stop-stays-parked-and-cannot-resume-finish-or-retry ()
   (test-with-stop
-    (setq test-stop-status "working")
+    (setq test-stop-status "working" test-stop-after-interrupt "working" test-stop-kill-works nil)
     (should-error (test-stop))
     (should (equal (org-dispatch--edit test-stop-file test-stop-id #'org-get-todo-state) "HOLD"))
     (let ((state (car (org-dispatch--states))))
@@ -133,55 +205,22 @@
       (should (equal before test-stop-calls)))
     (should (equal (org-dispatch--edit test-stop-file test-stop-id #'org-get-todo-state) "AUTO"))))
 
-(ert-deftest stop-unknown-missing-identity-and-timeout-stay-unconfirmed ()
-  (dolist (failure '(unknown missing-identity malformed-response null-agents timeout))
+(ert-deftest stop-unavailable-hc-stays-unconfirmed ()
+  (dolist (failure '(core-down ambiguous))
     (test-with-stop
-      (let ((clock 0) (poll 0))
-        (cl-letf (((symbol-function 'org-dispatch--herdr)
-                   (lambda (&rest args)
-                     (pcase failure
-                       ('malformed-response '((result . nil)))
-                       ('null-agents '((result . ((agents . nil)))))
-                       ('timeout (let ((test-stop-status (if (cl-oddp (cl-incf poll)) "idle" "working")))
-                                   (apply #'test-stop-herdr args)))
-                       (_ (let ((test-stop-status (if (eq failure 'unknown) "unknown" test-stop-status))
-                                (test-stop-session (unless (eq failure 'missing-identity) test-stop-session)))
-                            (apply #'test-stop-herdr args)))))))
-          (if (eq failure 'timeout)
-              (cl-letf (((symbol-function 'float-time) (lambda (&rest _) (setq clock (+ clock 5)))))
-                (should-error (test-stop)))
-            (should-error (test-stop))))
-        (should (equal (plist-get (car (org-dispatch--states)) :status) "stopping"))
-        (org-dispatch--edit test-stop-file test-stop-id
-          (lambda () (should (equal (org-get-todo-state) "HOLD"))
-            (should-not (org-entry-get nil "JUNE_STOPPED"))))))))
-
-(ert-deftest stop-pi-path-session-blocked-and-moved-named-worker ()
-  (test-with-stop
-    (let ((state (car (org-dispatch--states))))
-      (org-dispatch--save-state (plist-put state :agent "pi")))
-    (org-dispatch--edit test-stop-file test-stop-id
-      (lambda ()
-        (org-entry-put nil "AGENT" "pi")
-        (goto-char (point-min))
-        (while (search-forward "herdr:kit/claude:" nil t) (replace-match "herdr:kit/pi:" t t))))
-    (setq test-stop-status "blocked")
-    (cl-letf (((symbol-function 'org-dispatch--herdr)
-               (lambda (&rest args)
-                 (let ((response (copy-tree (apply #'test-stop-herdr args) t)))
-                   (when (equal args '("agent" "list"))
-                     (let ((agent (aref (org-dispatch--get response 'result 'agents) 0)))
-                       (setcdr (assq 'agent agent) "pi")
-                       (setcdr (assq 'pane_id agent) "p-moved")
-                       (setcdr (assq 'value (alist-get 'agent_session agent))
-                               (concat "/private/sessions/2026-11-09_" test-stop-session ".jsonl"))))
-                   response))))
-      (should-error (test-stop))
+      (cl-letf (((symbol-function 'org-dispatch--hc)
+                 (lambda (&rest args)
+                   (pcase failure
+                     ('core-down (signal 'org-dispatch-hc (list "connection" "core is down")))
+                     ('ambiguous (if (equal (car args) "ls")
+                                     '((terminals . [((address . "t-exact") (state . "live"))
+                                                     ((address . "t-twin") (state . "live"))]))
+                                   (apply #'test-stop-hc args)))))))
+        (should-error (test-stop)))
       (should (equal (plist-get (car (org-dispatch--states)) :status) "stopping"))
-      (setq test-stop-status "idle")
-      (test-stop))
-    (should (equal (plist-get (car (org-dispatch--states)) :status) "stopped"))
-    (should-not (seq-find (lambda (args) (member "send-keys" args)) test-stop-calls))))
+      (org-dispatch--edit test-stop-file test-stop-id
+        (lambda () (should (equal (org-get-todo-state) "HOLD"))
+          (should-not (org-entry-get nil "JUNE_STOPPED")))))))
 
 (ert-deftest stop-recovers-crash-before-org-save ()
   (test-with-stop
@@ -200,12 +239,12 @@
       (org-dispatch--save-state (plist-put state :status "stopping"))
       (test-stop (make-string 64 ?0))
       (should (equal (plist-get (car (org-dispatch--states)) :status) "stopped"))
-      (org-dispatch--save-state (plist-put (plist-put state :status "running") :pane "p-new")))
+      (org-dispatch--save-state (plist-put (plist-put state :status "running") :terminal "t-new")))
     (let ((process-environment (copy-sequence process-environment)))
-      (setenv "HERDR_PANE_ID" "p-exact")
+      (setenv "HC_TERMINAL_ID" "t-exact")
       (org-dispatch--edit test-stop-file test-stop-id
         (lambda () (should-error (org-dispatch--check-stopped-task t))))
-      (setenv "HERDR_PANE_ID" "p-new")
+      (setenv "HC_TERMINAL_ID" "t-new")
       (org-dispatch--edit test-stop-file test-stop-id (lambda () (org-dispatch--check-stopped-task t))))))
 
 (ert-deftest stop-final-save-preserves-concurrent-dialog-and-refuses-state-change ()
@@ -216,7 +255,8 @@
                    (org-dispatch--edit test-stop-file test-stop-id
                      (lambda ()
                        (if (eq change 'state) (org-todo "EVAL")
-                         (org-dispatch--append "Dialog" "- Jon: A concurrent instruction.")))))))
+                         (org-dispatch--append "Dialog" "- Jon: A concurrent instruction."))))
+                   "interrupted")))
         (if (eq change 'state)
             (progn (should-error (test-stop))
                    (should (equal (plist-get (car (org-dispatch--states)) :status) "stopping"))
@@ -242,65 +282,39 @@
           (org-todo "PROG")
           (let ((section (org-dispatch--section-bounds "Sessions")))
             (goto-char (cdr section))
-            (insert "- [[herdr:kit/pi:" second "@p-second][second worker]]\n\n"))))
+            (insert "- [[herdr:kit/pi:" second "@t-exact][second worker]]\n\n"))))
       (org-dispatch--save-state
-        (list :id test-stop-id :file test-stop-file :agent "pi" :pane "p-second"
-              :session second :status "running"))
-      (let ((test-stop-session second))
-        (cl-letf (((symbol-function 'org-dispatch--herdr)
-                   (lambda (&rest args)
-                     (let ((response (copy-tree (apply #'test-stop-herdr args) t)))
-                       (when (equal args '("agent" "list"))
-                         (setcdr (assq 'agent (aref (org-dispatch--get response 'result 'agents) 0)) "pi"))
-                       response))))
-          (test-stop nil "test:second")))
+        (list :id test-stop-id :file test-stop-file :agent "pi" :host "kit" :terminal "t-exact"
+              :run "run-2" :session second :status "running"))
+      (let ((test-stop-session second) (test-stop-agent "pi") (test-stop-run "run-2"))
+        (test-stop nil "test:second"))
       (dolist (agent '("claude" "pi" "claude"))
         (org-dispatch--edit test-stop-file test-stop-id
           (lambda ()
             (org-entry-put nil "AGENT" agent)
             (should-not (plist-get (org-dispatch--task) :session))))))))
 
-(ert-deftest stop-active-or-blocked-replacement-receives-neither-prompts-nor-keys ()
-  (dolist (status '("working" "blocked"))
-    (test-with-stop
-      (setq test-stop-status status)
-      (cl-letf (((symbol-function 'org-dispatch--herdr)
-                 (lambda (&rest args)
-                   ;; A normal prompt is no safer than keys: the replacement
-                   ;; takes the same name and pane after discovery.
-                   (if (equal args '("agent" "list"))
-                       (apply #'test-stop-herdr args)
-                     (push args test-stop-calls)
-                     (setq test-stop-session "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
-                     '((result . ((submitted . t))))))))
-        (should-error (test-stop)))
-      (should (equal test-stop-calls '(("agent" "list"))))
-      (should (equal (plist-get (car (org-dispatch--states)) :status) "stopping"))
-      (org-dispatch--edit test-stop-file test-stop-id
-        (lambda () (should (equal (org-get-todo-state) "HOLD"))
-          (should-not (org-entry-get nil "JUNE_STOPPED")))))))
-
 (ert-deftest stop-general-todo-refuses-late-worker-writes-but-allows-human-and-june ()
   (test-with-stop
     (test-stop)
     (let ((process-environment (copy-sequence process-environment)))
-      (setenv "HERDR_PANE_ID" "p-exact")
+      (setenv "HC_TERMINAL_ID" "t-exact")
       (dolist (state '("EVAL" "HOLD" "DONE" "TODO" "PROG" "AUTO"))
         (should-error (test-stop-todo state)))
-      ;; A new worker now owns the task. The old pane cannot overwrite it.
+      ;; A new worker now owns the task. The old terminal cannot overwrite it.
       (let ((state (car (org-dispatch--states))))
-        (org-dispatch--save-state (plist-put (plist-put state :status "running") :pane "p-new")))
+        (org-dispatch--save-state (plist-put (plist-put state :status "running") :terminal "t-new")))
       (dolist (state '("EVAL" "HOLD" "DONE" "TODO" "PROG" "AUTO"))
         (should-error (test-stop-todo state)))
-      ;; The current worker can still report. Human Herdr shells and June's
+      ;; The current worker can still report. Human hc shells and June's
       ;; daemon are not workers and retain state-edit authority too.
-      (setenv "HERDR_PANE_ID" "p-new")
+      (setenv "HC_TERMINAL_ID" "t-new")
       (test-stop-todo "EVAL")
       (setenv "PI_SESSION_ID" nil)
       (setenv "CLAUDECODE" nil)
-      (setenv "HERDR_PANE_ID" "p-human-shell")
+      (setenv "HC_TERMINAL_ID" "t-human-shell")
       (test-stop-todo "HOLD")
-      (setenv "HERDR_PANE_ID" nil)
+      (setenv "HC_TERMINAL_ID" nil)
       (test-stop-todo "EVAL")
       (should (equal (org-dispatch--edit test-stop-file test-stop-id #'org-get-todo-state) "EVAL")))))
 
@@ -309,46 +323,40 @@
     ;; Local no-nudge state is durable, but the Org receipt was not saved.
     (let ((state (car (org-dispatch--states))))
       (org-dispatch--save-state (plist-put (plist-put state :status "stopping") :stop-request "test:crashed")))
-    (setenv "HERDR_PANE_ID" "p-exact")
+    (setenv "HC_TERMINAL_ID" "t-exact")
     (dolist (state '("EVAL" "HOLD" "DONE" "TODO" "PROG" "AUTO"))
       (should-error (test-stop-todo state)))
     (should (equal (org-dispatch--edit test-stop-file test-stop-id #'org-get-todo-state) "PROG"))
-    (setenv "HERDR_PANE_ID" nil)
+    (setenv "HC_TERMINAL_ID" nil)
     (test-stop nil "test:recover")
     (should (equal (plist-get (car (org-dispatch--states)) :status) "stopped"))))
 
-(ert-deftest stop-unparseable-identities-never-confirm-exit-or-permit-auto ()
-  (dolist (identity '("/fixture/session-unknown.jsonl" "" "aaaaaaaa----------------------------" 42))
-    (test-with-stop
-      (let ((test-stop-session identity) (test-stop-status "working"))
-        (should-error (test-stop)))
-      (should (equal (plist-get (car (org-dispatch--states)) :status) "stopping"))
-      (org-dispatch--edit test-stop-file test-stop-id
-        (lambda () (should-not (org-entry-get nil "JUNE_STOPPED"))))
-      ;; A valid settled observation confirms the run. A later malformed
-      ;; identity must also block the resume recheck, not count as exit.
-      (test-stop)
-      (let ((test-stop-session identity) (test-stop-status "working"))
-        (should-error (test-stop-todo "AUTO"))))))
-
-(ert-deftest stop-nonresponse-and-retries-never-submit-or-claim-a-cooperative-stop ()
+(ert-deftest a-stopped-worker-running-again-blocks-resume ()
   (test-with-stop
+    (test-stop)
     (setq test-stop-status "working")
+    (should-error (test-stop-todo "AUTO"))
+    (setq test-stop-status "idle")
+    (test-stop-todo "AUTO")
+    (should (equal (org-dispatch--edit test-stop-file test-stop-id #'org-get-todo-state) "AUTO"))))
+
+(ert-deftest stop-retries-never-send-prompts-and-confirm-only-a-later-result ()
+  (test-with-stop
+    (setq test-stop-status "working" test-stop-after-interrupt "working" test-stop-kill-works nil)
     (dotimes (attempt 3)
       (should-error (test-stop nil (format "test:retry-%s" attempt)))
       (org-dispatch--watch (car (org-dispatch--states)))
       (should-error (test-stop-todo "AUTO"))
       (let ((process-environment (copy-sequence process-environment)))
-        (setenv "HERDR_PANE_ID" "p-exact")
+        (setenv "HC_TERMINAL_ID" "t-exact")
         (should-error (test-stop-todo "EVAL"))))
-    (should (seq-every-p (lambda (args) (member args '(("agent" "list") ("agent" "get" "p-exact"))))
-                         test-stop-calls))
+    ;; Only stop keys and kills, never a prompt.
+    (should-not (seq-find (lambda (args) (member (car args) '("send" "keys"))) test-stop-calls))
     (org-dispatch--edit test-stop-file test-stop-id
       (lambda ()
         (should (equal (org-get-todo-state) "HOLD"))
         (should-not (org-entry-get nil "JUNE_STOPPED"))
         (should (= 1 (how-many "Stop requested; parked" (point) (point-max))))))
-    ;; Only a later independent observation can confirm this original run.
     (setq test-stop-status "idle")
     (test-stop nil "test:after-manual-stop")
     (should (equal (plist-get (car (org-dispatch--states)) :status) "stopped"))))

@@ -31,7 +31,7 @@ export function testConfig(dir: string, extra: Partial<Config> = {}): Config {
 		skillDirs: [],
 		org: { root: join(dir, "org"), agendaFiles: join(dir, "agenda"), people: join(dir, "org", "people.org") },
 		dispatch: { hosts: [] },
-		herdr: { session: "default", host: "kit", hosts: {}, allowPrompt: false },
+		herdr: { host: "kit", hosts: {}, allowPrompt: false },
 		// Off unless a test turns it on, so no test depends on the hour it runs.
 		rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
 		reflection: { enabled: false, quietMinutes: 60, recentDays: 3, periods: [] },
@@ -191,4 +191,16 @@ export function routed(main: Step[], worker: Step[]): Step[] {
 		return typeof step === "function" ? step(ctx, ...rest) : step;
 	};
 	return Array.from({ length: main.length + worker.length }, () => next);
+}
+
+/**
+ * A fake hc for Herdr's run hook: one live terminal, t1, carrying any session label asked for and reporting STATUS
+ * (null for none). Calls are recorded in CALLS when given.
+ */
+export function hcStatus(status: string | null, calls?: string[][]) {
+	return async (argv: readonly string[]) => {
+		calls?.push([...argv]);
+		if (argv.includes("ls")) return JSON.stringify({ terminals: [{ address: "t1", state: "live" }] });
+		return JSON.stringify({ address: "t1", state: "live", status: status === null ? null : { state: status }, labels: {} });
+	};
 }

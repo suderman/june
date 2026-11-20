@@ -6,6 +6,26 @@
 (defvar test-review-repo)
 (defvar test-review-commit)
 (defvar test-review-workers)
+
+(defun test-review-worker (session status &optional address labels)
+  "A fake live hc terminal running pi SESSION with STATUS (nil for none)."
+  `((address . ,(or address "t-worker")) (state . "live")
+    (status . ,(and status `((state . ,status))))
+    (labels . ,(append labels `((org.agent . "pi") (org.session . ,session))))))
+
+(defun test-review-hc (&rest args)
+  "Answer only reads; any terminal input is a test failure."
+  (pcase args
+    (`("ls" "--all" "--label" ,filter)
+     `((terminals . ,(vconcat (mapcar (lambda (worker) `((address . ,(alist-get 'address worker)) (state . "live")))
+                                      (seq-filter (lambda (worker)
+                                                    (equal filter (concat "org.session="
+                                                                          (alist-get 'org.session (alist-get 'labels worker)))))
+                                                  test-review-workers))))))
+    (`("get" ,address)
+     (or (seq-find (lambda (worker) (equal (alist-get 'address worker) address)) test-review-workers)
+         (signal 'org-dispatch-hc (list "not_found" address))))
+    (_ (error "unexpected hc input %S" args))))
 (defconst test-review-id "00000000-0000-0000-0000-000000000001")
 (defconst test-review-developer "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 (defconst test-review-reviewer "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
@@ -19,12 +39,12 @@
           (org-dispatch-emacs-init (expand-file-name "no-init" root))
           (test-review-file (expand-file-name "work/studio/app/app.org" org-dispatch-root))
           (test-review-repo (expand-file-name "source" root))
-          (test-review-workers [])
+          (test-review-workers nil)
           (process-environment (copy-sequence process-environment)))
      (unwind-protect
          (progn
            (setenv "HOME" root)
-           (setenv "HERDR_PANE_ID" nil)
+           (setenv "HC_TERMINAL_ID" nil)
            (setenv "PI_SESSION_ID" nil)
            (setenv "CLAUDECODE" nil)
            (make-directory (file-name-directory test-review-file) t)
@@ -39,11 +59,8 @@
              (with-temp-file test-review-file
                (insert "#+TITLE: App\n\n* EVAL Build app\n:PROPERTIES:\n:ID: " test-review-id
                        "\n:HOST: kit\n:AGENT: pi\n:DIR: " test-review-repo "\n:REVIEW: yes\n:DEPLOY: no\n:END:\nOriginal scope stays.\n\n** Outcome\nImplementation and checks.\n\n** Sessions\n- [[herdr:kit/pi:"
-                       test-review-developer "@dev-pane][original developer]]\n\n** Dialog\n- Jon [2026-11-09 Mon 12:00]: Fix in scope, no deployment.\n"))
-             (cl-letf (((symbol-function 'org-dispatch--herdr)
-                        (lambda (&rest args)
-                          (unless (equal args '("agent" "list")) (error "unexpected Herdr input %S" args))
-                          `((result . ((agents . ,test-review-workers))))))
+                       test-review-developer "@t-developer][original developer]]\n\n** Dialog\n- Jon [2026-11-09 Mon 12:00]: Fix in scope, no deployment.\n"))
+             (cl-letf (((symbol-function 'org-dispatch--hc) #'test-review-hc)
                        ((symbol-function 'sleep-for) #'ignore))
                ,@body)))
        (dolist (buffer (buffer-list))
@@ -83,19 +100,21 @@
          (session (or session test-review-reviewer)))
     (test-review-at id (lambda ()
       (org-todo "PROG")
-      (org-dispatch--append "Sessions" (format "- [[herdr:kit/pi:%s@review-pane][reviewer]]" session))))
-    (org-dispatch--save-state (list :id id :file test-review-file :status "running" :agent "pi"
-                                   :session session :pane "review-pane" :started (float-time) :nudges 0
+      (org-dispatch--append "Sessions" (format "- [[herdr:kit/pi:%s@t-review][reviewer]]" session))))
+    (org-dispatch--save-state (list :id id :file test-review-file :status "running" :agent "pi" :host "kit"
+                                   :session session :terminal "t-review" :run "review-run"
+                                   :started (float-time) :nudges 0
                                    :dir (plist-get loop :snapshot)))
     (let ((process-environment (copy-sequence process-environment))
-          (test-review-workers (vector `((agent . "pi") (pane_id . "review-pane") (agent_status . "working")
-            (agent_session . ((value . ,(concat session ".jsonl"))))))))
-      (setenv "HERDR_PANE_ID" "review-pane")
+          (test-review-workers (list (test-review-worker session "working" "t-review"
+                                                         `((org.task . ,id) (org.run . "review-run"))))))
+      (setenv "HC_TERMINAL_ID" "t-review")
       (setenv "PI_SESSION_ID" session)
       (test-review-command "verdict" (list :commit test-review-commit :verdict verdict :note "Independent fixture findings and checks.") id))
     (test-review-at id (lambda () (org-todo "EVAL")))
     (org-dispatch--save-state (list :id id :file test-review-file :status "finished" :agent "pi"
-                                   :session session :pane "review-pane" :started (float-time) :nudges 0))))
+                                   :session session :terminal "t-review" :run "review-run"
+                                   :started (float-time) :nudges 0))))
 
 (defun test-review-advance ()
   (test-review-command "advance" (list :revision (test-review-revision) :commit test-review-commit)))
@@ -249,17 +268,16 @@
 
 (ert-deftest review-active-and-unknown-workers-block-handoffs-with-no-input ()
   (test-with-review
-    (setq test-review-workers (vector `((agent . "pi") (agent_status . "working")
-      (agent_session . ((value . ,(concat test-review-developer ".jsonl")))))))
+    (setq test-review-workers (list (test-review-worker test-review-developer "working")))
     (should-error (test-review-start))
     (should-not (test-review-loop))
-    (setq test-review-workers (vector '((agent . "pi") (agent_status . "idle"))))
+    ;; A live terminal that reports no status is unknown, never settled.
+    (setq test-review-workers (list (test-review-worker test-review-developer nil)))
     (should-error (test-review-start))
-    (setq test-review-workers [])
+    (setq test-review-workers nil)
     (test-review-start)
     (test-review-report "pass")
-    (setq test-review-workers (vector `((agent . "pi") (agent_status . "blocked")
-      (agent_session . ((value . ,(concat test-review-reviewer ".jsonl")))))))
+    (setq test-review-workers (list (test-review-worker test-review-reviewer "blocked")))
     (should-error (test-review-advance))
     (should (equal (test-review-state) "EVAL"))))
 
@@ -358,25 +376,26 @@
       (let ((alias (list :id "other" :host "kit" :agent "pi" :june t :dir (plist-get loop :snapshot) :hash "x")))
         (should-not (org-dispatch--eligible (list alias) (org-dispatch--states) t))))))
 
-(ert-deftest review-launch-error-keeps-pane-receipt-and-never-retries ()
+(ert-deftest review-launch-error-keeps-its-receipt-and-never-retries ()
   (test-with-review
     (test-review-start)
     (let* ((id (plist-get (test-review-loop) :review))
            (task (test-review-at id #'org-dispatch--task)) starts)
       (cl-letf (((symbol-function 'org-dispatch--command) (lambda (_) nil))
-                ((symbol-function 'org-dispatch--project-pane)
-                 (lambda (&rest _) '((pane_id . "partial-pane") (tab_id . "partial-tab"))))
-                ((symbol-function 'org-dispatch--herdr)
+                ((symbol-function 'org-dispatch--hc)
                  (lambda (&rest args)
-                   (when (equal (seq-take args 2) '("agent" "start"))
-                     (push args starts) (error "fixture transport lost after startup"))
-                   (error "unexpected Herdr input %S" args)))
+                   (pcase (car args)
+                     ("ls" '((terminals . [])))
+                     ("run" (push args starts)
+                      (signal 'org-dispatch-hc (list "connection" "fixture transport lost after startup")))
+                     (_ (error "unexpected hc input %S" args)))))
                 ((symbol-function 'org-dispatch--notify) #'ignore))
         (should-not (org-dispatch--launch task))
         (let ((state (car (org-dispatch--states))))
           (should (equal (plist-get state :status) "launch-uncertain"))
-          (should (equal (plist-get state :pane) "partial-pane"))
-          (should (equal (plist-get state :tab) "partial-tab")))
+          ;; The run and session chosen before launch stay on record for inspection.
+          (should (plist-get state :run))
+          (should (plist-get state :session)))
         (should (equal (test-review-state id) "HOLD"))
         (org-dispatch-run)
         (should (= 1 (length starts)))))))
@@ -404,7 +423,7 @@
       (setq spec (plist-put spec :revision "stale"))
       (should-error (test-review-command "start" spec)))
     (let ((process-environment (copy-sequence process-environment)))
-      (setenv "HERDR_PANE_ID" "developer-pane")
+      (setenv "HC_TERMINAL_ID" "t-developer")
       (setenv "PI_SESSION_ID" test-review-developer)
       (should-error (test-review-start)))
     (should-not (test-review-loop))))

@@ -5,7 +5,7 @@ description: >
   work to a logical project at ~/org/work/<domain>/<project>/<project>.org,
   where a project may reference zero, one, or many repositories. Creates or
   resumes task threads, tracks scope, checklists, follow-ups, verification, and
-  TODO state, links Herdr agent sessions, and follows the rules for autonomous
+  TODO state, links agent sessions (herdr: links), and follows the rules for autonomous
   AUTO tasks. Uses dated task directories for supplied material. Use during
   implementation, debugging, refactoring, actionable reviews, explicit project
   ideas, and other substantive work that should persist across sessions. Skip
@@ -237,7 +237,7 @@ States describe the task from Jon's point of view:
    Leave out routine mechanics such as reading files or editing the Org record.
 5. When supplied material is involved, find or create the task directory and
    read it before making decisions.
-6. Inside Herdr, link this session as described in "Herdr session links".
+6. Inside an hc terminal, link this session as described in "Session links".
 
 Write the thread by the Org rules in the global instructions: each heading
 directly on its content, one physical line per paragraph or list item, and one
@@ -317,17 +317,18 @@ This needs the headline-capable Org commands deployed on the working host. Until
 
 Do not claim the record is synchronized until this pass is done.
 
-## Herdr session links
+## Session links
 
-When working in a Herdr pane (`HERDR_PANE_ID` is set) and `herdr-link` is
+When working in an hc terminal (`HC_TERMINAL_ID` is set) and `herdr-link` is
 installed, link the session to the thread so Jon can follow it from Org back to
-the pane, or resume it.
+the agent, or resume it.
 
 1. Run `herdr-link stamp`. It prints an Org link naming host, agent, session,
-   and pane, labelled `agent@host/YYYY-MM-DDTHHMM`. When several sessions in
-   one thread play different roles, such as a supervisor and a worker, pass a
-   short role, `herdr-link stamp supervisor`, to end the label with
-   `#supervisor`. Write roles as lowercase hyphenated slugs, such as
+   and terminal, labelled `agent@host/YYYY-MM-DDTHHMM`, and labels this
+   terminal with the session so the link can find it again. When several
+   sessions in one thread play different roles, such as a supervisor and a
+   worker, pass a short role, `herdr-link stamp supervisor`, to end the label
+   with `#supervisor`. Write roles as lowercase hyphenated slugs, such as
    `petrochina-worker`; the tool converts anything else the same way.
    Otherwise pass nothing.
 2. Search the thread for `herdr:<host>/<agent>:<session>`. A resumed session
@@ -337,14 +338,14 @@ the pane, or resume it.
 
 ```org
 ** Sessions
-- [[herdr:kit/claude:8419644e-636d-490b-bec0-3c28856a68a5@w2Q:pN][claude@kit/2026-10-11T0738]]
-- [[herdr:cog/pi:01a1176c-3aa6-7717-a4c6-eaa0aa0a0833@w9:p1][pi@cog/2026-10-12T0910#worker]]
+- [[herdr:kit/claude:8419644e-636d-490b-bec0-3c28856a68a5@t2q][claude@kit/2026-10-11T0738]]
+- [[herdr:cog/pi:01a1176c-3aa6-7717-a4c6-eaa0aa0a0833@t9][pi@cog/2026-10-12T0910#worker]]
 ```
 
 A thread may collect sessions from several hosts and agents. Keep existing
 links and write a new one together with other thread updates, not as a
-separate edit. Never rewrite a link to track pane moves; following it finds the
-live pane. The only exception is a repeating dispatched task: `org-dispatch
+separate edit. Never rewrite a link; following it finds the session's live
+terminal by its label, or resumes the saved session. The only exception is a repeating dispatched task: `org-dispatch
 finish` moves that run's links into `:LOGBOOK:` and removes the section.
 
 ## Autonomous tasks
@@ -382,7 +383,7 @@ reaches 0 the agent must use `HOLD`.
 
 - Coding agents never set `AUTO` on an existing heading. Creating new AUTO headings through `org-dispatch plan` is allowed only for a plan Jon explicitly requested; otherwise Jon grants autonomy. Set `:HOST:` or `:AGENT:` only when Jon asks. June, Jon's assistant, is the one
   exception. Under her `AGENTS.md` (from `~/.agents/june`), she may queue new `AUTO` tasks, starting each one's body with a line saying she queued it and why. When Jon explicitly asks, she may also resume an existing TODO, EVAL, or HOLD task through `org_resume_task`, which uses the shared `org-edit` command and records his instruction in Dialog. It can add `:DEPENDS:` prerequisites in the same save, after checking for missing or duplicate IDs, self-dependency, and cycles. When Jon asks to remove selected prerequisites, June uses `org_remove_dependencies` with the freshly read task revision; AUTO becomes HOLD in the same locked save as removal and an appended Dialog correction. Prior Dialog and scope stay intact. She re-reads and resolves remaining prose gates before a separate authorized resume. Do not remove DEPENDS by hand on AUTO or treat edge removal as permission to start work. `org-edit` accepting AUTO does not give coding workers permission to set it.
-- After Jon activates the updated Org commands, June uses `org_stop_task` when he asks to stop or switch a running local dispatcher task. Read the whole task and Dialog first. The command records the stop, parks PROG at HOLD, suppresses nudges and confirms the exact session settled or exited. It sends no input: Herdr lacks expected-session/generation-bound interruption, so an active working/blocked worker stays unconfirmed. Ask Jon to interrupt that exact session manually, then retry the tool. Normal agent.prompt delivery has the same identity gap, so do not substitute a cooperative stop prompt or claim queued delivery. Its wait tracks lifecycle, not handling of a particular instruction. June cannot yet perform that interruption or cooperative delivery safely herself. It needs no `HERDR_ENV`; it is the dispatcher's supported task operation, not generic terminal control. An uncertain stop stays parked and blocks resume, finish and retry. Inspect the task and worker before retrying; never use raw keys, manual AUTO, process kills or a duplicate task as a workaround. A confirmed stop preserves identity, scope, findings, schedule, prerequisites and history, without claiming child processes ended. Only a separate authorized `org_resume_task` selects Jon's requested agent and grants AUTO. All stopped sessions are excluded from reuse, including across repeated agent switches. Late worker finish/retry and general org-edit state writes are guarded cooperatively; human shells and June's daemon retain state control. Remote tasks need that host's June or Jon. A checkout update alone is insufficient; activate the updated `org-edit` and dispatcher together with Jon's approval before using this workflow.
+- June uses `org_stop_task` when Jon asks to stop or switch a running local dispatcher task. Read the whole task and Dialog first. The command records the stop and parks PROG at HOLD with nudges off before it touches the worker. It then checks that the worker's hc terminal still carries the run's task, run, agent and session labels, presses its stop key, waits for it to settle, and kills that one terminal only if the agent does not stop. It sends no prompt and never touches another terminal; Dialog records whether the worker had exited, was left running because it was not working, stopped at the interrupt, or was killed. An error leaves the task parked and blocks resume, finish and retry. Inspect the task and worker before retrying the same call; never use raw keys, manual AUTO, process kills or a duplicate task as a workaround. A confirmed stop preserves identity, scope, findings, schedule, prerequisites and history; the session stays resumable. Only a separate authorized `org_resume_task` selects Jon's requested agent and grants AUTO. All stopped sessions are excluded from reuse, including across repeated agent switches. While a run is active, only its own terminal (`HC_TERMINAL_ID`) may finish, retry or change the task; human shells and June's daemon retain state control. Remote tasks need that host's June or Jon.
 - In a dispatched session, follow the dispatch prompt where it differs from
   this skill, and change the TODO state only with `org-dispatch finish`.
 - `** Dialog` is the conversation between agents and Jon on a task. It stays

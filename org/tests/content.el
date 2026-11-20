@@ -137,16 +137,17 @@
     (org-edit--at test-content-file "Old task"
       (lambda () (org-dispatch--append "Sessions" "- [[herdr:kit/pi:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa][worker]]")) t)
     (let ((before (test-content-read)))
-      (cl-letf (((symbol-function 'org-dispatch--herdr)
-                 (lambda (&rest _) '((result . ((agents . [((agent . "pi") (agent_status . "working")
-                    (agent_session . ((value . "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))))])))))))
-        (should (string-match-p "identity-bound interruption"
-                  (error-message-string (should-error (test-content-update (test-content-revision) :title "New"))))))
-      (cl-letf (((symbol-function 'org-dispatch--herdr)
-                 (lambda (&rest _) '((result . ((agents . [((agent . "pi") (agent_status . "unknown")
-                    (agent_session . ((value . "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))))])))))))
-        (should (string-match-p "worker status is unknown"
-                  (error-message-string (should-error (test-content-update (test-content-revision) :title "New"))))))
+      (dolist (status '("working" nil))
+        (cl-letf (((symbol-function 'org-dispatch--hc)
+                   (lambda (&rest args)
+                     (pcase (car args)
+                       ("ls" '((terminals . [((address . "t1") (state . "live"))])))
+                       ("get" `((address . "t1") (state . "live") (status . ,(and status `((state . ,status))))
+                                (labels (org.agent . "pi") (org.session . "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))))
+                       (_ (error "unexpected hc call %S" args)))))
+                  ((symbol-function 'sleep-for) #'ignore))
+          (should (string-match-p (format "worker t1 is %s; stop it before continuing" (or status "unknown"))
+                    (error-message-string (should-error (test-content-update (test-content-revision) :title "New")))))))
       (should (equal before (test-content-read))))))
 
 (ert-run-tests-batch-and-exit)
