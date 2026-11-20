@@ -207,6 +207,8 @@ fun Modifier.swipeHandle(swipe: Swipe, allowed: (Swipes.Direction) -> Boolean, a
             change.consume()
             drag = root - start
             tracker.addPosition(change.uptimeMillis, root)
+            // The drag starts where it passed touch slop, so its first move is nothing: the axis waits for a real one.
+            if (swipe.horizontal == null && abs(drag.x) == abs(drag.y)) return@detectDragGestures
             val horizontal = swipe.horizontal ?: (abs(drag.x) > abs(drag.y)).also { swipe.horizontal = it }
             val along = if (horizontal) drag.x else drag.y
             val give = if (allow(way(along, horizontal))) along else along * 0.15f
