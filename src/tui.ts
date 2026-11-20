@@ -20,10 +20,10 @@ import {
 	VStack,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { Client, COMMANDS, parseCommand, type Reply } from "./protocol.ts";
+import { Client, COMMANDS, parseCommand, type Reply, type Request } from "./protocol.ts";
 import { applyChanges, type ViewItem, type ViewState } from "./transcript.ts";
 import { orgToMarkdown } from "./org.ts";
-import { emacsCall, linkKind } from "../desktop/strip.mjs";
+import { emacsCall, linkKind, momentOf } from "../desktop/strip.mjs";
 import { runProcess, type Run } from "./tools/herdr.ts";
 
 /** Use the desktop's link rules and file arguments; never pass a link through a shell. */
@@ -35,6 +35,55 @@ export async function openTuiLink(url: string, run: Run = runProcess): Promise<v
 	else if (kind === "herdr") argv = ["herdr-link", "jump", url];
 	await run(argv, 30_000);
 }
+
+/** The terminal's own commands, for browsing June's history; the daemon never sees them. */
+export const LOCAL_COMMANDS = [
+	{ name: "day", description: "Browse a past day: YYYY-MM-DD or yesterday; alone, list the days" },
+	{ name: "today", description: "Back to today's live conversation" },
+	{ name: "search", description: "Find what you and June said; /at ID opens a hit" },
+	{ name: "at", description: "Open the day of a moment by its id, marked" },
+] as const;
+type LocalCommand = (typeof LOCAL_COMMANDS)[number]["name"];
+
+/** `/name args` when `text` is one of the terminal's own commands; undefined otherwise. */
+export function localCommand(text: string): { name: LocalCommand; args: string } | undefined {
+	const match = /^\/(day|today|search|at)(?:\s+([\s\S]*))?$/.exec(text.trim());
+	return match ? { name: match[1] as LocalCommand, args: (match[2] ?? "").trim() } : undefined;
+}
+
+/** The day before `date`, both "YYYY-MM-DD". */
+export function previousDay(date: string): string {
+	const [y, m, d] = date.split("-").map(Number) as [number, number, number];
+	const day = new Date(y, m - 1, d - 1);
+	return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+}
+
+const dayLabel = (date: string, style: "long" | "short" = "long") => {
+	const [y, m, d] = date.split("-").map(Number) as [number, number, number];
+	return new Date(y, m - 1, d).toLocaleDateString("en-CA", style === "long" ? { weekday: "long", month: "long", day: "numeric", year: "numeric" } : { weekday: "short", month: "short", day: "numeric" });
+};
+
+/** The most recent days with conversation, newest first, for /day alone. */
+export function daysText(reply: Extract<Reply, { type: "days" }>, count = 14): string {
+	if (reply.days.length === 0) return "No conversation yet.";
+	const rows = reply.days.slice(-count).reverse().map(({ date, count: n }) => `${date}  ${dayLabel(date, "short")}  ${n} message${n === 1 ? "" : "s"}${date === reply.today ? "  (today)" : ""}`);
+	const earlier = reply.days.length > count ? `${reply.days.length - count} earlier days not listed. ` : "";
+	return [...rows, `${earlier}/day YYYY-MM-DD opens one.`].join("\n");
+}
+
+/** Search hits, newest first, one a line led by the id /at takes. */
+export function searchText(reply: Extract<Reply, { type: "search" }>): string {
+	if (reply.hits.length === 0) return "Nothing found.";
+	const time = (at: number) => new Date(at).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit", hour12: false });
+	const rows = reply.hits.map((hit) => `${hit.id}  ${dayLabel(hit.date, "short")} ${time(hit.at)}  ${hit.kind === "user" ? "you" : "June"}: ${hit.text}`);
+	return [...rows, `${reply.more ? "Older hits left out; add words to narrow it. " : ""}/at ID opens one.`].join("\n");
+}
+
+/** Items kept after the moment /at opens, so the view, which follows its end, shows the moment near the bottom. */
+const AFTER_MOMENT = 3;
+
+/** A past day being browsed, fixed while the live view keeps updating underneath; `more` items past the moment are cut. */
+export type Past = { date: string; items: ViewItem[]; at?: string; more: number };
 
 /** A command's reply. Like a Telegram command reply, it is not part of the conversation; a reconnect drops it. */
 type CommandReply = { kind: "reply"; id: string; command: string; text: string };
@@ -152,8 +201,8 @@ function component(item: Item): Component[] {
 		case "assistant": {
 			const parts: Component[] = [new Line()];
 			for (const line of item.thinking?.split("\n") ?? []) parts.push(new Line(c.italic(c.muted(`∴ ${line}`))));
-			// June writes Org; the terminal draws Markdown.
-			if (item.text) parts.push(new Markdown(orgToMarkdown(item.text), 0, 0, markdownTheme));
+			// June writes Org; the terminal draws Markdown. A moment she links opens on a click, or by the /at it names.
+			if (item.text) parts.push(new Markdown(orgToMarkdown(item.text).replace(/\]\(june:at\/(\d+)\)/g, "](june:at/$1) (/at $1)"), 0, 0, markdownTheme));
 			if (item.streaming && parts.length === 1) parts.push(new Line(c.muted("…")));
 			if (item.error) parts.push(new Line(c.err(`! ${item.error}`)));
 			return parts;
@@ -184,6 +233,22 @@ export class Transcript {
 	/** When the running compaction started, as this client first saw it; undefined when none runs. */
 	compacting: number | undefined;
 	#replies: { after: string | null; reply: CommandReply }[] = [];
+	past: Past | undefined;
+	#pastReplies: CommandReply[] = [];
+
+	/** Browse a day the daemon folded: all of it, or with a moment, up to a few items past it. */
+	browse(reply: Extract<Reply, { type: "day" }>): void {
+		const at = reply.at === undefined ? -1 : reply.items.findIndex((item) => item.id === reply.at);
+		const end = at < 0 ? reply.items.length : Math.min(reply.items.length, at + 1 + AFTER_MOMENT);
+		this.past = { date: reply.date, items: reply.items.slice(0, end), ...(reply.at !== undefined ? { at: reply.at } : {}), more: reply.items.length - end };
+		this.#pastReplies = [];
+	}
+
+	/** Back to the live view. */
+	today(): void {
+		this.past = undefined;
+		this.#pastReplies = [];
+	}
 
 	apply(reply: Extract<Reply, { type: "view" }>): void {
 		if ("reset" in reply) {
@@ -196,6 +261,11 @@ export class Transcript {
 	}
 
 	reply(command: string, text: string): void {
+		// A past day does not change, so a reply given there follows it.
+		if (this.past) {
+			this.#pastReplies.push({ kind: "reply", id: `reply:past:${this.#pastReplies.length}`, command, text });
+			return;
+		}
 		// After the last item that stays: the streaming reply and a failure note are replaced when the run settles.
 		const anchor = this.items.findLast((item) => item.id !== "live" && !item.id.startsWith("failure:"));
 		this.#replies.push({ after: anchor?.id ?? null, reply: { kind: "reply", id: `reply:${this.#replies.length}`, command, text } });
@@ -203,6 +273,7 @@ export class Transcript {
 
 	/** Items and replies in display order; a reply whose item is gone stays at the end. */
 	shown(): Item[] {
+		if (this.past) return [...this.past.items, ...this.#pastReplies];
 		const ids = new Set(this.items.map((item) => item.id));
 		const after = (id: string | null) => this.#replies.filter((r) => r.after === id).map((r) => r.reply);
 		return [...after(null), ...this.items.flatMap((item) => [item, ...after(item.id)]), ...this.#replies.filter((r) => r.after !== null && !ids.has(r.after)).map((r) => r.reply)];
@@ -212,14 +283,24 @@ export class Transcript {
 class TranscriptView extends Container {
 	update(transcript: Transcript) {
 		this.clear();
-		if (transcript.earlier) this.addChild(new Line(c.muted("── earlier entries not shown")));
-		for (const item of transcript.shown()) for (const part of component(item)) this.addChild(part);
+		const past = transcript.past;
+		if (past) {
+			this.addChild(new Line(c.accent(`── ${dayLabel(past.date)} · /today returns`)));
+			if (past.items.length === 0) this.addChild(new Line(c.muted("── nothing said that day · /day lists the days")));
+		} else if (transcript.earlier) this.addChild(new Line(c.muted("── earlier days: /day yesterday · /day lists them · /search WORDS")));
+		for (const item of transcript.shown()) {
+			if (past?.at !== undefined && item.id === past.at) this.addChild(new Line(c.accent("▶ the moment")));
+			for (const part of component(item)) this.addChild(part);
+		}
+		if (past?.more) this.addChild(new Line(c.muted(`── ${past.more} more that day · /day ${past.date}`)));
 	}
 }
 
 export async function runTui(socketPath: string): Promise<void> {
 	const tui = new TuiAltScreen(new ProcessTerminal(), false, undefined, {
 		openUrl: (url) => {
+			const moment = momentOf(url);
+			if (moment !== undefined) return void browse("at", String(moment)).catch(fail);
 			void openTuiLink(url).catch((error) => {
 				flash = `Link failed: ${error instanceof Error ? error.message : String(error)}`;
 				redraw();
@@ -295,6 +376,13 @@ export async function runTui(socketPath: string): Promise<void> {
 			return redraw();
 		}
 		flash = undefined;
+		const own = localCommand(text);
+		if (own !== undefined) {
+			editor.addToHistory(text);
+			editor.setText("");
+			await browse(own.name, own.args).catch(fail);
+			return;
+		}
 		const command = parseCommand(text);
 		if (command !== undefined) {
 			editor.addToHistory(text);
@@ -313,6 +401,8 @@ export async function runTui(socketPath: string): Promise<void> {
 			const input = await imageInput(text, pasted);
 			const reply = await client.request({ op: "submit", requestId: randomUUID(), ...input, source: "tui", whenBusy });
 			if (reply.type === "error") throw new Error(reply.message);
+			// Sent from a past day, the message joins today's conversation, so the view follows it there.
+			transcript.today();
 			editor.addToHistory(text);
 			editor.setText("");
 			pasted.clear();
@@ -363,6 +453,46 @@ export async function runTui(socketPath: string): Promise<void> {
 		redraw();
 	};
 
+	const fail = (error: unknown) => {
+		flash = error instanceof Error ? error.message : String(error);
+		redraw();
+	};
+
+	/** The terminal's own commands: browse a day or a moment, search, or return to today. */
+	const browse = async (name: LocalCommand, args: string) => {
+		const current = client;
+		if (current === undefined || connection !== "online") throw new Error("not connected");
+		const ask = async (request: Request) => {
+			const reply = await current.request(request);
+			if (reply.type === "error") throw new Error(reply.message);
+			return reply;
+		};
+		const open = async (where: { date: string } | { at: number }) => {
+			const reply = await ask({ op: "day", requestId: randomUUID(), ...where });
+			if (reply.type !== "day") return;
+			if (reply.today && reply.at === undefined) transcript.today();
+			else transcript.browse(reply);
+		};
+		flash = undefined;
+		if (name === "today" || (name === "day" && args === "today")) transcript.today();
+		else if (name === "search") {
+			if (args === "") throw new Error("/search needs words");
+			const reply = await ask({ op: "search", requestId: randomUUID(), query: args, limit: 20 });
+			if (reply.type === "search") transcript.reply("search", searchText(reply));
+		} else if (name === "at") {
+			const id = momentOf(`june:at/${args.replace(/^june:at\//, "")}`);
+			if (id === undefined) throw new Error("/at takes an entry id, such as /at 38039");
+			await open({ at: id });
+		} else if (args === "" || args === "yesterday") {
+			const reply = await ask({ op: "days", requestId: randomUUID() });
+			if (reply.type !== "days") return;
+			if (args === "") transcript.reply("day", daysText(reply));
+			else await open({ date: previousDay(reply.today) });
+		} else if (/^\d{4}-\d{2}-\d{2}$/.test(args)) await open({ date: args });
+		else throw new Error("/day takes YYYY-MM-DD, yesterday or today");
+		redraw();
+	};
+
 	editor.onSubmit = (text) => {
 		void send(text, transcript.state.running ? "steer" : "followUp");
 	};
@@ -394,7 +524,7 @@ export async function runTui(socketPath: string): Promise<void> {
 		}
 		return undefined;
 	});
-	editor.setAutocompleteProvider(new CombinedAutocompleteProvider([...COMMANDS], process.cwd()));
+	editor.setAutocompleteProvider(new CombinedAutocompleteProvider([...COMMANDS, ...LOCAL_COMMANDS], process.cwd()));
 	tui.setFocus(editor);
 	tui.start();
 	redraw();

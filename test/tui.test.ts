@@ -12,7 +12,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { orgToMarkdown } from "../src/org.ts";
 import { plain } from "../src/plain.ts";
 import { fold } from "../src/transcript.ts";
-import { compactingStatus, openTuiLink, Transcript } from "../src/tui.ts";
+import { compactingStatus, daysText, localCommand, openTuiLink, previousDay, searchText, Transcript } from "../src/tui.ts";
 
 test("terminal clicks use desktop file routing, session jumps and web opening without a shell", async () => {
 	const calls: string[][] = [];
@@ -215,4 +215,39 @@ test("a command reply stays where it was given, after the streaming reply it int
 	t.apply({ type: "view", changes: [{ op: "drop", id: "live" }, { op: "put", item: { kind: "assistant", id: "2", text: "on it", streaming: false, answers: "tui", error: "aborted" }, after: "1" }, { op: "put", item: { kind: "note", id: "3", text: "stopped" }, after: "2" }] });
 	t.apply({ type: "view", changes: [{ op: "put", item: { kind: "user", id: "4", source: "kitty", text: "you there?" }, after: "3" }] });
 	assert.deepEqual(t.shown().map((i) => i.id), ["1", "reply:0", "2", "3", "4"]);
+});
+
+test("the terminal browses June's days with its own commands, leaving the daemon's alone", () => {
+	assert.deepEqual(localCommand("/day 2026-11-18"), { name: "day", args: "2026-11-18" });
+	assert.deepEqual(localCommand(" /search the boat "), { name: "search", args: "the boat" });
+	assert.deepEqual(localCommand("/today"), { name: "today", args: "" });
+	assert.deepEqual(localCommand("/at 38039"), { name: "at", args: "38039" });
+	for (const text of ["/stop", "/days", "/atlas", "day 2026-11-18"]) assert.equal(localCommand(text), undefined, text);
+	assert.equal(previousDay("2026-11-20"), "2026-11-19");
+	assert.equal(previousDay("2026-03-01"), "2026-02-28");
+	assert.equal(previousDay("2027-01-01"), "2026-12-31");
+	const days = daysText({ type: "days", requestId: "r", today: "2026-11-20", days: [{ date: "2026-11-18", count: 1 }, { date: "2026-11-20", count: 4 }] });
+	assert.match(days.split("\n")[0]!, /^2026-11-20 .* 4 messages {2}\(today\)$/);
+	assert.match(days.split("\n")[1]!, /^2026-11-18 .* 1 message$/);
+	const at = new Date(2026, 10, 17, 14, 2).getTime();
+	const hits = searchText({ type: "search", requestId: "r", more: true, hits: [{ id: 38039, at, date: "2026-11-17", kind: "june", text: "the boat leaves at nine" }] });
+	assert.match(hits, /^38039 {2}.*14:02 {2}June: the boat leaves at nine\nOlder hits left out/);
+	assert.equal(searchText({ type: "search", requestId: "r", more: false, hits: [] }), "Nothing found.");
+});
+
+test("a browsed day stays fixed while today updates underneath, and a moment cuts the day a few items past it", () => {
+	const t = new Transcript();
+	const state = { running: false, background: 0, queued: 0, model: "", compacting: false, expression: "idle" };
+	t.apply({ type: "view", reset: true, earlier: true, state, items: [{ kind: "user", id: "100", source: "tui", text: "today" }] });
+	const note = (id: number) => ({ kind: "note" as const, id: String(id), text: `n${id}` });
+	t.browse({ type: "day", requestId: "r", date: "2026-11-17", today: false, at: "3", items: [1, 2, 3, 4, 5, 6, 7, 8].map(note) });
+	assert.deepEqual(t.past?.items.map((i) => i.id), ["1", "2", "3", "4", "5", "6"]);
+	assert.equal(t.past?.more, 2);
+	t.apply({ type: "view", changes: [{ op: "put", item: { kind: "user", id: "101", source: "kitty", text: "later" }, after: "100" }] });
+	t.reply("search", "hits");
+	assert.deepEqual(t.shown().map((i) => i.id), ["1", "2", "3", "4", "5", "6", "reply:past:0"]);
+	t.browse({ type: "day", requestId: "r", date: "2026-11-16", today: false, items: [1, 2].map(note) });
+	assert.deepEqual(t.shown().map((i) => i.id), ["1", "2"], "a whole day, and the last day's replies gone");
+	t.today();
+	assert.deepEqual(t.shown().map((i) => i.id), ["100", "101"]);
 });
