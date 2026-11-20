@@ -15,6 +15,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -30,6 +31,11 @@ import androidx.compose.ui.layout.onSizeChanged
  * the lock screen may ask; once unlocked the conversation shows, and a cancelled unlock closes it.
  */
 class ConversationActivity : ComponentActivity() {
+    companion object {
+        /** Bumped when Jon summons June while this screen is in front (JuneSession): its text field takes focus. */
+        var summoned by mutableIntStateOf(0)
+    }
+
     private lateinit var link: Link
     private var locked by mutableStateOf(false)
 
@@ -72,6 +78,7 @@ class ConversationActivity : ComponentActivity() {
                                 Sheet(
                                     link, settings = { startActivity(android.content.Intent(this@ConversationActivity, MainActivity::class.java)) },
                                     header = Modifier.swipeHandle(swipe, allowed, act),
+                                    summoned = summoned,
                                 )
                             }
                         }

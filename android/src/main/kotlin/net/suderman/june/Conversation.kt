@@ -40,6 +40,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -188,12 +189,13 @@ private fun Prompt(text: String, onClick: () -> Unit, modifier: Modifier = Modif
 
 /**
  * The conversation itself: the status line, the items newest last, and the words to send; `settings` opens June's
- * settings, and `header`, when given, makes the status line a swipe handle (Swipes.kt) with a grab bar above it. It
+ * settings, and `header`, when given, makes the status line a swipe handle (Swipes.kt) with a grab bar above it. A
+ * change in `summoned` puts the text field in focus with the keyboard up. It
  * pads itself above the keyboard: neither the app's window (Android 15 and later) nor the session's (set still in
  * JuneSession) moves or shrinks for one.
  */
 @Composable
-fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fromSheet: Boolean = false, header: Modifier? = null) {
+fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fromSheet: Boolean = false, header: Modifier? = null, summoned: Int = 0) {
     val list = rememberLazyListState()
     val shown = link.items.filter { !it.private }
     // Stay on the newest item as the conversation grows.
@@ -341,7 +343,17 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                     )
                 }
             }
-            OutlinedTextField(Outbox.draft, { Outbox.draft = it }, Modifier.weight(1f), placeholder = { Text(if (showing != null) "about this screen…" else "to june…") }, maxLines = 5)
+            // Summoned again while this shows: ready to type. Only a change since this screen opened counts.
+            val words = remember { androidx.compose.ui.focus.FocusRequester() }
+            val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+            val opened = remember { summoned }
+            LaunchedEffect(summoned) {
+                if (summoned != opened) {
+                    words.requestFocus()
+                    keyboard?.show()
+                }
+            }
+            OutlinedTextField(Outbox.draft, { Outbox.draft = it }, Modifier.weight(1f).focusRequester(words), placeholder = { Text(if (showing != null) "about this screen…" else "to june…") }, maxLines = 5)
             if (link.state.running || link.state.compacting) OutlinedButton(onClick = link::stop) { Text("Stop") }
             val anything = Outbox.draft.isNotBlank() || showing != null || waiting.isNotEmpty()
             Button(

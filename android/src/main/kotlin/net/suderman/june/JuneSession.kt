@@ -55,8 +55,26 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
         setContent { Conversation(link, locked, screen, dismiss = { hide() }, unlock = ::unlock) }
     }
 
+    // Summoned over June's own full screen: no sheet over her, the full screen takes the words instead.
+    private var overJune = false
+
+    override fun onPrepareShow(args: Bundle?, showFlags: Int) {
+        super.onPrepareShow(args, showFlags)
+        val front = foreground(args)
+        overJune = front?.packageName == context.packageName && front.className == ConversationActivity::class.java.name &&
+            !context.getSystemService(KeyguardManager::class.java).isDeviceLocked
+        // Off before the window would be added, so the sheet never shows; on again for the next summon.
+        setUiEnabled(!overJune)
+    }
+
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
+        if (overJune) {
+            Log.i(TAG, "summoned over the full screen: its text field takes focus")
+            ConversationActivity.summoned++
+            hide()
+            return
+        }
         keepStill()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         // Opening June lets her hands act again after Jon stopped them; while she shows, her hands may close her.
@@ -68,9 +86,7 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
         lines.clear()
         screen = null
         app = runCatching {
-            @Suppress("DEPRECATION")
-            val front = args?.getParcelableArrayList<android.content.ComponentName>("android.service.voice.FOREGROUND_ACTIVITIES")?.firstOrNull()
-            front?.let { context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(it.packageName, 0)).toString() }
+            foreground(args)?.let { context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(it.packageName, 0)).toString() }
         }.getOrNull()
         // Whether the phone wants the user's credentials, not merely whether the lock screen shows.
         locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
@@ -97,6 +113,12 @@ class JuneSession(context: Context) : VoiceInteractionSession(context), Lifecycl
             }
         })
     }
+
+    /** The activity in front when June was summoned, from the show's arguments. */
+    private fun foreground(args: Bundle?): android.content.ComponentName? = runCatching {
+        @Suppress("DEPRECATION")
+        args?.getParcelableArrayList<android.content.ComponentName>("android.service.voice.FOREGROUND_ACTIVITIES")?.firstOrNull()
+    }.getOrNull()
 
     /**
      * Over the lock screen, a tap on the prompt opens June's full conversation screen, which covers the lock screen and
