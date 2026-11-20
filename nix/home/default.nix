@@ -83,8 +83,8 @@ in {
     };
     hcPackage = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = lib.attrByPath ["programs" "hc" "package"] null config;
-      defaultText = lib.literalExpression "config.programs.hc.package, when that option exists";
+      default = lib.attrByPath ["services" "herdr" "package"] null config;
+      defaultText = lib.literalExpression "config.services.herdr.package, when that option exists";
       description = "herdr-core, whose hc command the dispatcher, org-edit, herdr-link and herdr-notify drive.";
     };
     notify = {
