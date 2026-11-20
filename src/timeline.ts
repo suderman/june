@@ -107,6 +107,21 @@ export function terms(query: string): string[] {
 	return [...query.matchAll(/"([^"]+)"|(\S+)/g)].map((m) => (m[1] ?? m[2]!).toLowerCase()).filter((t) => t.trim() !== "");
 }
 
+/**
+ * A line of `text` around the first of `words` it holds, for a search result: on one line, cut to about `width`
+ * characters with an ellipsis at each cut end, from a little before the match. The start when nothing matches.
+ */
+export function snippet(text: string, words: readonly string[], width = 160): string {
+	const flat = text.replace(/\s+/g, " ").trim();
+	if (flat.length <= width) return flat;
+	const lower = flat.toLowerCase();
+	const hits = words.map((word) => lower.indexOf(word)).filter((at) => at >= 0);
+	const first = hits.length ? Math.min(...hits) : 0;
+	const from = Math.max(0, Math.min(first - Math.floor(width / 3), flat.length - width));
+	const to = Math.min(flat.length, from + width);
+	return `${from > 0 ? "…" : ""}${flat.slice(from, to).trim()}${to < flat.length ? "…" : ""}`;
+}
+
 type Load = (query: Parameters<Conversation["entries"]>[0], limit: number, cursor: Parameters<Conversation["entries"]>[2], context: Context) => ReturnType<Conversation["entries"]>;
 
 /** The folded items of the root conversation, caught up from its entries before every query. */

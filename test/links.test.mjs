@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { emacsCall, linkKind, markup } from "../desktop/strip.mjs";
+import { emacsCall, linkKind, markup, momentOf } from "../desktop/strip.mjs";
 
 const herdr = "herdr:kit/claude:af748c8e-1d51-43b5-89c9-20cf5b7adb73@w4Z:p39";
 
@@ -13,7 +13,10 @@ test("only web pages and stamped herdr sessions are links a click opens", () => 
 	assert.equal(linkKind("herdr:kit/pi:01a1b773-ab2d-7241-b463-6da5ad4d8827"), "herdr", "the pane is optional");
 	assert.equal(linkKind("file:~/org/work/x/x.org::*A heading"), "file");
 	assert.equal(linkKind("file:/home/jon/src/suderman/june/README.org"), "file");
-	for (const bad of ["javascript:alert(1)", "file:relative.org", "file:~/org/a\nb.org", "herdr:kit/claude:not-a-session", "herdr:kit/claude:af748c8e-1d51-43b5-89c9-20cf5b7adb73;rm -rf ~", "herdr:Kit$(id)/claude:af748c8e-1d51-43b5-89c9-20cf5b7adb73", "https://a b"])
+	assert.equal(linkKind("june:at/38039"), "moment");
+	assert.equal(momentOf("june:at/38039"), 38039);
+	assert.equal(momentOf("https://example.com/"), undefined);
+	for (const bad of ["june:at/0", "june:at/12x", "june:at/-3", "june:at/38039/../x", "june:conversation", "javascript:alert(1)", "file:relative.org", "file:~/org/a\nb.org", "herdr:kit/claude:not-a-session", "herdr:kit/claude:af748c8e-1d51-43b5-89c9-20cf5b7adb73;rm -rf ~", "herdr:Kit$(id)/claude:af748c8e-1d51-43b5-89c9-20cf5b7adb73", "https://a b"])
 		assert.equal(linkKind(bad), null, bad);
 });
 
@@ -21,6 +24,7 @@ test("June's links become anchors, in Markdown or Org form, and anything else ke
 	assert.equal(markup("see [the docs](https://example.com/a_b_c?x=1&y=2) now"), 'see <a href="https://example.com/a_b_c?x=1&amp;y=2">the docs</a> now', "the address survives the stress passes and is escaped");
 	assert.equal(markup(`step in: [[${herdr}][claude@kit]]`), `step in: <a href="${herdr}">claude@kit</a>`);
 	assert.equal(markup(`[pane](${herdr})`), `<a href="${herdr}">pane</a>`);
+	assert.equal(markup("[[june:at/38039][Tuesday, about the boat]]"), '<a href="june:at/38039">Tuesday, about the boat</a>', "a moment in June's history");
 	assert.equal(markup("[[file:~/org/todo.org::*Call the dentist][the dentist]]"), '<a href="file:~/org/todo.org::*Call the dentist">the dentist</a>', "Org's form lets a heading have spaces");
 	assert.equal(markup("here's the [clipboard task](file:~/org/work/suderman/june/june.org::*Prefer Jon's approved June clipboard art)."), `here's the <a href="file:~/org/work/suderman/june/june.org::*Prefer Jon's approved June clipboard art">clipboard task</a>.`, "June writes file links in Markdown's form too, spaces and all");
 	assert.equal(markup("[secrets](ftp://example.com/x)"), "secrets");

@@ -161,14 +161,22 @@ const HERDR = /^herdr:[a-z0-9-]+\/[a-z]+:[0-9a-f-]{36}(?:@[A-Za-z0-9:]+)?$/;
 
 /**
  * What a link in June's words opens, or null for one a tap leaves alone: "web" for an http or https page, "herdr" for an
- * agent's session, "file" for a file Emacs opens (file:PATH or file:PATH::SEARCH, PATH from ~ or /). Links come from
- * the model, so only these, and only ones that open or focus, never run anything.
+ * agent's session, "file" for a file Emacs opens (file:PATH or file:PATH::SEARCH, PATH from ~ or /), "moment" for a
+ * moment in June's history the client opens itself (june:at/ENTRY). Links come from the model, so only these, and only
+ * ones that open or focus, never run anything.
  */
 export function linkKind(url) {
 	if (/^https?:\/\/[^\s<>"]+$/.test(url)) return "web";
 	if (HERDR.test(url)) return "herdr";
 	if (/^file:(~\/|\/)[^\n<>"]*$/.test(url)) return "file";
+	if (momentOf(url) !== undefined) return "moment";
 	return null;
+}
+
+/** The entry id a june:at/ENTRY link names, or undefined for any other link. */
+export function momentOf(url) {
+	const match = /^june:at\/([1-9]\d{0,15})$/.exec(url);
+	return match ? Number(match[1]) : undefined;
 }
 
 /**

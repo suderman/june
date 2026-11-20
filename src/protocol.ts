@@ -46,6 +46,15 @@ export type Request =
 	 * `until` (epoch ms) and of `kinds`; or with `around`, the items around that entry id, oldest first.
 	 */
 	| { op: "timeline"; requestId: string; query?: string; since?: number; until?: number; kinds?: string[]; limit?: number; oldest?: boolean; around?: number; before?: number; after?: number }
+	/** The days with conversation, for a calendar, and the day it is now. A day starts at June's wake, not midnight. */
+	| { op: "days"; requestId: string }
+	/**
+	 * One past or present day's folded view, fixed, for browsing: the day named by `date` ("YYYY-MM-DD"), or the day of
+	 * entry `at`, whose item the reply names so a client can scroll to it.
+	 */
+	| { op: "day"; requestId: string; date?: string; at?: number; detail?: boolean }
+	/** What the user and June said that holds every word (a "quoted phrase" as it is), newest first. */
+	| { op: "search"; requestId: string; query: string; limit?: number }
 	/** Entry id ranges left out of the timeline, history, and views: Unix socket only. */
 	| { op: "hide"; requestId: string; action: "add" | "remove" | "list"; from?: number; to?: number }
 	/** `files` land in June's inbox on the daemon's host (see "Inbox" in docs/architecture.org); `data` is base64. */
@@ -61,6 +70,9 @@ export type Request =
 	| { op: "hands"; requestId: string }
 	/** A device's answer to an `act`: what it saw or did, or why it could not, and for `capture` the picture it took. */
 	| { op: "acted"; requestId: string; ok: boolean; text?: string; image?: { data: string; mimeType: string } };
+
+/** A search result: the entry it is in, when, the day that time belongs to, who said it, and a line around the match. */
+export type SearchHit = { id: number; at: number; date: string; kind: "user" | "june"; text: string };
 
 export type DeviceInfo = { name: string; createdAt: string; connections: number };
 
@@ -95,6 +107,11 @@ export type Reply =
 	| { type: "history"; requestId: string; entries: EntryRecord[]; earlier: boolean }
 	/** `more` says the limit or window left items out. */
 	| { type: "timeline"; requestId: string; items: TimelineItem[]; more: boolean }
+	| { type: "days"; requestId: string; days: { date: string; count: number }[]; today: string }
+	/** `at` is the id of the item for the entry asked about; `today` says the day is the one the live view shows. */
+	| { type: "day"; requestId: string; date: string; items: ViewItem[]; at?: string; today: boolean }
+	/** `more` says the limit left older hits out. */
+	| { type: "search"; requestId: string; hits: SearchHit[]; more: boolean }
 	| { type: "hidden"; requestId: string; ranges: [number, number][] }
 	| { type: "accepted"; requestId: string; submissionId: number }
 	| { type: "settled"; requestId: string; status: "done" | "unanswered"; text?: string; reason?: string }

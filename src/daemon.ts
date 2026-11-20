@@ -22,7 +22,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { type CommandScope, runCommand } from "./commands.ts";
 import { type Config, expandHome, type Paths } from "./config.ts";
 import { acquireDataDirLock, createLogger, createSettings, type Logger } from "./runtime.ts";
-import { diff, type Folded, foldView, PRIVATE, sourceName, textOf, type ViewState } from "./transcript.ts";
+import { diff, fold as foldEntries, type Folded, foldView, PRIVATE, sourceName, textOf, type ViewState } from "./transcript.ts";
 import { createPromptExtension } from "./prompt.ts";
 import { createHeartbeat } from "./heartbeat.ts";
 import { entryTimes } from "./history.ts";
@@ -34,9 +34,9 @@ import { createMemoryExtension } from "./memory.ts";
 import { createKeptImagesExtension, startImageExpiry } from "./kept-images.ts";
 import { createPayloadsExtension } from "./payloads.ts";
 import { type Immich, immichFrom, type ImmichWatch, scan, seenNote, watchImmich } from "./immich.ts";
-import { Hidden, KINDS, Timeline } from "./timeline.ts";
+import { Hidden, KINDS, snippet, terms, Timeline } from "./timeline.ts";
 import { createPatter, type PatterTiming } from "./patter.ts";
-import { createGreeting } from "./greeting.ts";
+import { createGreeting, dayName, dayRange, dayStart } from "./greeting.ts";
 import { createNtfy } from "./ntfy.ts";
 import { createConflicts } from "./conflicts.ts";
 import { createLooseEnds } from "./loose.ts";
@@ -67,6 +67,10 @@ const FLUSH_MS = 100;
 const SNAPSHOT_ENTRIES = 200;
 /** The most entries one history request returns. */
 const HISTORY_ENTRIES = 2000;
+/** The most entries a browsed day folds, so a runaway day cannot stall the daemon. */
+const DAY_ENTRIES = 5000;
+/** Search results by default, and at most. */
+const SEARCH_HITS = { default: 50, max: 200 };
 
 export type DaemonOptions = {
 	readonly config: Config;
@@ -313,7 +317,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const apkViews = { count: 0 };
 		const immichServer = immichFrom({ ...(options.env ?? process.env), ...options.secrets });
 		const immich = immichServer && { server: immichServer, watch: watchImmich(immichServer, { file: `${paths.state}/immich.json`, warn: (error) => log.warn("immich_status_failed", { error: error.message }) }) };
-		const scope: Scope = { apkViews, harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, ...(expressions ? { expressions } : {}), ...(immich ? { immich } : {}) };
+		const scope: Scope = { wake: config.rhythm.wake, apkViews, harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, ...(expressions ? { expressions } : {}), ...(immich ? { immich } : {}) };
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
@@ -381,7 +385,7 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 	});
 }
 
-type Scope = CommandScope & { immich?: { server: Immich; watch: ImmichWatch }; apkViews: { count: number }; timeline: Timeline; hidden: Hidden; log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; expressions?: ReturnType<typeof startExpressions> };
+type Scope = CommandScope & { wake: string; immich?: { server: Immich; watch: ImmichWatch }; apkViews: { count: number }; timeline: Timeline; hidden: Hidden; log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; expressions?: ReturnType<typeof startExpressions> };
 /** The sky a view sends with its state, and how it learns of a change. */
 type SkySource = Pick<Situation, "sky" | "onSky">;
 /** How many followed tasks are still going, and how a view learns of a change. */
@@ -460,7 +464,7 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 				const app = !local && request.client === "apk";
 				if (app !== viewingApp) scope.apkViews.count += app ? 1 : -1;
 				viewingApp = app;
-				view = await attachView(scope.root, context, send, request.requestId, { detail: request.detail === true, hidden: scope.hidden, ...(scope.sky ? { sky: scope.sky } : {}), ...(scope.follows ? { follows: scope.follows } : {}) });
+				view = await attachView(scope.root, context, send, request.requestId, { detail: request.detail === true, wake: scope.wake, hidden: scope.hidden, ...(scope.sky ? { sky: scope.sky } : {}), ...(scope.follows ? { follows: scope.follows } : {}) });
 				// The connection closed while the view was starting.
 				if (abort.signal.aborted) void view.stop();
 				return;
@@ -482,6 +486,42 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 						? await scope.timeline.around(around, number(request.before), number(request.after), context)
 						: await scope.timeline.search({ query: typeof request.query === "string" ? request.query : "", since: number(request.since), until: number(request.until), ...(kinds ? { kinds } : {}), limit: number(request.limit), ...(request.oldest === true ? { oldest: true } : {}) }, context);
 				return send({ type: "timeline", requestId: request.requestId, items, more });
+			}
+			case "days": {
+				const counts = new Map<string, number>();
+				for (const item of await scope.timeline.span(0, Number.MAX_SAFE_INTEGER, context))
+					if (item.kind === "user" || item.kind === "june") counts.set(dayName(item.at, scope.wake), (counts.get(dayName(item.at, scope.wake)) ?? 0) + 1);
+				const days = [...counts].map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date));
+				return send({ type: "days", requestId: request.requestId, days, today: dayName(Date.now(), scope.wake) });
+			}
+			case "day": {
+				let date = typeof request.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(request.date) ? request.date : undefined;
+				let target: number | undefined;
+				if (request.at !== undefined) {
+					const id = Number(request.at);
+					if (!Number.isSafeInteger(id) || id < 1) throw new Error("day needs an entry id");
+					// The item at the entry or the next one, as the timeline reads around an id: its time names the day.
+					const hit = (await scope.timeline.around(id, 0, 0, context)).items[0];
+					if (hit === undefined) throw new Error("No entry at or after that id");
+					date = dayName(hit.at, scope.wake);
+					target = hit.id;
+				}
+				if (date === undefined) throw new Error("day needs a date or an entry id");
+				const entries = await dayEntries(scope.root, scope.timeline, dayRange(date, scope.wake), context);
+				const hidden = scope.hidden.matcher();
+				const { items } = foldEntries(entries.filter((entry) => !hidden(Number(entry.id))), {}, false, { detail: request.detail === true });
+				// The first shown item at or after the entry: a quiet look or a hidden entry has none of its own.
+				const at = target === undefined ? undefined : items.find((item) => /^\d+$/.test(item.id) && Number(item.id) >= target && !("private" in item && item.private))?.id;
+				return send({ type: "day", requestId: request.requestId, date, items, ...(at !== undefined ? { at } : {}), today: date === dayName(Date.now(), scope.wake) });
+			}
+			case "search": {
+				const query = typeof request.query === "string" ? request.query : "";
+				const words = terms(query);
+				if (words.length === 0) return send({ type: "search", requestId: request.requestId, hits: [], more: false });
+				const limit = Math.min(Math.max(1, Number.isSafeInteger(request.limit) ? request.limit! : SEARCH_HITS.default), SEARCH_HITS.max);
+				const { items, more } = await scope.timeline.search({ query, kinds: ["user", "june"], limit }, context);
+				const hits = items.map((item) => ({ id: item.id, at: item.at, date: dayName(item.at, scope.wake), kind: item.kind as "user" | "june", text: snippet(item.text, words) }));
+				return send({ type: "search", requestId: request.requestId, hits, more });
 			}
 			case "hide": {
 				if (!local) throw new Error("Hidden entries are managed over the Unix socket");
@@ -635,18 +675,36 @@ export async function attachView(
 	context: Context,
 	send: (reply: Reply) => void,
 	requestId: string,
-	options: { detail?: boolean; sky?: SkySource; follows?: FollowSource; hidden?: Pick<Hidden, "matcher"> } = {},
+	options: { detail?: boolean; wake?: string; sky?: SkySource; follows?: FollowSource; hidden?: Pick<Hidden, "matcher"> } = {},
 ): Promise<View> {
 	let detail = options.detail === true;
 	// The fold knows nothing of the sky or the follows; they join the state here, so a change in the weather or in what
 	// she follows is a state change like any. The activity is left out while none holds.
 	const fold = (value: Parameters<typeof foldView>[0]) => {
 		const hidden = options.hidden?.matcher();
-		const folded = foldView(hidden ? { ...value, items: value.items.filter((item) => !(item.entry && hidden(Number((item.entry as { id?: unknown }).id)))) } : value, { detail });
+		const folded = foldView(today(hidden ? { ...value, items: value.items.filter((item) => !(item.entry && hidden(Number((item.entry as { id?: unknown }).id)))) } : value), { detail });
 		const sky = options.sky?.sky();
 		const state: ViewState = { ...folded.state, ...(sky ? { sky } : {}), ...(options.follows ? { following: options.follows.following(), ...(options.follows.following() > 0 ? { follows: options.follows.follows() } : {}) } : {}) };
 		const activity = activityOf(state);
 		return { ...folded, state: activity ? { ...state, activity } : state };
+	};
+	// With `wake`, only today: the entries since the day began; any before them make the view say earlier days exist.
+	const today = <T extends { readonly items: readonly { kind: string; entry?: unknown }[] }>(value: T): T => {
+		if (options.wake === undefined) return value;
+		const start = dayStart(new Date(), options.wake).getTime();
+		let at = 0;
+		let first = value.items.length;
+		for (let i = 0; i < value.items.length; i++) {
+			const item = value.items[i]!;
+			const time = (item.entry as { model?: { timestamp?: unknown }[] } | undefined)?.model?.[0]?.timestamp;
+			if (typeof time === "number") at = time;
+			if (item.kind === "entry" && at >= start) {
+				first = i;
+				break;
+			}
+		}
+		const earlier = value.items[0]?.kind === "earlier" || value.items.slice(0, first).some((item) => item.kind === "entry");
+		return { ...value, items: [...(earlier ? [{ kind: "earlier" }] : []), ...value.items.slice(first)] };
 	};
 	const load = (query: Parameters<Conversation["entries"]>[0], limit: number, ctx: Context) => root.entries(query, limit, undefined, ctx);
 	let transcript = new ConversationTranscript(load);
@@ -680,6 +738,22 @@ export async function attachView(
 		shown = next;
 		state = nextState;
 	};
+	// At the next day's start the view starts over on the new day, empty until someone speaks.
+	let dawn: ReturnType<typeof setTimeout> | undefined;
+	const awaitDawn = () => {
+		if (options.wake === undefined) return;
+		const now = Date.now();
+		const next = dayRange(dayName(now, options.wake), options.wake).end;
+		dawn = setTimeout(() => {
+			clearTimeout(timer);
+			timer = undefined;
+			replaced = false;
+			reset();
+			awaitDawn();
+		}, Math.min(next - now + 1000, 2 ** 31 - 1));
+		dawn.unref?.();
+	};
+	awaitDawn();
 	watch.start(async (call) => {
 		if (call.kind !== "value") return;
 		if (call.ops[0]?.[0] === "r") {
@@ -707,6 +781,7 @@ export async function attachView(
 		},
 		async stop() {
 			clearTimeout(timer);
+			clearTimeout(dawn);
 			stopSky?.();
 			stopFollows?.();
 			await watch.stop();
@@ -751,6 +826,29 @@ export async function attachment(root: Conversation, id: string, n: number): Pro
 	const content = (entry.model?.[0] as { content?: unknown } | undefined)?.content;
 	const image = Array.isArray(content) ? content.filter((b) => b?.type === "image")[n] : undefined;
 	return image && typeof image.data === "string" && typeof image.mimeType === "string" ? { data: image.data, mimeType: image.mimeType } : undefined;
+}
+
+/**
+ * One day's entries, oldest first: from the entry after the last timeline item before the day began until the first
+ * entry with its own time at or past its end, at most DAY_ENTRIES. An entry without its own time, such as patter, takes
+ * the time of the entry before it.
+ */
+async function dayEntries(root: Pick<Conversation, "entries">, timeline: Timeline, range: { start: number; end: number }, context: Context): Promise<EntryRecord[]> {
+	const before = (await timeline.search({ until: range.start, limit: 1 }, context)).items[0];
+	const entries: EntryRecord[] = [];
+	let at = 0;
+	let cursor: Cursor | undefined;
+	do {
+		const page = await root.entries({ minEntryId: ((before?.id ?? 0) + 1) as never, order: "ascending" }, 500, cursor, context);
+		for (const entry of page.items) {
+			const time = (entry.model?.[0] as { timestamp?: unknown } | undefined)?.timestamp;
+			if (typeof time === "number") at = time;
+			if (at >= range.end || entries.length >= DAY_ENTRIES) return entries;
+			if (at >= range.start) entries.push(entry);
+		}
+		cursor = page.next;
+	} while (cursor !== undefined);
+	return entries;
 }
 
 async function history(root: Conversation, since: number | undefined, limit: number, context: Context): Promise<{ entries: EntryRecord[]; earlier: boolean }> {

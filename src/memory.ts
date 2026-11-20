@@ -110,7 +110,7 @@ export function createMemoryExtension(files: () => PromptFiles, getHarness: () =
 	});
 	const timeline = defineTool({
 		name: "timeline",
-		description: `Search the exact record of what you and ${user()} said and did, back to your first day: their messages, your replies, patter, and one line per tool call, each with its entry id and time. Thinking, tool output, and your private looks are not in it. Give words to find (every word must appear, any case; "a phrase" as it is), newest first, or with oldest the earliest first, for when something was first said; or give around, an entry id from a result, to read the conversation around it. Leave out what you do not need.`,
+		description: `Search the exact record of what you and ${user()} said and did, back to your first day: their messages, your replies, patter, and one line per tool call, each with its entry id and time. Thinking, tool output, and your private looks are not in it. Give words to find (every word must appear, any case; "a phrase" as it is), newest first, or with oldest the earliest first, for when something was first said; or give around, an entry id from a result, to read the conversation around it. Link a moment for ${user()} as [[june:at/ID][label]] with its entry id. Leave out what you do not need.`,
 		parameters: obj({
 			query: opt(str({ description: "Words to find" })),
 			since: opt(str({ description: "Only from this time: 30m, 2h, 3d, 16:20, or a date such as 2026-10-30" })),

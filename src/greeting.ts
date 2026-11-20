@@ -21,6 +21,20 @@ export function dayStart(now: Date, wake: string): Date {
 	return start;
 }
 
+/** The day `at` (epoch ms) belongs to, "YYYY-MM-DD" local: the date its wake fell on, so 01:00 is still yesterday. */
+export function dayName(at: number, wake: string): string {
+	const start = dayStart(new Date(at), wake);
+	const pad = (n: number) => String(n).padStart(2, "0");
+	return `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
+}
+
+/** The day named `date` ("YYYY-MM-DD") as epoch ms, from its wake until the next day's, through a clock change. */
+export function dayRange(date: string, wake: string): { start: number; end: number } {
+	const [y, mo, d] = date.split("-").map(Number) as [number, number, number];
+	const [h, m] = wake.split(":").map(Number) as [number, number];
+	return { start: new Date(y, mo - 1, d, h, m).getTime(), end: new Date(y, mo - 1, d + 1, h, m).getTime() };
+}
+
 /**
  * The section's text while the user and June have not spoken since the day began, before the input being answered: a
  * message the user wrote, or a finished message June sent that was not a quiet heartbeat. Undefined once they have.
