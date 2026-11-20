@@ -16,7 +16,7 @@ import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, excerpt, idleState, liveSt
 
 import { replyParts } from "../src/artifact.ts";
 import { excerpt as codeExcerpt, html as codeHtml } from "../desktop/Code.mjs";
-import { panels as phonePanels, consoleStrip as phoneConsole } from "../android/js/june.mjs";
+import { panels as phonePanels, consoleStrip as phoneConsole, momentPanel } from "../android/js/june.mjs";
 
 test("artifacts remain whole beats on desktop and phone, including console, replay and streaming", () => {
 	const body = '  “Email”—<literal>\n\n=source=\n' + "line\n".repeat(20);
@@ -1473,4 +1473,6 @@ test("browsing June's days: header names, calendar keys, stepping between days w
 	assert.equal(panelOf(list, "12"), list[0].id, "a reply by its beats");
 	assert.equal(panelOf(list, "21"), list[1].id);
 	assert.equal(panelOf(list, "99"), "");
+	assert.equal(momentPanel(items, "21"), list[1].id, "the phone finds the moment's panel from the items, in either look");
+	assert.deepEqual(phoneConsole(items, emptyView().state, false).map((p) => p.id), list.map((p) => p.id), "the console's panels share the comic's ids");
 });

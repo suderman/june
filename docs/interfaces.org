@@ -28,6 +28,7 @@ A client is either on today, live, or on a past day, fixed while today goes on u
 
 - Terminal: =/day= lists the recent days; =/day DATE= or =/day yesterday= opens one, =/today= returns, =/search WORDS= lists hits with the id =/at ID= opens. =/at= shows the moment's day up to a few items past it, the moment marked. A click on a =june:at= link opens it in place, and the link shows its =/at ID= too.
 - Desktop: the masthead's date steps between days with conversation (‹ and ›) and opens a calendar with those days marked and a search whose hits update as the user types (=Browse.qml=). A moment opens its day with its panel outlined in the middle of the strip. The =june-desktop= IPC calls =day DATE=, =at ID=, and =today= do the same.
+- Phone: a line under the status line steps between days and opens the calendar and search inline, in place of the strip, since the assistant session cannot show a dialog (=Browse.kt=). A moment's panel lands at the foot of the strip, outlined. =june://at/ID= from another app opens the full screen on that moment.
 
 * Clients and protocol
 ** Recommended

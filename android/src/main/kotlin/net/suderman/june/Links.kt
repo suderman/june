@@ -21,7 +21,7 @@ object Links {
     /** file:PATH or file:PATH::SEARCH, PATH from ~ or /, as desktop/strip.mjs linkKind reads it. */
     private val FILE = Regex("""^file:(~/|/)[^\n<>"]*$""")
 
-    fun opens(url: String): Boolean = url.startsWith("https://") || url.startsWith("http://") || HERDR.matches(url) || FILE.matches(url)
+    fun opens(url: String): Boolean = url.startsWith("https://") || url.startsWith("http://") || HERDR.matches(url) || FILE.matches(url) || momentOf(url) != null
 
     /** Open `url`; returns why it could not be, or null. */
     fun open(context: Context, url: String): String? = when {
@@ -64,9 +64,13 @@ object Links {
         }.exceptionOrNull()?.let { "Emacs is not installed" }
     }
 
-    /** What a tap on a link in June's words does, in place of Compose's default; `leave` hides the assistant sheet. */
-    class Handler(private val context: Context, private val leave: () -> Unit) : UriHandler {
+    /**
+     * What a tap on a link in June's words does, in place of Compose's default; `leave` hides the assistant sheet. A
+     * moment in June's history (june:at/ID) opens in the conversation itself, through `moment`.
+     */
+    class Handler(private val context: Context, private val leave: () -> Unit, private val moment: (Long) -> Unit = {}) : UriHandler {
         override fun openUri(uri: String) {
+            momentOf(uri)?.let { moment(it); return }
             val why = open(context, uri)
             if (why == null) leave() else Toast.makeText(context, why, Toast.LENGTH_LONG).show()
         }

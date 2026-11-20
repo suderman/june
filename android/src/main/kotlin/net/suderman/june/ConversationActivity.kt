@@ -42,6 +42,8 @@ class ConversationActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         link = Link(this)
+        // Opened for a moment in June's history (june://at/ID): its day shows once the link is up.
+        intent?.dataString?.let(::momentOf)?.let(link::openMoment)
         setContent {
             val palette = pagePalette()
             // Dark status bar icons on a light page, light ones on a dark page.

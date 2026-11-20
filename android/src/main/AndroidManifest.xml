@@ -47,6 +47,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="june" android:host="conversation" />
             </intent-filter>
+            <!-- A moment in June's history from another app, such as a link in Org: june://at/ID opens its day there. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="june" android:host="at" />
+            </intent-filter>
         </activity>
 
         <!-- A herdr: link from another app, such as a tap on an agent notice in ntfy, opens like one in June's words

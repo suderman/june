@@ -15,6 +15,15 @@ import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.util.UUID
 
+/** A past day on show, fixed: its date, its folded items, and the id of the item for a moment opened, or "". */
+data class PastDay(val date: String, val items: List<Item>, val at: String)
+
+/** A search hit: the entry it is in, when, the day that belongs to, who said it ("user" or "june"), and a line around it. */
+data class SearchHit(val id: Long, val at: Long, val date: String, val kind: String, val text: String)
+
+/** A moment link, june:at/ID in June's words or june://at/ID from another app, as its entry id; null for anything else. */
+fun momentOf(url: String): Long? = Regex("^june:(?://)?at/([1-9]\\d{0,15})$").find(url)?.groupValues?.get(1)?.toLongOrNull()
+
 /** Where the link stands, as the session shows it. */
 sealed interface LinkStatus {
     data object Unpaired : LinkStatus
@@ -50,6 +59,62 @@ class Link(private val context: Context) {
     /** A command's reply or an error, shown briefly. */
     var notice: String by mutableStateOf("")
         private set
+
+    // Browsing June's history (see "Browse June's history by day" in docs/interfaces.org): the days with conversation and
+    // the day it is now, from the daemon; the past day on show, or null for today, live; and the latest search's hits.
+    var days: List<Pair<String, Int>> by mutableStateOf(emptyList())
+        private set
+    var today: String by mutableStateOf("")
+        private set
+    var past: PastDay? by mutableStateOf(null)
+        private set
+    var hits: List<SearchHit> by mutableStateOf(emptyList())
+        private set
+    var hitsMore: Boolean by mutableStateOf(false)
+        private set
+    var searchDone: Boolean by mutableStateOf(true)
+        private set
+    /** Bumped each time a day opens or today returns, so the strip lands once on its newest panel or the moment. */
+    var landing: Int by mutableStateOf(0)
+        private set
+    private var searchId = ""
+    /** A moment asked for before the link was up, such as june://at/ID from another app, opened once it is. */
+    private var pendingMoment: Long? = null
+
+    /** What the strip shows: the past day's items, or today's. */
+    val shownItems: List<Item> get() = past?.items ?: items
+    /** A past day is fixed: nothing runs in it. */
+    val shownState: ViewState get() = if (past != null) ViewState() else state
+
+    fun listDays() = send(JSONObject().put("op", "days"))
+
+    fun openDay(date: String) {
+        if (date == today) backToToday() else send(JSONObject().put("op", "day").put("date", date))
+    }
+
+    fun openMoment(id: Long) {
+        if (!send(JSONObject().put("op", "day").put("at", id))) pendingMoment = id
+    }
+
+    fun backToToday() {
+        if (past == null) return
+        past = null
+        landing++
+    }
+
+    fun search(words: String) {
+        searchId = requestId()
+        hits = emptyList()
+        hitsMore = false
+        searchDone = words.isBlank()
+        if (!searchDone) send(JSONObject().put("op", "search").put("query", words).put("limit", 50), searchId)
+    }
+
+    private fun send(request: JSONObject, id: String = requestId()): Boolean {
+        val ws = socket ?: return false
+        if (status !is LinkStatus.Linked) return false
+        return ws.send(request.put("requestId", id).toString())
+    }
 
     /** Pending art requests, by reply, so repeated long presses cannot queue duplicate model calls. */
     var taking: Map<String, String> by mutableStateOf(emptyMap())
@@ -87,7 +152,10 @@ class Link(private val context: Context) {
             .put("whenBusy", if (followUp) "followUp" else "steer")
         if (images.isNotEmpty()) request.put("images", org.json.JSONArray(images.map { JSONObject().put("type", "image").put("data", it).put("mimeType", "image/jpeg") }))
         if (files.isNotEmpty()) request.put("files", org.json.JSONArray(files.map { JSONObject().put("name", it.name).put("mimeType", it.mimeType).put("data", it.data) }))
-        return ws.send(request.toString())
+        if (!ws.send(request.toString())) return false
+        // Sent from a past day, the message joins today's conversation, so the strip follows it there.
+        backToToday()
+        return true
     }
 
     fun stop() {
@@ -139,10 +207,28 @@ class Link(private val context: Context) {
                             attachedPath = reply.optString("attached").takeIf { it.isNotEmpty() }
                             // As the app's own view, so a reply shown here is not also pushed to this phone (src/ntfy.ts).
                             webSocket.send(JSONObject().put("op", "attach").put("requestId", requestId()).put("client", "apk").toString())
+                            pendingMoment?.let { pendingMoment = null; openMoment(it) }
                         }
                         "view" -> {
                             items = if (reply.optBoolean("reset")) parseItems(reply.getJSONArray("items")) else applyChanges(items, reply.optJSONArray("changes") ?: org.json.JSONArray())
                             reply.optJSONObject("state")?.let { state = ViewState.from(it) }
+                            // A fresh view, on attach or at the day's start: the days may have moved on.
+                            if (reply.optBoolean("reset")) listDays()
+                        }
+                        "days" -> {
+                            val list = reply.optJSONArray("days") ?: org.json.JSONArray()
+                            days = (0 until list.length()).map { list.getJSONObject(it).let { d -> d.optString("date") to d.optInt("count") } }
+                            today = reply.optString("today")
+                        }
+                        "day" -> if (reply.optBoolean("today") && !reply.has("at")) backToToday() else {
+                            past = PastDay(reply.optString("date"), parseItems(reply.optJSONArray("items") ?: org.json.JSONArray()), reply.optString("at"))
+                            landing++
+                        }
+                        "search" -> if (reply.optString("requestId") == searchId) {
+                            val list = reply.optJSONArray("hits") ?: org.json.JSONArray()
+                            hits = (0 until list.length()).map { list.getJSONObject(it).let { h -> SearchHit(h.optLong("id"), h.optLong("at"), h.optString("date"), h.optString("kind"), h.optString("text")) } }
+                            hitsMore = reply.optBoolean("more")
+                            searchDone = true
                         }
                         "reply" -> notice = reply.optString("text")
                         "error" -> notice = reply.optString("message")

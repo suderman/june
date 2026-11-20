@@ -200,8 +200,8 @@ class Avatar(private val context: Context) {
 fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier = Modifier) {
     val art = rememberArt(link, decisions, avatar)
     val ready = art > 0
-    val panels by produceState(JSONArray(), art, link.items, link.state) {
-        if (ready) value = JSONArray(decisions.call("panels", JSONArray(link.items.map { it.raw }), link.state.raw, false))
+    val panels by produceState(JSONArray(), art, link.shownItems, link.shownState) {
+        if (ready) value = JSONArray(decisions.call("panels", JSONArray(link.shownItems.map { it.raw }), link.shownState.raw, false))
     }
     // The clock, for panels lit by the hour now (a reply still streaming), ticking each minute; the daemon's sky.
     val now by produceState(System.currentTimeMillis()) { while (true) { kotlinx.coroutines.delay(60_000); value = System.currentTimeMillis() } }
@@ -223,9 +223,14 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
             LocalPictures provides Pictures(avatar, link.attachedPath) { set, at -> viewing = set to at },
             LocalArtifactPreview provides { viewing = listOf(it) to 0 },
         ) {
-            LazyColumn(Modifier.fillMaxSize(), state = followNewest(if (count > 0) shown.getJSONObject(count - 1).getString("id") else null), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            val list = followNewest(if (count > 0) shown.getJSONObject(count - 1).getString("id") else null)
+            val marked = landOn(link, shown, decisions, list)
+            LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 items(count, key = { shown.getJSONObject(count - 1 - it).getString("id") }) { i ->
-                    PanelView(shown.getJSONObject(count - 1 - i), newest = i == 0, width.value, m, decisions, avatar, now, sky, link)
+                    val panel = shown.getJSONObject(count - 1 - i)
+                    Box(if (panel.getString("id") == marked) Modifier.border(4.dp, Look.accent) else Modifier) {
+                        PanelView(panel, newest = i == 0, width.value, m, decisions, avatar, now, sky, link)
+                    }
                 }
             }
         }
@@ -1023,8 +1028,8 @@ private fun ElementView(e: Measured, box: JSONObject, newest: Boolean) {
  */
 @Composable
 fun ConsoleStrip(link: Link, decisions: Decisions, palette: Look.Palette, modifier: Modifier = Modifier) {
-    val strip by produceState(JSONArray(), link.items, link.state) {
-        value = runCatching { JSONArray(decisions.call("consoleStrip", JSONArray(link.items.map { it.raw }), link.state.raw, false)) }
+    val strip by produceState(JSONArray(), link.shownItems, link.shownState) {
+        value = runCatching { JSONArray(decisions.call("consoleStrip", JSONArray(link.shownItems.map { it.raw }), link.shownState.raw, false)) }
             .onFailure { android.util.Log.w(TAG, "console strip failed: $it") }.getOrDefault(value)
     }
     // One snapshot for the list, as in Strip.
@@ -1033,14 +1038,16 @@ fun ConsoleStrip(link: Link, decisions: Decisions, palette: Look.Palette, modifi
     Box(modifier) {
         var viewing by remember { mutableStateOf<Previewing?>(null) }
         androidx.compose.runtime.CompositionLocalProvider(LocalArtifactPreview provides { viewing = it }) {
-            LazyColumn(Modifier.fillMaxSize(), state = followNewest(if (count > 0) shown.getJSONObject(count - 1).getString("id") else null), reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            val list = followNewest(if (count > 0) shown.getJSONObject(count - 1).getString("id") else null)
+            val marked = landOn(link, shown, decisions, list)
+            LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 items(count, key = { shown.getJSONObject(count - 1 - it).getString("id") }) { i ->
                     val panel = shown.getJSONObject(count - 1 - i)
                     val lines = panel.getJSONArray("lines")
-                    PanelActions(panel, link, Modifier.fillMaxWidth()) {
+                    PanelActions(panel, link, Modifier.fillMaxWidth().then(if (panel.getString("id") == marked) Modifier.border(2.dp, palette.accent).padding(6.dp) else Modifier)) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             for (j in 0 until lines.length()) ConsoleLine(lines.getJSONObject(j), palette)
-                            if (panel.optBoolean("live") && link.state.activity.isNotEmpty()) Text("… " + link.state.activity, color = palette.busy, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                            if (panel.optBoolean("live") && link.shownState.activity.isNotEmpty()) Text("… " + link.shownState.activity, color = palette.busy, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
                         }
                     }
                 }
@@ -1181,6 +1188,29 @@ private fun CutawayView(cut: JSONObject) {
             }
         }
     }
+}
+
+/**
+ * Land once on each day the link opens (its `landing`): on the newest panel, or for a moment, with the moment's panel at
+ * the foot of the view and what led to it above. Returns the moment's panel id, outlined while its day shows, or "".
+ */
+@Composable
+private fun landOn(link: Link, shown: JSONArray, decisions: Decisions, list: androidx.compose.foundation.lazy.LazyListState): String {
+    val at = link.past?.at.orEmpty()
+    val marked by produceState("", link.past) { value = if (at.isEmpty()) "" else runCatching { org.json.JSONTokener(decisions.call("momentPanel", JSONArray(link.shownItems.map { it.raw }), at)).nextValue() as String }.getOrDefault("") }
+    var landed by remember { mutableStateOf(-1) }
+    LaunchedEffect(link.landing, marked, shown.length()) {
+        if (landed == link.landing) return@LaunchedEffect
+        if (at.isEmpty()) {
+            landed = link.landing
+            list.scrollToItem(0)
+            return@LaunchedEffect
+        }
+        val index = (0 until shown.length()).firstOrNull { shown.getJSONObject(shown.length() - 1 - it).getString("id") == marked } ?: return@LaunchedEffect
+        landed = link.landing
+        list.scrollToItem(index)
+    }
+    return marked
 }
 
 /**

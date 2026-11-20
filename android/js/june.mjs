@@ -122,6 +122,11 @@ function scene(panel, laid, pose, sizes, width, now, hourOverride, sky) {
 }
 
 /** The strip in the console look: each panel's lines (console.mjs), and whether she is still working in it. */
+/** The id of the panel that shows view item `at` in either look, or "" (strip.mjs panelOf). */
+export function momentPanel(items, at) {
+	return strip.panelOf(strip.panels(items), at);
+}
+
 export function consoleStrip(items, state, holding) {
 	return panels(items, state, holding).map((panel) => ({ id: panel.id, live: panel.live === true, lines: looks.lines(panel), takeMenu: compose.takeMenu(panel) }));
 }

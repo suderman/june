@@ -197,7 +197,7 @@ private fun Prompt(text: String, onClick: () -> Unit, modifier: Modifier = Modif
 @Composable
 fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fromSheet: Boolean = false, header: Modifier? = null, summoned: Int = 0) {
     val list = rememberLazyListState()
-    val shown = link.items.filter { !it.private }
+    val shown = link.shownItems.filter { !it.private }
     // Stay on the newest item as the conversation grows.
     LaunchedEffect(shown.size, shown.lastOrNull()?.text?.length) { if (shown.isNotEmpty()) list.scrollToItem(shown.size - 1) }
     // The comic strip, from the decisions the phone shares with the desktop; the plain list until they load, or if
@@ -222,7 +222,9 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     }
     val detail = said?.optJSONArray("detail")
     // A tap on a link in June's words opens it as Links.kt allows, the sheet stepping aside for what opens.
-    val links = remember(leave) { Links.Handler(context, leave) }
+    val links = remember(leave, link) { Links.Handler(context, leave, link::openMoment) }
+    // The calendar and search, in place of the strip while open (Browse.kt).
+    var browsing by remember { mutableStateOf(false) }
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides links) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
         Column(Modifier.fillMaxWidth().then(header ?: Modifier)) {
@@ -274,8 +276,11 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                 }
             }
         }
+        if (link.status is LinkStatus.Linked) DayBar(link, palette, browsing) { browsing = !browsing }
         val ready = decisions
-        if (ready != null && LookChoice.console) {
+        if (browsing) {
+            Browse(link, palette, close = { browsing = false }, modifier = Modifier.weight(1f).fillMaxWidth())
+        } else if (ready != null && LookChoice.console) {
             ConsoleStrip(link, ready, palette, Modifier.weight(1f).fillMaxWidth())
         } else if (ready != null && avatar != null) {
             Strip(link, ready, avatar, Modifier.weight(1f).fillMaxWidth())
