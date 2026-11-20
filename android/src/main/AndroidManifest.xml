@@ -7,7 +7,7 @@
          app; it cannot be granted any other way. -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- Links.kt: a herdr: link in June's words opens a Termux session attached to the agent's pane. Granted over ADB. -->
+    <!-- Links.kt: a herdr: link opens a Termux session attached to the agent's terminal. Granted over ADB. -->
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 
     <!-- June opens apps by name through her hands: the launcher's apps must be visible to her. -->
@@ -44,6 +44,18 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="june" android:host="conversation" />
+            </intent-filter>
+        </activity>
+
+        <!-- A herdr: link from another app, such as a tap on an agent notice in ntfy, opens like one in June's words
+             (HerdrLinkActivity.kt). Not BROWSABLE, so a web page cannot start it. -->
+        <activity android:name=".HerdrLinkActivity" android:exported="true"
+            android:excludeFromRecents="true" android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="herdr" />
             </intent-filter>
         </activity>
 

@@ -15,7 +15,7 @@ import androidx.compose.ui.platform.UriHandler
  * a link says: a herdr link must have the form herdr-link stamps, and every kind only opens or focuses.
  */
 object Links {
-    /** HOST/AGENT:SESSION[@PANE], as org/bin/herdr-link stamps it and src/tools/org.ts reads it. */
+    /** HOST/AGENT:SESSION[@WHERE], as org/bin/herdr-link stamps it and src/tools/org.ts reads it. WHERE is an hc terminal or an old Herdr pane. */
     private val HERDR = Regex("""^herdr:([a-z0-9-]+)/([a-z]+):([0-9a-f-]{36})(?:@([A-Za-z0-9:]+))?$""")
 
     /** file:PATH or file:PATH::SEARCH, PATH from ~ or /, as desktop/strip.mjs linkKind reads it. */
@@ -34,8 +34,8 @@ object Links {
     }
 
     /**
-     * A new Termux session, shown, attached to the agent's pane on its host: ssh-unlock unlocks the ssh key with a
-     * fingerprint, then herdr-link attach finds the pane or resumes the session. Needs Termux's RUN_COMMAND, which
+     * A new Termux session, shown, attached to the agent's hc terminal on its host: ssh-unlock unlocks the ssh key with
+     * a fingerprint, then herdr-link attach finds the terminal by its session or resumes the session. Needs Termux's RUN_COMMAND, which
      * the install app grants, and allow-external-apps in ~/.termux/termux.properties.
      */
     private fun herdr(context: Context, path: String): String? {
