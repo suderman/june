@@ -370,7 +370,8 @@ come from the project file's `#+PROPERTY:`. With `agent`, when the worker
 finishes at EVAL the dispatcher starts an independent exact-commit review (see
 `development-review`), returns in-scope fixes to the same worker, closes the task
 on a pass, and leaves it to Jon only for named human checks or a decision.
-`REVIEWER` picks the reviewer agent (by default the other harness),
+`REVIEWER` picks the reviewer agent (pi, the default; Claude cannot review
+unattended, as it stops at its trust prompt in each new snapshot),
 `REVIEW_CHECKS` the agent checks, and `REVIEW_HUMAN` the human checks,
 separated by semicolons. Only Jon sets these, or June at his request. A task may sit at
 any level, such as under a heading in a `~/org/life` file; its `Sessions` and

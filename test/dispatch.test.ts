@@ -390,7 +390,8 @@ test("completion through installed org-edit writes CLOSED and refuses a concurre
 	let race = false;
 	const dispatch = new Dispatch(new Org(f.root), f.config, async (args) => {
 		if (race) await writeFile(f.project, evalText.replace("* EVAL Investigate", "* HOLD Investigate"));
-		return execFileSync(args[0]!, args.slice(1), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+		// Its own lock and state, never the live dispatcher's, which the timer holds every minute.
+		return execFileSync(args[0]!, args.slice(1), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, HC_TERMINAL_ID: undefined, XDG_RUNTIME_DIR: f.dir, XDG_STATE_HOME: join(f.dir, "state") } });
 	});
 	await dispatch.complete(request.file, request.title);
 	const done = await readFile(f.project, "utf8");
@@ -420,6 +421,8 @@ test("org-dispatch itself sees the task June wrote", { skip: !hasDispatcher && "
 			ORG_DISPATCH_EMACS_INIT: init,
 			XDG_STATE_HOME: join(f.dir, "state"),
 			XDG_CONFIG_HOME: join(f.dir, "config"),
+			// Its own lock, never the live dispatcher's.
+			XDG_RUNTIME_DIR: f.dir,
 			JUNE_CONFIG_DIR: join(f.dir, "config", "june"),
 		},
 	};
@@ -497,6 +500,8 @@ test("org-dispatch writes June's plan and holds the later task until the first i
 			ORG_DISPATCH_EMACS_INIT: init,
 			XDG_STATE_HOME: join(f.dir, "state"),
 			XDG_CONFIG_HOME: join(f.dir, "config"),
+			// Its own lock, never the live dispatcher's.
+			XDG_RUNTIME_DIR: f.dir,
 			JUNE_CONFIG_DIR: join(f.dir, "config", "june"),
 		},
 	};

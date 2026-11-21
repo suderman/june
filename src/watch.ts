@@ -96,7 +96,7 @@ export function createWatch(options: {
 		const headlineAt = Math.max(task?.headlineAt ?? 0, last?.headlineAt ?? 0);
 		if (task === undefined) return { signal: "missing", title, ...(headlineAt > 0 ? { headlineAt } : {}) };
 		let signal = task.state ?? "none";
-		if (signal === "EVAL" && task.asked) signal = "asks";
+		if (task.asked && (signal === "EVAL" || signal === "HOLD")) signal = "asks";
 		else if (signal === "EVAL" && underAgentReview(task)) signal = "reviewing";
 		if (signal === "PROG" && run.status !== "finished" && run.terminal) {
 			const status = await options.herdr.status(host, run.terminal).catch(() => undefined);

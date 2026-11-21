@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { type Agenda, Boards, loadAgenda, parseDialog, reviewKey, shapeAgenda, shapeAgents, type Task } from "../src/board.ts";
 import { Client } from "../src/protocol.ts";
@@ -64,6 +65,7 @@ test("agents join their tasks and rank what needs the user: a blocked worker, th
 		task("id:standing", { state: "EVAL", review: "agent" }),
 		task("id:human", { state: "EVAL", review: "agent", reviewPhase: "human" }),
 		task("id:question", { state: "EVAL", review: "agent", asked: "[2026-11-20 Fri 12:00]" }),
+		task("id:stuck", { state: "HOLD", reviewParent: "elsewhere", asked: "[2026-11-21 Sat 00:17]" }),
 		task("id:review", { state: "EVAL", headline: { text: "Done, check it.", state: "EVAL", at: now - 60_000 } }),
 		task("id:seen", { state: "EVAL", headline: { text: "Old.", state: "EVAL", at: now - 3_600_000 } }),
 		task("id:later", { state: "AUTO", scheduled: "<2026-11-22 Sun 09:00>", host: "kit", agent: "pi" }),
@@ -82,12 +84,12 @@ test("agents join their tasks and rank what needs the user: a blocked worker, th
 	assert.deepEqual(a.workers.map((w) => w.taskKey), ["id:run", "id:asks", undefined]);
 	// A HOLD with an agent's question waits on the outside world; a standing review before its verdict is the agents';
 	// after it, the user's checks are theirs, and a question is always theirs.
-	assert.deepEqual(a.needs.map((n) => [n.level, n.kind, n.task]), [[1, "blocked", "id:run"], [2, "review", "id:review"], [2, "review", "id:human"], [2, "asks", "id:question"]]);
+	assert.deepEqual(a.needs.map((n) => [n.level, n.kind, n.task]), [[1, "blocked", "id:run"], [2, "review", "id:review"], [2, "review", "id:human"], [2, "asks", "id:question"], [2, "asks", "id:stuck"]]);
 	assert.deepEqual(a.reviewing, ["id:dev", "id:checked", "id:standing"]);
 	assert.deepEqual(a.needs[0]!.worker, { host: "kit", terminal: "t7" });
 	assert.deepEqual(a.queued, ["id:rev", "id:sooner", "id:later"]);
 	assert.deepEqual(a.recent, ["id:seen", "id:finished"], "a review already in needs is not repeated; last week is gone");
-	assert.deepEqual(Object.keys(a.tasks).sort(), ["id:asks", "id:checked", "id:dev", "id:finished", "id:human", "id:later", "id:question", "id:rev", "id:review", "id:run", "id:seen", "id:sooner", "id:standing"]);
+	assert.deepEqual(Object.keys(a.tasks).sort(), ["id:asks", "id:checked", "id:dev", "id:finished", "id:human", "id:later", "id:question", "id:rev", "id:review", "id:run", "id:seen", "id:sooner", "id:standing", "id:stuck"]);
 });
 
 /** A fake export: the tasks given, as june-agenda.el prints them, on its last line after a log line. */
@@ -149,11 +151,18 @@ test("a client asks for the boards, and its view state then carries their revisi
 let hasEmacs = false;
 try { execFileSync("emacs", ["--version"], { stdio: "ignore" }); hasEmacs = true; } catch { /* The export test needs Emacs. */ }
 
+/** Today in Calgary as the export's Emacs sees it, from the system's zone data rather than Node's bundled copy. */
+function orgToday(): string {
+	const el = fileURLToPath(new URL("../org/dispatch/org-dispatch.el", import.meta.url));
+	return execFileSync("emacs", ["-Q", "--batch", "-l", el, "--eval", '(princ (format-time-string "%F"))'], { encoding: "utf8", env: { ...process.env, TZDIR: process.env.TZDIR ?? "/etc/zoneinfo" }, stdio: ["ignore", "pipe", "ignore"] }).trim();
+}
+
 /** A Calgary date `days` from today, as Org writes it, with an optional time. */
 function stamp(days: number, time = "", open = "<", close = ">"): string {
-	const at = new Date(Date.now() + days * 86_400_000);
-	const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/Edmonton", year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(at).map((p) => [p.type, p.value]));
-	return `${open}${parts.year}-${parts.month}-${parts.day} ${parts.weekday}${time ? ` ${time}` : ""}${close}`;
+	const at = new Date(`${orgToday()}T12:00:00Z`);
+	at.setUTCDate(at.getUTCDate() + days);
+	const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][at.getUTCDay()];
+	return `${open}${at.toISOString().slice(0, 10)} ${weekday}${time ? ` ${time}` : ""}${close}`;
 }
 
 test("the Emacs export follows Org's agenda and reads tasks, AUTO defaults, Dialog and sessions", { skip: !hasEmacs }, async (t) => {

@@ -319,7 +319,9 @@ export class Org {
 		}
 		// REVIEW may also come from the file's #+PROPERTY, as the dispatcher reads it.
 		const review = (report.REVIEW ?? lines.map((l) => /^#\+PROPERTY:[ \t]+REVIEW[ \t]+(\S+)/i.exec(l)?.[1]).find(Boolean) ?? "yes").toLowerCase();
-		const phase = (() => { try { return report.DEV_REVIEW ? String(JSON.parse(report.DEV_REVIEW).phase ?? "") || undefined : undefined; } catch { return undefined; } })();
+		const loop = (() => { try { return report.DEV_REVIEW ? JSON.parse(report.DEV_REVIEW) : undefined; } catch { return undefined; } })();
+		const phase = typeof loop?.phase === "string" && loop.phase ? loop.phase : undefined;
+		const reviewId = typeof loop?.review === "string" && loop.review ? loop.review : undefined;
 		const stamp = Number(report.HEADLINE_AT);
 		const headlineAt = Number.isFinite(stamp) && stamp > 0 ? stamp : undefined;
 		const headline = headlineAt !== undefined && report.HEADLINE_STATE === heading.state ? report.HEADLINE : undefined;
@@ -332,6 +334,8 @@ export class Org {
 			review,
 			...(report.REVIEW_PARENT ? { reviewParent: report.REVIEW_PARENT } : {}),
 			...(phase ? { reviewPhase: phase } : {}),
+			// The current round's review task, by ID.
+			...(reviewId ? { reviewId } : {}),
 			// Keep the stamp even in PROG/AUTO so a later transition cannot reuse it.
 			...(headlineAt !== undefined ? { headlineAt } : {}),
 			// The dispatcher holds an AUTO task until then.

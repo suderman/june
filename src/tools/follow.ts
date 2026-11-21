@@ -172,11 +172,15 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 			}
 		}
 		const worker = task.herdrSessions.filter((s) => s.host === input.host).at(-1);
+		// A standing review whose reviewer could not go on (ASKED) is the user's, not the agents'.
+		const stuck = task.state === "EVAL" && task.reviewPhase === "review" && task.reviewId !== undefined && underAgentReview(task)
+			? (await org.byId(task.reviewId).catch(() => undefined))?.asked === true
+			: false;
 		return {
 			state: task.state, missing: false, file: task.file,
 			...(agent ? { agent } : {}), ...(waiting ? { waiting } : {}),
-			...(task.state === "EVAL" && task.asked ? { asked: true } : {}),
-			...(task.state === "EVAL" && !task.asked && underAgentReview(task) ? { reviewing: true } : {}),
+			...(task.state === "EVAL" && (task.asked || stuck) ? { asked: true } : {}),
+			...(task.state === "EVAL" && !task.asked && !stuck && underAgentReview(task) ? { reviewing: true } : {}),
 			...(task.headline !== undefined ? { headline: task.headline } : {}),
 			...(task.scheduledAt !== undefined ? { scheduledAt: task.scheduledAt } : {}),
 			...(worker ? { worker: { agent: worker.agent, session: worker.session } } : {}),

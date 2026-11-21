@@ -949,7 +949,7 @@ review: opt(union([bool(), lit("agent")], { description: `Default true: the work
 					permissions: opt(str({ description: "First start only: separate local checks, remote reads/writes, commits/pushes, activation/deployment. State exclusions explicitly" })),
 					checks: opt(str({ description: "First start only: specific agent checks and reviewer responsibility" })),
 					human: opt(arr(str(), { description: "First start: required human checks, [] if none. human action: exact check names the user just accepted" })),
-					agent: agentParameter("First start: independent reviewer agent. Every round starts a fresh session"),
+					agent: agentParameter("First start: independent reviewer agent, pi: Claude stops at its workspace trust prompt in each new review snapshot, so it cannot review unattended and is refused. Every round starts a fresh session"),
 					note: opt(str({ description: "human only: the user's actual acceptance, never inferred from an agent verdict" })),
 				}),
 				replay: "safe",

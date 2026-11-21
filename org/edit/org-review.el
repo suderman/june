@@ -9,6 +9,11 @@
   "Who coordinates the loop, as Dialog and queued reviews name them.
 The dispatcher binds it to \"Dispatcher\" for standing agent reviews.")
 
+(defconst org-review-unattended-agents '("pi")
+  "Agents that can review unattended. Claude Code stops at its workspace trust
+prompt in every new snapshot, since it trusts only that exact repository root,
+and the dispatcher never answers a prompt.")
+
 (defun org-review--escalate ()
   "Leave the development task with Jon: EVAL with ASKED, never HOLD,
 which means waiting on something outside."
@@ -125,6 +130,9 @@ which means waiting on something outside."
                            :checks (org-review--text spec :checks) :human (delete-dups human)
                            :agent (org-review--text spec :agent)))
           (unless (member (plist-get loop :agent) org-dispatch-launchable) (error "reviewer agent unavailable"))
+          (unless (member (plist-get loop :agent) org-review-unattended-agents)
+            (error "%s cannot review unattended: it stops at its workspace trust prompt in each new review snapshot; use %s"
+                   (plist-get loop :agent) (string-join org-review-unattended-agents " or ")))
           (org-dispatch--append "Review contract"
             (format "- Authorized fixes, at most three exact-revision reviews: %s\n- Permissions for every handoff: %s\n- Agent checks: %s\n- Human checks: %s"
                     (plist-get loop :authorization) (plist-get loop :permissions) (plist-get loop :checks)

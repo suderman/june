@@ -235,9 +235,13 @@ export function shapeAgents(input: { workers: AgentSummary[]; hosts: Agents["hos
 	const reviewing = tasks.filter((t) => t.state === "EVAL" && t.asked === undefined &&
 		(t.reviewParent !== undefined || (t.id !== undefined && underReview.has(t.id)) || standing(t))).map((t) => t.key);
 	const agentReview = new Set(reviewing);
-	for (const task of tasks)
-		if (task.state === "EVAL" && !agentReview.has(task.key) && !seen.has(reviewKey(task)))
+	for (const task of tasks) {
+		if (seen.has(reviewKey(task))) continue;
+		if (task.state === "EVAL" && !agentReview.has(task.key))
 			needs.push({ level: 2, kind: task.asked !== undefined ? "asks" : "review", task: task.key, ...since(task) });
+		// The dispatcher's one HOLD for the user: a review that could not start for certain (HOLD with ASKED).
+		else if (task.state === "HOLD" && task.asked !== undefined) needs.push({ level: 2, kind: "asks", task: task.key, ...since(task) });
+	}
 	needs.sort((a, b) => a.level - b.level || (b.since ?? 0) - (a.since ?? 0));
 	const needed = new Set(needs.map((n) => n.task).filter(Boolean));
 	const start = (task: Task) => (task.scheduled ? orgTime(task.scheduled) : undefined) ?? 0;

@@ -66,7 +66,7 @@ test("Org reads the question, who reviews, and the review phase a follow needs",
 * EVAL Standing
 :PROPERTIES:
 :ID: 11111111-aaaa-4bbb-8ccc-000000000002
-:DEV_REVIEW: {"phase":"review","round":1}
+:DEV_REVIEW: {"phase":"review","round":1,"review":"11111111-aaaa-4bbb-8ccc-000000000009"}
 :END:
 * EVAL Own
 :PROPERTIES:
@@ -77,7 +77,7 @@ test("Org reads the question, who reviews, and the review phase a follow needs",
 	const org = new Org(root);
 	const [asked, standing, own] = await Promise.all(["1", "2", "3"].map((n) => org.byId(`11111111-aaaa-4bbb-8ccc-00000000000${n}`)));
 	assert.equal(asked!.asked, true);
-	assert.deepEqual([standing!.review, standing!.reviewPhase], ["agent", "review"], "the file's #+PROPERTY is inherited");
+	assert.deepEqual([standing!.review, standing!.reviewPhase, standing!.reviewId], ["agent", "review", "11111111-aaaa-4bbb-8ccc-000000000009"], "the file's #+PROPERTY is inherited");
 	assert.equal(own!.review, "yes");
 });
 

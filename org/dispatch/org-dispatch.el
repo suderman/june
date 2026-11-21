@@ -20,7 +20,8 @@
 ;; finishes at EVAL, and advances it on the reviewer's verdict (see
 ;; "Standing agent review"). It may come from the project file's #+PROPERTY.
 ;; EVAL with an ASKED stamp is a question or a problem for Jon; HOLD means the
-;; task waits on something outside, and nothing is for Jon to do.
+;; task waits on something outside, and nothing is for Jon to do, except an
+;; uncertain review-loop launch, which stays HOLD with ASKED.
 ;; DEPENDS lists id:UUID prerequisites; every one must be DONE before launch.
 ;; While an agent works on it, a PROG task carries the :auto: tag.
 
@@ -1412,6 +1413,8 @@ The original file may still exist after its heading has been archived."
     (lambda ()
       (unless (equal (org-get-todo-state) "HOLD")
         (org-todo "HOLD")
+        ;; HOLD stays, since recovery checks depend on it, but this is Jon's to inspect.
+        (org-entry-put nil "ASKED" (org-dispatch--stamp))
         (org-dispatch--append "Dialog" (org-dispatch--entry "Dispatcher"
           (concat "Review-loop launch ownership is uncertain; directory/slot remain reserved and no relaunch or terminal input is allowed. Jon must inspect hc, this receipt and child processes before recovery. " reason))))))
   (org-dispatch--notify (concat "HOLD · " (plist-get state :heading)) reason))
@@ -1519,10 +1522,8 @@ The original file may still exist after its heading has been archived."
 
 (defun org-dispatch--review-spec (task commit)
   "The standing contract for TASK's first review of COMMIT."
-  (let* ((developer (plist-get task :agent))
-         (reviewer (or (org-entry-get nil "REVIEWER")
-                       (car (remove developer org-dispatch-launchable))
-                       developer))
+  (let* (;; pi by default: Claude Code stops at its trust prompt in each new snapshot.
+         (reviewer (or (org-entry-get nil "REVIEWER") "pi"))
          (checks (or (org-entry-get nil "REVIEW_CHECKS")
                      "Check the work against the task's Scope and Checklist: run the project's tests and checks, try the edge cases and failure paths it names or implies, and confirm the commit holds only this task's changes."))
          (human (seq-remove #'string-empty-p

@@ -415,6 +415,8 @@
       (cl-letf (((symbol-function 'org-dispatch--notify) #'ignore))
         (org-dispatch--watch (car (org-dispatch--states))))
       (should (equal (test-review-state id) "HOLD"))
+      ;; HOLD for its recovery checks, but marked as Jon's to inspect.
+      (should (test-review-at id (lambda () (org-entry-get nil "ASKED"))))
       (should (equal (plist-get (car (org-dispatch--states)) :status) "launch-uncertain")))))
 
 (ert-deftest review-contract-needs-explicit-human-list-and-fresh-read-and-no-worker-coordinator ()
@@ -464,8 +466,8 @@
     (org-dispatch--agent-reviews (list test-review-file))
     (let* ((loop (test-review-loop)) (review (plist-get loop :review)))
       (should (equal (plist-get loop :phase) "review"))
-      ;; The other harness reviews pi's work by default.
-      (should (equal (plist-get loop :agent) "claude"))
+      ;; pi reviews by default, since Claude stops at its trust prompt in a new snapshot.
+      (should (equal (plist-get loop :agent) "pi"))
       (should (string-match-p "Standing agent review" (plist-get loop :authorization)))
       (should (equal (test-review-state review) "AUTO"))
       (should (string-search "Queued by Dispatcher" (test-review-text)))
@@ -547,6 +549,20 @@
     ;; The file's #+PROPERTY makes it standing.
     (org-dispatch--agent-reviews (list test-review-file))
     (should (equal (plist-get (test-review-loop) :phase) "review"))))
+
+(ert-deftest standing-review-refuses-a-reviewer-that-cannot-run-unattended ()
+  (test-with-review
+    (test-review-standing '(("REVIEWER" . "claude")))
+    (org-dispatch--agent-reviews (list test-review-file))
+    (should-not (test-review-loop))
+    (should-not (string-match-p "^\\* AUTO Review" (test-review-text)))
+    (should (test-review-asked))
+    (should (string-search "claude cannot review unattended" (test-review-text))))
+  (test-with-review
+    ;; June's own loop refuses it too, before writing anything.
+    (should-error (test-review-command "start" (list :revision (test-review-revision) :commit test-review-commit
+      :authorization "Jon delegated." :permissions "Local only." :checks "Agent checks." :human nil :agent "claude")))
+    (should-not (test-review-loop))))
 
 (ert-deftest standing-review-refusals-ask-jon-and-write-nothing-else ()
   (test-with-review
