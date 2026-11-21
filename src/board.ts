@@ -39,6 +39,12 @@ export type Task = {
 	/** Why the dispatcher cannot run it as it stands. */
 	problem?: string;
 	depends?: string[];
+	/** REVIEW as written: yes (the default) or no. */
+	review?: string;
+	/** For an independent review task, the ID of the development task it reviews (REVIEW_PARENT). */
+	reviewParent?: string;
+	/** The task has an independent development and review loop (DEV_REVIEW). */
+	devReview?: true;
 	/** For AUTO with DEPENDS, the dispatcher's verdict: ready, waiting, or blocked, with the task it waits on. */
 	dependency?: { kind: string; reason?: string };
 	/** The worker's last one-line report, the state it was written for, and when (epoch ms). */
@@ -67,9 +73,11 @@ export type Worker = AgentSummary & { /** The Org task it works on, by key. */ t
 
 /**
  * Something that needs the user, most urgent first: 1, a worker blocked on a permission or question dialog, which
- * only Herdr can answer; 2, a task on HOLD whose Dialog ends with a question for them; 3, a task newly in EVAL.
+ * only Herdr can answer; 2, a task newly in EVAL for them to evaluate, until they have seen it. HOLD is never a need:
+ * it means the task waits on something outside, and the user has done what they can. EVAL that agents are reviewing
+ * is not theirs yet.
  */
-export type Need = { level: 1 | 2 | 3; kind: "blocked" | "waiting" | "review"; task?: string; worker?: { host: string; terminal: string }; since?: number };
+export type Need = { level: 1 | 2; kind: "blocked" | "review"; task?: string; worker?: { host: string; terminal: string }; since?: number };
 
 export type Agents = {
 	generatedAt: number;
@@ -78,6 +86,8 @@ export type Agents = {
 	needs: Need[];
 	/** AUTO tasks by start time, soonest first. */
 	queued: string[];
+	/** Tasks in EVAL that agents are reviewing: open independent reviews, and the development tasks they review. */
+	reviewing: string[];
 	/** Tasks a worker reported on in the last day, newest first, apart from those in needs. */
 	recent: string[];
 	/** Every task the lists above name. */
@@ -164,6 +174,9 @@ function shapeTask(key: string, t: any, root: string): Task {
 		agent: t.agent ?? undefined,
 		problem: t.problem ?? undefined,
 		depends: t.depends ? String(t.depends).split(/\s+/).filter(Boolean) : undefined,
+		review: t.review ?? undefined,
+		reviewParent: t.reviewParent ?? undefined,
+		devReview: t.devReview === true ? true : undefined,
 		dependency: t.dependency ? compact({ kind: t.dependency.kind, reason: t.dependency.reason ?? undefined }) : undefined,
 		headline: t.headline ? compact({ text: t.headline, state: t.headlineState ?? undefined, at: Number.isFinite(at) && at > 0 ? Math.round(at * 1000) : undefined }) : undefined,
 		sessions: t.sessions ?? [],
@@ -185,15 +198,12 @@ export function parseDialog(text: string): DialogEntry[] {
 
 const DAY = 86_400_000;
 
-/** Whether the user wrote a Dialog entry: they sign it with their name. */
-const fromUser = (entry: DialogEntry, user: string) => entry.who === user;
-
 /**
  * Join live workers to their Org tasks and rank what needs the user. `seen` holds the review marks already seen
  * (reviewKey); a task in EVAL is a need until its mark is seen.
  */
-export function shapeAgents(input: { workers: AgentSummary[]; hosts: Agents["hosts"]; agenda: Agenda; seen: ReadonlySet<string>; user: string; now?: number }): Agents {
-	const { agenda, seen, user } = input;
+export function shapeAgents(input: { workers: AgentSummary[]; hosts: Agents["hosts"]; agenda: Agenda; seen: ReadonlySet<string>; now?: number }): Agents {
+	const { agenda, seen } = input;
 	const now = input.now ?? Date.now();
 	const byId = new Map<string, Task>();
 	const bySession = new Map<string, Task>();
@@ -211,13 +221,12 @@ export function shapeAgents(input: { workers: AgentSummary[]; hosts: Agents["hos
 	const needs: Need[] = [];
 	for (const w of workers) if (w.status === "blocked") needs.push({ level: 1, kind: "blocked", worker: { host: w.host, terminal: w.terminal }, ...(w.taskKey ? { task: w.taskKey } : {}) });
 	const tasks = Object.values(agenda.tasks);
-	for (const task of tasks) {
-		if (task.state === "HOLD") {
-			const last = task.dialog?.at(-1);
-			const asks = last ? !fromUser(last, user) && last.who !== "" : task.headline?.state === "HOLD";
-			if (asks) needs.push({ level: 2, kind: "waiting", task: task.key, ...since(task) });
-		} else if (task.state === "EVAL" && !seen.has(reviewKey(task))) needs.push({ level: 3, kind: "review", task: task.key, ...since(task) });
-	}
+	// A development task is under agent review while a review of it is still open; the review task itself is June's to advance.
+	const underReview = new Set(tasks.filter((t) => t.reviewParent && t.state !== "DONE").map((t) => t.reviewParent!));
+	const reviewing = tasks.filter((t) => t.state === "EVAL" && (t.reviewParent !== undefined || (t.id !== undefined && underReview.has(t.id)))).map((t) => t.key);
+	const agentReview = new Set(reviewing);
+	for (const task of tasks)
+		if (task.state === "EVAL" && !agentReview.has(task.key) && !seen.has(reviewKey(task))) needs.push({ level: 2, kind: "review", task: task.key, ...since(task) });
 	needs.sort((a, b) => a.level - b.level || (b.since ?? 0) - (a.since ?? 0));
 	const needed = new Set(needs.map((n) => n.task).filter(Boolean));
 	const start = (task: Task) => (task.scheduled ? orgTime(task.scheduled) : undefined) ?? 0;
@@ -226,8 +235,8 @@ export function shapeAgents(input: { workers: AgentSummary[]; hosts: Agents["hos
 		.filter((t) => t.headline?.at !== undefined && now - t.headline.at < DAY && !needed.has(t.key) && ["EVAL", "HOLD", "DONE"].includes(t.state ?? ""))
 		.sort((a, b) => b.headline!.at! - a.headline!.at!)
 		.map((t) => t.key);
-	const named = new Set([...workers.map((w) => w.taskKey), ...needed, ...queued, ...recent].filter((k): k is string => k !== undefined));
-	return { generatedAt: now, hosts: input.hosts, workers, needs, queued, recent, tasks: Object.fromEntries([...named].map((k) => [k, agenda.tasks[k]!])) };
+	const named = new Set([...workers.map((w) => w.taskKey), ...needed, ...queued, ...reviewing, ...recent].filter((k): k is string => k !== undefined));
+	return { generatedAt: now, hosts: input.hosts, workers, needs, queued, reviewing, recent, tasks: Object.fromEntries([...named].map((k) => [k, agenda.tasks[k]!])) };
 }
 
 function since(task: Task): { since?: number } {
@@ -474,7 +483,7 @@ export class Boards {
 		else this.#seen.prune(new Set(reviews));
 		const before = this.revisions();
 		if (this.#workers) {
-			const value = shapeAgents({ ...this.#workers, agenda, seen: this.#seen.marks(), user: this.#o.config.user.name ?? "User" });
+			const value = shapeAgents({ ...this.#workers, agenda, seen: this.#seen.marks() });
 			this.#agents = hold(value, this.#agents);
 		}
 		const after = this.revisions();

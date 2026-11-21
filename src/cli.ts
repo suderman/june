@@ -351,7 +351,7 @@ function formatAgenda(a: Agenda): string {
 
 function formatAgents(a: Agents): string {
 	const title = (key?: string) => (key ? (a.tasks[key]?.title ?? key) : "no task");
-	const kinds = { blocked: "blocked on a prompt", waiting: "waiting for your reply", review: "new for review" };
+	const kinds = { blocked: "blocked on a prompt", review: "ready for you to evaluate" };
 	const lines: string[] = [];
 	const down = a.hosts.filter((h) => !h.ok);
 	if (down.length > 0) lines.push(`Unreachable: ${down.map((h) => `${h.host} (${h.error})`).join(", ")}`);
@@ -364,6 +364,8 @@ function formatAgents(a: Agents): string {
 		const t = a.tasks[k]!;
 		lines.push(`  ${t.title} · ${t.agent ?? "?"} on ${t.host ?? "?"}${t.scheduled ? ` · ${t.scheduled}` : ""}${t.dependency && t.dependency.kind !== "ready" ? ` · ${t.dependency.kind}: ${t.dependency.reason}` : ""}`);
 	}
+	if (a.reviewing.length > 0) lines.push("In agent review:");
+	for (const k of a.reviewing) lines.push(`  ${a.tasks[k]!.title}${a.tasks[k]!.reviewParent ? " (the review)" : ""}`);
 	if (a.recent.length > 0) lines.push("Reported today:");
 	for (const k of a.recent) {
 		const t = a.tasks[k]!;
