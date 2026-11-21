@@ -42,13 +42,13 @@ test("the agenda splits today's overdue items from today, and shows a deadline t
 			] },
 			{ date: "2026-11-23", entries: [{ task: "/o/a.org::9", type: "deadline", date: "2026-11-23" }] },
 		],
-		tasks: Object.fromEntries([3, 5, 7, 9, 11].map((line) => [`/o/a.org::${line}`, { file: "/o/a.org", line, level: 1, title: `t${line}`, state: line === 7 ? "PROG" : "TODO", fileTitle: "A", tags: [], path: [], sessions: [], id: null, dialog: null }])),
+		tasks: Object.fromEntries([3, 5, 7, 9, 11].map((line) => [`/o/a.org::${line}`, { file: "/o/a.org", line, level: 2, title: line === 11 ? "t9" : `t${line}`, state: line === 7 ? "PROG" : "TODO", fileTitle: "A", tags: [], path: ["P"], sessions: [], id: null, dialog: null }])),
 	};
 	const a = shapeAgenda(raw, "/o");
-	assert.deepEqual(a.overdue.map((e) => e.task), ["a.org::3", "a.org::5"]);
-	assert.deepEqual(a.days[0]!.entries.map((e) => e.task), ["a.org::7", "a.org::11"], "the deadline on the 23rd waits for its day; timed items first");
-	assert.deepEqual(a.days[1]!.entries.map((e) => [e.task, e.type]), [["a.org::9", "deadline"]]);
-	assert.equal(a.tasks["a.org::7"]!.file, "a.org");
+	assert.deepEqual(a.overdue.map((e) => e.task), ["a.org::*P/t3", "a.org::*P/t5"]);
+	assert.deepEqual(a.days[0]!.entries.map((e) => e.task), ["a.org::*P/t7", "a.org::*P/t9::11"], "the deadline on the 23rd waits for its day; timed items first; a repeated path adds its line");
+	assert.deepEqual(a.days[1]!.entries.map((e) => [e.task, e.type]), [["a.org::*P/t9", "deadline"]]);
+	assert.equal(a.tasks["a.org::*P/t7"]!.file, "a.org");
 	assert.deepEqual(a.counts, { TODO: 4, PROG: 1 });
 	assert.deepEqual(a.projects, [{ file: "a.org", title: "A", counts: { TODO: 4, PROG: 1 } }]);
 });
@@ -222,7 +222,8 @@ CLOSED: [2026-01-01 Thu 10:00]
 	assert.deepEqual(hold.dialog, [{ who: "Agent", at: "[2026-11-18 Wed 15:40]", text: "Which branch?\nMain or release." }]);
 	assert.deepEqual(hold.sessions, [`herdr:kit/claude:${SESSION}@t9`]);
 	assert.deepEqual(hold.headline, { text: "Which branch should it use?", state: "HOLD" });
-	assert.equal(byTitle["Today thing"]!.key, "work/demo/demo.org::6");
+	assert.equal(byTitle["Today thing"]!.key, "work/demo/demo.org::*Today thing");
+	assert.equal(byTitle["Today thing"]!.line, 6);
 	assert.equal(byTitle["Today thing"]!.project, "Demo");
 	assert.deepEqual(a.counts, { TODO: 3, AUTO: 1, HOLD: 1, EVAL: 1, DONE: 1 });
 });

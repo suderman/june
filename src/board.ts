@@ -15,7 +15,7 @@ const STATES = ["TODO", "AUTO", "PROG", "EVAL", "HOLD", "DONE"] as const;
 /** A Dialog entry: who wrote it (Jon, Agent, June, Dispatcher), the Org timestamp it carries, and what it says. */
 export type DialogEntry = { who: string; at?: string; text: string };
 
-/** One Org heading. `file` is relative to the Org root; `key` is id:UUID, else FILE::LINE. */
+/** One Org heading. `file` is relative to the Org root; `key` is id:UUID, else FILE::*Outline/Path/Title. */
 export type Task = {
 	key: string;
 	id?: string;
@@ -115,11 +115,13 @@ export async function loadAgenda(listFile: string, root: string, run: Run = runP
 const compact = <T extends object>(value: T): T => Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null && v !== undefined)) as T;
 
 export function shapeAgenda(raw: Raw, root: string, now = Date.now()): Agenda {
-	// Keys without an ID name the file absolutely in the export, and relative to the Org root here.
+	// Without an ID, a task is named by its file and outline path, which edits elsewhere in the file leave alone; the
+	// export's FILE::LINE keys are mapped to those. A repeated path in one file takes its line as well.
 	const tasks: Record<string, Task> = {};
 	const keys = new Map<string, string>();
 	for (const [key, t] of Object.entries(raw.tasks)) {
 		const task = shapeTask(key, t, root);
+		if (tasks[task.key] !== undefined) task.key = `${task.key}::${task.line}`;
 		tasks[task.key] = task;
 		keys.set(key, task.key);
 	}
@@ -156,7 +158,7 @@ function shapeTask(key: string, t: any, root: string): Task {
 	const file = relative(root, t.file);
 	const at = Number(t.headlineAt);
 	return compact({
-		key: key.includes("::") ? `${file}::${t.line}` : key,
+		key: key.startsWith("id:") ? key : `${file}::*${[...(t.path ?? []), t.title].join("/")}`,
 		id: t.id ?? undefined,
 		file,
 		line: t.line,
