@@ -1,4 +1,5 @@
-// The weekly tidy of the user's org-work runtime folders (project-org-tasks keeps a task's generated files under
+// The weekly tidy of a host's org-work runtime folders, run there by its own timer (programs.june.orgWork in
+// nix/home/org.nix, `june org-work --clean`), as each host runs its own dispatcher (project-org-tasks keeps a task's generated files under
 // ORG_WORK/DOMAIN/PROJECT/YYYY-MM-DD-SLUG, outside the synced Org tree): a folder goes once every Org thread that names
 // it is DONE or archived and closed at least `afterDays` ago. It stays while any thread naming it is open, while it
 // closed more recently, while no thread names it at all, while a file in `keep` names it (such as the art's
@@ -103,36 +104,6 @@ export async function clean(options: OrgWorkOptions & { record?: string; log: Lo
 	}
 	options.log.info("org_work_cleaned", { deleted: deleted.length, failed: failed.length, waiting: waiting.length });
 	return { deleted, failed, waiting };
-}
-
-/** Once a week, from `day` at `at`, local time; a receipt keeps it once a week across restarts. */
-export function createOrgWorkCleanup(options: { config: { day: string; at: string }; state: string; clean: () => Promise<unknown>; log: Logger; now?: () => Date; tickMs?: number }): { stop(): void } {
-	const now = options.now ?? (() => new Date());
-	const receipt = join(options.state, "org-work.json");
-	const weekday = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"].indexOf(options.config.day);
-	let busy = false;
-	const tick = async () => {
-		const at = now();
-		const [h, m] = options.config.at.split(":").map(Number);
-		if (busy || at.getDay() !== weekday || at.getHours() * 60 + at.getMinutes() < h! * 60 + m!) return;
-		const day = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
-		let last = "";
-		try { last = String(JSON.parse(readFileSync(receipt, "utf8")).day ?? ""); } catch {}
-		if (last >= day) return;
-		busy = true;
-		try {
-			mkdirSync(options.state, { recursive: true });
-			writeFileSync(receipt, `${JSON.stringify({ day })}\n`);
-			await options.clean();
-		} catch (error) {
-			options.log.warn("org_work_clean_failed", { error: (error as Error).message.slice(0, 300) });
-		} finally {
-			busy = false;
-		}
-	};
-	const timer = setInterval(() => void tick(), options.tickMs ?? 60_000);
-	void tick();
-	return { stop: () => clearInterval(timer) };
 }
 
 /** DOMAIN/PROJECT/FOLDER under ROOT, and each task's REVIEW-LOOP/TASK-ID. */

@@ -19,7 +19,8 @@ const USAGE = `usage:
   june ask [--json] TEXT  send one message and print the answer ("-" or no text reads stdin)
   june status [--json]    daemon, model, and conversation state, without a model call
   june agenda [--json]    overdue, today and this week from the Org agenda, as June's clients see it
-  june org-work [--clean] [--json]  this host's org-work folders and what the tidy rules make of them; --clean removes those due
+  june org-work [--clean] [--keep PATH]... [--record FILE] [--after-days N] [--json]
+                          this host's org-work folders and what the tidy rules make of them; --clean removes those due
   june agents [--json]    the agents at work, what needs you, what is queued, and what finished today
   june transcript [--last N] [--since WHEN] [--detail] [--json]
                           the recent conversation as text: the last N entries (200 by default), or those since
@@ -468,20 +469,30 @@ main(process.argv.slice(2)).then(
 	},
 );
 
-/** `june org-work`: this host's runtime folders by verdict; `--clean` removes those the rules let go (src/org-work.ts). */
+/**
+ * `june org-work`: this host's runtime folders by verdict; `--clean` removes those the rules let go (src/org-work.ts).
+ * Each host where agents work runs it weekly from its own timer (programs.june.orgWork in nix/home/org.nix), passing
+ * --keep PATH (repeatable), --record FILE and --after-days N; --root and --org override ~/.local/state/org-work and ~/org.
+ */
 async function orgWorkCommand(args: string[], json: boolean): Promise<number> {
 	const { survey, clean } = await import("./org-work.ts");
-	const { loadConfig, expandHome } = await import("./config.ts");
+	const { expandHome } = await import("./config.ts");
 	const { createLogger } = await import("./runtime.ts");
-	// A client host may have no model configured; the defaults serve there.
-	let config: ReturnType<typeof loadConfig> | undefined;
-	try { config = loadConfig(); } catch {}
-	const settings = config?.orgWork ?? { root: expandHome("~/.local/state/org-work"), afterDays: 14, keep: [] as string[], record: undefined };
+	const values = (flag: string) => args.flatMap((a, i) => (a === flag && args[i + 1] !== undefined ? [args[i + 1]!] : []));
+	const one = (flag: string) => values(flag).at(-1);
+	const known = new Set(["--clean", "--keep", "--record", "--after-days", "--root", "--org"]);
+	for (let i = 0; i < args.length; i++) {
+		if (!known.has(args[i]!)) { console.error(`june org-work: unknown argument ${args[i]}`); return 2; }
+		if (args[i] !== "--clean") i++;
+	}
+	const afterDays = Number(one("--after-days") ?? 14);
+	if (!Number.isInteger(afterDays) || afterDays < 1) { console.error("june org-work: --after-days must be a whole number, 1 or more"); return 2; }
 	const now = new Date();
 	const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-	const options = { root: settings.root, org: config?.org.root ?? expandHome("~/org"), afterDays: settings.afterDays, keep: settings.keep, today };
+	const options = { root: expandHome(one("--root") ?? "~/.local/state/org-work"), org: expandHome(one("--org") ?? "~/org"), afterDays, keep: values("--keep").map(expandHome), today };
+	const record = one("--record");
 	if (args.includes("--clean")) {
-		const result = await clean({ ...options, ...(settings.record ? { record: settings.record } : {}), log: createLogger({ sink: () => {} }) });
+		const result = await clean({ ...options, ...(record ? { record: expandHome(record) } : {}), log: createLogger() });
 		if (json) console.log(JSON.stringify(result));
 		else console.log(`removed ${result.deleted.length}, could not remove ${result.failed.length}, waiting for you ${result.waiting.length}`);
 		return result.failed.length ? 1 : 0;

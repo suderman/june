@@ -94,12 +94,6 @@ export type Config = {
 	 * time reminds on its day, or null for none; timed entries remind at their time.
 	 */
 	readonly reminders?: { readonly dateOnly: string | null };
-	/**
-	 * The weekly tidy of org-work runtime folders (src/org-work.ts): off unless enabled. Once a week from `day` at
-	 * `at`, it removes folders whose Org threads are all DONE or archived and closed `afterDays` ago, keeps any a
-	 * `keep` file names, and adds what went to `record`, an Org file.
-	 */
-	readonly orgWork?: { readonly enabled: boolean; readonly root: string; readonly day: string; readonly at: string; readonly afterDays: number; readonly keep: readonly string[]; readonly record?: string };
 	/** The nightly pass over the day's journal and memory, in the rhythm's sleep hours. */
 	readonly reflection: {
 		readonly enabled: boolean;
@@ -196,7 +190,6 @@ const DEFAULTS = {
 	herdr: { hosts: {}, allowPrompt: true },
 	rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
 	reminders: { dateOnly: "09:00" as string | null },
-	orgWork: { enabled: false, root: "~/.local/state/org-work", day: "sun", at: "03:30", afterDays: 14, keep: [] as string[], record: undefined as string | undefined },
 	reflection: { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"], bitcoin: false },
 	heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
 	looseEnds: { enabled: false, at: "20:30" },
@@ -265,7 +258,6 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 		},
 		rhythm: rhythm({ ...DEFAULTS.rhythm, ...raw.rhythm }),
 		reminders: reminders({ ...DEFAULTS.reminders, ...raw.reminders }),
-		orgWork: orgWork({ ...DEFAULTS.orgWork, ...raw.orgWork }),
 		reflection: reflection({ ...DEFAULTS.reflection, ...raw.reflection }),
 		heartbeat: heartbeat({ ...DEFAULTS.heartbeat, ...raw.heartbeat }),
 		looseEnds: daily("looseEnds", { ...DEFAULTS.looseEnds, ...raw.looseEnds }),
@@ -303,15 +295,6 @@ function reminders(given: { dateOnly: string | null }): { dateOnly: string | nul
 		throw new Error(`reminders.dateOnly must be HH:MM, or null for no reminder at a deadline without a time, not ${given.dateOnly}`);
 	}
 	return { dateOnly: given.dateOnly };
-}
-
-function orgWork(given: typeof DEFAULTS.orgWork): NonNullable<Config["orgWork"]> {
-	if (typeof given.enabled !== "boolean") throw new Error("orgWork.enabled must be true or false");
-	if (!["sun", "mon", "tue", "wed", "thu", "fri", "sat"].includes(given.day)) throw new Error("orgWork.day must be sun, mon, tue, wed, thu, fri or sat");
-	if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(given.at)) throw new Error("orgWork.at must be HH:MM");
-	if (!Number.isInteger(given.afterDays) || given.afterDays < 1) throw new Error("orgWork.afterDays must be a whole number, 1 or more");
-	if (!Array.isArray(given.keep) || given.keep.some((k) => typeof k !== "string")) throw new Error("orgWork.keep must list paths");
-	return { ...given, root: expandHome(given.root), keep: given.keep.map(expandHome), ...(given.record ? { record: expandHome(given.record) } : {}) };
 }
 
 function reflection(given: Config["reflection"] & { start?: unknown; end?: unknown }): Config["reflection"] {

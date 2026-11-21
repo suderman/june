@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { clean, createOrgWorkCleanup, survey } from "../src/org-work.ts";
+import { clean, survey } from "../src/org-work.ts";
 import { createLogger } from "../src/runtime.ts";
 import { tempDir } from "./helpers.ts";
 
@@ -60,29 +60,23 @@ test("a runtime folder goes once every thread naming it is DONE or archived and 
 	assert.match(text, /Waiting for the user: 2 \(1 with unsaved git work, 1 named by no thread\)/);
 });
 
-test("the tidy runs once a week, from its day and hour, across restarts", async (t) => {
+test("june org-work takes its rules from flags, so each host's timer can pass them", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
-	let at = new Date(2026, 10, 21, 23, 0); // a Saturday
-	let runs = 0;
-	const make = () => createOrgWorkCleanup({ config: { day: "sun", at: "03:30" }, state: tmp.dir, clean: async () => { runs++; }, log: createLogger({ sink: () => {} }), now: () => at, tickMs: 5 });
-	let tidy = make();
-	await new Promise((r) => setTimeout(r, 20));
-	assert.equal(runs, 0, "not on Saturday");
-	at = new Date(2026, 10, 22, 3, 0);
-	await new Promise((r) => setTimeout(r, 20));
-	assert.equal(runs, 0, "not before 03:30");
-	at = new Date(2026, 10, 22, 3, 31);
-	await new Promise((r) => setTimeout(r, 30));
-	assert.equal(runs, 1);
-	tidy.stop();
-	tidy = make();
-	await new Promise((r) => setTimeout(r, 30));
-	tidy.stop();
-	assert.equal(runs, 1, "a restart the same day does not run it again");
-	at = new Date(2026, 10, 29, 4, 0);
-	tidy = make();
-	await new Promise((r) => setTimeout(r, 30));
-	tidy.stop();
-	assert.equal(runs, 2, "next Sunday it runs again");
+	const root = join(tmp.dir, "org-work");
+	const org = join(tmp.dir, "org");
+	for (const d of ["w/p/2026-10-01-done", "w/p/2026-10-02-art"]) { mkdirSync(join(root, d), { recursive: true }); writeFileSync(join(root, d, "f"), "x"); }
+	mkdirSync(join(org, "work"), { recursive: true });
+	writeFileSync(join(org, "work", "p.org"), "* DONE Done\nCLOSED: [2026-10-02 Fri]\n=org-work/w/p/2026-10-01-done=\n\n* DONE Art\nCLOSED: [2026-10-02 Fri]\n=org-work/w/p/2026-10-02-art=\n");
+	writeFileSync(join(tmp.dir, "prov"), "org-work/w/p/2026-10-02-art\n");
+	// As bin/june runs it; the Nix sandbox has no /usr/bin/env for that script's first line.
+	const cli = join(import.meta.dirname, "..", "src", "cli.ts");
+	const june = (args: string[], options = {}) => execFileSync(process.execPath, ["--disable-warning=ExperimentalWarning", cli, ...args], options);
+	const out = june(["org-work", "--root", root, "--org", org, "--keep", join(tmp.dir, "prov"), "--after-days", "14", "--json"]).toString();
+	assert.deepEqual(JSON.parse(out).map((f: { dir: string; verdict: string }) => [f.dir, f.verdict]), [["w/p/2026-10-01-done", "delete"], ["w/p/2026-10-02-art", "keep"]]);
+	const record = join(tmp.dir, "kit.org");
+	june(["org-work", "--clean", "--root", root, "--org", org, "--keep", join(tmp.dir, "prov"), "--record", record]);
+	assert.ok(!existsSync(join(root, "w/p/2026-10-01-done")) && existsSync(join(root, "w/p/2026-10-02-art")));
+	assert.match(readFileSync(record, "utf8"), /=w\/p\/2026-10-01-done=/);
+	assert.throws(() => june(["org-work", "--after-days", "0"], { stdio: "pipe" }), /after-days/);
 });

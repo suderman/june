@@ -82,6 +82,30 @@ in {
       Install.WantedBy = ["default.target"];
     };
 
+    # Each host where agents work tidies its own org-work folders weekly, as it runs its own dispatcher (src/org-work.ts).
+    systemd.user.services.org-work-tidy = lib.mkIf cfg.orgWork.enable {
+      Unit.Description = "Remove org-work runtime folders whose Org threads finished";
+      Service = {
+        Type = "oneshot";
+        Nice = 10;
+        IOSchedulingClass = "idle";
+        Environment = ["PATH=${lib.makeBinPath (with pkgs; [coreutils git ripgrep])}"];
+        ExecStart = lib.concatStringsSep " " ([(lib.getExe cfg.package) "org-work" "--clean" "--after-days" (toString cfg.orgWork.afterDays)]
+          ++ map (path: "--keep ${lib.escapeShellArg path}") cfg.orgWork.keep
+          ++ lib.optional (cfg.orgWork.record != null) "--record ${lib.escapeShellArg cfg.orgWork.record}");
+      };
+    };
+
+    systemd.user.timers.org-work-tidy = lib.mkIf cfg.orgWork.enable {
+      Unit.Description = "Tidy org-work runtime folders weekly";
+      Timer = {
+        OnCalendar = cfg.orgWork.calendar;
+        Persistent = true;
+        RandomizedDelaySec = "15m";
+      };
+      Install.WantedBy = ["timers.target"];
+    };
+
     systemd.user.timers.org-dispatch = lib.mkIf cfg.dispatch.enable {
       Unit.Description = "Check Org for autonomous tasks every minute";
       Timer = {

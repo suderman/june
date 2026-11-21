@@ -34,6 +34,31 @@ in {
     enable = lib.mkEnableOption "the june client";
     daemon.enable = lib.mkEnableOption "June's daemon on this host";
     dispatch.enable = lib.mkEnableOption "the Org dispatcher, which runs AUTO headings for this host";
+    orgWork = {
+      enable = lib.mkEnableOption "the weekly tidy of this host's ~/.local/state/org-work runtime folders (june org-work --clean), on each host where agents work, as each runs its own dispatcher";
+      keep = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        example = ["%h/org/june/avatar"];
+        description = "Files or directories whose mentions of an org-work folder keep it, such as art provenance notes. systemd specifiers (%h, %H) expand.";
+      };
+      record = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "%h/org/work/suderman/june/org-work-cleanup/%H.org";
+        description = "An Org file each run adds what it removed to; give each host its own, such as with %H, so synced copies never conflict. Null keeps no record.";
+      };
+      afterDays = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 14;
+        description = "How long a folder's threads must have been DONE or archived before it goes.";
+      };
+      calendar = lib.mkOption {
+        type = lib.types.str;
+        default = "Sun 03:30";
+        description = "When the weekly tidy runs, as systemd's OnCalendar.";
+      };
+    };
     package = lib.mkOption {
       type = lib.types.package;
       default = wrapper;
