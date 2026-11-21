@@ -103,6 +103,9 @@ class Link(private val context: Context) {
         taskNotice = key to if (send(JSONObject().put("op", "task").put("key", key).put("edit", edit), id)) "saving…" else "not connected"
     }
 
+    /** A review or question the user opened is seen on every device; the daemon answers with the agents board. */
+    fun markSeen(key: String) = send(JSONObject().put("op", "seen").put("keys", org.json.JSONArray().put(key)))
+
     fun wantBoards() {
         if (boardsWanted) return
         boardsWanted = true

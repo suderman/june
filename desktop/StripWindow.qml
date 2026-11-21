@@ -162,6 +162,7 @@ FloatingWindow {
       anchors.right: parent.right
       anchors.margins: 16
       view: win.shell.agentsView
+    onSeen: key => win.shell.markSeen(key)
     notice: win.shell.taskNotice
     onEdit: (key, change) => win.shell.editTask(key, change)
     tasks: Object.assign({}, win.shell.agendaBoard?.tasks ?? {}, win.shell.agentsBoard?.tasks ?? {})
@@ -260,6 +261,7 @@ FloatingWindow {
     anchors.rightMargin: win.layout.gap - 16
     width: win.layout.side
     view: win.shell.agentsView
+    onSeen: key => win.shell.markSeen(key)
     notice: win.shell.taskNotice
     onEdit: (key, change) => win.shell.editTask(key, change)
     tasks: Object.assign({}, win.shell.agendaBoard?.tasks ?? {}, win.shell.agentsBoard?.tasks ?? {})

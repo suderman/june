@@ -221,7 +221,13 @@ fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifie
     var idleOpen by remember { mutableStateOf(false) }
     var page by remember { mutableStateOf("") }
     // A row with a task opens its page; one without opens where it can.
-    val show: (String, String) -> Unit = { task, target -> if (task.isNotEmpty() && link.task(task) != null) page = task else if (target.isNotEmpty() && target != "null") open.openUri(target) }
+    val show: (String, String) -> Unit = { task, target ->
+        if (task.isNotEmpty() && link.task(task) != null) {
+            page = task
+            // Opening a page counts as seeing a task's review or question, on every device.
+            if (view?.optJSONArray("needs").objects().any { it.optString("task") == task && it.optString("kind") != "blocked" }) link.markSeen(task)
+        } else if (target.isNotEmpty() && target != "null") open.openUri(target)
+    }
     if (page.isNotEmpty() && colours != null) { TaskPage(link, decisions, colours, palette, page, "agents", { page = "" }, modifier); return }
     val v = view
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {

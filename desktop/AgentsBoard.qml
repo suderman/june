@@ -21,10 +21,15 @@ Item {
   signal edit(string key, var change)
   property var notice: ({ key: "", text: "" })
 
+  // Opening a page counts as seeing a task's review or question, on every device.
+  signal seen(string key)
+
   // A row with a task opens its page; one without opens where it can.
   function show(task, link) {
-    if (task !== "" && board.tasks[task] !== undefined) board.detailKey = task;
-    else if (link !== "") board.open(link);
+    if (task !== "" && board.tasks[task] !== undefined) {
+      board.detailKey = task;
+      if (board.view.needs.some(n => n.task === task && n.kind !== "blocked")) board.seen(task);
+    } else if (link !== "") board.open(link);
   }
 
   TaskDetail {

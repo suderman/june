@@ -141,6 +141,8 @@ ShellRoot {
     if (send({ op: "task", requestId: id, key: key, edit: change })) taskNotice = { key: key, text: "saving…", pending: id };
     else taskNotice = { key: key, text: "not connected", pending: "" };
   }
+  // A review or question the user opened is seen everywhere; the daemon answers with the agents board.
+  function markSeen(key) { send({ op: "seen", requestId: rid(), keys: [key] }); }
   function fetchBoards(agenda, agents) {
     if (agenda) send({ op: "agenda", requestId: rid() });
     if (agents) send({ op: "agents", requestId: rid() });
@@ -879,6 +881,7 @@ ShellRoot {
           width: Board.SIDE
           height: parent.height
           view: root.agentsView
+    onSeen: key => root.markSeen(key)
     notice: root.taskNotice
     onEdit: (key, change) => root.editTask(key, change)
     tasks: Object.assign({}, root.agendaBoard?.tasks ?? {}, root.agentsBoard?.tasks ?? {})
