@@ -54,6 +54,7 @@ import { Boards } from "./board.ts";
 import { TaskEdits } from "./board-edit.ts";
 import { OrgWorker } from "./org-worker.ts";
 import { Pushes } from "./push.ts";
+import { clean as cleanOrgWork, createOrgWorkCleanup } from "./org-work.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
 import { createWorkExtension, FocusDoc, WorkDoc } from "./tools/work.ts";
 import { createOrgExtension, Org } from "./tools/org.ts";
@@ -327,6 +328,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const boards = options.boards ?? new Boards({ config, herdr, seenFile: `${paths.state}/seen.json`, log, org: orgWorker });
 		const edits = options.edits ?? new TaskEdits(config, undefined, orgWorker);
 		// A phone's push address: the agenda changed, so its widget and reminders refresh at once (src/push.ts).
+		// The weekly tidy of org-work runtime folders, when enabled (src/org-work.ts).
+		const tidy = config.orgWork?.enabled
+			? createOrgWorkCleanup({
+				config: config.orgWork, state: paths.state, log,
+				clean: () => cleanOrgWork({ ...config.orgWork!, org: config.org.root, today: localDay(new Date()), log }),
+			})
+			: undefined;
 		const pushes = new Pushes({ file: `${paths.state}/push.json`, origin: config.ntfy ? new URL(config.ntfy.url).origin : undefined, boards, log, ...(options.pushPost ? { post: options.pushPost } : {}) });
 		// How many connections have the phone app's conversation open (ntfy.ts pushes only while none does).
 		const apkViews = { count: 0 };
@@ -369,6 +377,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				stopSituation();
 				follows.stop();
 				pushes.stop();
+				tidy?.stop();
 				boards.stop();
 				orgWorker.stop();
 				stopHeartbeat?.();
@@ -943,4 +952,9 @@ function statSafe(file: string): { size: number } | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+/** A date as the local calendar names it, YYYY-MM-DD. */
+function localDay(at: Date): string {
+	return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
 }

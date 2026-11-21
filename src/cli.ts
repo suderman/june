@@ -19,6 +19,7 @@ const USAGE = `usage:
   june ask [--json] TEXT  send one message and print the answer ("-" or no text reads stdin)
   june status [--json]    daemon, model, and conversation state, without a model call
   june agenda [--json]    overdue, today and this week from the Org agenda, as June's clients see it
+  june org-work [--clean] [--json]  this host's org-work folders and what the tidy rules make of them; --clean removes those due
   june agents [--json]    the agents at work, what needs you, what is queued, and what finished today
   june transcript [--last N] [--since WHEN] [--detail] [--json]
                           the recent conversation as text: the last N entries (200 by default), or those since
@@ -70,6 +71,8 @@ async function main(argv: string[]): Promise<number> {
 		case "agenda":
 		case "agents":
 			return board(p.socket, command, json);
+		case "org-work":
+			return orgWorkCommand(args, json);
 		case "transcript":
 			return transcript(p, args, json);
 		case "usage":
@@ -464,3 +467,33 @@ main(process.argv.slice(2)).then(
 		process.exit(1);
 	},
 );
+
+/** `june org-work`: this host's runtime folders by verdict; `--clean` removes those the rules let go (src/org-work.ts). */
+async function orgWorkCommand(args: string[], json: boolean): Promise<number> {
+	const { survey, clean } = await import("./org-work.ts");
+	const { loadConfig, expandHome } = await import("./config.ts");
+	const { createLogger } = await import("./runtime.ts");
+	// A client host may have no model configured; the defaults serve there.
+	let config: ReturnType<typeof loadConfig> | undefined;
+	try { config = loadConfig(); } catch {}
+	const settings = config?.orgWork ?? { root: expandHome("~/.local/state/org-work"), afterDays: 14, keep: [] as string[], record: undefined };
+	const now = new Date();
+	const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+	const options = { root: settings.root, org: config?.org.root ?? expandHome("~/org"), afterDays: settings.afterDays, keep: settings.keep, today };
+	if (args.includes("--clean")) {
+		const result = await clean({ ...options, ...(settings.record ? { record: settings.record } : {}), log: createLogger({ sink: () => {} }) });
+		if (json) console.log(JSON.stringify(result));
+		else console.log(`removed ${result.deleted.length}, could not remove ${result.failed.length}, waiting for you ${result.waiting.length}`);
+		return result.failed.length ? 1 : 0;
+	}
+	const folders = await survey(options);
+	if (json) { console.log(JSON.stringify(folders)); return 0; }
+	const gb = (n: number) => (n / 1e9).toFixed(2);
+	for (const verdict of ["delete", "unsaved", "unlinked", "keep", "open", "recent"] as const) {
+		const these = folders.filter((f) => f.verdict === verdict);
+		if (!these.length) continue;
+		console.log(`${verdict}: ${these.length} folders, ${gb(these.reduce((n, f) => n + f.bytes, 0))} GB`);
+		for (const f of these) console.log(`  ${gb(f.bytes).padStart(6)} GB  ${f.dir}${f.why ? `  (${f.why})` : ""}`);
+	}
+	return 0;
+}
