@@ -4,6 +4,7 @@
 // phone shares with the desktop" in docs/interfaces.org. Below them, the phone's own glue: it keeps the strip's memory
 // and the avatar set's poses in the engine between calls, and hands back layouts ready to draw.
 import { excerpt } from "../../desktop/Code.mjs";
+import * as board from "../../desktop/board.mjs";
 import * as compose from "../../desktop/compose.mjs";
 import * as looks from "../../desktop/console.mjs";
 import * as light from "../../desktop/light.mjs";
@@ -11,7 +12,7 @@ import * as live from "../../desktop/live.mjs";
 import * as scenery from "../../desktop/scenery.mjs";
 import * as strip from "../../desktop/strip.mjs";
 
-export { compose, light, live, looks, scenery, strip };
+export { board, compose, light, live, looks, scenery, strip };
 
 // Per-screen live presentation state; settled choices come from the recorded take or stable legacy derivation.
 const memory = { sides: {}, poseIds: {}, livePoses: {} };

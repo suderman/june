@@ -85,6 +85,8 @@ export type Need = { level: 1 | 2; kind: "blocked" | "asks" | "review"; task?: s
 
 export type Agents = {
 	generatedAt: number;
+	/** How the user signs their Dialog entries, so clients quote the others. */
+	user: string;
 	hosts: { host: string; ok: boolean; error?: string }[];
 	workers: Worker[];
 	needs: Need[];
@@ -210,7 +212,7 @@ const DAY = 86_400_000;
  * Join live workers to their Org tasks and rank what needs the user. `seen` holds the review marks already seen
  * (reviewKey); a task in EVAL is a need until its mark is seen.
  */
-export function shapeAgents(input: { workers: AgentSummary[]; hosts: Agents["hosts"]; agenda: Agenda; seen: ReadonlySet<string>; now?: number }): Agents {
+export function shapeAgents(input: { workers: AgentSummary[]; hosts: Agents["hosts"]; agenda: Agenda; seen: ReadonlySet<string>; now?: number; user?: string }): Agents {
 	const { agenda, seen } = input;
 	const now = input.now ?? Date.now();
 	const byId = new Map<string, Task>();
@@ -251,7 +253,7 @@ export function shapeAgents(input: { workers: AgentSummary[]; hosts: Agents["hos
 		.sort((a, b) => b.headline!.at! - a.headline!.at!)
 		.map((t) => t.key);
 	const named = new Set([...workers.map((w) => w.taskKey), ...needed, ...queued, ...reviewing, ...recent].filter((k): k is string => k !== undefined));
-	return { generatedAt: now, hosts: input.hosts, workers, needs, queued, reviewing, recent, tasks: Object.fromEntries([...named].map((k) => [k, agenda.tasks[k]!])) };
+	return { generatedAt: now, user: input.user ?? "", hosts: input.hosts, workers, needs, queued, reviewing, recent, tasks: Object.fromEntries([...named].map((k) => [k, agenda.tasks[k]!])) };
 }
 
 function since(task: Task): { since?: number } {
@@ -498,7 +500,7 @@ export class Boards {
 		else this.#seen.prune(new Set(reviews));
 		const before = this.revisions();
 		if (this.#workers) {
-			const value = shapeAgents({ ...this.#workers, agenda, seen: this.#seen.marks() });
+			const value = shapeAgents({ ...this.#workers, agenda, seen: this.#seen.marks(), user: this.#o.config.user.name ?? "" });
 			this.#agents = hold(value, this.#agents);
 		}
 		const after = this.revisions();

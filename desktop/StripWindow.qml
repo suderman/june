@@ -1,11 +1,14 @@
 // The strip in an ordinary window, for the launcher: the same conversation and panels as the desktop client, with a row of
 // toggles for this device's state (nothing written to config). Narrowed below 480 px it shows the strip's stacked
-// layout, the phone's. Ctrl+N and Ctrl+P page, Ctrl+R refreshes, Ctrl+W closes. See "The windowed strip" in docs/interfaces.org.
+// layout, the phone's. Wide enough (board.mjs boardLayout, about 1300 px), the agents take the left margin and the
+// projects the right; narrower, tabs switch between the strip and either board. Ctrl+N and Ctrl+P page, Ctrl+R
+// refreshes, Ctrl+W closes. See "The windowed strip" and "Agents and projects" in docs/interfaces.org.
 import QtQuick
 import QtQuick.Dialogs
 import QtQuick.Controls
 import Quickshell
 import "desktop.mjs" as Desktop
+import "board.mjs" as Board
 
 FloatingWindow {
   id: win
@@ -19,9 +22,13 @@ FloatingWindow {
   color: Theme.paper
   visible: shell.windowShown
   onVisibleChanged: {
-    if (visible) { strip.landOnNewest(); composer.focusInput(); }
+    if (visible) { strip.landOnNewest(); composer.focusInput(); shell.wantBoards(); }
     else shell.windowShown = false;
   }
+
+  readonly property var layout: Board.boardLayout(width)
+  // In a narrow window, which of the strip and the two boards shows (the shell keeps it, for `june-desktop tab`).
+  readonly property string tab: shell.windowTab
   onClosed: shell.windowShown = false
 
   Shortcut { sequence: "Ctrl+N"; onActivated: strip.page(1) }
@@ -38,7 +45,8 @@ FloatingWindow {
     anchors.top: parent.top
     anchors.bottom: parent.bottom
     anchors.horizontalCenter: parent.horizontalCenter
-    width: Math.min(parent.width, Theme.stripWidth)
+    // The column pads its contents 16 px, so with the boards beside it, it is the strip plus that padding.
+    width: win.layout.columns ? win.layout.strip + 32 : Math.min(parent.width, Theme.stripWidth)
 
     Masthead {
       id: masthead
@@ -127,9 +135,55 @@ FloatingWindow {
       }
     }
 
+    // Narrow, the boards are tabs beside the strip.
+    Row {
+      id: tabs
+      visible: !win.layout.columns
+      anchors.top: toggles.bottom
+      anchors.left: parent.left
+      anchors.leftMargin: 16
+      anchors.topMargin: visible ? 10 : 0
+      height: visible ? 30 : 0
+      spacing: 8
+      Pill { text: "strip"; on: win.tab === "strip"; onClicked: win.shell.windowTab = "strip" }
+      Pill {
+        text: win.shell.agentsView.needs.length > 0 ? "agents · " + win.shell.agentsView.needs.length : "agents"
+        on: win.tab === "agents"
+        onClicked: win.shell.windowTab = "agents"
+      }
+      Pill { text: "projects"; on: win.tab === "projects"; onClicked: win.shell.windowTab = "projects" }
+    }
+
+    AgentsBoard {
+      visible: !win.layout.columns && win.tab === "agents"
+      anchors.top: tabs.bottom
+      anchors.bottom: composer.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.margins: 16
+      view: win.shell.agentsView
+      loaded: win.shell.agentsBoard !== null
+      onOpen: link => win.shell.openLink(link)
+    }
+    ProjectsBoard {
+      visible: !win.layout.columns && win.tab === "projects"
+      anchors.top: tabs.bottom
+      anchors.bottom: composer.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.margins: 16
+      view: win.shell.agendaView
+      agenda: win.shell.agendaBoard
+      loaded: win.shell.agendaBoard !== null
+      host: win.shell.host
+      generatedAt: win.shell.agendaBoard?.generatedAt ?? 0
+      onOpen: link => win.shell.openLink(link)
+    }
+
     StripList {
       id: strip
-      anchors.top: toggles.bottom
+      visible: win.layout.columns || win.tab === "strip"
+      anchors.top: tabs.bottom
       anchors.bottom: composer.top
       anchors.left: parent.left
       anchors.right: parent.right
@@ -185,6 +239,37 @@ FloatingWindow {
       keys: ["text/uri-list"]
       onDropped: drop => { win.shell.attachPaths(win.shell.pathsOf(drop.urls)); drop.accept(Qt.CopyAction); }
     }
+  }
+
+  // Wide, the boards take the margins on either side of the strip.
+  AgentsBoard {
+    visible: win.layout.columns
+    anchors.top: parent.top
+    anchors.bottom: parent.bottom
+    anchors.right: column.left
+    anchors.topMargin: 16
+    anchors.bottomMargin: 16
+    anchors.rightMargin: win.layout.gap - 16
+    width: win.layout.side
+    view: win.shell.agentsView
+    loaded: win.shell.agentsBoard !== null
+    onOpen: link => win.shell.openLink(link)
+  }
+  ProjectsBoard {
+    visible: win.layout.columns
+    anchors.top: parent.top
+    anchors.bottom: parent.bottom
+    anchors.left: column.right
+    anchors.topMargin: 16
+    anchors.bottomMargin: 16
+    anchors.leftMargin: win.layout.gap - 16
+    width: win.layout.side
+    view: win.shell.agendaView
+    agenda: win.shell.agendaBoard
+    loaded: win.shell.agendaBoard !== null
+    host: win.shell.host
+    generatedAt: win.shell.agendaBoard?.generatedAt ?? 0
+    onOpen: link => win.shell.openLink(link)
   }
 
   // A picture or file a note brought, over the whole window until closed.

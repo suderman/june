@@ -24,6 +24,7 @@ import "scenery.mjs" as Scenery
 import "console.mjs" as Console
 import "desktop.mjs" as Desktop
 import "attach.mjs" as Attach
+import "board.mjs" as Board
 
 ShellRoot {
   id: root
@@ -31,6 +32,8 @@ ShellRoot {
   property bool shown: false
   // The windowed strip, and this device's toggles: state while the desktop client runs, never written to config.
   property bool windowShown: false
+  // In a narrow window, which of the strip and the two boards shows: strip, agents, or projects.
+  property string windowTab: "strip"
   // Live June in the corner: off, she never pops up and the key goes straight between hidden and the strip.
   property bool liveEnabled: true
   // The comic strip, or the console look for when June should look professional (a client meeting).
@@ -116,6 +119,27 @@ ShellRoot {
   property bool hitsMore: false
   property bool searchDone: false
   property string searchId: ""
+  // The agenda and agents boards (src/board.ts), fetched once something shows them and again whenever their revision
+  // in the view state moves; asking keeps them fresh in the daemon for this connection. See "Agents and projects" in
+  // docs/interfaces.org.
+  property bool boardsWanted: false
+  property var agendaBoard: null
+  property var agentsBoard: null
+  property var boardRevisions: ({ agenda: "", agents: "" })
+  property real boardNow: Date.now()
+  readonly property var agendaView: Board.agendaView(agendaBoard)
+  readonly property var agentsView: Board.agentsView(agentsBoard, boardNow, agendaBoard?.today ?? "", agentsBoard?.user ?? "")
+  function wantBoards() {
+    if (boardsWanted) return;
+    boardsWanted = true;
+    fetchBoards(true, true);
+  }
+  function fetchBoards(agenda, agents) {
+    if (agenda) send({ op: "agenda", requestId: rid() });
+    if (agents) send({ op: "agents", requestId: rid() });
+  }
+  // "3 min ago" moves on without a new board.
+  Timer { interval: 60000; running: root.boardsWanted; repeat: true; onTriggered: root.boardNow = Date.now() }
   // The panel holding the moment opened, marked in the strip; "" for none.
   property string markedPanel: ""
   // Each strip lands on a day as it opens: on its newest panel, or on the panel holding the moment.
@@ -420,6 +444,8 @@ ShellRoot {
     function light(hour: string): void { const h = Number(hour); root.lightHour = hour === "now" || isNaN(h) ? -1 : h; }
     // The strip in an ordinary window, for the launcher.
     function window(): void { root.windowShown = true; }
+    // The windowed strip on one of its tabs: strip, agents, or projects.
+    function tab(name: string): void { if (["strip", "agents", "projects"].includes(name)) root.windowTab = name; root.windowShown = true; }
     // June's history: a day by its date (YYYY-MM-DD), a moment by its entry id, or back to today.
     function day(date: string): void { root.openDay(date); }
     function at(id: string): void { root.openMoment(Strip.momentOf("june:at/" + id)); }
@@ -528,10 +554,31 @@ ShellRoot {
     if (reply.type === "hello") {
       fetchArt(reply.avatar);
       root.attached = attachedUrl(reply.attached);
+      // A new connection must ask again to keep the boards fresh.
+      if (boardsWanted) fetchBoards(true, true);
+      return;
+    }
+    if (reply.type === "agenda") {
+      agendaBoard = reply.agenda;
+      boardRevisions = Object.assign({}, boardRevisions, { agenda: reply.revision });
+      return;
+    }
+    if (reply.type === "agents") {
+      agentsBoard = reply.agents;
+      boardNow = Date.now();
+      boardRevisions = Object.assign({}, boardRevisions, { agents: reply.revision });
       return;
     }
     if (reply.type === "view") {
       view = Strip.applyView(view, reply);
+      const revisions = view.state?.boards;
+      if (boardsWanted && revisions) {
+        const agenda = (revisions.agenda ?? "") !== "" && revisions.agenda !== boardRevisions.agenda;
+        const agents = (revisions.agents ?? "") !== "" && revisions.agents !== boardRevisions.agents;
+        // Asked once per revision: a streaming reply sends the same state many times a second.
+        if (agenda || agents) boardRevisions = { agenda: revisions.agenda ?? boardRevisions.agenda, agents: revisions.agents ?? boardRevisions.agents };
+        fetchBoards(agenda, agents);
+      }
       // A fresh view, on attach or at the day's start: the days may have moved on.
       if (reply.reset === true) listDays();
       sync();
