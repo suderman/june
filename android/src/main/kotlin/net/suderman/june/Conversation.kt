@@ -35,6 +35,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.border
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.launch
 import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.StrokeCap
@@ -226,11 +227,13 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     val links = remember(leave, link) { Links.Handler(context, leave, link::openMoment) }
     // The calendar and search, in place of the strip while open (Browse.kt).
     var browsing by remember { mutableStateOf(false) }
-    // The full screen's tabs: the strip, or the agents or projects board (Boards.kt). The assistant sheet keeps the strip.
-    // Kept across Android remaking the screen, as the boards keep their place.
-    var tab by rememberSaveable { mutableStateOf("strip") }
+    // The full screen's pages, side by side: the agents board on the left, the strip in the middle, the projects board
+    // on the right (Boards.kt). A swipe moves the strip aside to show one; the assistant sheet keeps the strip alone.
+    // The pager keeps its page across Android remaking the screen, and each board its place.
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = 1) { 3 }
+    val pages = androidx.compose.runtime.rememberCoroutineScope()
     // A link asked for a board (the agenda widget, a reminder): show it; the board opens the task.
-    LaunchedEffect(link.requested) { link.requested?.let { tab = it.first } }
+    LaunchedEffect(link.requested) { link.requested?.let { pager.scrollToPage(if (it.first == "agents") 0 else 2) } }
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides links) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
         Column(Modifier.fillMaxWidth().then(header ?: Modifier)) {
@@ -282,29 +285,38 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                 }
             }
         }
-        if (link.status is LinkStatus.Linked) DayBar(link, palette, browsing) { browsing = !browsing }
         val ready = decisions
+        // The strip, with its day picker above it, which is the strip's alone.
+        val stripPage: @Composable (Modifier) -> Unit = { modifier ->
+            Column(modifier) {
+                if (link.status is LinkStatus.Linked) DayBar(link, palette, browsing) { browsing = !browsing }
+                if (browsing) {
+                    Browse(link, palette, close = { browsing = false }, modifier = Modifier.weight(1f).fillMaxWidth())
+                } else if (ready != null && LookChoice.console) {
+                    ConsoleStrip(link, ready, palette, Modifier.weight(1f).fillMaxWidth())
+                } else if (ready != null && avatar != null) {
+                    Strip(link, ready, avatar, Modifier.weight(1f).fillMaxWidth())
+                } else {
+                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(shown, key = { it.id }) { ItemRow(it) }
+                    }
+                }
+            }
+        }
         // The boards stay while the link comes back after June was in the background, so their place is kept.
         val boards = !fromSheet && ready != null && (link.status is LinkStatus.Linked || link.agenda != null || link.agents != null)
         if (boards) {
+            LaunchedEffect(Unit) { link.wantBoards() }
             val needs = link.agents?.optJSONArray("needs")?.length() ?: 0
-            BoardTabs(tab, needs, palette) { tab = it; if (it != "strip") link.wantBoards() }
-        }
-        if (boards && tab == "agents") {
-            AgentsBoard(link, ready!!, palette, Modifier.weight(1f).fillMaxWidth())
-        } else if (boards && tab == "projects") {
-            ProjectsBoard(link, ready!!, palette, Modifier.weight(1f).fillMaxWidth())
-        } else if (browsing) {
-            Browse(link, palette, close = { browsing = false }, modifier = Modifier.weight(1f).fillMaxWidth())
-        } else if (ready != null && LookChoice.console) {
-            ConsoleStrip(link, ready, palette, Modifier.weight(1f).fillMaxWidth())
-        } else if (ready != null && avatar != null) {
-            Strip(link, ready, avatar, Modifier.weight(1f).fillMaxWidth())
-        } else {
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(shown, key = { it.id }) { ItemRow(it) }
+            PageNames(pager.currentPage, needs, palette) { page -> pages.launch { pager.animateScrollToPage(page) } }
+            androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1, pageSpacing = 16.dp) { page ->
+                when (page) {
+                    0 -> AgentsBoard(link, ready!!, palette, Modifier.fillMaxSize())
+                    2 -> ProjectsBoard(link, ready!!, palette, Modifier.fillMaxSize())
+                    else -> stripPage(Modifier.fillMaxSize())
+                }
             }
-        }
+        } else stripPage(Modifier.weight(1f).fillMaxWidth())
         if (link.notice.isNotEmpty()) Text(link.notice, color = Color(0xFFFFD36B), fontSize = 13.sp, modifier = Modifier.padding(vertical = 4.dp))
         // The screen she was summoned over, offered for the next message: off until Jon adds it, since most messages do
         // not need the picture's tokens; gone once sent.

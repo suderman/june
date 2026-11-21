@@ -64,18 +64,16 @@ import org.json.JSONObject
 
 /** The strip, agents and projects tabs under the day bar; agents counts what needs the user. */
 @Composable
-fun BoardTabs(tab: String, needs: Int, palette: Look.Palette, onTab: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (name in listOf("strip", "agents", "projects")) {
-            val on = tab == name
+fun PageNames(page: Int, needs: Int, palette: Look.Palette, onPage: (Int) -> Unit) {
+    // Where each page lies: agents left of the strip, projects right; swiping is the way, a tap jumps.
+    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        for ((i, name) in listOf("‹ agents", "strip", "projects ›").withIndex()) {
+            val on = page == i
             Text(
-                if (name == "agents" && needs > 0) "agents · $needs" else name,
-                fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 14.sp,
-                color = if (on) palette.page else palette.pageInk,
-                modifier = Modifier.weight(1f).background(if (on) palette.pageInk else Color.Transparent, RoundedCornerShape(50))
-                    .border(2.dp, palette.pageInk, RoundedCornerShape(50)).clickable { onTab(name) }
-                    .padding(vertical = 10.dp),
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                if (i == 0 && needs > 0) "$name · $needs" else name,
+                fontFamily = Look.caption, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, fontSize = 13.sp,
+                color = if (on) palette.pageInk else if (i == 0 && needs > 0) palette.accent else palette.muted,
+                modifier = Modifier.clickable { onPage(i) }.padding(horizontal = 6.dp, vertical = 6.dp),
             )
         }
     }
