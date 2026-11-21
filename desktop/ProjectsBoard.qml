@@ -35,7 +35,7 @@ Item {
   TaskDetail {
     anchors.fill: parent
     visible: board.detailKey !== ""
-    backLabel: board.mode === "state" ? board.drill : "agenda"
+    backLabel: board.mode === "state" ? (Board.LISTS.find(l => l[0] === board.drill)?.[1] ?? board.drill).toLowerCase() : board.mode
     id: detailPage
     detail: board.detailKey !== "" ? Board.taskPage(board.agenda?.tasks, board.detailKey, board.pending, board.user, board.agenda?.today ?? "", Date.now()) : null
     today: board.agenda?.today ?? ""
@@ -78,15 +78,14 @@ Item {
           font.family: Theme.caption; font.pixelSize: 13
           color: Theme.muted
         }
-        Row {
-          anchors.right: parent.right
-          anchors.bottom: parent.bottom
-          anchors.bottomMargin: 26
-          spacing: 0
-          Segment { text: "agenda"; on: board.mode !== "projects"; onClicked: { board.mode = "agenda"; board.drill = ""; } }
-          Segment { text: "projects"; on: board.mode === "projects"; onClicked: board.mode = "projects" }
-        }
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 2.5; color: Theme.pageInk }
+      }
+      // What's dated, every open task by state, or the projects.
+      Row {
+        spacing: 6
+        Segment { text: "agenda"; on: board.mode === "agenda"; onClicked: { board.mode = "agenda"; board.drill = ""; } }
+        Segment { text: "tasks"; on: board.mode === "tasks" || board.mode === "state"; onClicked: { board.mode = "tasks"; board.drill = ""; } }
+        Segment { text: "projects"; on: board.mode === "projects"; onClicked: board.mode = "projects" }
       }
 
       Text {
@@ -116,30 +115,54 @@ Item {
           }
         }
       }
-      SectionTitle { text: "BY STATE"; visible: board.mode === "agenda" && board.view.counts.length > 0 }
-      Flow {
-        visible: board.mode === "agenda"
-        width: parent.width
-        spacing: 6
-        Repeater {
-          model: board.view.counts
-          delegate: StateChip {
-            required property var modelData
-            orgState: modelData.state; count: modelData.n; big: true
-            onClicked: { board.drill = modelData.state; board.mode = "state"; }
+      // Every open task by state, dated or not: a few rows each, the rest a tap away.
+      Repeater {
+        model: board.mode === "tasks" ? (board.view.lists ?? []) : []
+        delegate: Column {
+          id: list
+          required property var modelData
+          width: column.width
+          spacing: 7
+          Item {
+            width: parent.width
+            height: listTitle.implicitHeight
+            SectionTitle { id: listTitle; text: list.modelData.title + " · " + list.modelData.n }
+            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { board.drill = list.modelData.state; board.mode = "state"; } }
+          }
+          Repeater {
+            model: list.modelData.rows
+            delegate: AgendaRow { required property var modelData; width: column.width; entry: modelData }
+          }
+          Text {
+            visible: list.modelData.more > 0
+            text: "all " + list.modelData.n + " ›"
+            font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
+            color: Theme.pageInk
+            MouseArea { anchors.fill: parent; anchors.margins: -6; cursorShape: Qt.PointingHandCursor; onClicked: { board.drill = list.modelData.state; board.mode = "state"; } }
           }
         }
+      }
+      Text {
+        visible: board.mode === "tasks" && (board.view.queued ?? 0) > 0
+        width: parent.width
+        wrapMode: Text.Wrap
+        text: board.view.queued + " queued for agents, on the agents board"
+        font.family: Theme.caption; font.pixelSize: 12
+        color: Theme.muted
       }
 
       // One state's tasks.
       Text {
         visible: board.mode === "state"
-        text: "‹ agenda"
+        text: "‹ tasks"
         font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
         color: Theme.pageInk
-        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { board.mode = "agenda"; board.drill = ""; } }
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { board.mode = "tasks"; board.drill = ""; } }
       }
-      SectionTitle { visible: board.mode === "state"; text: board.drill + " · " + board.drillRows.length }
+      SectionTitle {
+        visible: board.mode === "state"
+        text: (Board.LISTS.find(l => l[0] === board.drill)?.[1] ?? board.drill) + " · " + board.drillRows.length
+      }
       Repeater {
         model: board.drillRows
         delegate: AgendaRow { required property var modelData; width: column.width; entry: modelData }
@@ -211,17 +234,18 @@ Item {
     height: Math.max(rowLines.implicitHeight, 20)
     Text {
       id: when
-      width: 40
+      // A list row has no day or time column, nor a chip: its list names the state.
+      width: r.entry.plain ? 0 : 40
       text: r.entry.day ? r.entry.day : (r.entry.time ?? "")
       font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
       color: Theme.muted
       y: 2
     }
-    StateChip { id: badge; anchors.left: when.right; orgState: r.entry.state; y: 1 }
+    StateChip { id: badge; anchors.left: when.right; orgState: r.entry.plain ? "" : r.entry.state; width: r.entry.plain ? 0 : implicitWidth; y: 1 }
     Column {
       id: rowLines
       anchors.left: badge.right
-      anchors.leftMargin: 8
+      anchors.leftMargin: r.entry.plain ? 0 : 8
       anchors.right: parent.right
       spacing: 1
       Text { width: parent.width; wrapMode: Text.Wrap; text: (r.entry.day && r.entry.time ? r.entry.time + "  " : "") + r.entry.title; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13; color: Theme.pageInk }

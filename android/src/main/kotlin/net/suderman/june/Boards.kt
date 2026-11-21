@@ -427,15 +427,20 @@ fun ProjectsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modif
     val open = LocalUriHandler.current
     var page by remember { mutableStateOf("") }
     LaunchedEffect(link.taskMoved) { if (link.taskMoved.first == page && page.isNotEmpty()) page = link.taskMoved.second }
-    if (page.isNotEmpty() && colours != null) { TaskPage(link, decisions, colours, palette, page, if (mode == "state") drill else "agenda", { page = "" }, modifier); return }
+    if (page.isNotEmpty() && colours != null) { TaskPage(link, decisions, colours, palette, page, if (mode == "state") listTitle(drill).lowercase() else mode, { page = "" }, modifier); return }
     val show: (JSONObject) -> Unit = { e -> val task = e.optString("task"); if (task.isNotEmpty() && link.task(task) != null) page = task else e.optString("link").takeIf { it.isNotEmpty() && it != "null" }?.let { open.openUri(it) } }
     val v = view
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(9.dp)) {
         item {
             val counts = v?.optJSONArray("counts").objects()
             val projects = v?.optJSONArray("projects").objects()
-            Heading("projects", if (v == null) "asking Emacs…" else "${counts.sumOf { it.optInt("n") }} open in ${projects.size} projects", palette) {
-                Segment("agenda", mode != "projects", palette) { mode = "agenda"; drill = "" }
+            Heading("projects", if (v == null) "asking Emacs…" else "${counts.sumOf { it.optInt("n") }} open in ${projects.size} projects", palette)
+        }
+        // What's dated, every open task by state, or the projects.
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Segment("agenda", mode == "agenda", palette) { mode = "agenda"; drill = "" }
+                Segment("tasks", mode == "tasks" || mode == "state", palette) { mode = "tasks"; drill = "" }
                 Segment("projects", mode == "projects", palette) { mode = "projects" }
             }
         }
@@ -447,19 +452,22 @@ fun ProjectsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modif
                     if (entries.isEmpty()) item { Text("Nothing on the agenda.", fontFamily = Look.lettering, fontSize = 14.sp, color = palette.muted) }
                     for (e in entries) item(key = section.optString("id") + "|" + e.optString("key")) { AgendaRow(e, colours, palette) { show(e) } }
                 }
-                val counts = v.optJSONArray("counts").objects()
-                if (counts.isNotEmpty()) {
-                    item { SectionTitle("BY STATE", palette, ink = true) }
-                    item {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            for (c in counts) StateChip(c.optString("state"), colours, count = c.optInt("n"), big = true) { drill = c.optString("state"); mode = "state" }
-                        }
+            }
+            // Every open task by state, dated or not: a few rows each, the rest a tap away.
+            "tasks" -> {
+                for (l in v.optJSONArray("lists").objects()) {
+                    val state = l.optString("state")
+                    item(key = "l|$state") { SectionTitle("${l.optString("title")} · ${l.optInt("n")}", palette, ink = true, onClick = { drill = state; mode = "state" }) }
+                    for (e in l.optJSONArray("rows").objects()) item(key = "l|$state|" + e.optString("key")) { AgendaRow(e, colours, palette) { show(e) } }
+                    if (l.optInt("more") > 0) item(key = "l|$state|more") {
+                        Text("all ${l.optInt("n")} ›", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = palette.pageInk, modifier = Modifier.clickable { drill = state; mode = "state" }.padding(vertical = 8.dp))
                     }
                 }
+                if (v.optInt("queued") > 0) item { Text("${v.optInt("queued")} queued for agents, on the agents board", fontFamily = Look.caption, fontSize = 13.sp, color = palette.muted) }
             }
             "state" -> {
-                item { Text("‹ agenda", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = palette.pageInk, modifier = Modifier.clickable { mode = "agenda"; drill = "" }.padding(vertical = 6.dp)) }
-                item { SectionTitle("$drill · ${rows.size}", palette, ink = true) }
+                item { Text("‹ tasks", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = palette.pageInk, modifier = Modifier.clickable { mode = "tasks"; drill = "" }.padding(vertical = 6.dp)) }
+                item { SectionTitle("${listTitle(drill)} · ${rows.size}", palette, ink = true) }
                 for (e in rows) item(key = "d|" + e.optString("key")) { AgendaRow(e, colours, palette) { show(e) } }
             }
             else -> for (p in v.optJSONArray("projects").objects()) item(key = "p|" + p.optString("file")) {
@@ -472,6 +480,9 @@ fun ProjectsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modif
         item { Spacer(Modifier.height(16.dp)) }
     }
 }
+
+/** A state's list title, as board.mjs LISTS names it. */
+private fun listTitle(state: String) = when (state) { "PROG" -> "IN PROGRESS"; "EVAL" -> "IN REVIEW"; "HOLD" -> "ON HOLD"; "TODO" -> "TO DO"; else -> state }
 
 @Composable
 private fun Heading(title: String, summary: String, palette: Look.Palette, trailing: @Composable () -> Unit = {}) {
@@ -623,9 +634,11 @@ private fun TaskRow(state: String, title: String, quote: String, meta: String, l
 private fun AgendaRow(e: JSONObject, colours: Colours, palette: Look.Palette, open: () -> Unit) {
     val day = e.optString("day")
     val time = e.optString("time")
+    // A list row has no day or time column, nor a chip: its list names the state.
+    val plain = e.optBoolean("plain")
     Row(Modifier.fillMaxWidth().clickable(onClick = open).padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(if (day.isNotEmpty()) day else time, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = palette.muted, modifier = Modifier.width(40.dp).padding(top = 2.dp))
-        StateChip(e.optString("state"), colours)
+        if (!plain) Text(if (day.isNotEmpty()) day else time, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = palette.muted, modifier = Modifier.width(40.dp).padding(top = 2.dp))
+        if (!plain) StateChip(e.optString("state"), colours)
         Column(Modifier.weight(1f)) {
             Text((if (day.isNotEmpty() && time.isNotEmpty()) "$time  " else "") + e.optString("title"), fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = palette.pageInk)
             val meta = e.optString("meta")

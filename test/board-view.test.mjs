@@ -160,3 +160,24 @@ test("an edit on its way shows as made, and the page takes no other until it lan
 	assert.equal(agentsView(agents, 0, "2026-11-21", "Alex").needs.length, 1);
 	assert.equal(agentsView(agents, 0, "2026-11-21", "Alex", { seen: ["id:p"] }).needs.length, 0, "a review opened is seen at once");
 });
+
+test("open tasks are listed by state, dated or not, newest-touched projects first, with the rest a tap away", () => {
+	const tasks = {};
+	const add = (key, extra) => { tasks[key] = task(key, extra); };
+	for (let i = 0; i < 7; i++) add(`old${i}`, { state: "TODO", file: "old.org", line: i, project: "Old" });
+	add("new", { state: "TODO", file: "new.org", line: 3, project: "Uptime" });
+	add("dated", { state: "TODO", file: "new.org", line: 9, project: "Uptime", deadline: "<2026-11-20 Fri>", scheduled: "<2026-11-23 Mon 09:00>" });
+	add("prog", { state: "PROG", file: "old.org", line: 20, project: "Old" });
+	add("queued", { state: "AUTO", file: "old.org", line: 30, project: "Old" });
+	const agenda = { generatedAt: 0, today: "2026-11-21", overdue: [], days: [{ date: "2026-11-21", entries: [] }], tasks, counts: {},
+		projects: [{ file: "old.org", title: "Old", counts: {}, changed: 100 }, { file: "new.org", title: "Uptime", counts: {}, changed: 900 }] };
+	const v = agendaView(agenda);
+	assert.deepEqual(v.lists.map((l) => [l.title, l.n, l.rows.length, l.more]), [["IN PROGRESS", 1, 1, 0], ["TO DO", 9, 5, 4]], "empty states and AUTO are left out");
+	assert.equal(v.queued, 1);
+	assert.deepEqual(v.lists[1].rows.slice(0, 3).map((r) => r.key), ["new", "dated", "old0"], "a file just changed comes first, in its own order");
+	assert.equal(v.lists[1].rows[0].meta, "Uptime", "a task without dates says only its project");
+	assert.equal(v.lists[1].rows[1].meta, "Uptime · due yesterday · scheduled Mon 09:00");
+	assert.equal(v.lists[1].rows[1].overdue, true);
+	assert.equal(stateRows(agenda, "TODO").length, 9);
+	assert.deepEqual(agendaView(agenda, { new: { change: { action: "state", state: "PROG" } } }).lists.map((l) => l.n), [2, 8], "an edit on its way moves its row");
+});

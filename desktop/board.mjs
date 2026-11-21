@@ -117,25 +117,42 @@ export function agendaView(agenda, pending, user) {
 	}
 	if (week.length > 0) sections.push({ id: "week", title: "THIS WEEK", alert: false, rows: week });
 	const counts = COUNT_ORDER.filter((s) => (agenda.counts[s] ?? 0) > 0).map((s) => ({ state: s, n: agenda.counts[s] }));
+	// Every open task by state, dated or not, as a few rows with the rest a tap away; AUTO is the agents board's.
+	const lists = LISTS.map(([state, title]) => {
+		const rows = stateRows(agenda, state);
+		return { state, title, n: rows.length, rows: rows.slice(0, PREVIEW), more: Math.max(0, rows.length - PREVIEW) };
+	}).filter((l) => l.n > 0);
+	const queued = Object.keys(agenda.tasks).filter((k) => agenda.tasks[k].state === "AUTO").length;
 	const projects = agenda.projects.map((p) => ({
 		file: p.file,
 		title: p.title,
 		counts: COUNT_ORDER.filter((s) => (p.counts[s] ?? 0) > 0).map((s) => ({ state: s, n: p.counts[s] })),
 		link: `file:~/org/${p.file}`,
 	}));
-	return { sections, counts, projects, today: agenda.today };
+	return { sections, counts, lists, queued, projects, today: agenda.today };
 }
+
+/** The lists under the agenda, in the order they want attention. */
+export const LISTS = [["PROG", "IN PROGRESS"], ["EVAL", "IN REVIEW"], ["HOLD", "ON HOLD"], ["TODO", "TO DO"]];
+const PREVIEW = 5;
 
 /** The tasks in one state, for drilling into a count, newest file order kept. */
 export function stateRows(agenda, state, pending, user) {
 	if (!agenda) return [];
 	agenda = withPending(agenda, pending, user);
-	const rows = [];
-	for (const key of Object.keys(agenda.tasks)) {
-		const t = agenda.tasks[key];
-		if (t.state === state) rows.push({ key, task: key, state, title: t.title, time: "", meta: t.project, link: taskLink(t) });
-	}
-	return rows;
+	// The projects touched most recently first, each in its file's order, so a project's tasks stay together.
+	const changed = {};
+	for (const p of agenda.projects ?? []) changed[p.file] = p.changed ?? 0;
+	const tasks = Object.keys(agenda.tasks).map((k) => agenda.tasks[k]).filter((t) => t.state === state);
+	tasks.sort((a, b) => (changed[b.file] ?? 0) - (changed[a.file] ?? 0) || a.file.localeCompare(b.file) || a.line - b.line);
+	return tasks.map((t) => {
+		// Its dates, so a task without one shows as such.
+		const when = [];
+		if (t.deadline) when.push(`due ${startOf(t.deadline, agenda.today)}`);
+		if (t.scheduled) when.push(`scheduled ${startOf(t.scheduled, agenda.today)}`);
+		const overdue = (t.deadline && pickerStart(t.deadline, agenda.today).date < agenda.today) === true;
+		return { key: t.key, task: t.key, state, plain: true, title: t.title, time: "", meta: [t.project].concat(when).join(" · "), overdue, link: taskLink(t) };
+	});
 }
 
 /** "3 min", "2 h", "4 d" since `at` (epoch ms). */

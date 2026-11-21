@@ -2,7 +2,7 @@
 // agenda by Org's own rules (org/agenda/june-agenda.el); hc reports the agents. Both are read-only here: edits go through
 // org-edit. A board is computed on request, and kept fresh while a client subscribes.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import { existsSync, readFileSync, renameSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { type Config, protectedOf } from "./config.ts";
 import type { Logger } from "./runtime.ts";
@@ -73,8 +73,8 @@ export type Agenda = {
 	days: { date: string; entries: AgendaEntry[] }[];
 	tasks: Record<string, Task>;
 	counts: Partial<Record<(typeof STATES)[number], number>>;
-	/** Each file holding open tasks, with its counts, most open first. */
-	projects: { file: string; title: string; counts: Partial<Record<(typeof STATES)[number], number>> }[];
+	/** Each file holding open tasks, with its counts and when it last changed (epoch ms), most open first. */
+	projects: { file: string; title: string; counts: Partial<Record<(typeof STATES)[number], number>>; changed?: number }[];
 };
 
 export type Worker = AgentSummary & { /** The Org task it works on, by key. */ taskKey?: string };
@@ -121,12 +121,13 @@ export function exportArgv(listFile: string, env: Record<string, string> = {}): 
 export async function loadAgenda(listFile: string, root: string, run: Run = runProcess, env?: Record<string, string>, now = Date.now()): Promise<Agenda> {
 	const out = await run(exportArgv(listFile, env), 120_000);
 	const last = out.trimEnd().split("\n").pop() ?? "";
-	return shapeAgenda(JSON.parse(last) as Raw, root, now);
+	const changed = (file: string) => { try { return statSync(file).mtimeMs; } catch { return undefined; } };
+	return shapeAgenda(JSON.parse(last) as Raw, root, now, changed);
 }
 
 const compact = <T extends object>(value: T): T => Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null && v !== undefined)) as T;
 
-export function shapeAgenda(raw: Raw, root: string, now = Date.now()): Agenda {
+export function shapeAgenda(raw: Raw, root: string, now = Date.now(), changed: (file: string) => number | undefined = () => undefined): Agenda {
 	// Without an ID, a task is named by its file and outline path, which edits elsewhere in the file leave alone; the
 	// export's FILE::LINE keys are mapped to those. A repeated path in one file takes its line as well.
 	const tasks: Record<string, Task> = {};
@@ -144,7 +145,10 @@ export function shapeAgenda(raw: Raw, root: string, now = Date.now()): Agenda {
 	const today: AgendaEntry[] = [];
 	for (const item of (first?.entries ?? []).map(entry)) {
 		const past = item.date !== undefined && item.date < raw.today;
-		if (item.type === "past-scheduled" || (item.type === "deadline" && past)) overdue.push(item);
+		// Org carries anything SCHEDULED forward, but a heading without a state is an event that has been, not work.
+		if (item.type === "past-scheduled" || (item.type === "deadline" && past)) {
+			if (tasks[item.task]?.state !== undefined) overdue.push(item);
+		}
 		// A deadline coming up this week is shown on its own day, not also as today's warning.
 		else if (!(item.type === "upcoming-deadline" && item.date !== undefined && later.has(item.date))) today.push(item);
 	}
@@ -157,7 +161,8 @@ export function shapeAgenda(raw: Raw, root: string, now = Date.now()): Agenda {
 		if (task.state === undefined) continue;
 		const state = task.state as keyof Agenda["counts"];
 		counts[state] = (counts[state] ?? 0) + 1;
-		const project = files.get(task.file) ?? { file: task.file, title: task.project, counts: {} };
+		const when = files.has(task.file) ? undefined : changed(join(root, task.file));
+		const project: Agenda["projects"][number] = files.get(task.file) ?? { file: task.file, title: task.project, counts: {}, ...(when !== undefined ? { changed: when } : {}) };
 		project.counts[state] = (project.counts[state] ?? 0) + 1;
 		files.set(task.file, project);
 	}
