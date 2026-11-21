@@ -9,8 +9,9 @@ import java.util.concurrent.Executors
 /**
  * The last agenda the daemon sent (src/board.ts Agenda), kept on the phone for the home-screen widget and the
  * reminders, which run while June is closed or offline. Only what they draw is kept: overdue, the days and their
- * entries, and the tasks those name, with their title, state and project. Saving redraws the widget and sets the
- * reminders again.
+ * entries, the tasks those name with their title, state and project, and every open task for the widget's lists, the
+ * projects touched most recently first, each in its file's order. Saving redraws the widget and sets the reminders
+ * again.
  */
 object AgendaStore {
     data class Stored(val agenda: JSONObject, val fetchedAt: Long, val revision: String)
@@ -54,7 +55,19 @@ object AgendaStore {
         keep(agenda.optJSONArray("overdue"))
         val days = agenda.optJSONArray("days") ?: JSONArray()
         for (i in 0 until days.length()) keep(days.optJSONObject(i)?.optJSONArray("entries"))
+        // Every open task, for the widget's lists, ordered as the tasks tab orders them (board.mjs stateRows).
+        val changed = HashMap<String, Long>()
+        agenda.optJSONArray("projects")?.let { for (i in 0 until it.length()) it.optJSONObject(i)?.let { p -> changed[p.optString("file")] = p.optLong("changed") } }
+        val open = tasks.keys().asSequence().mapNotNull { k -> tasks.optJSONObject(k)?.takeIf { it.optString("state") in listOf("TODO", "PROG", "EVAL", "HOLD", "AUTO") } }
+            .sortedWith(compareByDescending<JSONObject> { changed[it.optString("file")] ?: 0L }.thenBy { it.optString("file") }.thenBy { it.optInt("line") })
+            .map { t ->
+                JSONObject().put("key", t.optString("key")).put("title", t.optString("title")).put("state", t.optString("state"))
+                    .put("project", t.optString("project")).put("protected", t.optBoolean("protected"))
+                    .put("scheduled", t.optString("scheduled")).put("deadline", t.optString("deadline"))
+            }.toList()
+        for (t in open) if (!named.has(t.optString("key"))) named.put(t.optString("key"), JSONObject().put("title", t.optString("title")).put("state", t.optString("state")).put("project", t.optString("project")).put("protected", t.optBoolean("protected")))
         return JSONObject().put("today", agenda.optString("today")).put("generatedAt", agenda.optLong("generatedAt"))
+            .put("open", JSONArray(open))
             .put("overdue", agenda.optJSONArray("overdue") ?: JSONArray()).put("days", days).put("tasks", named)
             .put("reminders", agenda.optJSONObject("reminders") ?: JSONObject().put("dateOnly", "09:00"))
     }

@@ -13,6 +13,7 @@ import android.os.PersistableBundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -179,5 +180,43 @@ class QuickAddActivity : ComponentActivity() {
             }
         }.start()
         finish()
+    }
+}
+
+/** The widget's views (AgendaWidget.VIEWS), picked by tapping its title, one for each widget. */
+class ViewPickerActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val widget = intent.getIntExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_ID, -1)
+        if (widget < 0) return finish()
+        val current = AgendaWidget.viewOf(this, widget).id
+        setContent {
+            MaterialTheme {
+                Surface {
+                    androidx.compose.foundation.lazy.LazyColumn(Modifier.padding(vertical = 12.dp).fillMaxWidth()) {
+                        item { Text("Show in widget", Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge) }
+                        for (view in AgendaWidget.VIEWS) item {
+                            Row(
+                                Modifier.fillMaxWidth().clickable { AgendaWidget.setView(this@ViewPickerActivity, widget, view.id); finish() }
+                                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(view.name, style = MaterialTheme.typography.titleMedium)
+                                    Text(view.about, style = MaterialTheme.typography.bodySmall)
+                                }
+                                if (view.id == current) Text("✓", style = MaterialTheme.typography.titleMedium)
+                            }
+                        }
+                        item {
+                            TextButton({
+                                startActivity(Intent(this@ViewPickerActivity, ConversationActivity::class.java).setAction(Intent.ACTION_VIEW)
+                                    .setData(android.net.Uri.parse("june://projects")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
+                                finish()
+                            }, Modifier.padding(horizontal = 8.dp)) { Text("Open the projects board") }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

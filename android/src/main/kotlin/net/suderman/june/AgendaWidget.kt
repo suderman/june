@@ -19,14 +19,22 @@ import java.time.format.TextStyle
 import java.util.Locale
 
 /**
- * June's agenda on the home screen, in place of Bloom's: overdue, today and the next 13 days from the phone's copy of
- * the agenda (AgendaStore), with how many are due and how fresh it is. A row opens its task's page in June; the header
- * opens the projects board; ↻ asks for a fresh copy. It redraws whenever the copy changes.
+ * June's agenda on the home screen, in place of Bloom's, from the phone's copy of the agenda (AgendaStore), with how
+ * much it holds and how fresh it is. Each widget shows one view, picked by tapping its title (ViewPickerActivity), as
+ * Bloom borrowed from Orgzly's saved searches: the agenda (overdue, then 14 days), today, overdue, this week, or a list
+ * of open tasks by kind. A row opens its task's page in June; its state pill changes its state; + hands June a TODO;
+ * ↻ asks for a fresh copy. It redraws whenever the copy changes.
  */
 class AgendaWidget : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
         AgendaJob.schedule(context)
-        for (id in ids) manager.updateAppWidget(id, render(context))
+        for (id in ids) manager.updateAppWidget(id, render(context, id))
+    }
+
+    override fun onDeleted(context: Context, ids: IntArray) {
+        val prefs = views(context).edit()
+        for (id in ids) prefs.remove(id.toString())
+        prefs.apply()
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -46,11 +54,38 @@ class AgendaWidget : AppWidgetProvider() {
          * since a list keeps its place by position and rows added above would push overdue and today out of sight. */
         fun updateAll(context: Context, toTop: Boolean = false) {
             val manager = AppWidgetManager.getInstance(context)
-            val ids = manager.getAppWidgetIds(ComponentName(context, AgendaWidget::class.java))
-            if (ids.isEmpty()) return
-            val views = render(context)
-            if (toTop) views.setScrollPosition(R.id.agenda_list, 0)
-            for (id in ids) manager.updateAppWidget(id, views)
+            for (id in manager.getAppWidgetIds(ComponentName(context, AgendaWidget::class.java))) {
+                val views = render(context, id)
+                if (toTop) views.setScrollPosition(R.id.agenda_list, 0)
+                manager.updateAppWidget(id, views)
+            }
+        }
+
+        /** A view a widget can show: its name, what it holds, and, for a list, which open tasks. */
+        class View_(val id: String, val name: String, val about: String, val tasks: ((JSONObject) -> Boolean)? = null)
+
+        private fun dated(t: JSONObject) = t.optString("scheduled").isNotEmpty() || t.optString("deadline").isNotEmpty()
+        val VIEWS = listOf(
+            View_("agenda", "Agenda", "Overdue, then the next 14 days"),
+            View_("today", "Today", "What today holds"),
+            View_("overdue", "Overdue", "Late deadlines and scheduled tasks"),
+            View_("week", "This week", "Today and the next six days"),
+            View_("open", "Open tasks", "Everything not DONE, newest-touched projects first") { true },
+            View_("unscheduled", "Unscheduled", "Open tasks with no SCHEDULED or DEADLINE") { !dated(it) },
+            View_("prog", "In progress", "PROG") { it.optString("state") == "PROG" },
+            View_("eval", "In review", "EVAL") { it.optString("state") == "EVAL" },
+            View_("hold", "On hold", "HOLD") { it.optString("state") == "HOLD" },
+            View_("auto", "Agents", "AUTO: queued for an agent") { it.optString("state") == "AUTO" },
+            View_("todo", "To do", "TODO") { it.optString("state") == "TODO" },
+        )
+
+        private fun views(context: Context) = context.getSharedPreferences("widget_views", Context.MODE_PRIVATE)
+        fun viewOf(context: Context, id: Int): View_ = VIEWS.find { it.id == views(context).getString(id.toString(), "agenda") } ?: VIEWS[0]
+
+        fun setView(context: Context, id: Int, view: String) {
+            views(context).edit().putString(id.toString(), view).apply()
+            val manager = AppWidgetManager.getInstance(context)
+            manager.updateAppWidget(id, render(context, id).also { it.setScrollPosition(R.id.agenda_list, 0) })
         }
 
         /** Each state's pill: its background and its ink, desktop/board.mjs CHIPS. */
@@ -86,14 +121,16 @@ class AgendaWidget : AppWidgetProvider() {
         /** The page a widget row or a reminder opens: june://task?key=KEY, handled by ConversationActivity. */
         fun taskUri(key: String): Uri = Uri.Builder().scheme("june").authority("task").appendQueryParameter("key", key).build()
 
-        private fun render(context: Context): RemoteViews {
+        private fun render(context: Context, widget: Int): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.agenda_widget)
-            val open = Intent(context, ConversationActivity::class.java).setAction(Intent.ACTION_VIEW)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            views.setOnClickPendingIntent(R.id.agenda_header, PendingIntent.getActivity(context, 1, Intent(open).setData(Uri.parse("june://projects")), PendingIntent.FLAG_IMMUTABLE))
+            val view = viewOf(context, widget)
+            views.setTextViewText(R.id.agenda_view_name, "${view.name} ▾")
+            views.setOnClickPendingIntent(R.id.agenda_choose, PendingIntent.getActivity(context, 100 + widget,
+                Intent(context, ViewPickerActivity::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widget).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             views.setOnClickPendingIntent(R.id.agenda_refresh, PendingIntent.getBroadcast(context, 2, Intent(context, AgendaWidget::class.java).setAction(REFRESH), PendingIntent.FLAG_IMMUTABLE))
             views.setOnClickPendingIntent(R.id.agenda_add, PendingIntent.getActivity(context, 4, Intent(context, QuickAddActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE))
-            // Each row fills in its own task's link, and its ○ the DONE; WidgetTapActivity takes both.
+            // Each row fills in its own task's link, and its pill the state picker; WidgetTapActivity takes both.
             views.setPendingIntentTemplate(R.id.agenda_list, PendingIntent.getActivity(context, 3,
                 Intent(context, WidgetTapActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             val ticked = ticked(context)
@@ -116,8 +153,15 @@ class AgendaWidget : AppWidgetProvider() {
             val clock = DateTimeFormatter.ofPattern("H:mm")
             val fetched = Instant.ofEpochMilli(stored.fetchedAt).atZone(ZoneId.systemDefault())
             val stale = System.currentTimeMillis() - stored.fetchedAt > STALE_MS
+            val listed = view.tasks?.let { keep -> agenda.optJSONArray("open").objects().filter(keep) }
             val summary = buildString {
-                append("$todayCount today · $later in ${days.size} days")
+                append(when {
+                    listed != null -> "${listed.size} ${if (listed.size == 1) "task" else "tasks"}"
+                    view.id == "overdue" -> "${overdue.size} overdue"
+                    view.id == "today" -> "$todayCount today"
+                    view.id == "week" -> "$todayCount today · ${days.drop(1).take(6).sumOf { it.optJSONArray("entries")?.length() ?: 0 }} this week"
+                    else -> "$todayCount today · $later in ${days.size} days"
+                })
                 append(if (stale) " · last fresh ${dayWord(fetched.toLocalDate())} ${fetched.format(clock)}" else " · ${fetched.format(clock)}")
             }
             views.setTextViewText(R.id.agenda_summary, summary)
@@ -131,13 +175,13 @@ class AgendaWidget : AppWidgetProvider() {
                 v.setColorStateList(R.id.agenda_section, "setTextColor", if (alert) R.color.agenda_accent else R.color.agenda_ink)
                 items.addItem(n++, v)
             }
-            fun row(entry: JSONObject, overdueRow: Boolean) {
+            fun row(entry: JSONObject, overdueRow: Boolean, time: String = entry.optString("time"), what: String = label(entry)) {
                 val key = entry.optString("task")
                 val task = tasks.optJSONObject(key)
                 val v = RemoteViews(context.packageName, R.layout.agenda_row)
-                v.setTextViewText(R.id.agenda_time, entry.optString("time"))
+                v.setTextViewText(R.id.agenda_time, time)
                 v.setTextViewText(R.id.agenda_title, task?.optString("title") ?: key)
-                val meta = listOf(label(entry), task?.optString("project") ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
+                val meta = listOf(what, task?.optString("project") ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
                 v.setTextViewText(R.id.agenda_meta, meta)
                 v.setColorStateList(R.id.agenda_meta, "setTextColor", if (overdueRow) R.color.agenda_accent else R.color.agenda_muted)
                 if (key.isNotEmpty()) v.setOnClickFillInIntent(R.id.agenda_row, Intent().setData(taskUri(key)).putExtra("action", "open"))
@@ -156,11 +200,24 @@ class AgendaWidget : AppWidgetProvider() {
                 } else v.setViewVisibility(R.id.agenda_state, View.GONE)
                 items.addItem(n++, v)
             }
-            if (overdue.isNotEmpty()) {
+            if (listed != null) {
+                // A list of open tasks: each with its dates, if any, in the small print.
+                section("${view.name.uppercase()} · ${listed.size}", alert = false)
+                for (t in listed.take(150)) {
+                    val due = stampDay(t.optString("deadline"))
+                    val start = stampDay(t.optString("scheduled"))
+                    row(JSONObject().put("task", t.optString("key")), overdueRow = false, time = "",
+                        what = listOfNotNull(due?.let { "due $it" }, start?.let { "scheduled $it" }).joinToString(" · "))
+                }
+                views.setRemoteAdapter(R.id.agenda_list, items.build())
+                return views
+            }
+            if (overdue.isNotEmpty() && view.id in listOf("agenda", "overdue")) {
                 section("OVERDUE · ${overdue.size}", alert = true)
                 overdue.forEach { row(it, true) }
             }
-            for ((i, day) in days.withIndex()) {
+            val shown = when (view.id) { "overdue" -> emptyList(); "today" -> days.take(1); "week" -> days.take(7); else -> days }
+            for ((i, day) in shown.withIndex()) {
                 val entries = day.optJSONArray("entries").objects()
                 if (entries.isEmpty() && i > 0) continue
                 val date = runCatching { LocalDate.parse(day.optString("date")) }.getOrNull()
@@ -185,6 +242,21 @@ class AgendaWidget : AppWidgetProvider() {
                 "block" -> Regex("\\((\\d+)/(\\d+)\\)").find(extra)?.let { "day ${it.groupValues[1]} of ${it.groupValues[2]}" } ?: ""
                 else -> ""
             }
+        }
+
+        /** An Org timestamp's day and time, as the widget names them: today, tomorrow, a weekday, or Nov 27. */
+        private fun stampDay(stamp: String): String? {
+            val m = Regex("(\\d{4}-\\d{2}-\\d{2})(?: \\S+)?(?: (\\d{1,2}:\\d{2}))?").find(stamp) ?: return null
+            val date = runCatching { LocalDate.parse(m.groupValues[1]) }.getOrNull() ?: return null
+            val today = LocalDate.now()
+            val day = when {
+                date == today -> "today"
+                date == today.plusDays(1) -> "tomorrow"
+                date == today.minusDays(1) -> "yesterday"
+                date.isAfter(today) && date.isBefore(today.plusDays(7)) -> date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.CANADA)
+                else -> "${date.month.getDisplayName(TextStyle.SHORT, Locale.CANADA)} ${date.dayOfMonth}"
+            }
+            return if (m.groupValues[2].isNotEmpty()) "$day ${m.groupValues[2]}" else day
         }
 
         private fun dayWord(date: LocalDate): String {
