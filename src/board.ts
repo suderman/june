@@ -6,6 +6,7 @@ import { existsSync, readFileSync, renameSync, statSync, watch, writeFileSync, t
 import { dirname, join, relative } from "node:path";
 import { type Config, protectedOf } from "./config.ts";
 import type { Logger } from "./runtime.ts";
+import { type OrgWorker, OrgWorkerDown } from "./org-worker.ts";
 import { type AgentSummary, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { orgTime } from "./tools/org.ts";
 
@@ -118,8 +119,17 @@ export function exportArgv(listFile: string, env: Record<string, string> = {}): 
 }
 
 /** Run the export and shape it. The JSON is the last line; Org may log before it. */
-export async function loadAgenda(listFile: string, root: string, run: Run = runProcess, env?: Record<string, string>, now = Date.now()): Promise<Agenda> {
-	const out = await run(exportArgv(listFile, env), 120_000);
+export async function loadAgenda(listFile: string, root: string, run: Run = runProcess, env?: Record<string, string>, now = Date.now(), org?: OrgWorker): Promise<Agenda> {
+	// June's long-running Emacs keeps the files read and each file's day entries; a one-off Emacs when it is down.
+	let out: string | undefined;
+	if (org) {
+		try {
+			out = await org.agenda(listFile);
+		} catch (error) {
+			if (!(error instanceof OrgWorkerDown)) throw error;
+		}
+	}
+	out ??= await run(exportArgv(listFile, env), 120_000);
 	const last = out.trimEnd().split("\n").pop() ?? "";
 	const changed = (file: string) => { try { return statSync(file).mtimeMs; } catch { return undefined; } };
 	return shapeAgenda(JSON.parse(last) as Raw, root, now, changed);
@@ -337,6 +347,8 @@ export type BoardsOptions = {
 	run?: Run;
 	/** Extra environment for the Emacs export, for tests. */
 	env?: Record<string, string>;
+	/** June's long-running Emacs, which reads the agenda when it is up. */
+	org?: OrgWorker;
 	/** How often the agents are checked while a client subscribes. */
 	agentsMs?: number;
 	/** How often the agenda is recomputed while a client subscribes, beside file changes. */
@@ -350,7 +362,7 @@ type Held<T> = { value: T; revision: string; at: number };
  * agenda files and the agents are checked every `agentsMs`, and listeners hear of a new revision.
  */
 export class Boards {
-	readonly #o: Required<Omit<BoardsOptions, "env" | "herdr">> & { env?: Record<string, string>; herdr: Herdr };
+	readonly #o: Required<Omit<BoardsOptions, "env" | "herdr" | "org">> & { env?: Record<string, string>; herdr: Herdr; org?: OrgWorker };
 	readonly #seen: Seen;
 	readonly #listeners = new Set<() => void>();
 	#agenda?: Held<Agenda>;
@@ -478,7 +490,7 @@ export class Boards {
 	#refreshAgenda(): Promise<Held<Agenda>> {
 		return (this.#agendaRun ??= (async () => {
 			try {
-				const value = await loadAgenda(this.#o.config.org.agendaFiles, this.#o.config.org.root, this.#o.run, this.#o.env);
+				const value = await loadAgenda(this.#o.config.org.agendaFiles, this.#o.config.org.root, this.#o.run, this.#o.env, Date.now(), this.#o.org);
 				const protectedFiles = new Set(protectedOf(this.#o.config.org));
 				for (const task of Object.values(value.tasks)) if (protectedFiles.has(task.file)) task.protected = true;
 				const before = this.revisions();

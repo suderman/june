@@ -20,7 +20,7 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { type CommandScope, runCommand } from "./commands.ts";
-import { type Config, expandHome, type Paths } from "./config.ts";
+import { type Config, expandHome, type Paths, protectedOf } from "./config.ts";
 import { acquireDataDirLock, createLogger, createSettings, type Logger } from "./runtime.ts";
 import { diff, fold as foldEntries, type Folded, foldView, PRIVATE, sourceName, textOf, type ViewState } from "./transcript.ts";
 import { createPromptExtension } from "./prompt.ts";
@@ -52,6 +52,7 @@ import { createShowExtension } from "./tools/show.ts";
 import { createHerdrExtension, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { Boards } from "./board.ts";
 import { TaskEdits } from "./board-edit.ts";
+import { OrgWorker } from "./org-worker.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
 import { createWorkExtension, FocusDoc, WorkDoc } from "./tools/work.ts";
 import { createOrgExtension, Org } from "./tools/org.ts";
@@ -318,8 +319,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		let remoteError: string | undefined;
 		const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
 		const follows = pollFollowing(() => harness.commit((tx) => listFollowing(tx), BG), options.followingMs ?? 15_000, log);
-		const boards = options.boards ?? new Boards({ config, herdr, seenFile: `${paths.state}/seen.json`, log });
-		const edits = options.edits ?? new TaskEdits(config);
+		// One long-running Emacs for the boards' agenda reads and edits; it starts on first use.
+		const orgWorker = new OrgWorker({ log, env: { ORG_EDIT_PROTECTED: protectedOf(config.org).join(":") } });
+		const boards = options.boards ?? new Boards({ config, herdr, seenFile: `${paths.state}/seen.json`, log, org: orgWorker });
+		const edits = options.edits ?? new TaskEdits(config, undefined, orgWorker);
 		// How many connections have the phone app's conversation open (ntfy.ts pushes only while none does).
 		const apkViews = { count: 0 };
 		const immichServer = immichFrom({ ...(options.env ?? process.env), ...options.secrets });
@@ -361,6 +364,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				stopSituation();
 				follows.stop();
 				boards.stop();
+				orgWorker.stop();
 				stopHeartbeat?.();
 				stopLooseEnds?.();
 				stopConflicts?.();

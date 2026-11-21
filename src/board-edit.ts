@@ -7,6 +7,7 @@
 import { dirname, join } from "node:path";
 import { type Config, protectedOf } from "./config.ts";
 import { outlineKey, type Task } from "./board.ts";
+import { OrgEditError, type OrgWorker, OrgWorkerDown } from "./org-worker.ts";
 import { type Run, runProcess } from "./tools/herdr.ts";
 
 const REPO = dirname(import.meta.dirname);
@@ -42,10 +43,13 @@ function said(error: unknown): string {
 export class TaskEdits {
 	readonly #config: Config;
 	readonly #run: Run;
+	readonly #org: OrgWorker | undefined;
 
-	constructor(config: Config, run: Run = runProcess) {
+	/** ORG, June's long-running Emacs, makes the edits when it is up; RUN runs the org-edit wrapper otherwise. */
+	constructor(config: Config, run: Run = runProcess, org?: OrgWorker) {
 		this.#config = config;
 		this.#run = run;
+		this.#org = org;
 	}
 
 	/** The agent a task is run by: its AGENT, else its newest session's, else the dispatcher's default. */
@@ -139,6 +143,15 @@ export class TaskEdits {
 
 	/** One org-edit call, waiting its turn behind a dispatcher pass rather than failing. */
 	async #edit(...args: string[]): Promise<string> {
+		if (this.#org) {
+			try {
+				return await this.#org.edit(args, LOCK_WAIT_S);
+			} catch (error) {
+				if (error instanceof OrgEditError) throw new Error(said({ stderr: error.message, exitCode: error.exitCode }));
+				if (!(error instanceof OrgWorkerDown)) throw error;
+				// The worker is down: the one-off command still works, only slower.
+			}
+		}
 		const argv = ["env", `ORG_EDIT_PROTECTED=${protectedOf(this.#config.org).join(":")}`, `ORG_EDIT_WAIT=${LOCK_WAIT_S}`, "bash", ORG_EDIT, ...args];
 		try {
 			return await this.#run(argv, (LOCK_WAIT_S + 60) * 1000);

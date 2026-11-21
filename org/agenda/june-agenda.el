@@ -174,6 +174,36 @@
                   files)
     (org-dispatch--dependency-index (org-dispatch--lookup-files files))))
 
+(defvar june-agenda--days-cache (make-hash-table :test 'equal)
+  "FILE to (STAMP ENTRIES TASKS): its agenda entries for each day of a read, and the task records they name.
+They stay good while the file, today and the span stay the same, which STAMP records. One read uses them once;
+June's long-running Emacs (org/server/june-org-server.el) reuses them, so a read after an edit recomputes only the
+file that changed. Org's day entries are most of a read's time.")
+
+(defun june-agenda--day-entries (file today span tasks)
+  "FILE's entries for SPAN days from TODAY, as a vector of lists, from the cache when FILE is unchanged.
+Records the tasks they name in TASKS."
+  (let* ((attributes (file-attributes file))
+         (stamp (list (file-attribute-modification-time attributes) (file-attribute-size attributes) today span))
+         (cached (gethash file june-agenda--days-cache)))
+    (if (equal (car cached) stamp)
+        (progn
+          (dolist (task (nth 2 cached))
+            (unless (gethash (car task) tasks) (puthash (car task) (cdr task) tasks)))
+          (nth 1 cached))
+      (let ((days (make-vector span nil)) named)
+        (dotimes (n span)
+          (let (entries)
+            (dolist (item (org-agenda-get-day-entries file (calendar-gregorian-from-absolute (+ today n))
+                                                      :deadline :scheduled :timestamp :sexp))
+              (when-let* ((entry (june-agenda--entry item tasks)))
+                (push entry entries)
+                (let ((key (alist-get 'task entry)))
+                  (unless (assoc key named) (push (cons key (gethash key tasks)) named)))))
+            (aset days n (nreverse entries))))
+        (puthash file (list stamp days named) june-agenda--days-cache)
+        days))))
+
 (defun june-agenda-export ()
   "Print the agenda for the files listed in the first argument, as JSON."
   (let* ((list (or (pop command-line-args-left) (error "usage: june-agenda-export LIST [DAYS]")))
@@ -199,15 +229,11 @@
                         (and (equal state "DONE") (june-agenda--closed-recently-p)))
                 (let ((task (june-agenda--task index)))
                   (puthash (alist-get 'key task) task tasks)))))))))
-    (dotimes (n span)
-      (let* ((day (+ today n))
-             (date (calendar-gregorian-from-absolute day))
-             entries)
-        (dolist (file files)
-          (dolist (item (org-agenda-get-day-entries file date :deadline :scheduled :timestamp :sexp))
-            (when-let* ((entry (june-agenda--entry item tasks)))
-              (push entry entries))))
-        (push `((date . ,(june-agenda--date day)) (entries . ,(vconcat (nreverse entries)))) days)))
+    (let ((per-file (mapcar (lambda (file) (june-agenda--day-entries file today span tasks)) files)))
+      (dotimes (n span)
+        (push `((date . ,(june-agenda--date (+ today n)))
+                (entries . ,(vconcat (apply #'append (mapcar (lambda (v) (aref v n)) per-file)))))
+              days)))
     (let ((json-encoding-pretty-print nil))
       (princ (json-encode `((today . ,(june-agenda--date today))
                             (days . ,(vconcat (nreverse days)))
