@@ -17,6 +17,9 @@ Item {
   property string today: ""
   property string detailKey: ""
   signal open(string link)
+  // An edit from a task's page, and what the last one said for the task on show.
+  signal edit(string key, var change)
+  property var notice: ({ key: "", text: "" })
 
   // A row with a task opens its page; one without opens where it can.
   function show(task, link) {
@@ -31,6 +34,8 @@ Item {
     detail: board.detailKey !== "" ? Board.taskDetail(board.tasks[board.detailKey], board.user, board.today) : null
     onBack: board.detailKey = ""
     onOpen: link => board.open(link)
+    notice: board.notice.key === board.detailKey ? board.notice.text : ""
+    onEdit: change => board.edit(board.detailKey, change)
   }
 
   Flickable {

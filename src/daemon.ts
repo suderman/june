@@ -51,6 +51,7 @@ import { shownFiles } from "./shown.ts";
 import { createShowExtension } from "./tools/show.ts";
 import { createHerdrExtension, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { Boards } from "./board.ts";
+import { TaskEdits } from "./board-edit.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
 import { createWorkExtension, FocusDoc, WorkDoc } from "./tools/work.ts";
 import { createOrgExtension, Org } from "./tools/org.ts";
@@ -99,8 +100,9 @@ export type DaemonOptions = {
 	readonly remoteTiming?: { helloMs?: number; pingMs?: number; maxBuffered?: number };
 	/** Tests check the followed tasks more often than every 15 seconds. */
 	readonly followingMs?: number;
-	/** Tests supply the agenda and agents boards. */
+	/** Tests supply the agenda and agents boards, and the edits made from them. */
 	readonly boards?: Boards;
+	readonly edits?: Pick<TaskEdits, "apply">;
 	/** Tests answer notmuch themselves. */
 	readonly mailRun?: Run;
 	/** Tests set the watch's clock, loop speed, home directory for local run records, and commands. */
@@ -317,11 +319,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
 		const follows = pollFollowing(() => harness.commit((tx) => listFollowing(tx), BG), options.followingMs ?? 15_000, log);
 		const boards = options.boards ?? new Boards({ config, herdr, seenFile: `${paths.state}/seen.json`, log });
+		const edits = options.edits ?? new TaskEdits(config);
 		// How many connections have the phone app's conversation open (ntfy.ts pushes only while none does).
 		const apkViews = { count: 0 };
 		const immichServer = immichFrom({ ...(options.env ?? process.env), ...options.secrets });
 		const immich = immichServer && { server: immichServer, watch: watchImmich(immichServer, { file: `${paths.state}/immich.json`, warn: (error) => log.warn("immich_status_failed", { error: error.message }) }) };
-		const scope: Scope = { wake: config.rhythm.wake, apkViews, harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, boards, ...(expressions ? { expressions } : {}), ...(immich ? { immich } : {}) };
+		const scope: Scope = { wake: config.rhythm.wake, apkViews, harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, boards, edits, ...(expressions ? { expressions } : {}), ...(immich ? { immich } : {}) };
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
@@ -390,11 +393,11 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 	});
 }
 
-type Scope = CommandScope & { wake: string; immich?: { server: Immich; watch: ImmichWatch }; apkViews: { count: number }; timeline: Timeline; hidden: Hidden; log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; boards: BoardSource; expressions?: ReturnType<typeof startExpressions> };
+type Scope = CommandScope & { wake: string; immich?: { server: Immich; watch: ImmichWatch }; apkViews: { count: number }; timeline: Timeline; hidden: Hidden; log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; boards: BoardSource; edits: Pick<TaskEdits, "apply">; expressions?: ReturnType<typeof startExpressions> };
 /** The sky a view sends with its state, and how it learns of a change. */
 type SkySource = Pick<Situation, "sky" | "onSky">;
 /** The boards' revisions a view sends with its state, and their contents for the requests. */
-type BoardSource = Pick<Boards, "revisions" | "onChange" | "agenda" | "agents" | "seen" | "subscribe">;
+type BoardSource = Pick<Boards, "revisions" | "onChange" | "agenda" | "agents" | "seen" | "subscribe" | "refresh">;
 /** How many followed tasks are still going, and how a view learns of a change. */
 export type FollowSource = { following(): number; follows(): Followed[]; onFollowing(listener: () => void): () => void };
 
@@ -544,6 +547,16 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 				if (!Array.isArray(request.keys) || !request.keys.every((k) => typeof k === "string")) throw new Error("seen needs keys, a list of task keys");
 				const { revision, value } = await boards().seen(request.keys);
 				return send({ type: "agents", requestId: request.requestId, revision, agents: value });
+			}
+			case "task": {
+				if (typeof request.key !== "string" || typeof request.edit?.action !== "string") throw new Error("task needs a key and an edit");
+				const { value } = await boards().agenda();
+				const task = value.tasks[request.key];
+				if (task === undefined) throw new Error("That task is no longer on the agenda; the board will catch up");
+				scope.log.info("board_edit", { key: request.key, action: request.edit.action, device: device ?? "socket" });
+				const text = await scope.edits.apply(task, request.edit, `board:${request.requestId}`);
+				await scope.boards.refresh();
+				return send({ type: "task", requestId: request.requestId, key: request.key, text: text.trim() });
 			}
 			case "hide": {
 				if (!local) throw new Error("Hidden entries are managed over the Unix socket");

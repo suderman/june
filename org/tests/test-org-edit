@@ -343,6 +343,34 @@ out=$(run update-task "$content" "Old title" "$spec")
 check "content wrapper replays after rename" has "$out" '"written":false'
 check "content replay leaves all bytes alone" cmp -s "$content" "$fixture/content-edited"
 check "content edit releases its lock" flock -n "$XDG_RUNTIME_DIR/org-dispatch.lock" true
+# Replies: the user's Dialog entry from June's boards, and nothing else.
+reply_file="$HOME/org/reply.org"
+cat >"$reply_file" <<'EOF'
+* EVAL Hand off
+SCHEDULED: <2026-11-22 Sun>
+:PROPERTIES:
+:ID: 11111111-2222-4333-8444-555555555555
+:ASKED: [2026-11-21 Sat 01:00]
+:END:
+Body.
+
+** Dialog
+- Agent [2026-11-18 Wed 15:40]: Kit or cog?
+
+* TODO Next
+EOF
+run reply "$reply_file" id:11111111-2222-4333-8444-555555555555 '{"who":"Jon","text":"Always kit.\nCog only launches what kit hands it."}' >/dev/null
+check "a reply appends the user's entry to Dialog" line "$reply_file" '^- Jon \[20[0-9-]* [A-Za-z]* [0-9:]*\]: Always kit\.$'
+check "a reply indents its continuation lines" line "$reply_file" '^  Cog only launches what kit hands it\.$'
+check "a reply leaves state, planning and the question mark alone" bash -c "grep -q '^\* EVAL Hand off' '$reply_file' && grep -q '^SCHEDULED: <2026-11-22 Sun>' '$reply_file' && grep -q '^:ASKED:' '$reply_file'"
+check "a reply keeps the next heading apart" line "$reply_file" '^\* TODO Next$'
+cp "$reply_file" "$fixture/reply-once"
+check "a reply refuses an agent's name" has "$(run reply "$reply_file" "Hand off" '{"who":"Agent","text":"x"}')" "the user.s own name"
+check "a reply refuses a heading in its text" has "$(run reply "$reply_file" "Hand off" '{"who":"Jon","text":"* TODO sneak"}')" "without headings"
+check "a reply refuses unknown fields" has "$(run reply "$reply_file" "Hand off" '{"who":"Jon","text":"x","state":"AUTO"}')" "unknown reply field"
+check "refused replies write nothing" cmp -s "$reply_file" "$fixture/reply-once"
+check "a reply releases its lock" flock -n "$XDG_RUNTIME_DIR/org-dispatch.lock" true
+
 cp "$org/edit/org-edit.el" "$fixture/org-edit.el"
 # Existing command docstrings exceed Emacs's width limit; check code warnings.
 compile=$(emacs -Q --batch -L "$org/dispatch" --eval "(setq byte-compile-error-on-warn t byte-compile-warnings '(not docstrings))" -f batch-byte-compile "$fixture/org-edit.el" 2>&1 | grep -v '^Loading' || true)

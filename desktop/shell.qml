@@ -134,6 +134,13 @@ ShellRoot {
     boardsWanted = true;
     fetchBoards(true, true);
   }
+  // The user's edits from a task's page (src/board-edit.ts), and what the last one said.
+  property var taskNotice: ({ key: "", text: "", pending: "" })
+  function editTask(key, change) {
+    const id = rid();
+    if (send({ op: "task", requestId: id, key: key, edit: change })) taskNotice = { key: key, text: "saving…", pending: id };
+    else taskNotice = { key: key, text: "not connected", pending: "" };
+  }
   function fetchBoards(agenda, agents) {
     if (agenda) send({ op: "agenda", requestId: rid() });
     if (agents) send({ op: "agents", requestId: rid() });
@@ -563,6 +570,14 @@ ShellRoot {
       boardRevisions = Object.assign({}, boardRevisions, { agenda: reply.revision });
       return;
     }
+    if (reply.type === "task") {
+      if (reply.requestId === taskNotice.pending) taskNotice = { key: reply.key, text: "saved", pending: "" };
+      return;
+    }
+    if (reply.type === "error" && reply.requestId !== undefined && reply.requestId === taskNotice.pending) {
+      taskNotice = { key: taskNotice.key, text: reply.message, pending: "" };
+      return;
+    }
     if (reply.type === "agents") {
       agentsBoard = reply.agents;
       boardNow = Date.now();
@@ -864,6 +879,8 @@ ShellRoot {
           width: Board.SIDE
           height: parent.height
           view: root.agentsView
+    notice: root.taskNotice
+    onEdit: (key, change) => root.editTask(key, change)
     tasks: Object.assign({}, root.agendaBoard?.tasks ?? {}, root.agentsBoard?.tasks ?? {})
     user: root.agentsBoard?.user ?? ""
     today: root.agendaBoard?.today ?? ""
@@ -874,6 +891,8 @@ ShellRoot {
           width: Board.SIDE
           height: parent.height
           view: root.agendaView
+    notice: root.taskNotice
+    onEdit: (key, change) => root.editTask(key, change)
     user: root.agentsBoard?.user ?? ""
           agenda: root.agendaBoard
           loaded: root.agendaBoard !== null

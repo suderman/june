@@ -162,6 +162,8 @@ FloatingWindow {
       anchors.right: parent.right
       anchors.margins: 16
       view: win.shell.agentsView
+    notice: win.shell.taskNotice
+    onEdit: (key, change) => win.shell.editTask(key, change)
     tasks: Object.assign({}, win.shell.agendaBoard?.tasks ?? {}, win.shell.agentsBoard?.tasks ?? {})
     user: win.shell.agentsBoard?.user ?? ""
     today: win.shell.agendaBoard?.today ?? ""
@@ -176,6 +178,8 @@ FloatingWindow {
       anchors.right: parent.right
       anchors.margins: 16
       view: win.shell.agendaView
+    notice: win.shell.taskNotice
+    onEdit: (key, change) => win.shell.editTask(key, change)
     user: win.shell.agentsBoard?.user ?? ""
       agenda: win.shell.agendaBoard
       loaded: win.shell.agendaBoard !== null
@@ -256,6 +260,8 @@ FloatingWindow {
     anchors.rightMargin: win.layout.gap - 16
     width: win.layout.side
     view: win.shell.agentsView
+    notice: win.shell.taskNotice
+    onEdit: (key, change) => win.shell.editTask(key, change)
     tasks: Object.assign({}, win.shell.agendaBoard?.tasks ?? {}, win.shell.agentsBoard?.tasks ?? {})
     user: win.shell.agentsBoard?.user ?? ""
     today: win.shell.agendaBoard?.today ?? ""
@@ -272,6 +278,8 @@ FloatingWindow {
     anchors.leftMargin: win.layout.gap - 16
     width: win.layout.side
     view: win.shell.agendaView
+    notice: win.shell.taskNotice
+    onEdit: (key, change) => win.shell.editTask(key, change)
     user: win.shell.agentsBoard?.user ?? ""
     agenda: win.shell.agendaBoard
     loaded: win.shell.agendaBoard !== null

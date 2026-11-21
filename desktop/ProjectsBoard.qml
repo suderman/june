@@ -19,6 +19,9 @@ Item {
   property string user: ""
   property string detailKey: ""
   signal open(string link)
+  // An edit from a task's page, and what the last one said for the task on show.
+  signal edit(string key, var change)
+  property var notice: ({ key: "", text: "" })
 
   readonly property var drillRows: mode === "state" ? Board.stateRows(agenda, drill) : []
   readonly property int openCount: view.counts.reduce((n, c) => n + c.n, 0)
@@ -30,6 +33,8 @@ Item {
     detail: board.detailKey !== "" && board.agenda ? Board.taskDetail(board.agenda.tasks[board.detailKey], board.user, board.agenda.today) : null
     onBack: board.detailKey = ""
     onOpen: link => board.open(link)
+    notice: board.notice.key === board.detailKey ? board.notice.text : ""
+    onEdit: change => board.edit(board.detailKey, change)
   }
 
   Flickable {

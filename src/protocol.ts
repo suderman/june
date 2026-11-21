@@ -2,6 +2,7 @@
 // a reset with every item, then the changes to it (see "Attaching to the folded view" in docs/architecture.org).
 import type { Act } from "./tools/phone.ts";
 import type { Agenda, Agents } from "./board.ts";
+import type { TaskEdit } from "./board-edit.ts";
 import { connect, type Socket } from "node:net";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { EntryRecord } from "@earendil-works/pi-durable";
@@ -73,6 +74,8 @@ export type Request =
 	| { op: "agents"; requestId: string }
 	/** Mark tasks' reviews seen, by task key, on every device; answered with the agents board. */
 	| { op: "seen"; requestId: string; keys: string[] }
+	/** The user's edit of a task the boards show, by key (see board-edit.ts); answered with what org-edit printed. */
+	| { op: "task"; requestId: string; key: string; edit: TaskEdit }
 	/** Devices allowed on the WebSocket: Unix socket only. `add` answers with the new token, once. */
 	| { op: "device"; requestId: string; action: "add" | "list" | "revoke"; name?: string }
 	/** A device's offer to act on itself for June's `phone` tool, until the connection closes: WebSocket only. */
@@ -124,6 +127,7 @@ export type Reply =
 	| { type: "hidden"; requestId: string; ranges: [number, number][] }
 	| { type: "agenda"; requestId: string; revision: string; agenda: Agenda }
 	| { type: "agents"; requestId: string; revision: string; agents: Agents }
+	| { type: "task"; requestId: string; key: string; text: string }
 	| { type: "accepted"; requestId: string; submissionId: number }
 	| { type: "settled"; requestId: string; status: "done" | "unanswered"; text?: string; reason?: string }
 	| { type: "reply"; requestId: string; text: string }

@@ -377,6 +377,11 @@ export class Boards {
 		return this.#agents!;
 	}
 
+	/** Recompute the agenda now, after an edit, rather than wait for the file watch. */
+	async refresh(): Promise<void> {
+		await this.#refreshAgenda().catch(() => {});
+	}
+
 	/** Mark reviews seen, by task key; answers with the agents board they change. */
 	async seen(keys: readonly string[]): Promise<Held<Agents>> {
 		const agenda = (await this.agenda()).value;

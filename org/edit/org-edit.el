@@ -9,6 +9,7 @@
 ;;   org-edit-date      WHEN
 ;;   org-edit-update-task FILE HEADING JSON
 ;;   org-edit-reschedule-task FILE id:UUID WHEN JSON
+;;   org-edit-reply     FILE HEADING JSON (who, text): the user's Dialog reply
 ;;
 ;; Task content updates use a read revision and preserve old wording in Dialog.
 ;; States and dates go through Org, so CLOSED,
@@ -488,6 +489,30 @@ keep Dialog append-only, and never change prose or launch a worker here."
                         (written . ,(if replay :false t))))))
      t)
     (princ (concat (json-serialize result) "\n"))))
+
+;; Jon's reply from June's boards: one Dialog entry in his name, nothing else.
+(defun org-edit-reply ()
+  "Append the user's reply to FILE HEADING's Dialog: JSON with who and text.
+Dialog stays append-only and last; no state, schedule or worker changes."
+  (pcase-let* ((`(,file ,heading ,json) (org-edit--args 3 "reply FILE HEADING JSON"))
+               (spec (json-parse-string json :object-type 'plist :null-object nil :false-object :false))
+               (who (plist-get spec :who)) (text (plist-get spec :text))
+               (create-lockfiles t) (file-precious-flag t))
+    (cl-loop for (key _value) on spec by #'cddr do
+             (unless (memq key '(:who :text)) (error "unknown reply field %s" key)))
+    (unless (and (stringp who) (string-match-p "\\`[A-Z][[:alnum:]-]*\\'" who)
+                 (not (member who '("Agent" "June" "Dispatcher" "Pi" "Claude"))))
+      (error "reply needs who, the user's own name"))
+    (unless (and (stringp text) (not (string-empty-p (string-trim text)))
+                 (not (string-match-p "\r" text)) (not (string-match-p "^\\*+[ \t]" text)))
+      (error "reply needs text, without headings"))
+    (when (org-edit--worker-p) (error "a reply is the user's, not a coding worker's"))
+    (setq file (file-truename file))
+    (when (or (member (file-name-nondirectory file) '("asana.org" "archive.org"))
+              (string-match-p "/archive/\\|\\.sync-conflict-" file))
+      (error "not a writable live Org file: %s" file))
+    (org-edit--at file heading
+                  (lambda () (org-dispatch--append "Dialog" (org-dispatch--entry who text))))))
 
 (defun org-edit-update-task ()
   "Update a task's title and/or Scope, keeping state, planning and history.
