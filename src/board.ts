@@ -45,6 +45,8 @@ export type Task = {
 	reviewPhase?: string;
 	/** When it was put to the user: an EVAL with a question or a problem for them (ASKED). */
 	asked?: string;
+	/** The subtree's SHA256 when the board was made, which a title edit must still match. */
+	revision?: string;
 	/** For an independent review task, the ID of the development task it reviews (REVIEW_PARENT). */
 	reviewParent?: string;
 	/** The task has an independent development and review loop under way (REVIEW_PHASE). */
@@ -185,6 +187,7 @@ function shapeTask(key: string, t: any, root: string): Task {
 		review: t.review ?? undefined,
 		reviewPhase: t.reviewPhase ?? undefined,
 		asked: t.asked ?? undefined,
+		revision: t.revision ?? undefined,
 		reviewParent: t.reviewParent ?? undefined,
 		devReview: t.devReview === true ? true : undefined,
 		dependency: t.dependency ? compact({ kind: t.dependency.kind, reason: t.dependency.reason ?? undefined }) : undefined,

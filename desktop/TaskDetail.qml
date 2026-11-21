@@ -133,6 +133,22 @@ Item {
         Choice { id: scheduleButton; text: "schedule"; onClicked: if (when.text.trim() !== "") page.edit({ action: "schedule", when: when.text.trim() }) }
         Choice { id: deadlineButton; text: "deadline"; onClicked: if (when.text.trim() !== "") page.edit({ action: "deadline", when: when.text.trim() }) }
       }
+      // A new title, as June's org_update_task makes it: refused if the task changed since the board read it.
+      Row {
+        visible: ["", "TODO", "EVAL", "HOLD"].includes(page.orgState)
+        width: parent.width
+        spacing: 6
+        TextField {
+          id: rename
+          width: parent.width - 6 - renameButton.width
+          height: 28
+          placeholderText: "new title"
+          font.family: Theme.caption; font.pixelSize: 12
+          color: Theme.ink
+          background: Rectangle { radius: 8; color: Theme.balloon; border.color: Theme.pageInk; border.width: 1.5 }
+        }
+        Choice { id: renameButton; text: "rename"; onClicked: if (rename.text.trim() !== "") { page.edit({ action: "title", title: rename.text.trim() }); rename.text = ""; } }
+      }
       Text {
         visible: page.notice !== ""
         width: parent.width

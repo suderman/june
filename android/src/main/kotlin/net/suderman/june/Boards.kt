@@ -161,6 +161,13 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
                     }
                 }
             }
+            if (state in listOf("", "TODO", "EVAL", "HOLD")) item {
+                var title by remember(key) { mutableStateOf("") }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(title, { title = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("new title", fontSize = 13.sp) })
+                    Choice("rename", false, palette) { if (title.isNotBlank()) { link.editTask(key, JSONObject().put("action", "title").put("title", title.trim())); title = "" } }
+                }
+            }
             val (noticeKey, noticeText) = link.taskNotice
             if (noticeKey == key && noticeText.isNotEmpty()) item {
                 Text(noticeText, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (noticeText == "saved" || noticeText == "saving…") palette.muted else palette.accent)

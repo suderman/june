@@ -131,6 +131,8 @@
       (devReview . ,(and (org-dispatch--loop) t))
       (reviewPhase . ,(plist-get (org-dispatch--loop) :phase))
       (asked . ,(org-entry-get nil "ASKED"))
+      ;; The read revision org-edit's update-task checks, as June's org_read_task gives it.
+      (revision . ,(org-dispatch--revision))
       (headline . ,(org-entry-get nil "HEADLINE"))
       (headlineState . ,(org-entry-get nil "HEADLINE_STATE"))
       (headlineAt . ,(org-entry-get nil "HEADLINE_AT"))

@@ -16,7 +16,8 @@ export type TaskEdit =
 	| { action: "state"; state: "TODO" | "PROG" | "EVAL" | "HOLD" | "DONE" }
 	| { action: "assign"; agent: string; host?: string }
 	| { action: "reply"; text: string; resume?: boolean }
-	| { action: "schedule" | "deadline"; when: string };
+	| { action: "schedule" | "deadline"; when: string }
+	| { action: "title"; title: string };
 
 const SETTABLE = ["TODO", "PROG", "EVAL", "HOLD", "DONE"];
 
@@ -64,6 +65,13 @@ export class TaskEdits {
 				const out = await edit_("reply", file, heading, JSON.stringify({ who: user, text }));
 				if (!edit.resume) return out;
 				return out + await this.#assign(task, file, heading, this.agentOf(task), this.hostOf(task), request, `${user} replied in Dialog and resumed it from June's board.`);
+			}
+			case "title": {
+				const title = String(edit.title ?? "").trim();
+				if (title === "" || /[\n\r]/.test(title)) throw new Error("A title is one line of words");
+				if (!task.revision) throw new Error("The board has no revision for that task yet; wait for it to refresh");
+				if (!["TODO", "EVAL", "HOLD", undefined].includes(task.state)) throw new Error("Only a plain, TODO, EVAL or HOLD task can be renamed, never queued or running work");
+				return edit_("update-task", file, heading, JSON.stringify({ revision: task.revision, request, note: `${user} renamed it from June's board.`, title }));
 			}
 			case "schedule":
 			case "deadline": {
