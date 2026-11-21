@@ -91,6 +91,18 @@ class Link(private val context: Context) {
     private var agendaRevision = ""
     private var agentsRevision = ""
 
+    /** What the last edit from a task's page said, for that task: "saving…", "saved", or why it was refused. */
+    var taskNotice: Pair<String, String> by mutableStateOf("" to "")
+        private set
+    private var taskPending = ""
+
+    /** The user's edit of a task (src/board-edit.ts TaskEdit), by its key. */
+    fun editTask(key: String, edit: JSONObject) {
+        val id = requestId()
+        taskPending = id
+        taskNotice = key to if (send(JSONObject().put("op", "task").put("key", key).put("edit", edit), id)) "saving…" else "not connected"
+    }
+
     fun wantBoards() {
         if (boardsWanted) return
         boardsWanted = true
@@ -266,6 +278,10 @@ class Link(private val context: Context) {
                             hitsMore = reply.optBoolean("more")
                             searchDone = true
                         }
+                        "task" -> if (reply.optString("requestId") == taskPending) {
+                            taskPending = ""
+                            taskNotice = reply.optString("key") to "saved"
+                        }
                         "agenda" -> {
                             agenda = reply.optJSONObject("agenda")
                             agendaRevision = reply.optString("revision")
@@ -275,7 +291,10 @@ class Link(private val context: Context) {
                             agentsRevision = reply.optString("revision")
                         }
                         "reply" -> notice = reply.optString("text")
-                        "error" -> notice = reply.optString("message")
+                        "error" -> if (reply.optString("requestId").let { it.isNotEmpty() && it == taskPending }) {
+                            taskPending = ""
+                            taskNotice = taskNotice.first to reply.optString("message")
+                        } else notice = reply.optString("message")
                     }
                 }
             }

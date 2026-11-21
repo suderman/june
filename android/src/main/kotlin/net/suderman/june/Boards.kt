@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -135,10 +136,50 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
                 Text(headline, fontFamily = Look.lettering, fontSize = 14.sp, color = Look.ink,
                     modifier = Modifier.fillMaxWidth().background(Look.balloon, RoundedCornerShape(12.dp)).border(2.dp, Look.ink, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 7.dp))
             }
+            val state = d.optString("state")
+            val assignable = state in listOf("TODO", "EVAL", "HOLD")
+            if (state.isNotEmpty()) {
+                item { SectionTitle("STATE", palette) }
+                item {
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (s in listOf("TODO", "PROG", "EVAL", "HOLD", "DONE")) Choice(s, s == state, palette) { if (s != state) link.editTask(key, JSONObject().put("action", "state").put("state", s)) }
+                    }
+                }
+                if (assignable) item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("assign", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.muted)
+                        for (agent in listOf("pi", "claude")) Choice(agent, false, palette) { link.editTask(key, JSONObject().put("action", "assign").put("agent", agent)) }
+                    }
+                }
+                item {
+                    var whenText by remember(key) { mutableStateOf("") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(whenText, { whenText = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("fri 9:00, +2d, none", fontSize = 13.sp) })
+                        Choice("schedule", false, palette) { if (whenText.isNotBlank()) link.editTask(key, JSONObject().put("action", "schedule").put("when", whenText.trim())) }
+                        Choice("deadline", false, palette) { if (whenText.isNotBlank()) link.editTask(key, JSONObject().put("action", "deadline").put("when", whenText.trim())) }
+                    }
+                }
+            }
+            val (noticeKey, noticeText) = link.taskNotice
+            if (noticeKey == key && noticeText.isNotEmpty()) item {
+                Text(noticeText, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (noticeText == "saved" || noticeText == "saving…") palette.muted else palette.accent)
+            }
             item { SectionTitle("DIALOG", palette) }
             val dialog = d.optJSONArray("dialog").objects()
             if (dialog.isEmpty()) item { Text("No Dialog yet.", fontFamily = Look.lettering, fontSize = 14.sp, color = palette.muted) }
             for (e in dialog) item(key = "dialog|" + e.optString("key")) { DialogEntry(e, d.optString("harness"), colours, palette) }
+            // A reply in the user's name; with resume, the task goes back to its clanker with it.
+            if (state.isNotEmpty()) item {
+                var reply by remember(key) { mutableStateOf("") }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(reply, { reply = it }, Modifier.fillMaxWidth(), minLines = 2, placeholder = { Text("Reply in Dialog", fontSize = 14.sp) })
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Choice("Reply", false, palette) { if (reply.isNotBlank()) { link.editTask(key, JSONObject().put("action", "reply").put("text", reply)); reply = "" } }
+                        if (assignable) Choice("Reply and resume", true, palette) { if (reply.isNotBlank()) { link.editTask(key, JSONObject().put("action", "reply").put("text", reply).put("resume", true)); reply = "" } }
+                    }
+                }
+            }
         }
         item { Spacer(Modifier.height(16.dp)) }
     }
@@ -289,6 +330,17 @@ private fun Heading(title: String, summary: String, palette: Look.Palette, trail
         Spacer(Modifier.height(6.dp))
         Box(Modifier.fillMaxWidth().height(2.5.dp).background(palette.pageInk))
     }
+}
+
+/** A button on a task's page, filled when it is the current choice; at least 44 dp tall to tap. */
+@Composable
+private fun Choice(text: String, on: Boolean, palette: Look.Palette, onClick: () -> Unit) {
+    Text(
+        text, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 14.sp,
+        color = if (on) palette.page else palette.pageInk,
+        modifier = Modifier.background(if (on) palette.pageInk else Color.Transparent, RoundedCornerShape(50))
+            .border(2.dp, palette.pageInk, RoundedCornerShape(50)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp),
+    )
 }
 
 @Composable
