@@ -1,7 +1,7 @@
 // The boards as the clients draw them (desktop/board.mjs), shared by the desktop client and the phone.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agendaView, agentsView, boardLayout, dayHeading, entryMeta, harnessOf, startOf, stateRows, taskLink } from "../desktop/board.mjs";
+import { agendaView, agentsView, boardLayout, dayHeading, dialogKind, entryMeta, harnessOf, stampShort, startOf, stateRows, taskDetail, taskLink } from "../desktop/board.mjs";
 
 test("three columns fit a 1400 px window with the strip a little narrower, and tabs take over below about 1300", () => {
 	assert.deepEqual(boardLayout(1400), { columns: true, side: 268, gap: 20, strip: 784 });
@@ -84,4 +84,22 @@ test("the agents board puts what needs the user first, in its own words, and lin
 	assert.deepEqual(v.recent.map((r) => [r.title, r.when]), [["Report", "2 h"]]);
 	assert.equal(v.summary, "1 at work on kit");
 	assert.deepEqual(v.down, ["cog"]);
+});
+
+test("a task's page names who works it, what it waits on, and draws its Dialog by who wrote each entry", () => {
+	const t = task("id:ask", {
+		title: "Hand off", state: "EVAL", host: "cog", review: "agent", scheduled: "<2026-11-22 Sun 09:00>", path: ["Parent"],
+		sessions: ["herdr:kit/pi:a@t1", "herdr:cog/claude:b@t2"], headline: { text: "Kit or cog?", state: "EVAL" }, asked: "[2026-11-21 Sat 01:00]",
+		dialog: [{ who: "Dispatcher", at: "[2026-11-18 Wed 14:02]", text: "started claude on cog" }, { who: "Agent", at: "[2026-11-18 Wed 15:40]", text: "Kit or cog?" }, { who: "June", at: "[2026-11-18 Wed 15:41]", text: "It's yours." }, { who: "Alex", at: "[2026-11-19 Thu]", text: "Thinking." }],
+	});
+	const d = taskDetail(t, "Alex", "2026-11-21");
+	assert.equal(d.facts, "claude on cog · scheduled Sun 09:00 · agent review");
+	assert.equal(d.herdr, "herdr:cog/claude:b@t2");
+	assert.equal(d.emacs, "file:~/org/work/demo/demo.org::7");
+	assert.equal(d.path, "Parent");
+	assert.equal(d.asked, true);
+	assert.deepEqual(d.dialog.map((e) => [e.kind, e.at]), [["dispatcher", "Nov 18 14:02"], ["agent", "Nov 18 15:40"], ["june", "Nov 18 15:41"], ["user", "Nov 19"]]);
+	assert.equal(taskDetail(undefined, "Alex", ""), null);
+	assert.equal(dialogKind("Pi", "Alex"), "agent");
+	assert.equal(stampShort("nonsense"), "");
 });

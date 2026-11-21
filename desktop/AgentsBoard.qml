@@ -2,6 +2,7 @@
 // then who is working, what is queued and under agent review, who is idle, and what reported today. A card or row
 // opens where it can: an agent's session in Herdr, a task in Emacs. See "Agents and projects" in docs/interfaces.org.
 import QtQuick
+import "board.mjs" as Board
 
 Item {
   id: board
@@ -10,9 +11,30 @@ Item {
   property var view: ({ summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [] })
   property bool loaded: false
   property bool idleOpen: false
+  // Every task the board names, by key, and how the user signs Dialog, for a task's page; the page open, or "".
+  property var tasks: ({})
+  property string user: ""
+  property string today: ""
+  property string detailKey: ""
   signal open(string link)
 
+  // A row with a task opens its page; one without opens where it can.
+  function show(task, link) {
+    if (task !== "" && board.tasks[task] !== undefined) board.detailKey = task;
+    else if (link !== "") board.open(link);
+  }
+
+  TaskDetail {
+    anchors.fill: parent
+    visible: board.detailKey !== ""
+    backLabel: "agents"
+    detail: board.detailKey !== "" ? Board.taskDetail(board.tasks[board.detailKey], board.user, board.today) : null
+    onBack: board.detailKey = ""
+    onOpen: link => board.open(link)
+  }
+
   Flickable {
+    visible: board.detailKey === ""
     anchors.fill: parent
     contentHeight: column.implicitHeight + 16
     clip: true
@@ -68,13 +90,13 @@ Item {
       SectionTitle { text: "QUEUED · " + board.view.queued.length; visible: board.view.queued.length > 0 }
       Repeater {
         model: board.view.queued
-        delegate: TaskRow { required property var modelData; width: column.width; chip: "AUTO"; title: modelData.title; meta: modelData.who + " · " + modelData.when; link: modelData.link ?? "" }
+        delegate: TaskRow { required property var modelData; width: column.width; chip: "AUTO"; title: modelData.title; meta: modelData.who + " · " + modelData.when; link: modelData.link ?? ""; task: modelData.task }
       }
 
       SectionTitle { text: "IN AGENT REVIEW · " + board.view.reviewing.length; visible: board.view.reviewing.length > 0 }
       Repeater {
         model: board.view.reviewing
-        delegate: TaskRow { required property var modelData; width: column.width; chip: "EVAL"; title: modelData.title; meta: modelData.who; link: modelData.link ?? "" }
+        delegate: TaskRow { required property var modelData; width: column.width; chip: "EVAL"; title: modelData.title; meta: modelData.who; link: modelData.link ?? ""; task: modelData.task }
       }
 
       SectionTitle {
@@ -98,6 +120,7 @@ Item {
           quote: modelData.line
           meta: modelData.when ? modelData.when + " ago" : ""
           link: modelData.link ?? ""
+          task: modelData.task
         }
       }
 
@@ -127,6 +150,8 @@ Item {
     readonly property bool urgent: need.level === 1
     height: inner.implicitHeight + 20
     radius: 14
+    // The card opens the task's page; its button opens Herdr or Emacs straight away.
+    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: board.show(card.need.task ?? "", "") }
     color: urgent ? "#fff0ec" : Theme.balloon
     border.color: urgent ? "#b3311f" : Theme.ink
     border.width: urgent ? 3 : 2
@@ -203,7 +228,7 @@ Item {
       Text { width: parent.width; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight; text: w.worker.title; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: w.small ? 12 : 13; color: Theme.pageInk }
       Text { width: parent.width; elide: Text.ElideRight; text: w.worker.where + (w.small ? " · " + w.worker.status : ""); font.family: Theme.caption; font.pixelSize: 12; color: Theme.muted }
     }
-    MouseArea { anchors.fill: parent; enabled: (w.worker.link ?? "") !== ""; cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor; onClicked: board.open(w.worker.link) }
+    MouseArea { anchors.fill: parent; enabled: (w.worker.link ?? "") !== "" || (w.worker.task ?? "") !== ""; cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor; onClicked: board.show(w.worker.task ?? "", w.worker.link ?? "") }
   }
 
   // A task in a line: its state, title, a quoted report, and what it is waiting on; a click opens it in Emacs.
@@ -214,6 +239,7 @@ Item {
     property string quote: ""
     property string meta: ""
     property string link: ""
+    property string task: ""
     height: lines.implicitHeight
     StateChip { id: badge; orgState: t.chip; y: 1 }
     Column {
@@ -226,6 +252,6 @@ Item {
       Text { visible: t.quote !== ""; width: parent.width; wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight; text: "“" + t.quote + "”"; font.family: Theme.lettering; font.pixelSize: 12; color: Theme.muted }
       Text { visible: t.meta !== ""; width: parent.width; elide: Text.ElideRight; text: t.meta; font.family: Theme.caption; font.pixelSize: 12; color: Theme.muted }
     }
-    MouseArea { anchors.fill: parent; enabled: t.link !== ""; cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor; onClicked: board.open(t.link) }
+    MouseArea { anchors.fill: parent; enabled: t.link !== "" || t.task !== ""; cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor; onClicked: board.show(t.task, t.link) }
   }
 }

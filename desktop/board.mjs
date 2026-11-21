@@ -182,14 +182,14 @@ export function agentsView(agents, now, today, user) {
 		if (n.kind === "blocked") {
 			const w = agents.workers.find((x) => x.host === n.worker?.host && x.terminal === n.worker?.terminal);
 			return {
-				key: `blocked|${n.worker?.host}|${n.worker?.terminal}`, level: 1, kind: n.kind, label: "NEEDS PERMISSION",
+				key: `blocked|${n.worker?.host}|${n.worker?.terminal}`, task: n.task ?? "", level: 1, kind: n.kind, label: "NEEDS PERMISSION",
 				title: task?.title ?? w?.title ?? w?.cwd ?? "an agent", line: w?.title ?? "", harness: harnessOf(w?.agent),
 				where: `${n.worker?.host} · ${n.worker?.terminal}`, action: "Open in Herdr", link: w?.herdrLink ?? null,
 			};
 		}
 		const w = workerOf(n.task);
 		return {
-			key: `${n.kind}|${n.task}`, level: n.level, kind: n.kind,
+			key: `${n.kind}|${n.task}`, task: n.task, level: n.level, kind: n.kind,
 			label: n.kind === "asks" ? "ASKS YOU" : "READY FOR YOUR REVIEW",
 			title: task?.title ?? n.task,
 			line: n.kind === "asks" ? lastWord(task, user) : (task?.headline?.text ?? ""),
@@ -203,7 +203,7 @@ export function agentsView(agents, now, today, user) {
 		const task = w.taskKey ? tasks[w.taskKey] : undefined;
 		const place = String(w.cwd ?? "").split("/").filter((s) => s !== "");
 		return {
-			key: `${w.host}|${w.terminal}`, harness: harnessOf(w.agent), status: w.status,
+			key: `${w.host}|${w.terminal}`, task: w.taskKey ?? "", harness: harnessOf(w.agent), status: w.status,
 			title: task?.title ?? w.title ?? (place.length ? place[place.length - 1] : w.terminal),
 			where: `${w.agent} · ${w.host}/${w.terminal}`, link: w.herdrLink ?? null,
 		};
@@ -213,18 +213,57 @@ export function agentsView(agents, now, today, user) {
 	const queued = agents.queued.map((key) => {
 		const t = tasks[key];
 		const dep = t.dependency && t.dependency.kind !== "ready" ? `waits on ${t.dependency.reason ?? "a task"}` : "";
-		return { key, title: t.title, who: `${t.agent ?? "?"} on ${t.host ?? "?"}`, when: dep || startOf(t.scheduled, today) || "now", link: taskLink(t) };
+		return { key, task: key, title: t.title, who: `${t.agent ?? "?"} on ${t.host ?? "?"}`, when: dep || startOf(t.scheduled, today) || "now", link: taskLink(t) };
 	});
 	const reviewing = agents.reviewing.map((key) => {
 		const t = tasks[key];
-		return { key, title: t.title, who: t.reviewParent ? "the review" : "under agent review", link: taskLink(t) };
+		return { key, task: key, title: t.title, who: t.reviewParent ? "the review" : "under agent review", link: taskLink(t) };
 	});
 	const recent = agents.recent.map((key) => {
 		const t = tasks[key];
-		return { key, title: t.title, state: t.state, harness: harnessOf(taskAgent(t)), line: t.headline?.text ?? "", when: t.headline?.at ? since(t.headline.at, now) : "", link: taskLink(t) };
+		return { key, task: key, title: t.title, state: t.state, harness: harnessOf(taskAgent(t)), line: t.headline?.text ?? "", when: t.headline?.at ? since(t.headline.at, now) : "", link: taskLink(t) };
 	});
 	const hosts = agents.hosts.filter((h) => h.ok).map((h) => h.host);
 	const summary = `${working.length} at work${hosts.length ? ` on ${hosts.join(", ")}` : ""}`;
 	const down = agents.hosts.filter((h) => !h.ok).map((h) => h.host);
 	return { summary, needs, working, idle, queued, reviewing, recent, down };
+}
+
+/** Who wrote a Dialog entry, for how it is drawn: the user, June, the dispatcher, or an agent. */
+export function dialogKind(who, user) {
+	if (who === user) return "user";
+	if (who === "June") return "june";
+	if (who === "Dispatcher") return "dispatcher";
+	return "agent";
+}
+
+/** An Org timestamp, "[2026-11-18 Wed 15:40]", as "Nov 18 15:40". */
+export function stampShort(stamp) {
+	const m = /(\d{4})-(\d{2})-(\d{2})(?: \S+)?(?: (\d{1,2}:\d{2}))?/.exec(String(stamp ?? ""));
+	if (!m) return "";
+	return `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}${m[4] ? " " + m[4] : ""}`;
+}
+
+/**
+ * One task's page: its state, title, where it is, what it waits on, who works it, its last report, the links that
+ * open it in Emacs and its newest session in Herdr, and its Dialog as a conversation, oldest first.
+ */
+export function taskDetail(task, user, today) {
+	if (!task) return null;
+	const sessions = task.sessions ?? [];
+	const agent = taskAgent(task);
+	const facts = [];
+	if (agent) facts.push(task.host ? `${agent} on ${task.host}` : agent);
+	if (task.scheduled) facts.push(`scheduled ${startOf(task.scheduled, today)}`);
+	if (task.deadline) facts.push(`due ${startOf(task.deadline, today)}`);
+	if (task.dependency && task.dependency.kind !== "ready") facts.push(`waits on ${task.dependency.reason ?? "a task"}`);
+	if (task.review === "agent") facts.push("agent review");
+	if (task.review === "none") facts.push("no review");
+	return {
+		key: task.key, title: task.title, state: task.state ?? "", project: task.project,
+		path: (task.path ?? []).join(" / "), facts: facts.join(" · "), headline: task.headline?.text ?? "",
+		asked: task.asked !== undefined, harness: harnessOf(agent), emacs: taskLink(task),
+		herdr: sessions.length ? sessions[sessions.length - 1] : null,
+		dialog: (task.dialog ?? []).map((e, i) => ({ key: String(i), who: e.who || "note", kind: dialogKind(e.who, user), at: stampShort(e.at), text: e.text })),
+	};
 }

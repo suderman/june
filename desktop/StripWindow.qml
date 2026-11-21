@@ -162,6 +162,9 @@ FloatingWindow {
       anchors.right: parent.right
       anchors.margins: 16
       view: win.shell.agentsView
+    tasks: Object.assign({}, win.shell.agendaBoard?.tasks ?? {}, win.shell.agentsBoard?.tasks ?? {})
+    user: win.shell.agentsBoard?.user ?? ""
+    today: win.shell.agendaBoard?.today ?? ""
       loaded: win.shell.agentsBoard !== null
       onOpen: link => win.shell.openLink(link)
     }
@@ -173,6 +176,7 @@ FloatingWindow {
       anchors.right: parent.right
       anchors.margins: 16
       view: win.shell.agendaView
+    user: win.shell.agentsBoard?.user ?? ""
       agenda: win.shell.agendaBoard
       loaded: win.shell.agendaBoard !== null
       host: win.shell.host
@@ -252,6 +256,9 @@ FloatingWindow {
     anchors.rightMargin: win.layout.gap - 16
     width: win.layout.side
     view: win.shell.agentsView
+    tasks: Object.assign({}, win.shell.agendaBoard?.tasks ?? {}, win.shell.agentsBoard?.tasks ?? {})
+    user: win.shell.agentsBoard?.user ?? ""
+    today: win.shell.agendaBoard?.today ?? ""
     loaded: win.shell.agentsBoard !== null
     onOpen: link => win.shell.openLink(link)
   }
@@ -265,6 +272,7 @@ FloatingWindow {
     anchors.leftMargin: win.layout.gap - 16
     width: win.layout.side
     view: win.shell.agendaView
+    user: win.shell.agentsBoard?.user ?? ""
     agenda: win.shell.agendaBoard
     loaded: win.shell.agendaBoard !== null
     host: win.shell.host

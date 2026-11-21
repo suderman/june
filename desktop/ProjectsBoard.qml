@@ -16,12 +16,24 @@ Item {
   // agenda, projects, or a state's tasks.
   property string mode: "agenda"
   property string drill: ""
+  property string user: ""
+  property string detailKey: ""
   signal open(string link)
 
   readonly property var drillRows: mode === "state" ? Board.stateRows(agenda, drill) : []
   readonly property int openCount: view.counts.reduce((n, c) => n + c.n, 0)
 
+  TaskDetail {
+    anchors.fill: parent
+    visible: board.detailKey !== ""
+    backLabel: board.mode === "state" ? board.drill : "agenda"
+    detail: board.detailKey !== "" && board.agenda ? Board.taskDetail(board.agenda.tasks[board.detailKey], board.user, board.agenda.today) : null
+    onBack: board.detailKey = ""
+    onOpen: link => board.open(link)
+  }
+
   Flickable {
+    visible: board.detailKey === ""
     anchors.fill: parent
     contentHeight: column.implicitHeight + 16
     clip: true
@@ -200,6 +212,12 @@ Item {
       Text { width: parent.width; wrapMode: Text.Wrap; text: (r.entry.day && r.entry.time ? r.entry.time + "  " : "") + r.entry.title; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13; color: Theme.pageInk }
       Text { visible: r.entry.meta !== ""; width: parent.width; elide: Text.ElideRight; text: r.entry.meta; font.family: Theme.caption; font.pixelSize: 12; color: r.entry.overdue ? Theme.accent : Theme.muted }
     }
-    MouseArea { anchors.fill: parent; enabled: (r.entry.link ?? "") !== ""; cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor; onClicked: board.open(r.entry.link) }
+    MouseArea {
+      anchors.fill: parent
+      enabled: (r.entry.task ?? "") !== "" || (r.entry.link ?? "") !== ""
+      cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+      // A task opens its page, where Emacs is a button away.
+      onClicked: (r.entry.task ?? "") !== "" && board.agenda?.tasks[r.entry.task] ? board.detailKey = r.entry.task : board.open(r.entry.link)
+    }
   }
 }

@@ -864,6 +864,9 @@ ShellRoot {
           width: Board.SIDE
           height: parent.height
           view: root.agentsView
+    tasks: Object.assign({}, root.agendaBoard?.tasks ?? {}, root.agentsBoard?.tasks ?? {})
+    user: root.agentsBoard?.user ?? ""
+    today: root.agendaBoard?.today ?? ""
           loaded: root.agentsBoard !== null
           onOpen: link => { if (root.openLink(link)) root.hide(); }
         }
@@ -871,6 +874,7 @@ ShellRoot {
           width: Board.SIDE
           height: parent.height
           view: root.agendaView
+    user: root.agentsBoard?.user ?? ""
           agenda: root.agendaBoard
           loaded: root.agendaBoard !== null
           host: root.host
