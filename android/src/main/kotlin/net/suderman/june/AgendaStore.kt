@@ -27,8 +27,9 @@ object AgendaStore {
             val tmp = File(app.filesDir, "agenda.json.tmp")
             tmp.writeText(record.toString())
             tmp.renameTo(file(app))
-            AgendaWidget.updateAll(app)
-            if (old?.revision != revision) Reminders.schedule(app)
+            val changed = old?.revision != revision
+            AgendaWidget.updateAll(app, toTop = changed)
+            if (changed) Reminders.schedule(app)
         }
     }
 

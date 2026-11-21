@@ -42,11 +42,14 @@ class AgendaWidget : AppWidgetProvider() {
         /** Past this, the header says when the copy was last fresh. */
         private const val STALE_MS = 45 * 60 * 1000L
 
-        fun updateAll(context: Context) {
+        /** Redraw every June agenda widget; TO_TOP, when the agenda's contents changed, shows its first rows again,
+         * since a list keeps its place by position and rows added above would push overdue and today out of sight. */
+        fun updateAll(context: Context, toTop: Boolean = false) {
             val manager = AppWidgetManager.getInstance(context)
             val ids = manager.getAppWidgetIds(ComponentName(context, AgendaWidget::class.java))
             if (ids.isEmpty()) return
             val views = render(context)
+            if (toTop) views.setScrollPosition(R.id.agenda_list, 0)
             for (id in ids) manager.updateAppWidget(id, views)
         }
 
