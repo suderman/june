@@ -36,9 +36,9 @@ test("the agenda splits today's overdue items from today, and shows a deadline t
 			{ date: "2026-11-20", entries: [
 				{ task: "/o/a.org::3", type: "past-scheduled", extra: "Sched. 2x:", date: "2026-11-18" },
 				{ task: "/o/a.org::5", type: "deadline", extra: "2 d. ago:", date: "2026-11-18" },
-				{ task: "/o/a.org::7", type: "scheduled", time: "09:30", date: "2026-11-20" },
 				{ task: "/o/a.org::9", type: "upcoming-deadline", extra: "In 3 d.:", date: "2026-11-23" },
 				{ task: "/o/a.org::11", type: "upcoming-deadline", extra: "In 12 d.:", date: "2026-12-02" },
+				{ task: "/o/a.org::7", type: "scheduled", time: "09:30", date: "2026-11-20" },
 			] },
 			{ date: "2026-11-23", entries: [{ task: "/o/a.org::9", type: "deadline", date: "2026-11-23" }] },
 		],
@@ -46,7 +46,7 @@ test("the agenda splits today's overdue items from today, and shows a deadline t
 	};
 	const a = shapeAgenda(raw, "/o");
 	assert.deepEqual(a.overdue.map((e) => e.task), ["a.org::3", "a.org::5"]);
-	assert.deepEqual(a.days[0]!.entries.map((e) => e.task), ["a.org::7", "a.org::11"], "the deadline on the 23rd waits for its day");
+	assert.deepEqual(a.days[0]!.entries.map((e) => e.task), ["a.org::7", "a.org::11"], "the deadline on the 23rd waits for its day; timed items first");
 	assert.deepEqual(a.days[1]!.entries.map((e) => [e.task, e.type]), [["a.org::9", "deadline"]]);
 	assert.equal(a.tasks["a.org::7"]!.file, "a.org");
 	assert.deepEqual(a.counts, { TODO: 4, PROG: 1 });

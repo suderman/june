@@ -124,7 +124,9 @@ export function shapeAgenda(raw: Raw, root: string, now = Date.now()): Agenda {
 		// A deadline coming up this week is shown on its own day, not also as today's warning.
 		else if (!(item.type === "upcoming-deadline" && item.date !== undefined && later.has(item.date))) today.push(item);
 	}
-	const days = [{ date: first?.date ?? raw.today, entries: today }, ...rest.map((day) => ({ date: day.date, entries: day.entries.map(entry) }))];
+	// As Org's agenda sorts a day: timed items first, by time; the rest keep the agenda files' order.
+	const byTime = (entries: AgendaEntry[]) => entries.map((e, i) => ({ e, i })).sort((a, b) => (a.e.time ?? "99").localeCompare(b.e.time ?? "99") || a.i - b.i).map(({ e }) => e);
+	const days = [{ date: first?.date ?? raw.today, entries: byTime(today) }, ...rest.map((day) => ({ date: day.date, entries: byTime(day.entries.map(entry)) }))];
 	const counts: Agenda["counts"] = {};
 	const files = new Map<string, Agenda["projects"][number]>();
 	for (const task of Object.values(tasks)) {
