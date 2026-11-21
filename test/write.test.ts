@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -214,7 +215,10 @@ test("through this checkout's org-edit, a TODO gets its deadline and later close
 		return;
 	}
 	const script = fileURLToPath(new URL("../org/edit/org-edit", import.meta.url));
-	const f = await fixture((argv) => runProcess(["bash", script, ...argv.slice(1)], 60_000));
+	// Its own lock, never the live dispatcher's, which the timer holds every minute.
+	const runtime = await mkdtemp(join(tmpdir(), "june-lock-"));
+	t.after(() => rm(runtime, { recursive: true, force: true }));
+	const f = await fixture((argv) => runProcess(["env", `XDG_RUNTIME_DIR=${runtime}`, "bash", script, ...argv.slice(1)], 60_000));
 	t.after(f.cleanup);
 	const added = await f.writes.addTask({ file: "life/school.org", under: "Pickup", title: "Leave to pick up the kids", deadline: "2026-10-28 15:25" });
 	assert.match(added.planning ?? "", /DEADLINE: <2026-10-28 Wed 15:25>/);

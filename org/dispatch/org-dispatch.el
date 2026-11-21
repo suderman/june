@@ -15,6 +15,12 @@
 ;; tags are decoration. SCHEDULED delays a task; a repeater makes it recur.
 ;; Other settings are properties: REVIEW, DEPLOY, LIVE_CONTENT, BRANCH, MODEL, DIR, and
 ;; RETRY, the number of times an agent may return the task to AUTO later.
+;; REVIEW is yes (Jon reviews at EVAL, the default), no, or agent: the
+;; dispatcher then starts an independent exact-commit review when the worker
+;; finishes at EVAL, and advances it on the reviewer's verdict (see
+;; "Standing agent review"). It may come from the project file's #+PROPERTY.
+;; EVAL with an ASKED stamp is a question or a problem for Jon; HOLD means the
+;; task waits on something outside, and nothing is for Jon to do.
 ;; DEPENDS lists id:UUID prerequisites; every one must be DONE before launch.
 ;; While an agent works on it, a PROG task carries the :auto: tag.
 
@@ -109,6 +115,25 @@ Nil takes dispatch.settle from June's config.json, else 120.")
 (defun org-dispatch--leave-prog ()
   (unless (equal org-state "PROG") (org-dispatch--untag-auto)))
 (add-hook 'org-after-todo-state-change-hook #'org-dispatch--leave-prog)
+
+;; ASKED marks an EVAL that holds a question or a problem for Jon. Leaving EVAL,
+;; by a resume, a claim, or a close, answers it.
+(defun org-dispatch--leave-asked ()
+  (unless (equal org-state "EVAL") (org-entry-delete nil "ASKED")))
+(add-hook 'org-after-todo-state-change-hook #'org-dispatch--leave-asked)
+
+(defun org-dispatch--ask (who text)
+  "Put this EVAL entry to Jon: WHO's TEXT in Dialog and an ASKED stamp."
+  (org-dispatch--append "Dialog" (org-dispatch--entry who text))
+  (org-entry-put nil "ASKED" (org-dispatch--stamp)))
+
+(defun org-dispatch--review-mode ()
+  "Who reviews the entry at point: `jon', `agent', or `none'.
+REVIEW may be inherited, so a project file's #+PROPERTY can set it."
+  (pcase (downcase (or (org-entry-get nil "REVIEW" t) "yes"))
+    ("no" 'none)
+    ("agent" 'agent)
+    (_ 'jon)))
 
 (defun org-dispatch--log (format-string &rest args)
   (princ (concat (format-time-string "%F %T ") (apply #'format format-string args) "\n")))
@@ -647,7 +672,8 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
           :retry (string-to-number (or (org-entry-get nil "RETRY") "0"))
           :june (or (org-entry-get nil "JUNE_REQUEST") (org-entry-get nil "PLAN_REQUEST"))
           :review-loop (and (or (org-entry-get nil "DEV_REVIEW") (org-entry-get nil "REVIEW_PARENT")) t)
-          :review (not (equal (downcase (or (org-entry-get nil "REVIEW") "yes")) "no"))
+          :review (not (eq (org-dispatch--review-mode) 'none))
+          :agent-review (eq (org-dispatch--review-mode) 'agent)
           :deploy (equal (downcase (or (org-entry-get nil "DEPLOY") "no")) "yes")
           :live-content live-content
           :branch (org-entry-get nil "BRANCH")
@@ -866,7 +892,8 @@ replaying the same key and spec; missing prerequisites block partial plans."
         (unless (member host org-dispatch-hosts) (error "Unknown host %s" host))
         (unless (and (member agent org-dispatch-agents) (member agent org-dispatch-launchable))
           (error "Unknown agent %s" agent))
-        (unless (memq review '(yes t :false)) (error "review must be a boolean"))
+        (unless (or (memq review '(yes t :false)) (equal review "agent"))
+          (error "review must be a boolean or \"agent\""))
         (when dir
           (org-dispatch--plan-line dir "dir")
           (unless (and (or (file-name-absolute-p dir) (string-prefix-p "~/" dir))
@@ -887,7 +914,9 @@ replaying the same key and spec; missing prerequisites block partial plans."
                     :text (format "* AUTO %s\n:PROPERTIES:\n:ID: %s\n:HOST: %s\n:AGENT: %s\n:PLAN_REQUEST: %s\n:PLAN_HASH: %s\n%s%s%s:END:\n%s\n"
                                   heading id host agent key hash
                                   (if dir (concat ":DIR: " dir "\n") "")
-                                  (if (eq review :false) ":REVIEW: no\n" "")
+                                  (cond ((eq review :false) ":REVIEW: no\n")
+                                        ((equal review "agent") ":REVIEW: agent\n")
+                                        (t ""))
                                   (if depends (concat ":DEPENDS: " (string-join depends " ") "\n") "")
                                   (string-trim body))) records)))
     (setq records (nreverse records))
@@ -1088,9 +1117,13 @@ terminal from another run. Returns \"gone\", \"settled\" (it was not working),
   (string-join
    (delq nil
          (list
-          (if (plist-get task :review)
-              "- Jon or an agent he delegates reviews this task. Finish with EVAL, never DONE."
-            "- No separate review is required. Finish with DONE once agent-run checks verify the requested work. Use EVAL only for a remaining review that genuinely needs human judgment, eyes, or physical checks; name it explicitly.")
+          (cond
+           ((and (plist-get task :agent-review) (not (plist-get task :review-loop)))
+            "- An independent agent reviews this task's exact commit when you finish with EVAL; never finish DONE. Commit all of this task's work and leave the worktree clean: the review starts from HEAD. If it finds in-scope problems, this task comes back to you with them. Say in Outcome which checks only Jon can do, such as taste or hardware.")
+           ((plist-get task :review)
+            "- Jon or an agent he delegates reviews this task. Finish with EVAL, never DONE.")
+           (t
+            "- No separate review is required. Finish with DONE once agent-run checks verify the requested work. Use EVAL only for a remaining review that genuinely needs human judgment, eyes, or physical checks; name it explicitly."))
           (let ((where (if (org-dispatch--git-p (plist-get task :dir))
                            "your work"
                          "your work in each repository you change"))
@@ -1342,13 +1375,13 @@ is accepted as unknown, which the watcher never mistakes for idle."
                (org-dispatch--uncertain-launch state reason))
               (address
                (org-dispatch--claim task address (plist-get state :session))
-               (org-dispatch--hold
+               (org-dispatch--park
                 state (format "%s did not start cleanly in hc terminal %s on %s: %s. Inspect it with hc read %s before resuming."
                               agent address org-dispatch-host reason address)))
               ;; A launcher hc cannot run is wrong until someone fixes it.
               ((and (eq (car err) 'org-dispatch-hc) (equal (org-dispatch--hc-kind err) "spawn_failed"))
                (org-dispatch--claim task nil nil)
-               (org-dispatch--hold state (format "%s could not start on %s: %s" command org-dispatch-host reason)))
+               (org-dispatch--park state (format "%s could not start on %s: %s" command org-dispatch-host reason)))
               ;; hc itself failing, such as a stopped core, leaves the task AUTO for a later run.
               (t (org-dispatch--drop-state id)))
              (org-dispatch--log "launch failed for %s: %s" (plist-get task :heading) reason))
@@ -1356,15 +1389,16 @@ is accepted as unknown, which the watcher never mistakes for idle."
 
 ;;; Watching
 
-(defun org-dispatch--hold (state reason)
-  "Set STATE's task to HOLD with a Dispatcher entry giving REASON."
+(defun org-dispatch--park (state reason)
+  "Hand STATE's task to Jon: EVAL, ASKED, and a Dispatcher entry giving REASON.
+Not HOLD, which means the task waits on something outside."
   (org-dispatch--edit (plist-get state :file) (plist-get state :id)
                       (lambda ()
-                        (org-todo "HOLD")
-                        (org-dispatch--append "Dialog" (org-dispatch--entry "Dispatcher" reason))))
+                        (org-todo "EVAL")
+                        (org-dispatch--ask "Dispatcher" reason)))
   (org-dispatch--drop-state (plist-get state :id))
-  (org-dispatch--notify (concat "HOLD · " (plist-get state :heading)) reason)
-  (org-dispatch--log "held %s: %s" (plist-get state :id) reason))
+  (org-dispatch--notify (concat "EVAL · " (plist-get state :heading)) reason)
+  (org-dispatch--log "parked %s for Jon: %s" (plist-get state :id) reason))
 
 (defun org-dispatch--todo-state (state)
   "Current unique TODO keyword across live files and archives, else nil.
@@ -1418,10 +1452,10 @@ The original file may still exist after its heading has been archived."
       (org-dispatch--drop-state id))
      ((> (- (float-time) (plist-get state :started)) org-dispatch-time-limit)
       (ignore-errors (org-dispatch--hc "interrupt" (plist-get state :terminal)))
-      (org-dispatch--hold state (format "Interrupted after %d minutes without finishing."
+      (org-dispatch--park state (format "Interrupted after %d minutes without finishing."
                                         (/ org-dispatch-time-limit 60))))
      ((null status)
-      (org-dispatch--hold state (format "%s is no longer running in its hc terminal %s."
+      (org-dispatch--park state (format "%s is no longer running in its hc terminal %s."
                                         (or (plist-get state :agent) "pi")
                                         (plist-get state :terminal))))
      ((equal status "blocked")
@@ -1435,7 +1469,7 @@ The original file may still exist after its heading has been archived."
          ((< (- (float-time) since) org-dispatch-nudge-after)
           (org-dispatch--save-state state))
          ((>= nudges org-dispatch-max-nudges)
-          (org-dispatch--hold state (format "Still idle without a state change after %d nudge%s."
+          (org-dispatch--park state (format "Still idle without a state change after %d nudge%s."
                                             org-dispatch-max-nudges
                                             (if (= org-dispatch-max-nudges 1) "" "s"))))
          (t
@@ -1449,6 +1483,157 @@ The original file may still exist after its heading has been archived."
           (org-dispatch--log "nudged %s (%d of %d)" id (1+ nudges) org-dispatch-max-nudges)))))
      ;; Working, or unknown: a worker without status is never nudged as idle.
      (t (org-dispatch--save-state (plist-put state :idle 0))))))
+
+;;; Standing agent review
+
+;; With REVIEW agent, Jon has delegated an independent review of every exact
+;; commit the worker finishes at EVAL, with in-scope fixes returned to the same
+;; worker: the loop in org-review.el, which June otherwise starts for him each
+;; time. Each run starts a review for a development task that is settled at
+;; EVAL, and advances one whose reviewer has recorded a verdict. Anything the
+;; loop refuses, or a fixes round without a new commit, goes to Jon as EVAL with
+;; ASKED and a Dispatcher entry; it never retries on its own.
+
+(declare-function org-review--git "org-review" (dir &rest args))
+(declare-function org-review--start "org-review" (spec))
+(declare-function org-review--advance "org-review" (spec))
+
+(defconst org-dispatch--directory
+  (file-name-directory (or load-file-name buffer-file-name default-directory)))
+
+(defun org-dispatch--require-review ()
+  "Load org-review.el from the edit directory beside this file."
+  (unless (featurep 'org-review)
+    (add-to-list 'load-path (expand-file-name "../edit" org-dispatch--directory))
+    (require 'org-review)))
+
+(defun org-dispatch--revision ()
+  "The read revision org-edit and June use for the entry at point."
+  (secure-hash 'sha256 (encode-coding-string
+                        (replace-regexp-in-string "\n+\\'" "" (org-dispatch--subtree-text)) 'utf-8)))
+
+(defun org-dispatch--loop ()
+  "This entry's DEV_REVIEW contract, or nil."
+  (when-let* ((text (org-entry-get nil "DEV_REVIEW")))
+    (ignore-errors (json-parse-string text :object-type 'plist :array-type 'list :null-object nil :false-object :false))))
+
+(defun org-dispatch--review-spec (task commit)
+  "The standing contract for TASK's first review of COMMIT."
+  (let* ((developer (plist-get task :agent))
+         (reviewer (or (org-entry-get nil "REVIEWER")
+                       (car (remove developer org-dispatch-launchable))
+                       developer))
+         (checks (or (org-entry-get nil "REVIEW_CHECKS")
+                     "Check the work against the task's Scope and Checklist: run the project's tests and checks, try the edge cases and failure paths it names or implies, and confirm the commit holds only this task's changes."))
+         (human (seq-remove #'string-empty-p
+                            (mapcar #'string-trim (split-string (or (org-entry-get nil "REVIEW_HUMAN") "") ";")))))
+    (list :revision (org-dispatch--revision) :commit commit
+          :authorization "Standing agent review: this task's REVIEW is agent, which Jon sets."
+          :permissions (format "Reviewer: read-only apart from local test artifacts and its own review record. Developer, for fixes: %s, %s. A verdict grants no activation or deployment."
+                               (if (plist-get task :branch)
+                                   (format "commit and push to %s as the task allows" (plist-get task :branch))
+                                 "commit and push as the task allows")
+                               (if (plist-get task :deploy) "and deploy when the task calls for it" "and no deployment"))
+          :checks checks :human human :agent reviewer)))
+
+(defun org-dispatch--review-work (file)
+  "What the standing reviews in FILE need on this host: (start . ID),
+(advance . PARENT-ID) or (park PARENT-ID . REASON). Read-only."
+  (let (work)
+    (with-temp-buffer
+      (insert-file-contents file)
+      (setq buffer-file-name file)
+      (org-mode)
+      (org-map-entries
+       (lambda ()
+         (let ((id (org-entry-get nil "ID")) (parent (org-entry-get nil "REVIEW_PARENT")))
+           (when (and id (equal (org-get-todo-state) "EVAL")
+                      (not (org-entry-get nil "ASKED"))
+                      ;; A run still holding its slot is not settled yet.
+                      (not (file-exists-p (org-dispatch--state-file id))))
+             (if parent
+                 (save-excursion
+                   (let ((verdict (org-entry-get nil "REVIEW_RESULT")))
+                     (when-let* ((at (org-find-property "ID" parent)))
+                       (goto-char at)
+                       (let ((loop (org-dispatch--loop)))
+                         (when (and (eq (org-dispatch--review-mode) 'agent)
+                                    (equal (plist-get loop :phase) "review")
+                                    (equal (plist-get loop :review) id))
+                           (push (if verdict (cons 'advance parent)
+                                   (cons 'park (cons parent "the reviewer finished without recording a verdict")))
+                                 work))))))
+               (let ((task (org-dispatch--task)))
+                 (when (and (plist-get task :agent-review)
+                            (equal (plist-get task :host) org-dispatch-host)
+                            (not (plist-get task :repeat))
+                            (member (plist-get (org-dispatch--loop) :phase) '(nil "fixes")))
+                   (push (cons 'start id) work)))))))))
+    (nreverse work)))
+
+(defun org-dispatch--edit-or-revert (file id function)
+  "Call FUNCTION at ID in FILE and save; on an error, save nothing."
+  (org-dispatch--edit file id
+                      (lambda ()
+                        (condition-case err (funcall function)
+                          (error (set-buffer-modified-p nil)
+                                 (signal (car err) (cdr err)))))))
+
+(defun org-dispatch--review-start (file id)
+  (org-dispatch--edit-or-revert
+   file id
+   (lambda ()
+     (let* ((task (org-dispatch--task))
+            (dir (or (plist-get task :dir) (error "the task has no directory to review")))
+            (commit (org-review--git dir "rev-parse" "HEAD"))
+            (loop (org-dispatch--loop)))
+       (when (and loop (equal commit (plist-get loop :commit)))
+         (error "the fixes for round %d finished without a new commit" (plist-get loop :round)))
+       (setq loop (org-review--start (org-dispatch--review-spec task commit)))
+       (org-dispatch--log "started agent review round %d of %s at %s" (plist-get loop :round) id commit)))))
+
+(defun org-dispatch--review-advance (file parent)
+  (let ((loop (org-dispatch--edit-or-revert
+               file parent
+               (lambda ()
+                 (org-review--advance (list :commit (plist-get (org-dispatch--loop) :commit)
+                                            :revision (org-dispatch--revision)))))))
+    (org-dispatch--log "agent review of %s: %s" parent (plist-get loop :phase))
+    (pcase (plist-get loop :phase)
+      ("accepted" (org-dispatch--notify (concat "DONE · " parent) "The agent review passed; no human checks remained."))
+      ("human" (org-dispatch--notify (concat "EVAL · " parent) (concat "The agent review passed; Jon's checks remain: " (string-join (plist-get loop :human) "; "))))
+      ("escalated" (org-dispatch--notify (concat "ASK · " parent) "The agent review needs Jon's decision.")))))
+
+(defun org-dispatch--review-park (file id reason)
+  "Hand the development task ID to Jon, once, with REASON."
+  (org-dispatch--edit file id
+                      (lambda ()
+                        (unless (org-entry-get nil "ASKED")
+                          (org-dispatch--ask "Dispatcher" (format "Agent review stopped: %s. Jon decides how to continue." reason)))))
+  (org-dispatch--notify (concat "ASK · " id) (concat "Agent review stopped: " reason))
+  (org-dispatch--log "agent review of %s stopped: %s" id reason))
+
+(defvar org-review-author)
+
+(defun org-dispatch--agent-reviews (&optional agenda)
+  "Start and advance standing agent reviews in AGENDA on this host."
+  (let ((org-review-author "Dispatcher")
+        (files (seq-filter (lambda (file)
+                             (with-temp-buffer
+                               (insert-file-contents file)
+                               (re-search-forward "^\\*+ EVAL " nil t)))
+                           (or agenda (org-dispatch--agenda-files)))))
+    (dolist (file files)
+      (dolist (item (org-dispatch--review-work file))
+        (when (equal (car item) 'park)
+          (org-dispatch--review-park file (cadr item) (cddr item)))
+        (unless (equal (car item) 'park)
+          (org-dispatch--require-review)
+          (condition-case err
+              (if (equal (car item) 'start)
+                  (org-dispatch--review-start file (cdr item))
+                (org-dispatch--review-advance file (cdr item)))
+            (error (org-dispatch--review-park file (cdr item) (error-message-string err)))))))))
 
 ;;; Worker retirement
 
@@ -1772,6 +1957,10 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
     (condition-case err
         (org-dispatch--retire-panes (org-dispatch--agenda-files))
       (error (org-dispatch--log "worker retirement failed: %s" (error-message-string err)))))
+  ;; Before launching, so a review it queues or fixes it returns start in this run.
+  (condition-case err
+      (org-dispatch--agent-reviews)
+    (error (org-dispatch--log "agent reviews failed: %s" (error-message-string err))))
   (dolist (task (org-dispatch--eligible (org-dispatch--tasks) (org-dispatch--states)))
     (org-dispatch--launch task)))
 
@@ -1785,7 +1974,9 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                          (t "new"))))))
 
 (defun org-dispatch-finish ()
-  "Finish a task: ID STATE [NOTE] [--headline LINE] from the command line."
+  "Finish a task: ID STATE [NOTE] [--headline LINE] from the command line.
+STATE is EVAL, DONE, HOLD (waiting on something outside, NOTE says what), or
+ASK (a question for Jon in NOTE, recorded in Dialog with the task at EVAL)."
   (let* ((id (pop command-line-args-left))
          (todo (upcase (or (pop command-line-args-left) "")))
          (flag (member "--headline" command-line-args-left))
@@ -1803,21 +1994,26 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                        (json-parse-buffer :object-type 'plist :null-object nil :false-object nil))))
          result)
     (setq command-line-args-left nil)
-    (unless (member todo '("EVAL" "HOLD" "DONE"))
-      (error "STATE must be EVAL, HOLD, or DONE"))
+    (unless (member todo '("EVAL" "ASK" "HOLD" "DONE"))
+      (error "STATE must be EVAL, ASK, HOLD, or DONE"))
+    (when (and (equal todo "ASK") (string-empty-p note))
+      (error "ASK needs the question for Jon"))
     (when (and (equal todo "HOLD") (string-empty-p note))
-      (error "HOLD needs a question for Jon"))
+      (error "HOLD needs what the task waits for"))
     (setq result
           (org-dispatch--edit
            file id
            (lambda ()
              (org-dispatch--check-stopped-task t)
-             (let ((task (org-dispatch--task)))
+             (let ((task (org-dispatch--task))
+                   (ask (equal todo "ASK")))
                (when (and (equal todo "DONE")
                           (or (plist-get task :review) (org-entry-get nil "DEV_REVIEW")
                               (org-entry-get nil "REVIEW_PARENT")))
                  (setq todo "EVAL"))
+               (when ask (setq todo "EVAL"))
                (cond
+                (ask nil)
                 ((equal todo "HOLD")
                  (org-dispatch--append "Dialog" (org-dispatch--entry "Agent" note)))
                 ((and (equal todo "DONE") (plist-get task :repeat))
@@ -1827,15 +2023,19 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                  (org-entry-put nil "DISPATCH_FINISH" (replace-regexp-in-string "[\n\r]+" " " note)))
                (org-dispatch--headline headline todo)
                (org-todo todo)
-               (org-get-todo-state)))))
+               ;; A plain EVAL is ready for review; only a question asks Jon.
+               (org-entry-delete nil "ASKED")
+               (when ask (org-dispatch--ask "Agent" note))
+               (if ask "EVAL (asked)" (org-get-todo-state))))))
     (when state
       (org-dispatch--save-state (plist-put state :status "finished")))
-    (org-dispatch--notify (format "%s · %s" todo (or (plist-get state :heading) id))
+    (org-dispatch--notify (format "%s · %s" (if (equal result "EVAL (asked)") "ASK" todo) (or (plist-get state :heading) id))
                           (if (string-empty-p note) "Finished." note)
                           (and (plist-get state :terminal)
                                (format "herdr:%s/%s:%s@%s" org-dispatch-host (plist-get state :agent)
                                        (plist-get state :session) (plist-get state :terminal))))
     (princ (format "%s is now %s\n" id result))
+    (setq result (car (split-string result)))
     (when (equal result "AUTO")
       (princ "The repeat was logged and the next run is scheduled.\n"))))
 
@@ -1875,7 +2075,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
          (when (plist-get task :repeat)
            (error "a repeating task recurs on its own; finish it with DONE"))
          (when (< (plist-get task :retry) 1)
-           (error "Jon allowed no more retries; finish with HOLD instead"))
+           (error "Jon allowed no more retries; finish with ASK or HOLD instead"))
          (setq left (1- (plist-get task :retry)))
          (org-entry-put nil "RETRY" (number-to-string left))
          ;; A string keeps the time; a time value loses it when nothing was scheduled.

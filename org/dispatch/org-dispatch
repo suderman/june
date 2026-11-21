@@ -16,7 +16,7 @@ if [[ -z ${TZDIR:-} && ! -d /usr/share/zoneinfo && -d /etc/zoneinfo ]]; then exp
 batch=(emacs -Q --batch -l "$ORG_DISPATCH_EL")
 
 case ${1:-run} in
-  run) exec flock -n "${XDG_RUNTIME_DIR:-/tmp}/org-dispatch.lock" "${batch[@]}" -f org-dispatch-run ;;
+  run) exec flock --close -n "${XDG_RUNTIME_DIR:-/tmp}/org-dispatch.lock" "${batch[@]}" -f org-dispatch-run ;;
   scan) exec "${batch[@]}" -f org-dispatch-scan ;;
   reconcile)
     [[ $# -eq 2 && $2 == --dry-run ]] || { echo "only reconcile --dry-run is supported; enabled runs retire workers" >&2; exit 2; }
@@ -26,7 +26,7 @@ case ${1:-run} in
   finish)
     [[ $# -ge 3 ]] || { echo "usage: org-dispatch finish ID EVAL|HOLD|DONE [NOTE] [--headline LINE]" >&2; exit 2; }
     shift
-    exec flock -n "${XDG_RUNTIME_DIR:-/tmp}/org-dispatch.lock" "${batch[@]}" -f org-dispatch-finish "$@"
+    exec flock --close -n "${XDG_RUNTIME_DIR:-/tmp}/org-dispatch.lock" "${batch[@]}" -f org-dispatch-finish "$@"
     ;;
   plan)
     [[ $# -eq 2 ]] || { echo "usage: org-dispatch plan SPEC.json" >&2; exit 2; }
@@ -36,7 +36,7 @@ case ${1:-run} in
   retry)
     [[ $# -ge 4 ]] || { echo "usage: org-dispatch retry ID WHEN NOTE" >&2; exit 2; }
     shift
-    exec flock -n "${XDG_RUNTIME_DIR:-/tmp}/org-dispatch.lock" "${batch[@]}" -f org-dispatch-retry "$@"
+    exec flock --close -n "${XDG_RUNTIME_DIR:-/tmp}/org-dispatch.lock" "${batch[@]}" -f org-dispatch-retry "$@"
     ;;
   *) echo "usage: org-dispatch [run|scan|reconcile --dry-run|plan SPEC.json|finish ID STATE [NOTE] [--headline LINE]|retry ID WHEN NOTE]" >&2; exit 2 ;;
 esac

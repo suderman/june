@@ -128,6 +128,11 @@ test("renderTask puts SCHEDULED on the planning line, before the drawer", () => 
 	);
 });
 
+test("renderTask writes who reviews: nothing for the user, no when waived, agent for a standing agent review", () => {
+	const drawer = (review: boolean | "agent") => /:REVIEW: \w+/.exec(renderTask({ ...request, body: "Body.", review }, "id-1"))?.[0];
+	assert.deepEqual([drawer(true), drawer(false), drawer("agent")], [undefined, ":REVIEW: no", ":REVIEW: agent"]);
+});
+
 test("queueing refuses files and requests the dispatcher should not get", async (t) => {
 	const f = await fixture();
 	t.after(f.cleanup);

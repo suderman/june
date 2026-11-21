@@ -38,6 +38,49 @@ test("follow reports each transition once and stays quiet otherwise", () => {
 	assert.equal(decide(input, { state: "PROG", missing: false }, "PROG", 8 * 24 * 60 * min, FOLLOW_DEFAULTS).done, true, "follows expire");
 });
 
+test("a question at EVAL needs the user, an agent review stays quiet, and HOLD only waits outside", () => {
+	const at = (seen: { asked?: boolean; reviewing?: boolean }, state = "EVAL", last = "PROG") =>
+		decide(input, { state, missing: false, file: "todo.org", ...seen }, last, 3 * min, FOLLOW_DEFAULTS);
+	const asks = at({ asked: true });
+	assert.deepEqual([asks.signal, asks.done], ["asks", false], "the follow goes on until the user answers and it runs again");
+	assert.match(asks.say ?? "", /with a question or a problem for /);
+	assert.equal(at({ asked: true }, "EVAL", "asks").signal, "asks", "still asking is the same signal");
+	assert.deepEqual([at({ reviewing: true }).signal, at({ reviewing: true }).say, at({ reviewing: true }).done], ["reviewing", undefined, false]);
+	assert.deepEqual([at({}).signal, at({}).done], ["EVAL", true], "a finished review is reported and ends the follow");
+	const hold = at({}, "HOLD");
+	assert.match(hold.say ?? "", /waiting on something outside/);
+	assert.doesNotMatch(hold.say ?? "", /question/);
+});
+
+test("Org reads the question, who reviews, and the review phase a follow needs", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "org");
+	await mkdir(root, { recursive: true });
+	await writeFile(join(root, "w.org"), `#+PROPERTY: REVIEW agent
+* EVAL Asked
+:PROPERTIES:
+:ID: 11111111-aaaa-4bbb-8ccc-000000000001
+:ASKED: [2026-11-20 Fri 12:00]
+:END:
+* EVAL Standing
+:PROPERTIES:
+:ID: 11111111-aaaa-4bbb-8ccc-000000000002
+:DEV_REVIEW: {"phase":"review","round":1}
+:END:
+* EVAL Own
+:PROPERTIES:
+:ID: 11111111-aaaa-4bbb-8ccc-000000000003
+:REVIEW: yes
+:END:
+`);
+	const org = new Org(root);
+	const [asked, standing, own] = await Promise.all(["1", "2", "3"].map((n) => org.byId(`11111111-aaaa-4bbb-8ccc-00000000000${n}`)));
+	assert.equal(asked!.asked, true);
+	assert.deepEqual([standing!.review, standing!.reviewPhase], ["agent", "review"], "the file's #+PROPERTY is inherited");
+	assert.equal(own!.review, "yes");
+});
+
 test("a task scheduled ahead is followed quietly until its start, then on the usual launch clock", () => {
 	const day = 24 * 60 * min;
 	const at = (scheduledAt: number | undefined, now: number, last = "AUTO") =>
@@ -178,7 +221,8 @@ test("a manually started worker finishes through org-edit and June hears its exa
 	const script = join(import.meta.dirname, "../org/edit/org-edit");
 	const output = execFileSync("bash", [script, "todo", file, `id:${id}`, "EVAL", "--expect", "PROG", "--headline", headline], {
 		encoding: "utf8",
-		env: { ...process.env, ORG_EDIT_EL: join(import.meta.dirname, "../org/edit/org-edit.el"), ORG_DISPATCH_EL: join(import.meta.dirname, "../org/dispatch/org-dispatch.el") },
+		// Its own lock and state, never the live dispatcher's, which the timer holds every minute.
+		env: { ...process.env, HC_TERMINAL_ID: undefined, XDG_RUNTIME_DIR: tmp.dir, XDG_STATE_HOME: join(tmp.dir, "state"), ORG_EDIT_EL: join(import.meta.dirname, "../org/edit/org-edit.el"), ORG_DISPATCH_EL: join(import.meta.dirname, "../org/dispatch/org-dispatch.el") },
 	});
 	assert.match(output, /EVAL Manual check/);
 	const finished = await org.byId(id);

@@ -39,8 +39,12 @@ export type Task = {
 	/** Why the dispatcher cannot run it as it stands. */
 	problem?: string;
 	depends?: string[];
-	/** REVIEW as written: yes (the default) or no. */
+	/** Who reviews it at EVAL, as the dispatcher reads REVIEW (inherited from the file too): jon, agent, or none. */
 	review?: string;
+	/** The phase of its independent review loop (DEV_REVIEW): review, fixes, human, accepted, or escalated. */
+	reviewPhase?: string;
+	/** When it was put to the user: an EVAL with a question or a problem for them (ASKED). */
+	asked?: string;
 	/** For an independent review task, the ID of the development task it reviews (REVIEW_PARENT). */
 	reviewParent?: string;
 	/** The task has an independent development and review loop (DEV_REVIEW). */
@@ -73,11 +77,11 @@ export type Worker = AgentSummary & { /** The Org task it works on, by key. */ t
 
 /**
  * Something that needs the user, most urgent first: 1, a worker blocked on a permission or question dialog, which
- * only Herdr can answer; 2, a task newly in EVAL for them to evaluate, until they have seen it. HOLD is never a need:
- * it means the task waits on something outside, and the user has done what they can. EVAL that agents are reviewing
- * is not theirs yet.
+ * only Herdr can answer; 2, a task newly in EVAL for them, until they have seen it: a question or a problem put to
+ * them (ASKED), or work ready for their review. HOLD is never a need: it means the task waits on something outside,
+ * and the user has done what they can. EVAL that agents are reviewing is not theirs yet.
  */
-export type Need = { level: 1 | 2; kind: "blocked" | "review"; task?: string; worker?: { host: string; terminal: string }; since?: number };
+export type Need = { level: 1 | 2; kind: "blocked" | "asks" | "review"; task?: string; worker?: { host: string; terminal: string }; since?: number };
 
 export type Agents = {
 	generatedAt: number;
@@ -86,7 +90,7 @@ export type Agents = {
 	needs: Need[];
 	/** AUTO tasks by start time, soonest first. */
 	queued: string[];
-	/** Tasks in EVAL that agents are reviewing: open independent reviews, and the development tasks they review. */
+	/** Tasks in EVAL that agents are reviewing: open independent reviews, the development tasks they review, and standing (REVIEW agent) reviews the dispatcher has yet to start or advance. */
 	reviewing: string[];
 	/** Tasks a worker reported on in the last day, newest first, apart from those in needs. */
 	recent: string[];
@@ -177,6 +181,8 @@ function shapeTask(key: string, t: any, root: string): Task {
 		problem: t.problem ?? undefined,
 		depends: t.depends ? String(t.depends).split(/\s+/).filter(Boolean) : undefined,
 		review: t.review ?? undefined,
+		reviewPhase: t.reviewPhase ?? undefined,
+		asked: t.asked ?? undefined,
 		reviewParent: t.reviewParent ?? undefined,
 		devReview: t.devReview === true ? true : undefined,
 		dependency: t.dependency ? compact({ kind: t.dependency.kind, reason: t.dependency.reason ?? undefined }) : undefined,
@@ -225,10 +231,13 @@ export function shapeAgents(input: { workers: AgentSummary[]; hosts: Agents["hos
 	const tasks = Object.values(agenda.tasks);
 	// A development task is under agent review while a review of it is still open; the review task itself is June's to advance.
 	const underReview = new Set(tasks.filter((t) => t.reviewParent && t.state !== "DONE").map((t) => t.reviewParent!));
-	const reviewing = tasks.filter((t) => t.state === "EVAL" && (t.reviewParent !== undefined || (t.id !== undefined && underReview.has(t.id)))).map((t) => t.key);
+	const standing = (t: Task) => t.review === "agent" && [undefined, "review", "fixes"].includes(t.reviewPhase);
+	const reviewing = tasks.filter((t) => t.state === "EVAL" && t.asked === undefined &&
+		(t.reviewParent !== undefined || (t.id !== undefined && underReview.has(t.id)) || standing(t))).map((t) => t.key);
 	const agentReview = new Set(reviewing);
 	for (const task of tasks)
-		if (task.state === "EVAL" && !agentReview.has(task.key) && !seen.has(reviewKey(task))) needs.push({ level: 2, kind: "review", task: task.key, ...since(task) });
+		if (task.state === "EVAL" && !agentReview.has(task.key) && !seen.has(reviewKey(task)))
+			needs.push({ level: 2, kind: task.asked !== undefined ? "asks" : "review", task: task.key, ...since(task) });
 	needs.sort((a, b) => a.level - b.level || (b.since ?? 0) - (a.since ?? 0));
 	const needed = new Set(needs.map((n) => n.task).filter(Boolean));
 	const start = (task: Task) => (task.scheduled ? orgTime(task.scheduled) : undefined) ?? 0;
@@ -245,9 +254,9 @@ function since(task: Task): { since?: number } {
 	return task.headline?.at !== undefined && task.headline.state === task.state ? { since: task.headline.at } : {};
 }
 
-/** The mark that says the user has seen a task's review: a new report or a new trip to EVAL makes a new one. */
+/** The mark that says the user has seen a task's review: a new report, a new question or a new trip to EVAL makes a new one. */
 export function reviewKey(task: Task): string {
-	return `${task.key}@${task.headline?.state === "EVAL" ? (task.headline.at ?? "") : ""}`;
+	return `${task.key}@${task.headline?.state === "EVAL" ? (task.headline.at ?? "") : ""}${task.asked ? `@${task.asked}` : ""}`;
 }
 
 /** Review marks the user has seen, kept in the state directory so every device agrees. */

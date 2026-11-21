@@ -7,6 +7,10 @@ description: Coordinate a user-delegated independent development/review loop wit
 
 June coordinates this workflow. Coding workers implement or review their assigned task; they never grant AUTO or coordinate their own acceptance.
 
+## Standing agent review
+
+A task whose `REVIEW` is `agent` (in its drawer, or the project file's `#+PROPERTY:`) carries Jon's standing delegation, and the dispatcher on its host runs the loop: when the worker finishes at EVAL and has settled, it starts the review of the exact HEAD commit with a contract built from the task (reviewer `REVIEWER`, else the other harness; checks `REVIEW_CHECKS`, else the Scope and Checklist; human checks `REVIEW_HUMAN`; the developer keeps the task's own commit, push and deploy permissions). When the reviewer settles at EVAL with its verdict, the dispatcher advances it: fixes return to the developer, a pass closes the task or leaves it at EVAL for the named human checks, and anything blocked, a third round, a fixes round without a new commit, or a refusal goes to Jon as EVAL with `ASKED` and a Dispatcher entry. It never retries on its own. Do not call `org_review_task` start or advance on these tasks; report the outcome, and record Jon's human acceptance with action `human` when he gives it. The rest of this skill describes the loop for tasks without a standing setting.
+
 ## Permission first
 
 Read the whole development task, including Dialog and prior linked reviews. The user must have delegated independent review and bounded in-scope fixes, not merely requested a second opinion. If that authority is missing, ask. Do not enroll unrelated work or use a review finding to expand implementation scope.
@@ -33,7 +37,7 @@ On the review's EVAL notice, read its whole Outcome, immutable verdict and evide
 
 - `fixes` returns the same development task to AUTO with its original agent and session history. Dialog links the review, copies its findings summary and repeats permissions. Developer reads the full review, corrects only authorized findings, verifies and finishes EVAL with a new commit. Then `start` a new exact-revision review. Do not ask Jon to relay findings.
 - `pass` accepts agent checks for that commit. If human checks remain, development stays EVAL. Otherwise it closes DONE under the delegated contract. Never use this to close a task that still needs separate acceptance outside the contract.
-- `blocked`, missing permission or the third unsuccessful round leaves development HOLD for Jon. Do not reset the counter, create a replacement loop or commission follow-up work. Findings outside scope need Jon, not another worker.
+- `blocked`, missing permission or the third unsuccessful round leaves development at EVAL with `ASKED` for Jon (not HOLD, which means waiting on something outside). Do not reset the counter, create a replacement loop or commission follow-up work. Findings outside scope need Jon, not another worker.
 
 Read results before claiming anything changed. A replay can return an earlier phase without changing a later task state. If development is EVAL after fixes but its commit is unchanged, do not spin on duplicate `start` calls. Ask Jon about the unresolved finding. Unexpected branch/source movement, a reviewer HOLD/crash, missing verdict or a dirty/partial snapshot also needs inspection. Escalate rather than repeatedly launching or resetting snapshots. Existing stop/reassign safeguards still apply. No action proves child processes ended.
 

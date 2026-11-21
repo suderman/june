@@ -38,6 +38,11 @@ export function orgTime(stamp: string, zone = ORG_ZONE): number | undefined {
 	return wall - zoneOffset(wall - zoneOffset(wall, zone), zone);
 }
 
+/** An EVAL task whose standing agent review (REVIEW agent) is not finished: the dispatcher starts it, or it is running. */
+export function underAgentReview(task: { review?: string; reviewParent?: string; reviewPhase?: string }): boolean {
+	return task.review === "agent" && task.reviewParent === undefined && [undefined, "review", "fixes"].includes(task.reviewPhase);
+}
+
 export function parseHeading(text: string, line: number): Heading | undefined {
 	const match = HEADING.exec(text);
 	if (match === null) return undefined;
@@ -308,16 +313,25 @@ export class Org {
 		const report: Record<string, string> = {};
 		if (lines[at]?.trim() === ":PROPERTIES:") {
 			for (at++; at < end && lines[at]?.trim() !== ":END:"; at++) {
-				const value = /^[ \t]*:(HEADLINE(?:_STATE|_AT)?):[ \t]+(\S(?:[^\r\n]*\S)?)[ \t]*$/i.exec(lines[at]!);
+				const value = /^[ \t]*:(HEADLINE(?:_STATE|_AT)?|ASKED|REVIEW|REVIEW_PARENT|DEV_REVIEW):[ \t]+(\S(?:[^\r\n]*\S)?)[ \t]*$/i.exec(lines[at]!);
 				if (value) report[value[1]!.toUpperCase()] = value[2]!;
 			}
 		}
+		// REVIEW may also come from the file's #+PROPERTY, as the dispatcher reads it.
+		const review = (report.REVIEW ?? lines.map((l) => /^#\+PROPERTY:[ \t]+REVIEW[ \t]+(\S+)/i.exec(l)?.[1]).find(Boolean) ?? "yes").toLowerCase();
+		const phase = (() => { try { return report.DEV_REVIEW ? String(JSON.parse(report.DEV_REVIEW).phase ?? "") || undefined : undefined; } catch { return undefined; } })();
 		const stamp = Number(report.HEADLINE_AT);
 		const headlineAt = Number.isFinite(stamp) && stamp > 0 ? stamp : undefined;
 		const headline = headlineAt !== undefined && report.HEADLINE_STATE === heading.state ? report.HEADLINE : undefined;
 		return {
 			file: this.rel(path), line: start, state: heading.state, title: heading.title, herdrSessions: herdrLinks(text),
 			...(headline !== undefined ? { headline } : {}),
+			// A question or a problem for the user at EVAL (see org-dispatch.el).
+			...(report.ASKED ? { asked: true } : {}),
+			// Who reviews: yes (the user), no, or agent (the dispatcher runs an independent review).
+			review,
+			...(report.REVIEW_PARENT ? { reviewParent: report.REVIEW_PARENT } : {}),
+			...(phase ? { reviewPhase: phase } : {}),
 			// Keep the stamp even in PROG/AUTO so a later transition cannot reuse it.
 			...(headlineAt !== undefined ? { headlineAt } : {}),
 			// The dispatcher holds an AUTO task until then.

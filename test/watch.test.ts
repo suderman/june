@@ -414,3 +414,9 @@ test("the notice names each task once, with where it lives and what it needs", (
 	]);
 	assert.match(text, /- «Ship» \(work\/a\.org\) on kit is now EVAL, ready for review\.\n- «Gone» on cog is missing\./);
 });
+
+test("the watch says a question needs the user and HOLD does not", () => {
+	const text = message([{ title: "Fix the build", host: "kit", signal: "asks" }, { title: "Renew the cert", host: "kit", signal: "HOLD" }] as never);
+	assert.match(text, /«Fix the build» on kit is at EVAL with a question or a problem for them/);
+	assert.match(text, /«Renew the cert» on kit is on HOLD, waiting on something outside; nothing for them to do yet/);
+});

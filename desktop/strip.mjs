@@ -271,9 +271,9 @@ export function readInput(text) {
 }
 
 /** A followed task's last signal (the daemon's state.follows) in plain words. */
-const SIGNALS = { AUTO: "queued", waiting: "waiting on another task", stalled: "not launched yet", PROG: "in progress", blocked: "its agent needs you", HOLD: "on hold for you" };
-/** Signals that wait on the user, which the status line always says. */
-export const NEEDS_YOU = ["blocked", "HOLD"];
+const SIGNALS = { AUTO: "queued", waiting: "waiting on another task", stalled: "not launched yet", PROG: "in progress", blocked: "its agent needs you", asks: "asks you", reviewing: "in agent review", HOLD: "on hold, waiting outside" };
+/** Signals that wait on the user, which the status line always says. HOLD waits on something outside, not on them. */
+export const NEEDS_YOU = ["blocked", "asks"];
 const clipTitle = (title) => (title.length > 36 ? `${title.slice(0, 35).replace(/\s+$/, "")}…` : title);
 
 /**
@@ -285,7 +285,7 @@ export function status(state, host, seen = []) {
 	// A daemon older than the names sends only the count.
 	const named = state.follows !== undefined;
 	const follows = state.follows ?? Array.from({ length: state.following ?? 0 }, () => ({ title: "", signal: "PROG" }));
-	// Dismissed by the user, a task that needs them is calm until its signal changes (a new HOLD, a newly blocked agent).
+	// Dismissed by the user, a task that needs them is calm until its signal changes (a new question, a newly blocked agent).
 	const asks = (f) => NEEDS_YOU.includes(f.signal) && !seen.includes(followKey(f));
 	const needs = follows.filter(asks);
 	const detail = (named ? follows : []).map((f) => ({ title: f.title, state: SIGNALS[f.signal] ?? String(f.signal).toLowerCase(), needsYou: asks(f), key: followKey(f) }));

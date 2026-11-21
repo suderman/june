@@ -61,6 +61,9 @@ test("agents join their tasks and rank what needs the user: a blocked worker, th
 		task("id:dev", { id: "dev", state: "EVAL", devReview: true }),
 		task("id:rev", { id: "rev", state: "AUTO", reviewParent: "dev" }),
 		task("id:checked", { id: "checked", state: "EVAL", reviewParent: "other" }),
+		task("id:standing", { state: "EVAL", review: "agent" }),
+		task("id:human", { state: "EVAL", review: "agent", reviewPhase: "human" }),
+		task("id:question", { state: "EVAL", review: "agent", asked: "[2026-11-20 Fri 12:00]" }),
 		task("id:review", { state: "EVAL", headline: { text: "Done, check it.", state: "EVAL", at: now - 60_000 } }),
 		task("id:seen", { state: "EVAL", headline: { text: "Old.", state: "EVAL", at: now - 3_600_000 } }),
 		task("id:later", { state: "AUTO", scheduled: "<2026-11-22 Sun 09:00>", host: "kit", agent: "pi" }),
@@ -77,12 +80,14 @@ test("agents join their tasks and rank what needs the user: a blocked worker, th
 	const seen = new Set([reviewKey(board.tasks["id:seen"]!)]);
 	const a = shapeAgents({ workers, hosts: [{ host: "kit", ok: true }], agenda: board, seen, now });
 	assert.deepEqual(a.workers.map((w) => w.taskKey), ["id:run", "id:asks", undefined]);
-	assert.deepEqual(a.needs.map((n) => [n.level, n.kind, n.task]), [[1, "blocked", "id:run"], [2, "review", "id:review"]], "a HOLD with an agent's question waits on the outside world");
-	assert.deepEqual(a.reviewing, ["id:dev", "id:checked"]);
+	// A HOLD with an agent's question waits on the outside world; a standing review before its verdict is the agents';
+	// after it, the user's checks are theirs, and a question is always theirs.
+	assert.deepEqual(a.needs.map((n) => [n.level, n.kind, n.task]), [[1, "blocked", "id:run"], [2, "review", "id:review"], [2, "review", "id:human"], [2, "asks", "id:question"]]);
+	assert.deepEqual(a.reviewing, ["id:dev", "id:checked", "id:standing"]);
 	assert.deepEqual(a.needs[0]!.worker, { host: "kit", terminal: "t7" });
 	assert.deepEqual(a.queued, ["id:rev", "id:sooner", "id:later"]);
 	assert.deepEqual(a.recent, ["id:seen", "id:finished"], "a review already in needs is not repeated; last week is gone");
-	assert.deepEqual(Object.keys(a.tasks).sort(), ["id:asks", "id:checked", "id:dev", "id:finished", "id:later", "id:rev", "id:review", "id:run", "id:seen", "id:sooner"]);
+	assert.deepEqual(Object.keys(a.tasks).sort(), ["id:asks", "id:checked", "id:dev", "id:finished", "id:human", "id:later", "id:question", "id:rev", "id:review", "id:run", "id:seen", "id:sooner", "id:standing"]);
 });
 
 /** A fake export: the tasks given, as june-agenda.el prints them, on its last line after a log line. */
@@ -214,7 +219,7 @@ CLOSED: [2026-01-01 Thu 10:00]
 	assert.deepEqual(titles(a.days[1]!.entries), ["Queued work"]);
 	const byTitle = Object.fromEntries(Object.values(a.tasks).map((t) => [t.title, t]));
 	assert.deepEqual(Object.keys(byTitle).sort(), ["Due soon", "Finished recently", "Overdue thing", "Queued work", "Review of the waiting task", "Today thing", "Waiting for Alex", "Weekly planning"]);
-	assert.deepEqual([byTitle["Review of the waiting task"]!.review, byTitle["Review of the waiting task"]!.reviewParent], ["yes", "5b0c6c4e-1111-4222-8333-444455556666"]);
+	assert.deepEqual([byTitle["Review of the waiting task"]!.review, byTitle["Review of the waiting task"]!.reviewParent], ["jon", "5b0c6c4e-1111-4222-8333-444455556666"]);
 	assert.deepEqual([byTitle["Due soon"]!.priority, byTitle["Due soon"]!.tags], ["A", ["work"]]);
 	assert.deepEqual([byTitle["Queued work"]!.host, byTitle["Queued work"]!.agent], ["cog", "claude"]);
 	const hold = byTitle["Waiting for Alex"]!;

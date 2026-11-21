@@ -980,7 +980,9 @@ test("live June watches while the daemon says she follows tasks, after anything 
 	const dismissed = status({ running: false, background: 0, follows: [stuck] }, "kit", ["Fix the bridge|blocked"]);
 	assert.equal(dismissed.text, "keeping an eye on «Fix the bridge»", "dismissed, it goes calm");
 	assert.equal(dismissed.detail[0].needsYou, false);
-	assert.equal(status({ running: false, background: 0, follows: [{ title: "Fix the bridge", signal: "HOLD" }] }, "kit", ["Fix the bridge|blocked"]).text, "«Fix the bridge» needs you", "until its signal changes");
+	assert.equal(status({ running: false, background: 0, follows: [{ title: "Fix the bridge", signal: "asks" }] }, "kit", ["Fix the bridge|blocked"]).text, "«Fix the bridge» needs you", "until its signal changes");
+	assert.equal(status({ running: false, background: 0, follows: [{ title: "Fix the bridge", signal: "HOLD" }] }, "kit").text, "keeping an eye on «Fix the bridge»", "HOLD waits on something outside, not on him");
+	assert.equal(status({ running: false, background: 0, follows: [{ title: "Fix the bridge", signal: "reviewing" }] }, "kit").detail[0].state, "in agent review");
 });
 
 test("in a stacked panel a tail leaves the top under her mouth, or there is none", () => {

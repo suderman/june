@@ -199,10 +199,13 @@ States describe the task from Jon's point of view:
 - `TODO`: captured, not started. Jon's to do or to hand on.
 - `AUTO`: queued for an unattended agent; see "Autonomous tasks".
 - `PROG`: active investigation or implementation.
-- `EVAL`: ready for review or acceptance by Jon or an agent he delegates.
+- `EVAL`: ready for review or acceptance by Jon or an agent he delegates. With
+  an `ASKED` stamp, it holds a question or a problem for Jon in Dialog.
 - `HOLD`: Jon cannot act on it now, for any reason: an external dependency,
   client approval or feedback, limited bandwidth, or a deliberate pause.
   Record the reason and any known condition for resuming; never invent one.
+  HOLD never means "waiting for Jon": a question for him is EVAL with
+  `ASKED` (a dispatched worker finishes with `ASK`).
 - `DONE`: the requested work is complete and verified.
 
 - Verification, not a commit or push, is the threshold for `DONE`. Never leave a thread in `PROG` only because changes are uncommitted.
@@ -361,26 +364,39 @@ decoration. Both pi and Claude Code can be started. A task runs once its text ha
 `org-dispatch-settle` (headings June writes, marked `:JUNE_REQUEST:`, launch at
 once); `org-dispatch scan` shows what that host would launch
 now. `SCHEDULED` delays it and a repeater makes it recur. Jon adjusts a run with the
-`REVIEW`, `DEPLOY`, `BRANCH`, `MODEL`, `DIR`, and `RETRY` properties. A task may sit at
+`REVIEW`, `DEPLOY`, `BRANCH`, `MODEL`, `DIR`, and `RETRY` properties.
+`REVIEW` is `yes` (the default: Jon reviews at EVAL), `no`, or `agent`, and may
+come from the project file's `#+PROPERTY:`. With `agent`, when the worker
+finishes at EVAL the dispatcher starts an independent exact-commit review (see
+`development-review`), returns in-scope fixes to the same worker, closes the task
+on a pass, and leaves it to Jon only for named human checks or a decision.
+`REVIEWER` picks the reviewer agent (by default the other harness),
+`REVIEW_CHECKS` the agent checks, and `REVIEW_HUMAN` the human checks,
+separated by semicolons. Only Jon sets these, or June at his request. A task may sit at
 any level, such as under a heading in a `~/org/life` file; its `Sessions` and
 `Dialog` sections are always one level below it.
 
 The dispatcher sets `PROG` and an `:auto:` tag when it launches; the agent ends
-at `EVAL`, `HOLD`, or `DONE`, and leaving `PROG` removes the tag. Never add or
+at `EVAL`, `ASK` (a question for Jon: EVAL with `ASKED`), `HOLD` (waiting on
+something outside), or `DONE`, and leaving `PROG` removes the tag. A worker the
+dispatcher has to give up on (failed launch, time limit, no longer running,
+nudges used up) also goes to Jon as EVAL with `ASKED`. Leaving EVAL clears
+`ASKED`. Never add or
 remove `:auto:` yourself. Jon sets `AUTO` again to resume the agent after answering in
 `Dialog`, or `TODO` to take the task back. A repeating task returns to `AUTO`
 through its `REPEAT_TO_STATE` property, which the dispatcher adds.
 
 After Jon deploys the dependency-aware dispatcher, task dependencies use `:DEPENDS: id:UUID id:UUID`. The dispatcher waits without launching a worker until every prerequisite is DONE. EVAL never satisfies a dependency. IDs resolve across agenda files and their archives. `org-dispatch scan` reports waiting tasks and root blockers such as HOLD, missing or duplicate IDs, or a cycle; waiting consumes no slot or retry. The worker prompt includes immediate prerequisites' finish notes and Outcome sections. Repeating tasks return to AUTO and do not remain satisfied after an iteration.
 
-With that dispatcher deployed, when Jon explicitly asks for a new plan, June queues it with her `org_queue_plan` tool, which follows every task, and a coding agent may run `org-dispatch plan SPEC.json` to create its new AUTO tasks and an ID-linked plan table. This does not authorize resuming existing tasks or autonomous follow-ups. The spec has `key` (a unique plain plan name), `title`, `file` (the writable agenda file for the table), and a `tasks` array. Each task has a plain `key`, `file`, `title`, Org `body` without a top-level heading or drawer, and optional `depends` (task keys or existing `id:UUID` references), `host`, `agent`, `dir`, and `review` (true by default; false only if Jon waives review). Keep the spec under local `org-work` runtime storage. IDs are stable: replay the same key and unchanged spec after an interruption without resetting existing tasks. The graph is validated before writing; each file publishes atomically, not the whole plan. The command starts no agent. Deploy the new dispatcher on all launching hosts before removing existing prose gates, RETRY budgets, or retry schedules; old versions ignore DEPENDS.
+With that dispatcher deployed, when Jon explicitly asks for a new plan, June queues it with her `org_queue_plan` tool, which follows every task, and a coding agent may run `org-dispatch plan SPEC.json` to create its new AUTO tasks and an ID-linked plan table. This does not authorize resuming existing tasks or autonomous follow-ups. The spec has `key` (a unique plain plan name), `title`, `file` (the writable agenda file for the table), and a `tasks` array. Each task has a plain `key`, `file`, `title`, Org `body` without a top-level heading or drawer, and optional `depends` (task keys or existing `id:UUID` references), `host`, `agent`, `dir`, and `review` (true by default; `"agent"` when Jon asks for a standing agent review; false only if Jon waives review). Keep the spec under local `org-work` runtime storage. IDs are stable: replay the same key and unchanged spec after an interruption without resetting existing tasks. The graph is validated before writing; each file publishes atomically, not the whole plan. The command starts no agent. Deploy the new dispatcher on all launching hosts before removing existing prose gates, RETRY budgets, or retry schedules; old versions ignore DEPENDS.
 
 A one-off task that waits on something outside the agent's control, such as an upstream fix, can check again later when Jon sets `:RETRY: N` on it. The
 agent runs `org-dispatch retry ID WHEN NOTE`. The dispatcher then lowers
 `RETRY` by one, sets `SCHEDULED`, logs the run in `:LOGBOOK:` and returns the
 task to `AUTO`, and a fresh session picks it up when it is due. Once `RETRY`
-reaches 0 the agent must use `HOLD`.
+reaches 0 the agent must use `ASK` or `HOLD`.
 
+- Coding agents never set `REVIEW`, `REVIEWER`, `REVIEW_CHECKS` or `REVIEW_HUMAN`.
 - Coding agents never set `AUTO` on an existing heading. Creating new AUTO headings through `org-dispatch plan` is allowed only for a plan Jon explicitly requested; otherwise Jon grants autonomy. Set `:HOST:` or `:AGENT:` only when Jon asks. June, Jon's assistant, is the one
   exception. Under her `AGENTS.md` (from `~/.agents/june`), she may queue new `AUTO` tasks, starting each one's body with a line saying she queued it and why. When Jon explicitly asks, she may also resume an existing TODO, EVAL, or HOLD task through `org_resume_task`, which uses the shared `org-edit` command and records his instruction in Dialog. It can add `:DEPENDS:` prerequisites in the same save, after checking for missing or duplicate IDs, self-dependency, and cycles. When Jon asks to remove selected prerequisites, June uses `org_remove_dependencies` with the freshly read task revision; AUTO becomes HOLD in the same locked save as removal and an appended Dialog correction. Prior Dialog and scope stay intact. She re-reads and resolves remaining prose gates before a separate authorized resume. Do not remove DEPENDS by hand on AUTO or treat edge removal as permission to start work. `org-edit` accepting AUTO does not give coding workers permission to set it.
 - June uses `org_stop_task` when Jon asks to stop or switch a running local dispatcher task. Read the whole task and Dialog first. The command records the stop and parks PROG at HOLD with nudges off before it touches the worker. It then checks that the worker's hc terminal still carries the run's task, run, agent and session labels, presses its stop key, waits for it to settle, and kills that one terminal only if the agent does not stop. It sends no prompt and never touches another terminal; Dialog records whether the worker had exited, was left running because it was not working, stopped at the interrupt, or was killed. An error leaves the task parked and blocks resume, finish and retry. Inspect the task and worker before retrying the same call; never use raw keys, manual AUTO, process kills or a duplicate task as a workaround. A confirmed stop preserves identity, scope, findings, schedule, prerequisites and history; the session stays resumable. Only a separate authorized `org_resume_task` selects Jon's requested agent and grants AUTO. All stopped sessions are excluded from reuse, including across repeated agent switches. While a run is active, only its own terminal (`HC_TERMINAL_ID`) may finish, retry or change the task; human shells and June's daemon retain state control. Remote tasks need that host's June or Jon.

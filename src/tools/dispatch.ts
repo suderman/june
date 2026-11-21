@@ -42,7 +42,8 @@ export type QueueRequest = {
 	/** The agent the dispatcher starts; June's config default, pi without one. */
 	agent?: string;
 	dir?: string;
-	review: boolean;
+	/** true: the user reviews at EVAL; false: waived; "agent": a standing independent agent review (REVIEW agent). */
+	review: boolean | "agent";
 	/** Stable across a tool's replay, so a rerun finds its own heading instead of writing a second one. */
 	key: string;
 	/** When the dispatcher may start it, as org-edit date takes it, such as `2026-11-07 09:30` or `fri 9:30`; unset starts now. */
@@ -56,7 +57,8 @@ export type QueueRequest = {
 export function renderTask(request: QueueRequest, id: string, stamp?: string): string {
 	const properties = [`:ID: ${id}`, `:AGENT: ${request.agent ?? "pi"}`, `:HOST: ${request.host}`, `:JUNE_REQUEST: ${request.key}`];
 	if (request.dir) properties.push(`:DIR: ${request.dir}`);
-	if (!request.review) properties.push(":REVIEW: no");
+	if (request.review === false) properties.push(":REVIEW: no");
+	if (request.review === "agent") properties.push(":REVIEW: agent");
 	const body = request.body.trim();
 	return [`* AUTO ${request.title}`, ...(stamp ? [`SCHEDULED: ${stamp}`] : []), ":PROPERTIES:", ...properties, ":END:", ...(body ? [body] : []), ""].join("\n");
 }
@@ -199,7 +201,7 @@ export type PlanTask = {
 	host?: string;
 	agent?: string;
 	dir?: string;
-	review?: boolean;
+	review?: boolean | "agent";
 };
 
 export type PlanRequest = {
@@ -400,7 +402,7 @@ export class Dispatch {
 				agent: task.agent ?? defaultAgent,
 				...(task.depends?.length ? { depends: [...task.depends] } : {}),
 				...(task.dir ? { dir: task.dir } : {}),
-				...(task.review === false ? { review: false } : {}),
+				...(task.review === false || task.review === "agent" ? { review: task.review } : {}),
 			});
 		}
 		if (/[\n\r]/.test(request.title) || !request.title.trim()) throw new Error("The plan title is one non-empty line");
@@ -719,7 +721,7 @@ export function createDispatchExtension(
 					host: str({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` }),
 					agent: agentParameter(`Coding agent the dispatcher starts: ${agents.join(" or ")}; default ${defaultAgent}. Choose one when ${user()} names it. It is written as :AGENT: in the drawer, which the dispatcher reads before any agent tag, so no tag is needed`),
 					dir: opt(str({ description: "Existing working directory override, usually one of the project's local repository links. Omit for one-offs without a checkout: the dispatcher uses the project directory" })),
-					review: opt(bool({ description: `Default true: the worker stops at EVAL for human or agent review, including read-only lookups you will review yourself. Set false only when ${user()} explicitly waives review` })),
+review: opt(union([bool(), lit("agent")], { description: `Default true: the worker stops at EVAL for ${user()}'s review, including read-only lookups you will review yourself. "agent" only when ${user()} asks for agent review: when the worker finishes at EVAL, the dispatcher starts an independent agent review of its exact commit, sends in-scope fixes back to the same worker, and brings the task to ${user()} only for named human checks or a decision; it needs a Git repository. Set false only when ${user()} explicitly waives review` })),
 					scheduled: opt(str({ description: `Only when ${user()} wants it to start later: the earliest start, in Calgary time as the dispatcher reads it, as a date (2026-11-07, today, tomorrow, fri, +2d; a weekday name is the next one, never today) and optional time (09:30). Omit to start now. It goes into the heading before the file is saved, so the task cannot launch early; a time already past is refused` })),
 				}),
 				// Idempotent by key: a rerun after a restart finds the heading it wrote.
@@ -748,7 +750,7 @@ export function createDispatchExtension(
 						host: opt(str({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` })),
 						agent: agentParameter(`Coding agent: ${agents.join(" or ")}; default ${defaultAgent}`),
 						dir: opt(str({ description: "Existing working directory, usually one of the project's local repository links; omit to use the project directory" })),
-						review: opt(bool({ description: `Default true: the worker stops at EVAL for review. Set false only when ${user()} explicitly waives review for this task` })),
+						review: opt(union([bool(), lit("agent")], { description: `Default true: the worker stops at EVAL for review. "agent" only when ${user()} asks for agent review of this task (see org_queue_task). Set false only when ${user()} explicitly waives review for this task` })),
 					}), { minItems: 1 }),
 				}),
 				// org-dispatch plan derives every ID from the key, so a replay finds the tasks the first run wrote.

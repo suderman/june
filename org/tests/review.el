@@ -97,22 +97,23 @@
 
 (defun test-review-report (verdict &optional session)
   (let* ((loop (test-review-loop)) (id (plist-get loop :review))
+         (agent (plist-get loop :agent))
          (session (or session test-review-reviewer)))
     (test-review-at id (lambda ()
       (org-todo "PROG")
-      (org-dispatch--append "Sessions" (format "- [[herdr:kit/pi:%s@t-review][reviewer]]" session))))
-    (org-dispatch--save-state (list :id id :file test-review-file :status "running" :agent "pi" :host "kit"
+      (org-dispatch--append "Sessions" (format "- [[herdr:kit/%s:%s@t-review][reviewer]]" agent session))))
+    (org-dispatch--save-state (list :id id :file test-review-file :status "running" :agent agent :host "kit"
                                    :session session :terminal "t-review" :run "review-run"
                                    :started (float-time) :nudges 0
                                    :dir (plist-get loop :snapshot)))
     (let ((process-environment (copy-sequence process-environment))
           (test-review-workers (list (test-review-worker session "working" "t-review"
-                                                         `((org.task . ,id) (org.run . "review-run"))))))
+                                                         `((org.agent . ,agent) (org.task . ,id) (org.run . "review-run"))))))
       (setenv "HC_TERMINAL_ID" "t-review")
       (setenv "PI_SESSION_ID" session)
       (test-review-command "verdict" (list :commit test-review-commit :verdict verdict :note "Independent fixture findings and checks.") id))
     (test-review-at id (lambda () (org-todo "EVAL")))
-    (org-dispatch--save-state (list :id id :file test-review-file :status "finished" :agent "pi"
+    (org-dispatch--save-state (list :id id :file test-review-file :status "finished" :agent agent
                                    :session session :terminal "t-review" :run "review-run"
                                    :started (float-time) :nudges 0))))
 
@@ -216,7 +217,8 @@
       (test-review-start)
       (test-review-report "fixes")
       (test-review-advance))
-    (should (equal (test-review-state) "HOLD"))
+    (should (equal (test-review-state) "EVAL"))
+    (should (test-review-at test-review-id (lambda () (org-entry-get nil "ASKED"))))
     (should (equal (plist-get (test-review-loop) :phase) "escalated"))
     (test-review-new-commit)
     (should-error (test-review-start))
@@ -297,7 +299,8 @@
     (let ((id (plist-get (test-review-loop) :review)))
       (should-error (test-review-command "verdict" (list :commit test-review-commit :verdict "pass" :note "changed mind") id)))
     (test-review-advance)
-    (should (equal (test-review-state) "HOLD"))
+    (should (equal (test-review-state) "EVAL"))
+    (should (test-review-at test-review-id (lambda () (org-entry-get nil "ASKED"))))
     (should-error (test-review-command "human" (list :revision (test-review-revision) :commit test-review-commit
       :checks '("Human check") :note "Jon checked it.")))
     (dolist (state '("AUTO" "DONE"))
@@ -435,5 +438,127 @@
     (let ((command-line-args-left (list test-review-id "DONE" "generic worker finish")))
       (org-dispatch-finish))
     (should (equal (test-review-state) "EVAL"))))
+
+;;; Standing agent review: the dispatcher runs the loop when REVIEW is agent.
+
+(defun test-review-standing (&optional extra)
+  "Make the development task's REVIEW agent, with EXTRA drawer lines."
+  (test-review-at test-review-id
+    (lambda ()
+      (org-entry-put nil "REVIEW" "agent")
+      (dolist (pair extra) (org-entry-put nil (car pair) (cdr pair))))))
+
+(defun test-review-settle (id)
+  "The watch drops a run's receipt once its worker settles."
+  (org-dispatch--drop-state id))
+
+(defun test-review-asked ()
+  (test-review-at test-review-id (lambda () (org-entry-get nil "ASKED"))))
+
+(defun test-review-text ()
+  (with-temp-buffer (insert-file-contents test-review-file) (buffer-string)))
+
+(ert-deftest standing-review-starts-once-returns-fixes-and-asks-without-a-new-commit ()
+  (test-with-review
+    (test-review-standing)
+    (org-dispatch--agent-reviews (list test-review-file))
+    (let* ((loop (test-review-loop)) (review (plist-get loop :review)))
+      (should (equal (plist-get loop :phase) "review"))
+      ;; The other harness reviews pi's work by default.
+      (should (equal (plist-get loop :agent) "claude"))
+      (should (string-match-p "Standing agent review" (plist-get loop :authorization)))
+      (should (equal (test-review-state review) "AUTO"))
+      (should (string-search "Queued by Dispatcher" (test-review-text)))
+      ;; A second run finds the review under way and adds nothing.
+      (org-dispatch--agent-reviews (list test-review-file))
+      (should (equal (test-review-loop) loop))
+      (test-review-report "fixes")
+      ;; A run still holding its slot is not settled.
+      (org-dispatch--agent-reviews (list test-review-file))
+      (should (equal (test-review-state review) "EVAL"))
+      (test-review-settle review)
+      (org-dispatch--agent-reviews (list test-review-file))
+      (should (equal (test-review-state review) "DONE"))
+      (should (equal (test-review-state) "AUTO"))
+      (should (equal (plist-get (test-review-loop) :phase) "fixes"))
+      (should (string-match-p "^- Dispatcher .*Review \\[\\[id:" (test-review-text)))
+      ;; The developer finishes again without committing anything new: Jon is asked, once.
+      (test-review-at test-review-id (lambda () (org-todo "EVAL")))
+      (org-dispatch--agent-reviews (list test-review-file))
+      (should (equal (test-review-state) "EVAL"))
+      (should (test-review-asked))
+      (should (string-search "Agent review stopped: the fixes for round 1 finished without a new commit" (test-review-text)))
+      (let ((text (test-review-text)))
+        (org-dispatch--agent-reviews (list test-review-file))
+        (should (equal (test-review-text) text)))
+      ;; Jon resumes it; leaving EVAL clears the question, and a new commit starts round 2.
+      (test-review-at test-review-id (lambda () (org-todo "AUTO")))
+      (should-not (test-review-asked))
+      (test-review-new-commit)
+      (test-review-at test-review-id (lambda () (org-todo "EVAL")))
+      (org-dispatch--agent-reviews (list test-review-file))
+      (should (= 2 (plist-get (test-review-loop) :round)))
+      (should (equal (plist-get (test-review-loop) :commit) test-review-commit)))))
+
+(ert-deftest standing-review-pass-closes-or-leaves-the-named-human-checks ()
+  (test-with-review
+    (test-review-standing '(("REVIEWER" . "pi") ("REVIEW_HUMAN" . "Phone check; Look at the colours")))
+    (org-dispatch--agent-reviews (list test-review-file))
+    (should (equal (plist-get (test-review-loop) :agent) "pi"))
+    (should (equal (plist-get (test-review-loop) :human) '("Phone check" "Look at the colours")))
+    (test-review-report "pass")
+    (test-review-settle (plist-get (test-review-loop) :review))
+    (org-dispatch--agent-reviews (list test-review-file))
+    (should (equal (test-review-state) "EVAL"))
+    (should (equal (plist-get (test-review-loop) :phase) "human"))
+    ;; Ready for Jon's checks, not a question.
+    (should-not (test-review-asked)))
+  (test-with-review
+    (test-review-standing)
+    (org-dispatch--agent-reviews (list test-review-file))
+    (test-review-report "pass")
+    (test-review-settle (plist-get (test-review-loop) :review))
+    (org-dispatch--agent-reviews (list test-review-file))
+    (should (equal (test-review-state) "DONE"))))
+
+(ert-deftest standing-review-follows-the-project-default-and-leaves-other-tasks-alone ()
+  (test-with-review
+    ;; REVIEW yes is Jon's to review.
+    (org-dispatch--agent-reviews (list test-review-file))
+    (should-not (test-review-loop))
+    (test-review-at test-review-id (lambda () (org-entry-delete nil "REVIEW") (org-entry-put nil "HOST" "cog")))
+    (with-temp-file test-review-file
+      (insert "#+PROPERTY: REVIEW agent\n")
+      (insert (with-temp-buffer (insert-file-contents test-review-file) (buffer-string))))
+    ;; Another host's task waits for its own dispatcher.
+    (org-dispatch--agent-reviews (list test-review-file))
+    (should-not (test-review-loop))
+    (test-review-at test-review-id (lambda () (org-entry-put nil "HOST" "kit")))
+    ;; A run still holding its slot is not settled.
+    (org-dispatch--save-state (list :id test-review-id :status "finished"))
+    (org-dispatch--agent-reviews (list test-review-file))
+    (should-not (test-review-loop))
+    (test-review-settle test-review-id)
+    ;; A question for Jon is his.
+    (test-review-at test-review-id (lambda () (org-entry-put nil "ASKED" "[2026-11-20 Fri 12:00]")))
+    (org-dispatch--agent-reviews (list test-review-file))
+    (should-not (test-review-loop))
+    (test-review-at test-review-id (lambda () (org-entry-delete nil "ASKED")))
+    ;; The file's #+PROPERTY makes it standing.
+    (org-dispatch--agent-reviews (list test-review-file))
+    (should (equal (plist-get (test-review-loop) :phase) "review"))))
+
+(ert-deftest standing-review-refusals-ask-jon-and-write-nothing-else ()
+  (test-with-review
+    (test-review-standing)
+    (with-temp-file (expand-file-name "code.txt" test-review-repo) (insert "uncommitted\n"))
+    (let ((before (test-review-text)))
+      (org-dispatch--agent-reviews (list test-review-file))
+      (should-not (test-review-loop))
+      (should (equal (test-review-state) "EVAL"))
+      (should (test-review-asked))
+      (should (string-search "Agent review stopped: revision changed or worktree dirty" (test-review-text)))
+      (should-not (string-match-p "^\\* AUTO Review" (test-review-text)))
+      (should (equal (replace-regexp-in-string "^:ASKED:.*\n\\|^- Dispatcher .*\n" "" (test-review-text)) before)))))
 
 (ert-run-tests-batch-and-exit)

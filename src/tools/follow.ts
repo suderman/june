@@ -4,7 +4,7 @@
 import { defineDoc, defineTask, type Tx } from "@earendil-works/pi-durable";
 import { admitNotice, type Notice } from "../notify.ts";
 import type { Herdr } from "./herdr.ts";
-import type { Org } from "./org.ts";
+import { type Org, underAgentReview } from "./org.ts";
 import { User, user } from "../user.ts";
 
 export type FollowInput = {
@@ -64,6 +64,10 @@ export type Observation = {
 	worker?: { agent: string; session: string };
 	/** Still AUTO behind a prerequisite that is not DONE. */
 	waiting?: boolean;
+	/** At EVAL with a question or a problem for the user (ASKED). */
+	asked?: boolean;
+	/** At EVAL under a standing agent review the dispatcher is running (REVIEW agent), not yet the user's. */
+	reviewing?: boolean;
 	/** The task's SCHEDULED start, before which the dispatcher holds it in AUTO. */
 	scheduledAt?: number;
 };
@@ -100,14 +104,20 @@ export function decide(input: FollowInput, seen: Observation, last: string, now:
 	}
 	switch (seen.state) {
 		case "EVAL":
+			if (seen.asked)
+				return { signal: "asks", done: false, say: `${Name} is at EVAL with a question or a problem for ${user()}. Read its Dialog with org_read_task and pass it on in a line or two, with what happens if they resume it without answering.` };
+			// The dispatcher runs the review and returns any fixes; the outcome is reported when it lands.
+			if (seen.reviewing) return { signal: "reviewing", done: false, say: undefined };
+		// falls through
 		case "DONE":
 			return {
 				signal: seen.state,
 				done: true,
-				say: `${Name} is now ${seen.state}. Read it with org_read_task, including its outcome and verification evidence.${seen.state === "EVAL" ? ` If it has DEV_REVIEW or REVIEW_PARENT, read the development-review skill and coordinate its next exact-revision handoff with org_review_task, never general completion or resume. Otherwise, if you created it, the request is satisfied, and no decision or review from ${user()} remains, use org_complete_task to mark it DONE before reporting. Leave any remaining human review at EVAL and name the specific checks.` : ""} Tell ${user()} what came of it in a line or two. This ends your follow of it, timed updates included.`,
+				say: `${Name} is now ${seen.state}. Read it with org_read_task, including its outcome and verification evidence.${seen.state === "EVAL" ? ` If it has DEV_REVIEW or REVIEW_PARENT, read the development-review skill and coordinate its next exact-revision handoff with org_review_task, never general completion or resume; when its REVIEW is agent, the dispatcher runs that loop, so only report the agent verdict and any human checks left. Otherwise, if you created it, the request is satisfied, and no decision or review from ${user()} remains, use org_complete_task to mark it DONE before reporting. Leave any remaining human review at EVAL and name the specific checks.` : ""} Tell ${user()} what came of it in a line or two. This ends your follow of it, timed updates included.`,
 			};
 		case "HOLD":
-			return { signal: "HOLD", done: false, say: `${Name} is on HOLD. Read its Dialog with org_read_task and pass the agent's question to the user.` };
+			// HOLD waits on something outside; there is nothing for the user to do yet.
+			return { signal: "HOLD", done: false, say: `${Name} is on HOLD, waiting on something outside. Read its Dialog with org_read_task and tell ${user()} in a line what it waits for; they need do nothing yet.` };
 		case "TODO":
 			// The user took it back; nothing to report.
 			return { signal: "TODO", done: true, say: undefined };
@@ -165,6 +175,8 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 		return {
 			state: task.state, missing: false, file: task.file,
 			...(agent ? { agent } : {}), ...(waiting ? { waiting } : {}),
+			...(task.state === "EVAL" && task.asked ? { asked: true } : {}),
+			...(task.state === "EVAL" && !task.asked && underAgentReview(task) ? { reviewing: true } : {}),
 			...(task.headline !== undefined ? { headline: task.headline } : {}),
 			...(task.scheduledAt !== undefined ? { scheduledAt: task.scheduledAt } : {}),
 			...(worker ? { worker: { agent: worker.agent, session: worker.session } } : {}),
@@ -200,8 +212,8 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 				const changed = next?.say !== undefined && next.signal !== last;
 				const update = !changed && next !== undefined && progressDue(task.input, next.signal, reported, now);
 				const say = changed ? next.say : update ? progress(task.input, seen?.file) : undefined;
-				const news = changed && ["DONE", "EVAL", "HOLD"].includes(next!.signal) && seen?.headline !== undefined
-					? { title: task.input.title, signal: next!.signal, headline: seen.headline, ...seen.worker }
+				const news = changed && ["DONE", "EVAL", "asks", "HOLD"].includes(next!.signal) && seen?.headline !== undefined
+					? { title: task.input.title, signal: next!.signal === "asks" ? "EVAL" : next!.signal, headline: seen.headline, ...seen.worker }
 					: undefined;
 				const workerLine = news ? `\nWorker headline${news.agent ? ` (${news.agent})` : ""}: ${news.headline}` : "";
 				const notice: Notice | undefined =

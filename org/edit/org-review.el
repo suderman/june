@@ -5,6 +5,16 @@
 (require 'org-edit)
 (require 'json)
 
+(defvar org-review-author "June"
+  "Who coordinates the loop, as Dialog and queued reviews name them.
+The dispatcher binds it to \"Dispatcher\" for standing agent reviews.")
+
+(defun org-review--escalate ()
+  "Leave the development task with Jon: EVAL with ASKED, never HOLD,
+which means waiting on something outside."
+  (org-entry-put nil "ASKED" (org-dispatch--stamp))
+  (unless (equal (org-get-todo-state) "EVAL") (org-todo "EVAL")))
+
 (defun org-review--json (value)
   (let ((json-encoding-pretty-print nil) (json-false :false) (json-null nil))
     (json-encode value)))
@@ -139,7 +149,7 @@
         (goto-char (point-max))
         (unless (bolp) (insert "\n"))
         (unless (save-excursion (forward-line -1) (looking-at-p "^$")) (insert "\n"))
-        (insert (format "* AUTO %s\n:PROPERTIES:\n:ID: %s\n:HOST: %s\n:AGENT: %s\n:DIR: %s\n:JUNE_REQUEST: review-%s\n:REVIEW: yes\n:DEPLOY: no\n:REVIEW_PARENT: %s\n:REVIEW_COMMIT: %s\n:END:\nQueued by June: Independent exact-revision review of [[id:%s][the development task]].\n\n** Scope\nReview commit =%s= in this private snapshot only. Read the whole development task and Dialog for requirements, but do not modify its source checkout. This is a fresh reviewer session. Find and test defects; do not implement fixes, commit, push, activate, deploy, start services or commission work. Local verification and remote reads are allowed only within the contract below.\n\nPermissions: %s\n\nAgent checks: %s\n\nHuman checks remain with Jon: %s\n\nRecord exact commands, results, findings and what was tested with fakes versus for real in Outcome. Then run =org-edit review verdict %s id:%s '{\"commit\":\"%s\",\"verdict\":\"pass|fixes|blocked\",\"note\":\"specific findings and evidence\"}'=, choosing one verdict, and finish EVAL through org-dispatch. pass means all agent checks passed, never human acceptance. fixes means in-scope corrections for the original developer. blocked means missing permission, out-of-scope findings or an untestable requirement needing Jon. Never silently waive a required check.\n" title review host (plist-get loop :agent) snapshot review id commit id commit (plist-get loop :permissions) (plist-get loop :checks)
+        (insert (format "* AUTO %s\n:PROPERTIES:\n:ID: %s\n:HOST: %s\n:AGENT: %s\n:DIR: %s\n:JUNE_REQUEST: review-%s\n:REVIEW: yes\n:DEPLOY: no\n:REVIEW_PARENT: %s\n:REVIEW_COMMIT: %s\n:END:\nQueued by %s: Independent exact-revision review of [[id:%s][the development task]].\n\n** Scope\nReview commit =%s= in this private snapshot only. Read the whole development task and Dialog for requirements, but do not modify its source checkout. This is a fresh reviewer session. Find and test defects; do not implement fixes, commit, push, activate, deploy, start services or commission work. Local verification and remote reads are allowed only within the contract below.\n\nPermissions: %s\n\nAgent checks: %s\n\nHuman checks remain with Jon: %s\n\nRecord exact commands, results, findings and what was tested with fakes versus for real in Outcome. Then run =org-edit review verdict %s id:%s '{\"commit\":\"%s\",\"verdict\":\"pass|fixes|blocked\",\"note\":\"specific findings and evidence\"}'=, choosing one verdict, and finish EVAL through org-dispatch. pass means all agent checks passed, never human acceptance. fixes means in-scope corrections for the original developer. blocked means missing permission, out-of-scope findings or an untestable requirement needing Jon. Never silently waive a required check.\n" title review host (plist-get loop :agent) snapshot review id commit org-review-author id commit (plist-get loop :permissions) (plist-get loop :checks)
                         (if (plist-get loop :human) (string-join (plist-get loop :human) "; ") "none")
                         (shell-quote-argument buffer-file-name) review commit))
         (goto-char parent)
@@ -223,7 +233,7 @@
          (unless (plist-get loop :human) (org-todo "DONE")))
         ("fixes"
          (if (>= (plist-get loop :round) 3)
-             (progn (setq loop (plist-put loop :phase "escalated")) (org-todo "HOLD"))
+             (progn (setq loop (plist-put loop :phase "escalated")) (org-review--escalate))
            (setq loop (plist-put loop :phase "fixes"))
            ;; Same development task and assignment, including its original Sessions.
            ;; No general-purpose resume or fresh scope is granted by a verdict.
@@ -231,10 +241,10 @@
            (org-entry-put nil "DEPLOY" "no")
            (org-dispatch--headline nil nil)
            (org-todo "AUTO")))
-        ("blocked" (setq loop (plist-put loop :phase "escalated")) (org-todo "HOLD"))
+        ("blocked" (setq loop (plist-put loop :phase "escalated")) (org-review--escalate))
         (_ (error "invalid review verdict")))
       (org-review--put "DEV_REVIEW" loop)
-      (org-dispatch--append "Dialog" (org-dispatch--entry "June"
+      (org-dispatch--append "Dialog" (org-dispatch--entry org-review-author
         (format "Review [[id:%s][round %d]] of %s: %s. %s Phase: %s. %s Permissions remain: %s No activation or deployment is authorized by review approval."
                 (plist-get loop :review) (plist-get loop :round) commit (plist-get result :verdict)
                 (plist-get result :note) (plist-get loop :phase)

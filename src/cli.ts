@@ -351,7 +351,7 @@ function formatAgenda(a: Agenda): string {
 
 function formatAgents(a: Agents): string {
 	const title = (key?: string) => (key ? (a.tasks[key]?.title ?? key) : "no task");
-	const kinds = { blocked: "blocked on a prompt", review: "ready for you to evaluate" };
+	const kinds = { blocked: "blocked on a prompt", asks: "asks you", review: "ready for you to evaluate" };
 	const lines: string[] = [];
 	const down = a.hosts.filter((h) => !h.ok);
 	if (down.length > 0) lines.push(`Unreachable: ${down.map((h) => `${h.host} (${h.error})`).join(", ")}`);

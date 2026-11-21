@@ -232,8 +232,24 @@ run finish 00000000-0000-0000-0000-000000000006 EVAL "Legacy finish, no headline
 check "a legacy finish removes a previous headline" lacks "$(grep '^:HEADLINE:' "$repeat_file")" "I'm stuck"
 check "a legacy finish also clears the freshness binding" bash -c "! grep -Eq '^:HEADLINE_STATE: *(EVAL|HOLD)$' '$repeat_file'"
 check "finish drops :auto:" line "$repeat_file" "^\* EVAL Reviewed one-off :kit:$"
-check "finish refuses HOLD without a question" has "$(run finish 00000000-0000-0000-0000-000000000006 HOLD)" "HOLD needs a question for Jon"
-check "finish refuses AUTO" has "$(run finish 00000000-0000-0000-0000-000000000006 AUTO note)" "STATE must be EVAL, HOLD, or DONE"
+check "finish refuses HOLD without what it waits for" has "$(run finish 00000000-0000-0000-0000-000000000006 HOLD)" "HOLD needs what the task waits for"
+check "finish refuses ASK without a question" has "$(run finish 00000000-0000-0000-0000-000000000006 ASK)" "ASK needs the question for Jon"
+check "finish refuses AUTO" has "$(run finish 00000000-0000-0000-0000-000000000006 AUTO note)" "STATE must be EVAL, ASK, HOLD, or DONE"
+# ASK puts a question to Jon: EVAL, the question in Dialog, an ASKED stamp; a later plain EVAL is ready for review.
+emacs -Q --batch -l "$org/dispatch/org-dispatch.el" --eval "
+  (org-dispatch--edit \"$repeat_file\" \"00000000-0000-0000-0000-000000000006\" (lambda () (org-todo \"PROG\")))" >/dev/null 2>&1
+out=$(run finish 00000000-0000-0000-0000-000000000006 ASK "1. Keep the old copy?" --headline "Two copies; which do I keep?")
+check "ASK reports a question at EVAL" has "$out" "is now EVAL (asked)"
+check "ASK leaves the task at EVAL" line "$repeat_file" "^\* EVAL Reviewed one-off :kit:$"
+check "ASK keeps its question in Dialog" line "$repeat_file" '^- Agent .*: 1\. Keep the old copy?$'
+check "ASK stamps ASKED" line "$repeat_file" '^:ASKED: *\[20[0-9-]* [A-Za-z]* [0-9:]*\]$'
+check "ASK binds its headline to EVAL" line "$repeat_file" '^:HEADLINE_STATE: *EVAL$'
+emacs -Q --batch -l "$org/dispatch/org-dispatch.el" --eval "
+  (org-dispatch--edit \"$repeat_file\" \"00000000-0000-0000-0000-000000000006\" (lambda () (org-todo \"PROG\")))" >/dev/null 2>&1
+check "leaving EVAL answers the question" bash -c "! grep -q '^:ASKED:' '$repeat_file'"
+run finish 00000000-0000-0000-0000-000000000006 ASK "Again?" >/dev/null
+run finish 00000000-0000-0000-0000-000000000006 EVAL "Done after all." >/dev/null
+check "a plain EVAL finish is ready for review, not a question" bash -c "! grep -q '^:ASKED:' '$repeat_file'"
 
 # Prompt: the retry rule appears only when Jon allowed a retry.
 render() {
@@ -250,7 +266,17 @@ check "the prompt omits retry at RETRY 0" lacks "$(render 0 '')" "org-dispatch r
 check "the prompt omits retry for a repeat" lacks "$(render 2 'SCHEDULED: <2026-10-15 Thu 04:30 +1d>\n')" "org-dispatch retry 0000"
 check "the prompt fills every placeholder" lacks "$(render 2 '')" "{{"
 check "the prompt asks for the worker's own headline" has "$(render 0 '')" 'one-line headline in your own voice'
-check "the prompt passes the headline on EVAL and HOLD" bash -c '[[ $(grep -c -- "org-dispatch finish .* --headline" <<<"$1") -eq 2 ]]' _ "$(render 0 '')"
+check "the prompt passes the headline on EVAL, ASK and HOLD" bash -c '[[ $(grep -c -- "org-dispatch finish .* --headline" <<<"$1") -eq 3 ]]' _ "$(render 0 '')"
+check "the prompt sends questions through ASK, not HOLD" has "$(render 0 '')" 'finish 00000000-0000-0000-0000-000000000007 ASK "question"'
+check "the prompt keeps HOLD for outside blockers" has "$(render 0 '')" 'HOLD means Jon has nothing to do yet'
+review_file="$ORG_DISPATCH_ROOT/agent-review.org"
+printf '%s\n' '* PROG Standing review :kit:' ':PROPERTIES:' ':ID: 00000000-0000-0000-0000-000000000031' ':REVIEW: agent' ':END:' >"$review_file"
+agent_policy=$(emacs -Q --batch -l "$org/dispatch/org-dispatch.el" --eval "
+  (with-current-buffer (find-file-noselect \"$review_file\")
+    (goto-char (point-min))
+    (princ (org-dispatch--policy (org-dispatch--task))))" 2>/dev/null)
+check "REVIEW agent tells the worker an agent reviews its exact commit" has "$agent_policy" 'An independent agent reviews this task.s exact commit'
+rm -f "$review_file"
 
 # Claiming writes the resolved HOST and AGENT into the drawer once, beside ID.
 claim_file="$ORG_DISPATCH_ROOT/claim.org"
@@ -827,7 +853,7 @@ cat >"$fixture/launch-tests.el" <<'EOF'
       (delete-directory (expand-file-name "~/.claude-acct") t)
       (delete-directory bin t))))
 
-(ert-deftest startup-failures-hold-with-the-terminal-to-inspect ()
+(ert-deftest startup-failures-go-to-jon-with-the-terminal-to-inspect ()
   (dolist (failure '(blocked exited))
     (test-with-hc
      (let* ((task (test-task "claude"))
@@ -839,7 +865,9 @@ cat >"$fixture/launch-tests.el" <<'EOF'
        (org-dispatch--edit
         (plist-get task :file) (plist-get task :id)
         (lambda ()
-          (should (equal (org-get-todo-state) "HOLD"))
+          ;; Something went wrong for Jon to look at: EVAL with ASKED, not HOLD.
+          (should (equal (org-get-todo-state) "EVAL"))
+          (should (org-entry-get nil "ASKED"))
           (should-not (org-get-tags nil t))
           ;; The chosen session is linked with its terminal, for hc read and a later resume.
           (should (string-search "@t-new][claude@kit/" (org-dispatch--subtree-text)))
@@ -848,7 +876,7 @@ cat >"$fixture/launch-tests.el" <<'EOF'
           (should (string-search "hc read t-new" (org-dispatch--subtree-text)))))
        (should-not (org-dispatch--eligible (org-dispatch--tasks) nil t))))))
 
-(ert-deftest an-unrunnable-launcher-holds-and-hc-outages-wait ()
+(ert-deftest an-unrunnable-launcher-goes-to-jon-and-hc-outages-wait ()
   (test-with-hc
    (test-with-command "claude" "claude-missing"
      (let ((task (test-task "claude")) (test-spawn-fail t))
@@ -856,7 +884,8 @@ cat >"$fixture/launch-tests.el" <<'EOF'
        (should-not (org-dispatch--states))
        (org-dispatch--edit (plist-get task :file) (plist-get task :id)
                            (lambda ()
-                             (should (equal (org-get-todo-state) "HOLD"))
+                             (should (equal (org-get-todo-state) "EVAL"))
+                             (should (org-entry-get nil "ASKED"))
                              (should-not (org-dispatch--section-bounds "Sessions"))
                              (should (string-search "claude-missing could not start" (org-dispatch--subtree-text))))))))
   (test-with-hc
@@ -907,7 +936,7 @@ cat >"$fixture/launch-tests.el" <<'EOF'
        (delete-file file)
        (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))))))
 
-(ert-deftest watch-waits-on-blocked-and-holds-a-missing-worker ()
+(ert-deftest watch-waits-on-blocked-and-hands-a-missing-worker-to-jon ()
   (test-with-hc
    (let* ((task (test-task "claude")))
      (should (org-dispatch--launch task))
@@ -921,7 +950,8 @@ cat >"$fixture/launch-tests.el" <<'EOF'
        (org-dispatch--watch (car (org-dispatch--states)))
        (org-dispatch--edit (plist-get task :file) (plist-get task :id)
                            (lambda ()
-                             (should (equal (org-get-todo-state) "HOLD"))
+                             (should (equal (org-get-todo-state) "EVAL"))
+                             (should (org-entry-get nil "ASKED"))
                              (should-not (org-get-tags nil t))
                              (should (string-search "claude is no longer running in its hc terminal t-new"
                                                     (org-dispatch--subtree-text)))))))))

@@ -1,6 +1,7 @@
 Your turn ended without finishing task {{ID}} ({{HEADING}}). This is nudge
-{{NUDGE}} of {{MAX}}; after the last one the task goes to HOLD.
+{{NUDGE}} of {{MAX}}; after the last one the task goes back to Jon.
 
 Continue the work. If it is complete, run =org-dispatch finish {{ID}} EVAL "result"=,
 or =DONE= if the rules allow it. If you need Jon, run
-=org-dispatch finish {{ID}} HOLD "question"=.
+=org-dispatch finish {{ID}} ASK "question"=. If it waits on something outside
+your and Jon's control, run =org-dispatch finish {{ID}} HOLD "what it waits for"=.

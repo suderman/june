@@ -14,7 +14,7 @@ import { within } from "./heartbeat.ts";
 import { admitNotice, type Notice, type WorkerHeadline } from "./notify.ts";
 import { Follows } from "./tools/follow.ts";
 import type { Herdr, Run } from "./tools/herdr.ts";
-import type { Org } from "./tools/org.ts";
+import { type Org, underAgentReview } from "./tools/org.ts";
 import { user } from "./user.ts";
 
 /** One run as org-dispatch records it in ~/.local/state/org-dispatch/<id>.json. */
@@ -27,9 +27,10 @@ type Seen = { signal: string; title: string; host: string; file?: string; headli
 type Ledger = { runs: Record<string, Seen>; pending: Record<string, Seen>; notified: number; hosts: string[] };
 
 /** Signals worth telling the user about; any other signal clears a pending one. */
-const NEWS = new Set(["EVAL", "HOLD", "DONE", "blocked"]);
+const NEWS = new Set(["EVAL", "asks", "HOLD", "DONE", "blocked"]);
 /** Once a finished run shows one of these, it has nothing more to say until it is run again. */
-const SETTLED = new Set(["EVAL", "HOLD", "DONE", "TODO", "missing"]);
+// An EVAL under a standing agent review ("reviewing") is not settled: its news is the review's outcome.
+const SETTLED = new Set(["EVAL", "asks", "HOLD", "DONE", "TODO", "missing"]);
 
 const STATE_DIR = ".local/state/org-dispatch";
 
@@ -95,6 +96,8 @@ export function createWatch(options: {
 		const headlineAt = Math.max(task?.headlineAt ?? 0, last?.headlineAt ?? 0);
 		if (task === undefined) return { signal: "missing", title, ...(headlineAt > 0 ? { headlineAt } : {}) };
 		let signal = task.state ?? "none";
+		if (signal === "EVAL" && task.asked) signal = "asks";
+		else if (signal === "EVAL" && underAgentReview(task)) signal = "reviewing";
 		if (signal === "PROG" && run.status !== "finished" && run.terminal) {
 			const status = await options.herdr.status(host, run.terminal).catch(() => undefined);
 			if (status === "blocked") signal = "blocked";
@@ -102,12 +105,12 @@ export function createWatch(options: {
 		// A state-bound stamp must belong to this run and be newer than the last observation.
 		const fresh = task.headline !== undefined && task.headlineAt !== undefined && run.started !== undefined
 			&& task.headlineAt >= run.started && task.headlineAt > (last?.headlineAt ?? 0)
-			&& ["EVAL", "HOLD", "DONE"].includes(signal);
+			&& ["EVAL", "asks", "HOLD", "DONE"].includes(signal);
 		const worker = task.herdrSessions.filter((session) => session.host === host).at(-1);
 		return {
 			signal, title, file: task.file,
 			...(headlineAt > 0 ? { headlineAt } : {}),
-			...(fresh ? { report: { title, signal, headline: task.headline!, ...(worker ? { agent: worker.agent, session: worker.session } : {}) } } : {}),
+			...(fresh ? { report: { title, signal: signal === "asks" ? "EVAL" : signal, headline: task.headline!, ...(worker ? { agent: worker.agent, session: worker.session } : {}) } } : {}),
 		};
 	};
 
@@ -234,7 +237,8 @@ function parse(text: string): DispatchRun[] {
 
 const SAY: Record<string, string> = {
 	EVAL: "is now EVAL, ready for review",
-	HOLD: "is on HOLD, waiting on an answer in its Dialog",
+	asks: "is at EVAL with a question or a problem for them in its Dialog",
+	HOLD: "is on HOLD, waiting on something outside; nothing for them to do yet",
 	DONE: "is DONE",
 	blocked: "has an agent blocked, waiting for a person",
 };
