@@ -181,3 +181,13 @@ test("open tasks are listed by state, dated or not, newest-touched projects firs
 	assert.equal(stateRows(agenda, "TODO").length, 9);
 	assert.deepEqual(agendaView(agenda, { new: { change: { action: "state", state: "PROG" } } }).lists.map((l) => l.n), [2, 8], "an edit on its way moves its row");
 });
+
+test("a task repeating every day has a row on each day, each with its own key", () => {
+	const daily = task("id:mail", { title: "Check school mail", state: "AUTO", scheduled: "<2026-11-22 Sun 04:30 ++1d>" });
+	const entry = { task: "id:mail", type: "scheduled", time: "04:30", date: "2026-11-22" };
+	const agenda = { generatedAt: 0, today: "2026-11-21", overdue: [], tasks: { "id:mail": daily }, counts: {}, projects: [],
+		days: [{ date: "2026-11-21", entries: [] }, { date: "2026-11-22", entries: [entry] }, { date: "2026-11-23", entries: [entry] }, { date: "2026-11-24", entries: [entry] }] };
+	const week = agendaView(agenda).sections.find((s) => s.id === "week");
+	assert.equal(week.rows.length, 3);
+	assert.equal(new Set(week.rows.map((r) => r.key)).size, 3);
+});

@@ -116,6 +116,8 @@ export function agendaView(agenda, pending, user) {
 		day.entries.forEach((e, j) => week.push(row(e, agenda, { day: j === 0 ? label : "" })));
 	}
 	if (week.length > 0) sections.push({ id: "week", title: "THIS WEEK", alert: false, rows: week });
+	// A repeating task shows on every day with the same timestamp.
+	for (const section of sections) uniqueKeys(section.rows);
 	const counts = COUNT_ORDER.filter((s) => (agenda.counts[s] ?? 0) > 0).map((s) => ({ state: s, n: agenda.counts[s] }));
 	// Every open task by state, dated or not, as a few rows with the rest a tap away; AUTO is the agents board's.
 	const lists = LISTS.map(([state, title]) => {
@@ -130,6 +132,16 @@ export function agendaView(agenda, pending, user) {
 		link: `file:~/org/${p.file}`,
 	}));
 	return { sections, counts, lists, queued, projects, today: agenda.today };
+}
+
+/** The phone's lists stop on a repeated key, so a repeat gets #2, #3. */
+function uniqueKeys(rows) {
+	const seen = {};
+	for (const r of rows) {
+		const n = seen[r.key] = (seen[r.key] ?? 0) + 1;
+		if (n > 1) r.key = `${r.key}#${n}`;
+	}
+	return rows;
 }
 
 /** The lists under the agenda, in the order they want attention. */
@@ -359,6 +371,7 @@ export function agentsView(agents, now, today, user, pending) {
 	const hosts = agents.hosts.filter((h) => h.ok).map((h) => h.host);
 	const summary = `${working.length} at work${hosts.length ? ` on ${hosts.join(", ")}` : ""}`;
 	const down = agents.hosts.filter((h) => !h.ok).map((h) => h.host);
+	for (const list of [needs, working, idle, queued, reviewing, recent]) uniqueKeys(list);
 	return { summary, needs, working, idle, queued, reviewing, recent, down };
 }
 
