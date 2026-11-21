@@ -89,6 +89,11 @@ export type Config = {
 	 * if he is up, and the nightly reflection runs from `sleep`, when he is surely asleep, until `wake`.
 	 */
 	readonly rhythm: { readonly wake: string; readonly quiet: string; readonly sleep: string };
+	/**
+	 * The phone's reminders from the agenda (android Reminders.kt). `dateOnly` is the local "HH:MM" a deadline without a
+	 * time reminds on its day, or null for none; timed entries remind at their time.
+	 */
+	readonly reminders?: { readonly dateOnly: string | null };
 	/** The nightly pass over the day's journal and memory, in the rhythm's sleep hours. */
 	readonly reflection: {
 		readonly enabled: boolean;
@@ -184,6 +189,7 @@ const DEFAULTS = {
 	org: { root: "~/org", agendaFiles: "~/.local/state/org-dispatch/agenda-files", people: "~/org/people.org", protected: ["asana.org"] as string[] },
 	herdr: { hosts: {}, allowPrompt: true },
 	rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
+	reminders: { dateOnly: "09:00" as string | null },
 	reflection: { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"], bitcoin: false },
 	heartbeat: { enabled: false, everyMinutes: 60, chattingMinutes: 15 },
 	looseEnds: { enabled: false, at: "20:30" },
@@ -251,6 +257,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 			allowPrompt: herdr.allowPrompt === true,
 		},
 		rhythm: rhythm({ ...DEFAULTS.rhythm, ...raw.rhythm }),
+		reminders: reminders({ ...DEFAULTS.reminders, ...raw.reminders }),
 		reflection: reflection({ ...DEFAULTS.reflection, ...raw.reflection }),
 		heartbeat: heartbeat({ ...DEFAULTS.heartbeat, ...raw.heartbeat }),
 		looseEnds: daily("looseEnds", { ...DEFAULTS.looseEnds, ...raw.looseEnds }),
@@ -281,6 +288,13 @@ function rhythm(given: Config["rhythm"]): Config["rhythm"] {
 	for (const key of ["wake", "quiet", "sleep"] as const)
 		if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(given[key])) throw new Error(`rhythm.${key} must be HH:MM, not ${given[key]}`);
 	return given;
+}
+
+function reminders(given: { dateOnly: string | null }): { dateOnly: string | null } {
+	if (given.dateOnly !== null && !(typeof given.dateOnly === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(given.dateOnly))) {
+		throw new Error(`reminders.dateOnly must be HH:MM, or null for no reminder at a deadline without a time, not ${given.dateOnly}`);
+	}
+	return { dateOnly: given.dateOnly };
 }
 
 function reflection(given: Config["reflection"] & { start?: unknown; end?: unknown }): Config["reflection"] {

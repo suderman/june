@@ -261,6 +261,7 @@ test("a change to the agenda alone tells clients, and a refresh after an edit re
 	assert.equal(agents.value.tasks["asana.org::*Mirrored"], undefined);
 	assert.equal((await boards.agenda()).value.tasks["asana.org::*Mirrored"]?.protected, true, "asana.org is protected without config");
 	assert.equal((await boards.agenda()).value.tasks["w.org::*Party"]?.protected, undefined);
+	assert.deepEqual((await boards.agenda()).value.reminders, { dateOnly: "09:00" }, "the phone learns when a deadline without a time reminds");
 	let told = 0;
 	boards.onChange(() => told++);
 	// An export already under way read the file before the edit; the refresh waits for it and reads again.

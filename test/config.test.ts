@@ -214,3 +214,21 @@ test("a model that sends no response headers for a minute is given up on, so the
 	assert.equal(createSettings().stream?.timeoutMs, 60_000);
 	assert.equal(createSettings({ contextCap: 1000, contextWindow: 4000 }).stream?.timeoutMs, 60_000);
 });
+
+test("a deadline without a time reminds at 09:00 unless the config names another time, or null for none", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const dirs = paths({ JUNE_CONFIG_DIR: join(tmp.dir, "config"), JUNE_DATA_DIR: join(tmp.dir, "data"), JUNE_STATE_DIR: join(tmp.dir, "state") });
+	await mkdir(dirs.config, { recursive: true });
+	const write = (reminders?: unknown) => writeFile(join(dirs.config, "config.json"), JSON.stringify({ model: { chat: { provider: "p", modelId: "m" } }, ...(reminders === undefined ? {} : { reminders }) }));
+	await write();
+	assert.deepEqual(loadConfig(dirs, {}).reminders, { dateOnly: "09:00" });
+	await write({ dateOnly: "07:30" });
+	assert.deepEqual(loadConfig(dirs, {}).reminders, { dateOnly: "07:30" });
+	await write({ dateOnly: null });
+	assert.deepEqual(loadConfig(dirs, {}).reminders, { dateOnly: null });
+	for (const bad of ["9am", "25:00", 9]) {
+		await write({ dateOnly: bad });
+		assert.throws(() => loadConfig(dirs, {}), /reminders.dateOnly must be HH:MM/);
+	}
+});

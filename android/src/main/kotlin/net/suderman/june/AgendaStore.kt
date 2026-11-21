@@ -55,5 +55,6 @@ object AgendaStore {
         for (i in 0 until days.length()) keep(days.optJSONObject(i)?.optJSONArray("entries"))
         return JSONObject().put("today", agenda.optString("today")).put("generatedAt", agenda.optLong("generatedAt"))
             .put("overdue", agenda.optJSONArray("overdue") ?: JSONArray()).put("days", days).put("tasks", named)
+            .put("reminders", agenda.optJSONObject("reminders") ?: JSONObject().put("dateOnly", "09:00"))
     }
 }

@@ -74,6 +74,8 @@ export type Agenda = {
 	days: { date: string; entries: AgendaEntry[] }[];
 	tasks: Record<string, Task>;
 	counts: Partial<Record<(typeof STATES)[number], number>>;
+	/** How the phone reminds from this agenda: the local "HH:MM" a deadline without a time reminds at, or null. */
+	reminders?: { dateOnly: string | null };
 	/** Each file holding open tasks, with its counts and when it last changed (epoch ms), most open first. */
 	projects: { file: string; title: string; counts: Partial<Record<(typeof STATES)[number], number>>; changed?: number }[];
 };
@@ -496,6 +498,7 @@ export class Boards {
 				const value = await loadAgenda(this.#o.config.org.agendaFiles, this.#o.config.org.root, this.#o.run, this.#o.env, Date.now(), this.#o.org);
 				const protectedFiles = new Set(protectedOf(this.#o.config.org));
 				for (const task of Object.values(value.tasks)) if (protectedFiles.has(task.file)) task.protected = true;
+				value.reminders = { dateOnly: this.#o.config.reminders ? this.#o.config.reminders.dateOnly : "09:00" };
 				const before = this.revisions();
 				const held = hold(value, this.#agenda);
 				this.#agenda = held;

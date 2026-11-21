@@ -16,7 +16,8 @@ import java.time.ZoneId
 /**
  * Bloom's reminders, from June's agenda: an exact alarm at each timed SCHEDULED and DEADLINE in the phone's copy of
  * the agenda (AgendaStore), and at a timed timestamp on a heading with a state, for headings that are not AUTO, whose
- * starts are the agents', or DONE. That is how June sets a reminder for the user: a TODO with a deadline. A plain
+ * starts are the agents', or DONE. That is how June sets a reminder for the user: a TODO with a deadline. A deadline
+ * without a time reminds on its day at the config's reminders.dateOnly (09:00 unless set; null for none). A plain
  * event (a timestamp on a heading without a state, as the calendar mirrors write) gets none: the calendar has it. They are set again whenever the agenda changes, after a boot
  * and after an update. A reminder's notification opens the task's page; Done marks it DONE through the daemon,
  * as the boards do, and Snooze brings it back in ten minutes.
@@ -34,6 +35,8 @@ object Reminders {
         val agenda = AgendaStore.load(context)?.agenda ?: return emptyList()
         val tasks = agenda.optJSONObject("tasks") ?: JSONObject()
         val zone = ZoneId.systemDefault()
+        val dateOnly = agenda.optJSONObject("reminders")?.let { if (it.isNull("dateOnly")) null else it.optString("dateOnly") }
+            ?.let { runCatching { LocalTime.parse(it) }.getOrNull() }
         val out = mutableListOf<Due>()
         val days = agenda.optJSONArray("days") ?: return emptyList()
         for (i in 0 until days.length()) {
@@ -44,13 +47,15 @@ object Reminders {
                 val e = entries.optJSONObject(j) ?: continue
                 val type = e.optString("type")
                 if (type != "scheduled" && type != "deadline" && type != "timestamp") continue
-                val time = runCatching { LocalTime.parse(e.optString("time")) }.getOrNull() ?: continue
+                val timed = runCatching { LocalTime.parse(e.optString("time")) }.getOrNull()
+                // A deadline with no time reminds on its own day, at the configured hour.
+                val time = timed ?: (if (type == "deadline" && e.optString("date") == day.optString("date")) dateOnly else null) ?: continue
                 val task = tasks.optJSONObject(e.optString("task")) ?: continue
                 val state = task.optString("state")
                 if (state == "AUTO" || state == "DONE" || (type == "timestamp" && state.isEmpty())) continue
                 val at = date.atTime(time).atZone(zone).toInstant().toEpochMilli()
                 if (at <= now) continue
-                out += Due(e.optString("task"), task.optString("title"), when (type) { "deadline" -> "due ${e.optString("time")}"; "scheduled" -> "scheduled ${e.optString("time")}"; else -> "at ${e.optString("time")}" }, state, at)
+                out += Due(e.optString("task"), task.optString("title"), when { timed == null -> "due today"; type == "deadline" -> "due ${e.optString("time")}"; type == "scheduled" -> "scheduled ${e.optString("time")}"; else -> "at ${e.optString("time")}" }, state, at)
             }
         }
         return out.distinctBy { listOf(it.key, it.what, it.at) }.sortedBy { it.at }.take(MOST)
