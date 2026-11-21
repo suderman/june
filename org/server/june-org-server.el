@@ -30,8 +30,9 @@
                      (not (verify-visited-file-modtime buffer))))
         (with-current-buffer buffer (set-buffer-modified-p nil))
         (kill-buffer buffer))))
-  ;; June's config may change while this runs; org-dispatch reads it again when asked.
-  (setq org-dispatch--defaults nil))
+  ;; June's config and Jon's agenda files may change while this runs; org-dispatch reads them again when asked.
+  (setq org-dispatch--defaults nil
+        org-dispatch--agenda-memo nil))
 
 (defun june-org-server--run (op args)
   "Run OP with ARGS, as the org-edit wrapper or the agenda export would, and return what it printed."

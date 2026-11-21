@@ -16,7 +16,8 @@ if [[ -z ${TZDIR:-} && ! -d /usr/share/zoneinfo && -d /etc/zoneinfo ]]; then exp
 batch=(emacs -Q --batch -l "$ORG_DISPATCH_EL")
 
 case ${1:-run} in
-  run) exec flock --close -n "${XDG_RUNTIME_DIR:-/tmp}/org-dispatch.lock" "${batch[@]}" -f org-dispatch-run ;;
+  # The run takes the lock itself, after listing the agenda files (org-dispatch--with-lock).
+  run) exec "${batch[@]}" -f org-dispatch-run ;;
   scan) exec "${batch[@]}" -f org-dispatch-scan ;;
   reconcile)
     [[ $# -eq 2 && $2 == --dry-run ]] || { echo "only reconcile --dry-run is supported; enabled runs retire workers" >&2; exit 2; }

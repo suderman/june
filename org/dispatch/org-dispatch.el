@@ -315,11 +315,42 @@ Terminal-level done and blocked notices come from its event consumer."
 
 ;;; Org
 
+(defvar org-dispatch--agenda-memo nil
+  "Within one dispatcher run, its agenda files as (FILES . WRITE).
+The run loads Jon's Emacs config once, not at every step that wants
+the list. WRITE is non-nil while a list read from the config has yet
+to be written to the cache file. Outside a run, which binds
+`org-dispatch--memoize', every call reads the config again.")
+
+(defvar org-dispatch--memoize nil
+  "Non-nil while one dispatcher run may reuse its list of agenda files.")
+
 (defun org-dispatch--agenda-files (&optional read-only)
   "Jon's `org-agenda-files', read by loading his Emacs config in batch.
 Cache the list, and reuse the last good one when the config fails to load,
 so a half-edited config does not stop dispatching.
 READ-ONLY leaves the cache alone."
+  (unless (and org-dispatch--memoize org-dispatch--agenda-memo)
+    (setq org-dispatch--agenda-memo (org-dispatch--read-agenda-files)))
+  (when (and (not read-only) (cdr org-dispatch--agenda-memo))
+    (org-dispatch--write-agenda-cache (cadr org-dispatch--agenda-memo))
+    (setcdr org-dispatch--agenda-memo nil))
+  (seq-filter (lambda (file)
+                (and (file-regular-p file)
+                     (not (string-search ".sync-conflict-" file))))
+              (car org-dispatch--agenda-memo)))
+
+(defun org-dispatch--write-agenda-cache (files)
+  "Write FILES to the cached agenda list.
+June's boards read it, and a run whose config fails to load."
+  (make-directory org-dispatch-state-dir t)
+  (with-temp-file (expand-file-name "agenda-files" org-dispatch-state-dir) (insert (string-join files "\n"))))
+
+(defun org-dispatch--read-agenda-files ()
+  "Jon's agenda files as (FILES . WRITE).
+FILES come from his Emacs config, else the cache, else every Org file
+under the root. WRITE holds the list read from the config, to be
+written to the cache, or nil when the config failed to load."
   (let ((cache (expand-file-name "agenda-files" org-dispatch-state-dir))
         files)
     (when (file-readable-p org-dispatch-emacs-init)
@@ -332,25 +363,17 @@ READ-ONLY leaves the cache alone."
           (while (re-search-forward "^org-dispatch-file:\\(.+\\)$" nil t)
             (push (match-string 1) files)))))
     (if files
-        (progn
-          (setq files (nreverse files))
-          (unless read-only
-            (make-directory org-dispatch-state-dir t)
-            (with-temp-file cache (insert (string-join files "\n")))))
+        (let ((files (nreverse files))) (cons files (list files)))
       (org-dispatch--log "could not read org-agenda-files from %s; using %s"
                          org-dispatch-emacs-init
                          (if (file-exists-p cache) "the cached list" org-dispatch-root))
-      (setq files (if (file-exists-p cache)
-                      (with-temp-buffer
-                        (insert-file-contents cache)
-                        (split-string (buffer-string) "\n" t))
-                    (directory-files-recursively
-                     org-dispatch-root "\\.org\\'" nil
-                     (lambda (dir) (not (string-prefix-p "." (file-name-nondirectory dir))))))))
-    (seq-filter (lambda (file)
-                  (and (file-regular-p file)
-                       (not (string-search ".sync-conflict-" file))))
-                files)))
+      (list (if (file-exists-p cache)
+                (with-temp-buffer
+                  (insert-file-contents cache)
+                  (split-string (buffer-string) "\n" t))
+              (directory-files-recursively
+               org-dispatch-root "\\.org\\'" nil
+               (lambda (dir) (not (string-prefix-p "." (file-name-nondirectory dir))))))))))
 
 (defun org-dispatch--files (&optional agenda)
   "Live AGENDA files, or Jon's agenda files, with an AUTO heading."
@@ -1966,7 +1989,44 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
       (org-dispatch--write-json file new))
     (append (nreverse eligible) (nreverse reports))))
 
+(defvar org-dispatch-lock-wait 5
+  "Seconds a run waits for the dispatcher lock before skipping a pass.
+June's board edits hold it for milliseconds; another run holds it
+for its whole pass.")
+
+(defun org-dispatch--with-lock (function)
+  "Call FUNCTION holding the dispatcher lock that org-edit shares.
+Skip it and return nil when the lock stays taken for
+`org-dispatch-lock-wait' seconds. A separate flock process holds it,
+closing its descriptor before its command, so nothing this run starts
+inherits the lock, and the lock goes when that process or Emacs ends."
+  (let* ((file (expand-file-name "org-dispatch.lock" (or (getenv "XDG_RUNTIME_DIR") "/tmp")))
+         (output "")
+         (holder (make-process
+                  :name "org-dispatch-lock" :noquery t :connection-type 'pipe
+                  :command (list "flock" "--close" "-w" (number-to-string org-dispatch-lock-wait) "-E" "75" file
+                                 "sh" "-c" "echo held; exec cat >/dev/null")
+                  :filter (lambda (_process text) (setq output (concat output text))))))
+    (while (and (process-live-p holder) (not (string-search "held" output)))
+      (accept-process-output holder 0.1))
+    (if (not (string-search "held" output))
+        (progn (when (process-live-p holder) (delete-process holder)) nil)
+      (unwind-protect (funcall function)
+        (when (process-live-p holder) (delete-process holder))))))
+
 (defun org-dispatch-run ()
+  "One dispatcher pass.
+Listing Jon's agenda files loads his Emacs config in a second Emacs,
+a second or more, and reads no task, so it happens before the lock;
+everything that reads or writes tasks happens under it."
+  (let ((org-dispatch--memoize t) (org-dispatch--agenda-memo nil))
+    (org-dispatch--agenda-files)
+    (org-dispatch--with-lock #'org-dispatch--run-locked)))
+
+(defun org-dispatch--run-locked ()
+  "The pass under the dispatcher lock.
+Watch running tasks, retire finished workers, advance agent reviews,
+then launch."
   (dolist (state (org-dispatch--states))
     (condition-case err
         (org-dispatch--watch state)
