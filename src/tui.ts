@@ -14,6 +14,7 @@ import {
 	type MarkdownTheme,
 	matchesKey,
 	ProcessTerminal,
+	type ProgramStatus,
 	ScrollView,
 	TuiAltScreen,
 	truncateToWidth,
@@ -143,6 +144,26 @@ const CHORES = [
 ];
 const LATE = ["nearly there, reckon", "still at it, don't rush me", "this one's a big swag"];
 const TRACK = 8;
+
+/** What the terminal client tells herdr-core and other OSC 7501 terminals about June. One June answers every surface,
+ * so a reply to Telegram or the phone shows here as working too. Prompts and replies are never reported. */
+export function programStatus(now: {
+	connection: "connecting" | "online" | "offline";
+	running: boolean;
+	background: number;
+	queued: number;
+	compacting: boolean;
+	notice?: string;
+	answered: boolean;
+}): ProgramStatus {
+	const app = "june";
+	if (now.connection === "offline") return { state: "error", app, message: "Daemon unreachable" };
+	if (now.compacting) return { state: "working", app, message: "Compacting" };
+	if (now.running) return { state: "working", app, message: now.queued ? `${now.queued} queued` : "June" };
+	if (now.background > 0) return { state: "working", app, message: "Working in the background" };
+	if (now.notice) return { state: "error", app, message: now.notice };
+	return { state: now.answered ? "done" : "idle", app, message: "June" };
+}
 
 /**
  * A kangaroo hopping along a track, a chore, and the time so far. Past a minute she gets a touch defensive. Noto's
@@ -297,7 +318,8 @@ class TranscriptView extends Container {
 }
 
 export async function runTui(socketPath: string): Promise<void> {
-	const tui = new TuiAltScreen(new ProcessTerminal(), false, undefined, {
+	const terminal = new ProcessTerminal();
+	const tui = new TuiAltScreen(terminal, false, undefined, {
 		openUrl: (url) => {
 			const moment = momentOf(url);
 			if (moment !== undefined) return void browse("at", String(moment)).catch(fail);
@@ -334,6 +356,9 @@ export async function runTui(socketPath: string): Promise<void> {
 	// /compact's own start, before the daemon's compaction event arrives; the transcript's wins once it does.
 	let compactStarted: number | undefined;
 	let ticker: ReturnType<typeof setInterval> | undefined;
+	// Idle until June works while this client watches; done after that, as Pi reports.
+	let answered = false;
+	let reported: string | undefined;
 	let done!: () => void;
 	const finished = new Promise<void>((resolve) => (done = resolve));
 
@@ -358,6 +383,13 @@ export async function runTui(socketPath: string): Promise<void> {
 		status.text = parts.join(c.muted(" · "));
 		view.update(transcript);
 		tui.requestRender();
+		const { running, background, queued, notice } = transcript.state;
+		if (running || background > 0 || since !== undefined) answered = true;
+		const report = programStatus({ connection, running, background, queued, compacting: since !== undefined, notice, answered });
+		const key = JSON.stringify(report);
+		if (key === reported) return; // the compaction stopwatch redraws four times a second
+		reported = key;
+		terminal.setProgramStatus(report);
 	};
 
 	const exit = () => {

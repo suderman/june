@@ -25,7 +25,7 @@ export const runProcess: Run = (argv, timeoutMs) =>
 export type Terminal = {
 	address: string;
 	state: "live" | "finished";
-	status?: { state?: string; kind?: string; msg?: string } | null;
+	status?: { state?: string; app?: string; kind?: string; msg?: string } | null;
 	labels?: Record<string, string>;
 	cwd?: string;
 	title?: string;
@@ -120,7 +120,7 @@ export class Herdr {
 		const { prefix } = await this.#argv(host, []);
 		const list = await this.#json(host, ["ls", "--json"]);
 		const rows = (list?.terminals ?? []).filter((row: any) =>
-			row.state === "live" && sameHost(row.address, prefix) && (AGENTS.test(row.agent ?? "") || row.status != null));
+			row.state === "live" && sameHost(row.address, prefix) && row.agent !== "june" && (AGENTS.test(row.agent ?? "") || row.status != null));
 		const full = await Promise.all(rows.map((row: any) => this.#json(host, ["get", row.address, "--json"]).catch(() => undefined)));
 		return rows.map((row: any, i: number) => summarize(host, prefix, row, full[i]));
 	}
@@ -130,9 +130,12 @@ export class Herdr {
 		return this.#run(argv, 15_000);
 	}
 
-	/** Type TEXT into a local terminal and press Enter; hc refuses one that is blocked on a dialog. */
-	prompt(target: string, text: string): Promise<any> {
-		return this.#json(this.#config.host, ["send", checkTarget(target), text, "--json"]);
+	/** Type TEXT into a local terminal and press Enter; hc refuses one that is blocked on a dialog. June's own terminal
+	 * client reports itself as app june, and June does not prompt herself. */
+	async prompt(target: string, text: string): Promise<any> {
+		checkTarget(target);
+		if ((await this.terminal(this.#config.host, target))?.status?.app === "june") throw new Error(`${target} is June's own terminal client`);
+		return this.#json(this.#config.host, ["send", target, text, "--json"]);
 	}
 }
 

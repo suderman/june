@@ -12,7 +12,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { orgToMarkdown } from "../src/org.ts";
 import { plain } from "../src/plain.ts";
 import { fold } from "../src/transcript.ts";
-import { compactingStatus, daysText, localCommand, openTuiLink, previousDay, searchText, Transcript } from "../src/tui.ts";
+import { compactingStatus, daysText, programStatus, localCommand, openTuiLink, previousDay, searchText, Transcript } from "../src/tui.ts";
 
 test("terminal clicks use desktop file routing, session jumps and web opening without a shell", async () => {
 	const calls: string[][] = [];
@@ -155,6 +155,20 @@ test("the compaction line hops, changes chores, counts time, and keeps its width
 	assert.ok(chore(1000) && chore(7000) && chore(1000) !== chore(7000), "the chore changes every six seconds");
 	assert.match(compactingStatus(65_000), /1:05/);
 	assert.match(compactingStatus(65_000), /nearly there|don't rush me|big swag/, "past a minute she gets defensive");
+});
+
+test("the terminal reports June's state over OSC 7501 as app june, from any surface's work, without prompt or reply text", () => {
+	const now = { connection: "online" as const, running: false, background: 0, queued: 0, compacting: false, answered: false };
+	assert.deepEqual(programStatus(now), { state: "idle", app: "june", message: "June" });
+	assert.deepEqual(programStatus({ ...now, running: true }), { state: "working", app: "june", message: "June" });
+	assert.deepEqual(programStatus({ ...now, running: true, queued: 2 }), { state: "working", app: "june", message: "2 queued" });
+	assert.equal(programStatus({ ...now, background: 1 }).state, "working", "background work keeps her busy, as Claude reports it");
+	assert.deepEqual(programStatus({ ...now, compacting: true }), { state: "working", app: "june", message: "Compacting" });
+	assert.deepEqual(programStatus({ ...now, answered: true }), { state: "done", app: "june", message: "June" });
+	assert.deepEqual(programStatus({ ...now, notice: "compaction failed: boom" }), { state: "error", app: "june", message: "compaction failed: boom" });
+	assert.equal(programStatus({ ...now, running: true, notice: "retrying: overloaded" }).state, "working", "a retry is still work");
+	assert.deepEqual(programStatus({ ...now, connection: "offline", running: true }), { state: "error", app: "june", message: "Daemon unreachable" });
+	assert.equal(programStatus({ ...now, connection: "connecting" }).state, "idle");
 });
 
 test("the view says while a compaction runs, so a client that attaches mid-compaction shows it too", () => {
