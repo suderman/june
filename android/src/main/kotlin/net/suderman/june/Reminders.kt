@@ -15,8 +15,9 @@ import java.time.ZoneId
 
 /**
  * Bloom's reminders, from June's agenda: an exact alarm at each timed SCHEDULED and DEADLINE in the phone's copy of
- * the agenda (AgendaStore), for headings that are not AUTO, whose starts are the agents', or DONE. That is how June
- * sets a reminder for the user: a TODO with a deadline. They are set again whenever the agenda changes, after a boot
+ * the agenda (AgendaStore), and at a timed timestamp on a heading with a state, for headings that are not AUTO, whose
+ * starts are the agents', or DONE. That is how June sets a reminder for the user: a TODO with a deadline. A plain
+ * event (a timestamp on a heading without a state, as the calendar mirrors write) gets none: the calendar has it. They are set again whenever the agenda changes, after a boot
  * and after an update. A reminder's notification opens the task's page; Done marks it DONE through the daemon,
  * as the boards do, and Snooze brings it back in ten minutes.
  */
@@ -42,14 +43,14 @@ object Reminders {
             for (j in 0 until entries.length()) {
                 val e = entries.optJSONObject(j) ?: continue
                 val type = e.optString("type")
-                if (type != "scheduled" && type != "deadline") continue
+                if (type != "scheduled" && type != "deadline" && type != "timestamp") continue
                 val time = runCatching { LocalTime.parse(e.optString("time")) }.getOrNull() ?: continue
                 val task = tasks.optJSONObject(e.optString("task")) ?: continue
                 val state = task.optString("state")
-                if (state == "AUTO" || state == "DONE") continue
+                if (state == "AUTO" || state == "DONE" || (type == "timestamp" && state.isEmpty())) continue
                 val at = date.atTime(time).atZone(zone).toInstant().toEpochMilli()
                 if (at <= now) continue
-                out += Due(e.optString("task"), task.optString("title"), if (type == "deadline") "due ${e.optString("time")}" else "scheduled ${e.optString("time")}", state, at)
+                out += Due(e.optString("task"), task.optString("title"), when (type) { "deadline" -> "due ${e.optString("time")}"; "scheduled" -> "scheduled ${e.optString("time")}"; else -> "at ${e.optString("time")}" }, state, at)
             }
         }
         return out.distinctBy { listOf(it.key, it.what, it.at) }.sortedBy { it.at }.take(MOST)
