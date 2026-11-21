@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -226,7 +227,8 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     // The calendar and search, in place of the strip while open (Browse.kt).
     var browsing by remember { mutableStateOf(false) }
     // The full screen's tabs: the strip, or the agents or projects board (Boards.kt). The assistant sheet keeps the strip.
-    var tab by remember { mutableStateOf("strip") }
+    // Kept across Android remaking the screen, as the boards keep their place.
+    var tab by rememberSaveable { mutableStateOf("strip") }
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides links) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
         Column(Modifier.fillMaxWidth().then(header ?: Modifier)) {
@@ -280,7 +282,8 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
         }
         if (link.status is LinkStatus.Linked) DayBar(link, palette, browsing) { browsing = !browsing }
         val ready = decisions
-        val boards = !fromSheet && ready != null && link.status is LinkStatus.Linked
+        // The boards stay while the link comes back after June was in the background, so their place is kept.
+        val boards = !fromSheet && ready != null && (link.status is LinkStatus.Linked || link.agenda != null || link.agents != null)
         if (boards) {
             val needs = link.agents?.optJSONArray("needs")?.length() ?: 0
             BoardTabs(tab, needs, palette) { tab = it; if (it != "strip") link.wantBoards() }

@@ -36,6 +36,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -356,8 +357,8 @@ fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifie
         }.getOrNull()
     }
     val open = LocalUriHandler.current
-    var idleOpen by remember { mutableStateOf(false) }
-    var page by remember { mutableStateOf("") }
+    var idleOpen by rememberSaveable { mutableStateOf(false) }
+    var page by rememberSaveable { mutableStateOf("") }
     // A row with a task opens its page; one without opens where it can.
     val show: (String, String) -> Unit = { task, target ->
         if (task.isNotEmpty() && link.task(task) != null) {
@@ -407,8 +408,8 @@ fun ProjectsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modif
     LaunchedEffect(Unit) { link.wantBoards() }
     val colours = rememberColours(decisions)
     // agenda, projects, or one state's tasks.
-    var mode by remember { mutableStateOf("agenda") }
-    var drill by remember { mutableStateOf("") }
+    var mode by rememberSaveable { mutableStateOf("agenda") }
+    var drill by rememberSaveable { mutableStateOf("") }
     val user = link.agents?.optString("user") ?: ""
     val view by produceState<JSONObject?>(null, link.agenda, link.pending) {
         val agenda = link.agenda
@@ -419,7 +420,7 @@ fun ProjectsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modif
         value = if (agenda == null || drill.isEmpty()) emptyList() else runCatching { JSONArray(decisions.call("board.stateRows", agenda, drill, link.pending, user)).objects() }.getOrDefault(emptyList())
     }
     val open = LocalUriHandler.current
-    var page by remember { mutableStateOf("") }
+    var page by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(link.taskMoved) { if (link.taskMoved.first == page && page.isNotEmpty()) page = link.taskMoved.second }
     if (page.isNotEmpty() && colours != null) { TaskPage(link, decisions, colours, palette, page, if (mode == "state") listTitle(drill).lowercase() else mode, { page = "" }, modifier); return }
     val show: (JSONObject) -> Unit = { e -> val task = e.optString("task"); if (task.isNotEmpty() && link.task(task) != null) page = task else e.optString("link").takeIf { it.isNotEmpty() && it != "null" }?.let { open.openUri(it) } }

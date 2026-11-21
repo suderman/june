@@ -293,6 +293,8 @@ class Link(private val context: Context) {
         active = false
         taking = emptyMap()
         main.removeCallbacksAndMessages(null)
+        // That cancelled the outbox's tick too; the next change starts it again.
+        ticking = false
         socket?.close(1000, "session hidden")
         socket = null
     }
