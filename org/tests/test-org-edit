@@ -309,6 +309,12 @@ shifted="$HOME/org/shifted.org"
 printf '* TODO Shifted\n' >"$shifted"
 check "schedule refuses a day that does not exist" has "$(run schedule "$shifted" Shifted '2026-02-31')" 'no such date 2026-02-31'
 check "a refused date leaves the heading unscheduled" test "$(<"$shifted")" = '* TODO Shifted'
+check "a twelve-hour time is read" has "$(run date 'mon 9:30pm')" ' Mon 21:30>'
+check "noon and midnight are read" has "$(run date '12pm') $(run date '12am')" ' 12:00> .* 00:00>'
+check "a time alone is today's" has "$(run date '9am')" "<$(TZ=America/Edmonton date +%F) [A-Z][a-z][a-z] 09:00>"
+check "+2h starts two hours from now" has "$(run date '+2h')" "<$(TZ=America/Edmonton date -d '+2 hours' +'%F %a %H'):"
+check "13pm is refused" has "$(run date '13pm')" 'no such time'
+check "+2h is a repeater after a date" has "$(run date 'fri 9:00 +2h')" ' 09:00 +2h>'
 check "missing zone data stops instead of using UTC" has "$(TZDIR=/nonexistent run date '+0d')" 'No zone data for America/Edmonton'
 
 cp "$tasks" "$HOME/org/asana.org"

@@ -22,6 +22,8 @@ Item {
   property var notice: ({ key: "", text: "" })
   // Who a task can be handed to, and where by default (the agents board's dispatch).
   property var dispatch: null
+  // The user's edits on their way (shell.qml pendingEdits), shown as made.
+  property var pending: ({})
   // A rename moves a task without an ID to a new key; its page follows.
   onNoticeChanged: if ((notice.from ?? "") !== "" && notice.from === detailKey) detailKey = notice.key
 
@@ -41,7 +43,9 @@ Item {
     visible: board.detailKey !== ""
     backLabel: "agents"
     id: detailPage
-    detail: board.detailKey !== "" ? Board.taskDetail(Board.findTask(board.tasks, board.detailKey), board.user, board.today, Date.now()) : null
+    detail: board.detailKey !== "" ? Board.taskPage(board.tasks, board.detailKey, board.pending, board.user, board.today, Date.now()) : null
+    today: board.today
+    undo: board.notice.key === board.detailKey || board.notice.key === (detailPage.detail?.key ?? "") ? (board.notice.undo ?? null) : null
     dispatch: board.dispatch
     onBack: board.detailKey = ""
     onOpen: link => board.open(link)

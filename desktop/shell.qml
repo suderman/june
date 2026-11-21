@@ -49,10 +49,15 @@ ShellRoot {
   // Do not disturb: she never pops up by herself, though summoning her works as ever. It is mako's mode, so the
   // desktop and June keep one switch; without mako it is this device's alone.
   property bool localQuiet: false
-  readonly property bool quiet: systemModes === null ? localQuiet : Desktop.quietIn(systemModes)
+  // The mode asked of mako, shown at once until mako's own modes say it took, or the call fails.
+  property var askedQuiet: null
+  readonly property bool quiet: askedQuiet !== null ? askedQuiet : systemModes === null ? localQuiet : Desktop.quietIn(systemModes)
   onQuietChanged: if (quiet && miniShown && !miniSummoned) hideMini()
+  onSystemModesChanged: if (askedQuiet !== null && !quietSetter.running && systemModes !== null && Desktop.quietIn(systemModes) === askedQuiet) askedQuiet = null
   function setQuiet(on) {
     if (systemModes === null) { localQuiet = on; return; }
+    if (quietSetter.running) return;
+    askedQuiet = on;
     quietSetter.command = Desktop.setQuietCall(systemModes, on);
     quietSetter.running = true;
   }
@@ -67,7 +72,13 @@ ShellRoot {
     command: Desktop.SCHEME_CALL
     stdout: StdioCollector { onStreamFinished: root.systemScheme = Desktop.parseScheme(text) }
   }
-  Process { id: quietSetter; onExited: modesReader.running = true }
+  Process {
+    id: quietSetter
+    // A failed call puts back what mako says.
+    onExited: (code, status) => { if (code !== 0) root.askedQuiet = null; else quietSettle.restart(); modesReader.running = true; }
+  }
+  // However the call went, mako's own modes are the truth a few seconds on.
+  Timer { id: quietSettle; interval: 4000; onTriggered: root.askedQuiet = null }
   // Opens a herdr link (herdr-link focuses or resumes the agent's pane in kitty) or a file link (emacsclient).
   Process { id: linker }
   // Opens a link from June's words as Strip.linkKind allows: a web page in the browser, an agent's session through
@@ -127,25 +138,76 @@ ShellRoot {
   property var agentsBoard: null
   property var boardRevisions: ({ agenda: "", agents: "" })
   property real boardNow: Date.now()
-  readonly property var agendaView: Board.agendaView(agendaBoard)
-  readonly property var agentsView: Board.agentsView(agentsBoard, boardNow, agendaBoard?.today ?? "", agentsBoard?.user ?? "")
+  readonly property var agendaView: Board.agendaView(agendaBoard, pendingEdits, agentsBoard?.user ?? "")
+  readonly property var agentsView: Board.agentsView(agentsBoard, boardNow, agendaBoard?.today ?? "", agentsBoard?.user ?? "", pendingEdits)
   function wantBoards() {
     if (boardsWanted) return;
     boardsWanted = true;
     fetchBoards(true, true);
   }
   // The user's edits from a task's page (src/board-edit.ts), and what the last one said.
-  property var taskNotice: ({ key: "", text: "", pending: "" })
+  // An edit shows as made the moment it is sent (board.mjs pendingTask), and its task takes no other until the daemon
+  // answers. A refusal, a dropped connection or no answer puts back what the board says; once saved, the overlay goes
+  // when the boards that carry the edit arrive.
+  // pendingEdits: { [key]: { change, id, done, at, undo } }, and seen: the reviews opened since the last agents board.
+  property var taskNotice: ({ key: "", text: "", pending: "", from: "", undo: null })
+  property var pendingEdits: ({})
+  property bool agentsFetching: false
+  function setPending(next) { pendingEdits = next; }
   function editTask(key, change) {
+    const held = pendingEdits[key];
+    if (held && !held.done) return;
+    const task = Board.findTask(Object.assign({}, agendaBoard?.tasks ?? {}, agentsBoard?.tasks ?? {}), key);
     const id = rid();
-    if (send({ op: "task", requestId: id, key: key, edit: change })) taskNotice = { key: key, text: "saving…", pending: id };
-    else taskNotice = { key: key, text: "not connected", pending: "" };
+    if (!send({ op: "task", requestId: id, key: key, edit: change })) {
+      taskNotice = { key: key, text: "not connected", pending: "", from: "", undo: null };
+      return;
+    }
+    // A state change can be put back; the board's state is what it goes back to.
+    const undo = change.action === "state" && (task?.state ?? "") !== "" ? { action: "state", state: task.state } : null;
+    const next = Object.assign({}, pendingEdits);
+    next[key] = { change: change, id: id, done: false, at: Date.now(), undo: undo };
+    setPending(next);
+    taskNotice = { key: key, text: "", pending: id, from: "", undo: null };
   }
-  // A review or question the user opened is seen everywhere; the daemon answers with the agents board.
-  function markSeen(key) { send({ op: "seen", requestId: rid(), keys: [key] }); }
+  function pendingById(id) {
+    for (const key in pendingEdits) if (key !== "seen" && pendingEdits[key].id === id) return key;
+    return "";
+  }
+  function dropPending(keys) {
+    if (keys.length === 0) return;
+    const next = Object.assign({}, pendingEdits);
+    for (const key of keys) delete next[key];
+    setPending(next);
+  }
+  // Saved edits stop overlaying once a board newer than the save has arrived.
+  function settlePending() {
+    if (agentsFetching) return;
+    dropPending(Object.keys(pendingEdits).filter(k => k !== "seen" && pendingEdits[k].done));
+  }
+  Timer {
+    interval: 1000; repeat: true; running: Object.keys(root.pendingEdits).length > 0
+    onTriggered: {
+      const now = Date.now();
+      const keys = Object.keys(root.pendingEdits).filter(k => k !== "seen");
+      // No answer in 30 s: show the board as it stands. A save whose boards never moved settles after 6 s.
+      const lost = keys.filter(k => !root.pendingEdits[k].done && now - root.pendingEdits[k].at > 30000);
+      if (lost.length > 0) root.taskNotice = { key: lost[0], text: "June didn't answer; this is what the board says", pending: "", from: "", undo: null };
+      root.dropPending(lost.concat(keys.filter(k => root.pendingEdits[k].done && now - root.pendingEdits[k].at > 6000)));
+    }
+  }
+  // "saved" and its undo fade after a few seconds; refusals stay until the next edit.
+  Timer { id: noticeFade; interval: 5000; onTriggered: if (root.taskNotice.text === "saved") root.taskNotice = { key: root.taskNotice.key, text: "", pending: "", from: "", undo: null } }
+  // A review or question the user opened is seen everywhere at once; the daemon answers with the agents board.
+  function markSeen(key) {
+    const next = Object.assign({}, pendingEdits);
+    next.seen = (pendingEdits.seen ?? []).concat([key]);
+    setPending(next);
+    send({ op: "seen", requestId: rid(), keys: [key] });
+  }
   function fetchBoards(agenda, agents) {
     if (agenda) send({ op: "agenda", requestId: rid() });
-    if (agents) send({ op: "agents", requestId: rid() });
+    if (agents && send({ op: "agents", requestId: rid() })) agentsFetching = true;
   }
   // "3 min ago" moves on without a new board.
   Timer { interval: 60000; running: root.boardsWanted; repeat: true; onTriggered: root.boardNow = Date.now() }
@@ -563,27 +625,45 @@ ShellRoot {
     if (reply.type === "hello") {
       fetchArt(reply.avatar);
       root.attached = attachedUrl(reply.attached);
-      // A new connection must ask again to keep the boards fresh.
+      // A new connection must ask again to keep the boards fresh; an edit sent on the old one may never be answered.
+      const unanswered = Object.keys(pendingEdits).filter(k => k !== "seen" && !pendingEdits[k].done);
+      if (unanswered.length > 0) taskNotice = { key: unanswered[0], text: "The connection dropped; this is what the board says", pending: "", from: "", undo: null };
+      dropPending(unanswered);
+      agentsFetching = false;
       if (boardsWanted) fetchBoards(true, true);
       return;
     }
     if (reply.type === "agenda") {
       agendaBoard = reply.agenda;
       boardRevisions = Object.assign({}, boardRevisions, { agenda: reply.revision });
+      settlePending();
       return;
     }
     if (reply.type === "task") {
-      if (reply.requestId === taskNotice.pending) taskNotice = { key: reply.key, from: reply.from ?? "", text: "saved", pending: "" };
+      const key = pendingById(reply.requestId);
+      if (key === "") return;
+      const held = pendingEdits[key];
+      const next = Object.assign({}, pendingEdits);
+      delete next[key];
+      next[reply.key] = Object.assign({}, held, { done: true, at: Date.now() });
+      setPending(next);
+      taskNotice = { key: reply.key, from: reply.from ?? "", text: "saved", pending: "", undo: held.undo };
+      noticeFade.restart();
       return;
     }
-    if (reply.type === "error" && reply.requestId !== undefined && reply.requestId === taskNotice.pending) {
-      taskNotice = { key: taskNotice.key, text: reply.message, pending: "" };
+    if (reply.type === "error" && reply.requestId !== undefined && pendingById(reply.requestId) !== "") {
+      const key = pendingById(reply.requestId);
+      dropPending([key]);
+      taskNotice = { key: key, text: reply.message, pending: "", from: "", undo: null };
       return;
     }
     if (reply.type === "agents") {
       agentsBoard = reply.agents;
       boardNow = Date.now();
       boardRevisions = Object.assign({}, boardRevisions, { agents: reply.revision });
+      agentsFetching = false;
+      if ((pendingEdits.seen ?? []).length > 0) { const next = Object.assign({}, pendingEdits); delete next.seen; setPending(next); }
+      settlePending();
       return;
     }
     if (reply.type === "view") {
@@ -884,6 +964,7 @@ ShellRoot {
     onSeen: key => root.markSeen(key)
     notice: root.taskNotice
     dispatch: root.agentsBoard?.dispatch ?? null
+    pending: root.pendingEdits
     onEdit: (key, change) => root.editTask(key, change)
     tasks: Object.assign({}, root.agendaBoard?.tasks ?? {}, root.agentsBoard?.tasks ?? {})
     user: root.agentsBoard?.user ?? ""
@@ -897,6 +978,7 @@ ShellRoot {
           view: root.agendaView
     notice: root.taskNotice
     dispatch: root.agentsBoard?.dispatch ?? null
+    pending: root.pendingEdits
     onEdit: (key, change) => root.editTask(key, change)
     user: root.agentsBoard?.user ?? ""
           agenda: root.agendaBoard

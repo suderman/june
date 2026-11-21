@@ -107,6 +107,12 @@ export class TaskEdits {
 				case "deadline": {
 					const when = String(edit.when ?? "").trim();
 					if (when === "") throw new Error("Give a date such as fri 9:00, 2026-11-28, +2d, or none to clear it");
+					// A queued task's start moves only while nothing has launched it, checked under the dispatcher's lock.
+					if (edit.action === "schedule" && task.state === "AUTO") {
+						if (!task.id || !task.revision) throw new Error("A queued task's start moves once the board has its ID and revision; wait for it to refresh");
+						if (!/^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?$/.test(when)) throw new Error("Pick a date and time for a queued task's new start");
+						return this.#edit("reschedule-task", file, heading, when, JSON.stringify({ revision: task.revision, request, note: "Moved from June's board.", who: user }));
+					}
 					return this.#edit(edit.action, file, heading, this.#when(when));
 				}
 				default:

@@ -91,23 +91,88 @@ class Link(private val context: Context) {
     private var agendaRevision = ""
     private var agentsRevision = ""
 
-    /** What the last edit from a task's page said, for that task: "saving…", "saved", or why it was refused. */
+    /** What the last edit from a task's page said, for that task: "saved", or why it was refused. */
     var taskNotice: Pair<String, String> by mutableStateOf("" to "")
         private set
-    private var taskPending = ""
+    /** The edit that puts back the last saved state change, while "saved" shows. */
+    var taskUndo: JSONObject? by mutableStateOf(null)
+        private set
+    private var noticeAt = 0L
     /** A rename that moved a task without an ID to a new key: (old key, new key), so its page follows. */
     var taskMoved: Pair<String, String> by mutableStateOf("" to "")
         private set
 
-    /** The user's edit of a task (src/board-edit.ts TaskEdit), by its key. */
-    fun editTask(key: String, edit: JSONObject) {
-        val id = requestId()
-        taskPending = id
-        taskNotice = key to if (send(JSONObject().put("op", "task").put("key", key).put("edit", edit), id)) "saving…" else "not connected"
+    /**
+     * The user's edits on their way, as shell.qml pendingEdits: { key: { change, id, done, at, undo } } and seen, the
+     * reviews opened since the last agents board. board.mjs shows them as made; a refusal, a dropped link or no answer
+     * puts back what the board says, and a saved edit stops overlaying once the boards that carry it arrive.
+     */
+    var pending: JSONObject by mutableStateOf(JSONObject())
+        private set
+    private var agentsFetching = false
+
+    private fun changePending(change: (JSONObject) -> Unit) {
+        val next = JSONObject(pending.toString())
+        change(next)
+        pending = next
+        if (next.length() > 0 && !ticking) {
+            ticking = true
+            main.postDelayed(::tick, 1_000)
+        }
+    }
+    private var ticking = false
+    private fun tick() {
+        tickPending()
+        if (pending.length() > 0 || taskNotice.second == "saved") main.postDelayed(::tick, 1_000) else ticking = false
     }
 
-    /** A review or question the user opened is seen on every device; the daemon answers with the agents board. */
-    fun markSeen(key: String) = send(JSONObject().put("op", "seen").put("keys", org.json.JSONArray().put(key)))
+    private fun pendingById(id: String): String =
+        pending.keys().asSequence().firstOrNull { it != "seen" && pending.optJSONObject(it)?.optString("id") == id } ?: ""
+
+    private fun editKeys() = pending.keys().asSequence().filter { it != "seen" }.toList()
+
+    private fun notice(key: String, text: String, undo: JSONObject? = null) {
+        taskNotice = key to text
+        taskUndo = undo
+        noticeAt = System.currentTimeMillis()
+        // "saved" fades on the same tick.
+        if (text == "saved" && !ticking) {
+            ticking = true
+            main.postDelayed(::tick, 1_000)
+        }
+    }
+
+    /** The user's edit of a task (src/board-edit.ts TaskEdit), by its key; UNDO is the edit that would put it back. */
+    fun editTask(key: String, edit: JSONObject, undo: JSONObject? = null) {
+        val held = pending.optJSONObject(key)
+        if (held != null && !held.optBoolean("done")) return
+        val id = requestId()
+        if (!send(JSONObject().put("op", "task").put("key", key).put("edit", edit), id)) return notice(key, "not connected")
+        changePending { it.put(key, JSONObject().put("change", edit).put("id", id).put("done", false).put("at", System.currentTimeMillis()).put("undo", undo ?: JSONObject.NULL)) }
+        notice(key, "")
+    }
+
+    /** Once a second while edits are on their way: give up on one unanswered for 30 s, settle a save after 6 s, and
+     * let "saved" fade after 5. */
+    private fun tickPending(now: Long = System.currentTimeMillis()) {
+        val lost = editKeys().filter { pending.optJSONObject(it)?.let { e -> !e.optBoolean("done") && now - e.optLong("at") > 30_000 } == true }
+        val settled = editKeys().filter { pending.optJSONObject(it)?.let { e -> e.optBoolean("done") && now - e.optLong("at") > 6_000 } == true }
+        if (lost.isNotEmpty()) notice(lost.first(), "June didn't answer; this is what the board says")
+        if (lost.isNotEmpty() || settled.isNotEmpty()) changePending { p -> (lost + settled).forEach { p.remove(it) } }
+        if (taskNotice.second == "saved" && now - noticeAt > 5_000) notice(taskNotice.first, "")
+    }
+
+    private fun settlePending() {
+        if (agentsFetching) return
+        val done = editKeys().filter { pending.optJSONObject(it)?.optBoolean("done") == true }
+        if (done.isNotEmpty()) changePending { p -> done.forEach { p.remove(it) } }
+    }
+
+    /** A review or question the user opened is seen on every device at once; the daemon answers with the agents board. */
+    fun markSeen(key: String) {
+        changePending { it.put("seen", (it.optJSONArray("seen") ?: org.json.JSONArray()).put(key)) }
+        send(JSONObject().put("op", "seen").put("keys", org.json.JSONArray().put(key)))
+    }
 
     fun wantBoards() {
         if (boardsWanted) return
@@ -117,7 +182,7 @@ class Link(private val context: Context) {
 
     private fun fetchBoards(agenda: Boolean, agents: Boolean) {
         if (agenda) send(JSONObject().put("op", "agenda"))
-        if (agents) send(JSONObject().put("op", "agents"))
+        if (agents && send(JSONObject().put("op", "agents"))) agentsFetching = true
     }
 
     /** The state's board revisions: ask for a board whose revision moved, once per revision. */
@@ -260,7 +325,13 @@ class Link(private val context: Context) {
                             // As the app's own view, so a reply shown here is not also pushed to this phone (src/ntfy.ts).
                             webSocket.send(JSONObject().put("op", "attach").put("requestId", requestId()).put("client", "apk").toString())
                             pendingMoment?.let { pendingMoment = null; openMoment(it) }
-                            // A new connection must ask again to keep the boards fresh.
+                            // A new connection must ask again to keep the boards fresh; an edit sent on the old one may never be answered.
+                            val unanswered = editKeys().filter { pending.optJSONObject(it)?.optBoolean("done") == false }
+                            if (unanswered.isNotEmpty()) {
+                                notice(unanswered.first(), "The connection dropped; this is what the board says")
+                                changePending { p -> unanswered.forEach { p.remove(it) } }
+                            }
+                            agentsFetching = false
                             if (boardsWanted) fetchBoards(agenda = true, agents = true)
                         }
                         "view" -> {
@@ -284,24 +355,32 @@ class Link(private val context: Context) {
                             hitsMore = reply.optBoolean("more")
                             searchDone = true
                         }
-                        "task" -> if (reply.optString("requestId") == taskPending) {
-                            taskPending = ""
-                            taskNotice = reply.optString("key") to "saved"
-                            reply.optString("from").takeIf { it.isNotEmpty() }?.let { taskMoved = it to reply.optString("key") }
+                        "task" -> pendingById(reply.optString("requestId")).takeIf { it.isNotEmpty() }?.let { key ->
+                            val held = pending.optJSONObject(key)!!
+                            val now = reply.optString("key")
+                            changePending { p -> p.remove(key); p.put(now, JSONObject(held.toString()).put("done", true).put("at", System.currentTimeMillis())) }
+                            notice(now, "saved", held.optJSONObject("undo"))
+                            reply.optString("from").takeIf { it.isNotEmpty() }?.let { taskMoved = it to now }
                         }
                         "agenda" -> {
                             agenda = reply.optJSONObject("agenda")
                             agendaRevision = reply.optString("revision")
+                            settlePending()
                         }
                         "agents" -> {
                             agents = reply.optJSONObject("agents")
                             agentsRevision = reply.optString("revision")
+                            agentsFetching = false
+                            if (pending.has("seen")) changePending { it.remove("seen") }
+                            settlePending()
                         }
                         "reply" -> notice = reply.optString("text")
-                        "error" -> if (reply.optString("requestId").let { it.isNotEmpty() && it == taskPending }) {
-                            taskPending = ""
-                            taskNotice = taskNotice.first to reply.optString("message")
-                        } else notice = reply.optString("message")
+                        "error" -> pendingById(reply.optString("requestId")).let { key ->
+                            if (reply.optString("requestId").isNotEmpty() && key.isNotEmpty()) {
+                                changePending { it.remove(key) }
+                                notice(key, reply.optString("message"))
+                            } else notice = reply.optString("message")
+                        }
                     }
                 }
             }

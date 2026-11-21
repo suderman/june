@@ -1,7 +1,7 @@
 // The boards as the clients draw them (desktop/board.mjs), shared by the desktop client and the phone.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agendaView, agentsView, boardLayout, dayHeading, dialogKind, entryMeta, findTask, harnessOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink } from "../desktop/board.mjs";
+import { agendaView, agentsView, boardLayout, dayHeading, dayWord, dialogKind, entryMeta, findTask, harnessOf, monthDays, pendingTask, pickerStart, quickDays, stampOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink } from "../desktop/board.mjs";
 
 test("three columns fit a 1400 px window with the strip a little narrower, and tabs take over below about 1300", () => {
 	assert.deepEqual(boardLayout(1400), { columns: true, side: 268, gap: 20, strip: 784 });
@@ -93,7 +93,7 @@ test("a task's page names who works it, what it waits on, and draws its Dialog b
 		dialog: [{ who: "Dispatcher", at: "[2026-11-18 Wed 14:02]", text: "started claude on cog" }, { who: "Agent", at: "[2026-11-18 Wed 15:40]", text: "Kit or cog?" }, { who: "June", at: "[2026-11-18 Wed 15:41]", text: "It's yours." }, { who: "Alex", at: "[2026-11-19 Thu]", text: "Thinking." }],
 	});
 	const d = taskDetail(t, "Alex", "2026-11-21");
-	assert.equal(d.facts, "claude on cog · scheduled Sun 09:00 · agent review");
+	assert.equal(d.facts, "claude on cog · scheduled tomorrow 09:00 · agent review");
 	assert.equal(d.herdr, "herdr:cog/claude:b@t2");
 	assert.equal(d.emacs, "file:~/org/work/demo/demo.org::7");
 	assert.equal(d.path, "Parent");
@@ -102,7 +102,7 @@ test("a task's page names who works it, what it waits on, and draws its Dialog b
 	assert.equal(taskDetail(undefined, "Alex", ""), null);
 	assert.equal(dialogKind("Pi", "Alex"), "agent");
 	const sat = new Date(2026, 10, 21, 8, 0).getTime();
-	assert.equal(taskDetail(t, "Alex", "2026-11-21", sat).starts, "Sun 09:00", "a schedule still ahead is when it would start");
+	assert.equal(taskDetail(t, "Alex", "2026-11-21", sat).starts, "tomorrow 09:00", "a schedule still ahead is when it would start");
 	assert.equal(startsAt(task("x", { scheduled: "<2026-11-21 Sat 07:30>" }), "2026-11-21", sat), "now");
 	assert.equal(startsAt(task("x", { scheduled: "<2026-11-21 Sat 9:30>" }), "2026-11-21", sat), "today 9:30");
 	assert.equal(startsAt(task("x"), "2026-11-21", sat), "now");
@@ -117,4 +117,46 @@ test("a page follows its task when the dispatcher gives it an ID", () => {
 	assert.equal(findTask(tasks, "work/c/c.org::*Clinic/Set up forwarding"), claimed);
 	assert.equal(findTask(tasks, "work/c/c.org::*Gone"), null);
 	assert.equal(findTask(null, "x"), null);
+});
+
+test("dates are named so they cannot be read as the wrong week", () => {
+	const today = "2026-11-21";
+	assert.deepEqual(["2026-11-21", "2026-11-22", "2026-11-20", "2026-11-23", "2026-11-27", "2026-11-28", "2026-11-16", "2027-01-04"].map((d) => dayWord(d, today)),
+		["today", "tomorrow", "yesterday", "Mon", "Fri", "Nov 28", "Nov 16", "Jan 4 2027"]);
+	assert.equal(startOf("<2026-11-16 Mon>", today), "Nov 16", "last Monday is not this Monday");
+	assert.equal(startOf("<2026-11-23 Mon 09:00>", today), "Mon 09:00");
+});
+
+test("a picker starts from a task's date, offers quick days, and writes what org-edit reads", () => {
+	assert.deepEqual(pickerStart("<2026-11-23 Mon 9:00 ++1w>", "2026-11-21"), { date: "2026-11-23", time: "09:00" });
+	assert.deepEqual(pickerStart(undefined, "2026-11-21"), { date: "2026-11-21", time: "" });
+	assert.deepEqual(quickDays("2026-11-21").map((q) => [q.label, q.date]), [["today", "2026-11-21"], ["tomorrow", "2026-11-22"], ["Mon", "2026-11-23"], ["in a week", "2026-11-28"]]);
+	assert.deepEqual(quickDays("2026-11-22").map((q) => q.label), ["today", "tomorrow", "in a week"], "on Sunday, tomorrow is Monday");
+	const nov = monthDays(2026, 11, "2026-11-21");
+	assert.equal(nov.title, "Nov 2026");
+	assert.equal(nov.weeks[0][0].date, "2026-11-01", "November 2026 starts on a Sunday");
+	assert.deepEqual(nov.weeks[2].filter((d) => d.today).map((d) => d.date), ["2026-11-21"]);
+	assert.equal(nov.weeks[0][0].past, true);
+	assert.ok(nov.weeks.every((w) => w.length === 7));
+	assert.equal(stampOf("2026-11-23 9:00"), "<2026-11-23 Mon 09:00>");
+	assert.equal(stampOf("2026-11-23"), "<2026-11-23 Mon>");
+	assert.equal(stampOf("fri"), undefined);
+});
+
+test("an edit on its way shows as made, and the page takes no other until it lands", () => {
+	const t = task("id:p", { title: "Party", state: "TODO", scheduled: "<2026-11-22 Sun 15:00 ++1w>", dialog: [] });
+	assert.equal(pendingTask(t, { action: "state", state: "DONE" }).state, "DONE");
+	const handed = pendingTask(t, { action: "assign", agent: "pi", host: "cog", when: "2026-11-23 09:00" });
+	assert.deepEqual([handed.state, handed.agent, handed.host, handed.scheduled], ["AUTO", "pi", "cog", "<2026-11-23 Mon 09:00>"]);
+	assert.equal(pendingTask(t, { action: "deadline", when: "none" }).deadline, undefined);
+	const replied = taskDetail(t, "Alex", "2026-11-21", 0, { change: { action: "reply", text: "On it", resume: true } });
+	assert.deepEqual([replied.state, replied.busy, replied.dialog[0].who, replied.dialog[0].at], ["AUTO", true, "Alex", "sending…"]);
+	assert.equal(taskDetail(t, "Alex", "2026-11-21", 0).busy, false);
+	const agenda = { generatedAt: 0, today: "2026-11-21", overdue: [{ task: "id:p", type: "deadline", date: "2026-11-20" }], days: [{ date: "2026-11-21", entries: [] }], tasks: { "id:p": t }, counts: {}, projects: [] };
+	assert.equal(agendaView(agenda, { "id:p": { change: { action: "state", state: "DONE" } } }).sections[0].rows[0].state, "DONE");
+	assert.equal(agenda.tasks["id:p"].state, "TODO", "the board itself is left as the daemon sent it");
+	assert.deepEqual(stateRows(agenda, "EVAL", { "id:p": { change: { action: "state", state: "EVAL" } } }).map((r) => r.key), ["id:p"]);
+	const agents = { generatedAt: 0, user: "Alex", hosts: [], workers: [], needs: [{ level: 2, kind: "review", task: "id:p" }], queued: [], reviewing: [], recent: [], tasks: { "id:p": { ...t, state: "EVAL" } } };
+	assert.equal(agentsView(agents, 0, "2026-11-21", "Alex").needs.length, 1);
+	assert.equal(agentsView(agents, 0, "2026-11-21", "Alex", { seen: ["id:p"] }).needs.length, 0, "a review opened is seen at once");
 });

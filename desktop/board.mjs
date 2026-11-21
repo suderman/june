@@ -101,8 +101,9 @@ function row(entry, agenda, extra) {
  * The agenda board as sections of rows: overdue, today, and the rest of the week with each day's name on its first
  * row; then the counts by state and the projects with open work.
  */
-export function agendaView(agenda) {
+export function agendaView(agenda, pending, user) {
 	if (!agenda) return { sections: [], counts: [], projects: [], today: "" };
+	agenda = withPending(agenda, pending, user);
 	const sections = [];
 	if (agenda.overdue.length > 0)
 		sections.push({ id: "overdue", title: `OVERDUE · ${agenda.overdue.length}`, alert: true, rows: agenda.overdue.map((e) => row(e, agenda, { overdue: true })) });
@@ -126,8 +127,9 @@ export function agendaView(agenda) {
 }
 
 /** The tasks in one state, for drilling into a count, newest file order kept. */
-export function stateRows(agenda, state) {
+export function stateRows(agenda, state, pending, user) {
 	if (!agenda) return [];
+	agenda = withPending(agenda, pending, user);
 	const rows = [];
 	for (const key of Object.keys(agenda.tasks)) {
 		const t = agenda.tasks[key];
@@ -148,8 +150,119 @@ export function since(at, now) {
 export function startOf(stamp, today) {
 	const m = /(\d{4}-\d{2}-\d{2})(?: \S+)?(?: (\d{1,2}:\d{2}))?/.exec(String(stamp ?? ""));
 	if (!m) return "";
-	const day = m[1] === today ? "today" : calendar(m[1]).weekday;
+	const day = dayWord(m[1], today);
 	return m[2] ? `${day} ${m[2]}` : day;
+}
+
+/** Whole days from TODAY to DATE, both YYYY-MM-DD. */
+function daysBetween(today, date) {
+	const at = (d) => { const [y, m, n] = String(d).split("-").map(Number); return Date.UTC(y, m - 1, n); };
+	return Math.round((at(date) - at(today)) / 86400000);
+}
+
+/** A date by a name it cannot be mistaken in: today, tomorrow or yesterday; a weekday within the coming week;
+ * otherwise its month and day, with the year when it is not this one. */
+export function dayWord(date, today) {
+	if (!today) return calendar(date).weekday;
+	const n = daysBetween(today, date);
+	if (n === 0) return "today";
+	if (n === 1) return "tomorrow";
+	if (n === -1) return "yesterday";
+	const c = calendar(date);
+	if (n > 1 && n < 7) return c.weekday;
+	return `${c.month} ${c.day}${date.slice(0, 4) === today.slice(0, 4) ? "" : ` ${date.slice(0, 4)}`}`;
+}
+
+/** The Org timestamp for a picker's "YYYY-MM-DD" or "YYYY-MM-DD HH:MM", as org-edit writes it. */
+export function stampOf(when) {
+	const m = /^(\d{4}-\d{2}-\d{2})(?: (\d{1,2}:\d{2}))?$/.exec(String(when ?? ""));
+	if (!m) return undefined;
+	return `<${m[1]} ${calendar(m[1]).weekday}${m[2] ? ` ${m[2].padStart(5, "0")}` : ""}>`;
+}
+
+/** A timestamp's date and time for a picker to start from: { date, time }, or today with no time. */
+export function pickerStart(stamp, today) {
+	const m = /(\d{4}-\d{2}-\d{2})(?: \S+)?(?: (\d{1,2}:\d{2}))?/.exec(String(stamp ?? ""));
+	return m ? { date: m[1], time: m[2] ? m[2].padStart(5, "0") : "" } : { date: today, time: "" };
+}
+
+/** A month's days for a picker, as weeks of seven from Sunday: { date, day, inMonth, past, today }. */
+export function monthDays(year, month, today) {
+	const first = new Date(Date.UTC(year, month - 1, 1, 12));
+	const start = first.getTime() - first.getUTCDay() * 86400000;
+	const two = (n) => String(n).padStart(2, "0");
+	const weeks = [];
+	for (let w = 0; w < 6; w++) {
+		const week = [];
+		for (let d = 0; d < 7; d++) {
+			const at = new Date(start + (w * 7 + d) * 86400000);
+			const date = `${at.getUTCFullYear()}-${two(at.getUTCMonth() + 1)}-${two(at.getUTCDate())}`;
+			week.push({ date, day: at.getUTCDate(), inMonth: at.getUTCMonth() === month - 1, past: today ? date < today : false, today: date === today });
+		}
+		if (w > 3 && !week.some((d) => d.inMonth)) break;
+		weeks.push(week);
+	}
+	return { title: `${MONTHS[month - 1]} ${year}`, weeks };
+}
+
+/** Quick picks for a picker: today, tomorrow, next Monday, and a week from today. */
+export function quickDays(today) {
+	const [y, m, d] = String(today).split("-").map(Number);
+	const two = (n) => String(n).padStart(2, "0");
+	const day = (n) => { const at = new Date(Date.UTC(y, m - 1, d + n, 12)); return `${at.getUTCFullYear()}-${two(at.getUTCMonth() + 1)}-${two(at.getUTCDate())}`; };
+	const toMonday = ((8 - new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay()) % 7) || 7;
+	const picks = [{ label: "today", date: day(0) }, { label: "tomorrow", date: day(1) }];
+	if (toMonday > 1) picks.push({ label: "Mon", date: day(toMonday) });
+	picks.push({ label: "in a week", date: day(7) });
+	return picks;
+}
+
+/** A task as it will be once the user's pending edit (board-edit.ts TaskEdit) lands, marked pending. */
+export function pendingTask(task, change, user, busy) {
+	if (!task || !change) return task;
+	const t = Object.assign({}, task, { pending: busy !== false });
+	switch (change.action) {
+		case "state": t.state = change.state; break;
+		case "assign":
+			t.state = "AUTO";
+			t.agent = change.agent;
+			if (change.host) t.host = change.host;
+			if (change.when) t.scheduled = stampOf(change.when) ?? t.scheduled;
+			break;
+		case "schedule":
+		case "deadline": {
+			const field = change.action === "schedule" ? "scheduled" : "deadline";
+			if (change.when === "none") delete t[field];
+			else t[field] = stampOf(change.when) ?? t[field];
+			break;
+		}
+		case "title": t.title = change.title; break;
+		case "reply":
+			t.dialog = (task.dialog ?? []).concat([{ who: user || "You", at: "", text: change.text, sending: true }]);
+			if (change.resume) t.state = "AUTO";
+			break;
+	}
+	return t;
+}
+
+/** The page for the task a board names by KEY, with the user's edit on its way: what TaskDetail and the phone's
+ * TaskPage draw. PENDING is { [key]: { change, done } }. */
+export function taskPage(tasks, key, pending, user, today, now) {
+	const t = findTask(tasks, key);
+	if (!t) return null;
+	return taskDetail(t, user, today, now, pending ? (pending[t.key] ?? pending[key]) : undefined);
+}
+
+/** A board's tasks with the user's pending edits, { [key]: { change } }, shown as made. */
+function withPending(board, pending, user) {
+	const keys = pending ? Object.keys(pending).filter((k) => k !== "seen" && pending[k]?.change) : [];
+	if (!board || keys.length === 0) return board;
+	const tasks = Object.assign({}, board.tasks);
+	for (const key of keys) {
+		const found = findTask(tasks, key);
+		if (found) tasks[found.key] = pendingTask(found, pending[key].change, user);
+	}
+	return Object.assign({}, board, { tasks });
 }
 
 /** The agent a task's newest Herdr link names, pi or claude, else its AGENT. */
@@ -173,11 +286,14 @@ function lastWord(task, user) {
  * is queued and under agent review, and what reported today. `today` is YYYY-MM-DD for start times; `user` signs
  * the user's Dialog entries.
  */
-export function agentsView(agents, now, today, user) {
+export function agentsView(agents, now, today, user, pending) {
 	if (!agents) return { summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [] };
+	agents = withPending(agents, pending, user);
 	const tasks = agents.tasks;
+	// A review the user just opened is seen before the daemon says so.
+	const seen = pending?.seen ?? [];
 	const workerOf = (key) => agents.workers.find((w) => w.taskKey === key);
-	const needs = agents.needs.map((n) => {
+	const needs = agents.needs.filter((n) => n.kind === "blocked" || !seen.includes(n.task)).map((n) => {
 		const task = n.task ? tasks[n.task] : undefined;
 		if (n.kind === "blocked") {
 			const w = agents.workers.find((x) => x.host === n.worker?.host && x.terminal === n.worker?.terminal);
@@ -275,8 +391,9 @@ export function startsAt(task, today, now) {
 	return at > localStamp(now ?? Date.now()) ? startOf(task.scheduled, today) : "now";
 }
 
-export function taskDetail(task, user, today, now) {
+export function taskDetail(task, user, today, now, pending) {
 	if (!task) return null;
+	task = pendingTask(task, pending?.change, user, !pending?.done);
 	const sessions = task.sessions ?? [];
 	const agent = taskAgent(task);
 	const facts = [];
@@ -289,9 +406,15 @@ export function taskDetail(task, user, today, now) {
 	return {
 		key: task.key, title: task.title, state: task.state ?? "", project: task.project, file: task.file,
 		protected: task.protected === true, host: task.host ?? "", agent, starts: startsAt(task, today, now),
+		// While an edit is on its way, the page shows it as made and takes no other.
+		busy: task.pending === true,
+		scheduled: pickerStart(task.scheduled, today), deadline: pickerStart(task.deadline, today),
+		hasScheduled: Boolean(task.scheduled), hasDeadline: Boolean(task.deadline),
+		scheduledLabel: task.scheduled ? startOf(task.scheduled, today) : "", deadlineLabel: task.deadline ? startOf(task.deadline, today) : "",
+		repeats: /[.+]\+?\d+[hdwmy]/.test(String(task.scheduled ?? "")),
 		path: (task.path ?? []).join(" / "), facts: facts.join(" · "), headline: task.headline?.text ?? "",
 		asked: task.asked !== undefined, harness: harnessOf(agent), emacs: taskLink(task),
 		herdr: sessions.length ? sessions[sessions.length - 1] : null,
-		dialog: (task.dialog ?? []).map((e, i) => ({ key: String(i), who: e.who || "note", kind: dialogKind(e.who, user), at: stampShort(e.at), text: e.text })),
+		dialog: (task.dialog ?? []).map((e, i) => ({ key: String(i), who: e.who || "note", kind: dialogKind(e.who, user), at: e.sending ? "sending…" : stampShort(e.at), text: e.text })),
 	};
 }

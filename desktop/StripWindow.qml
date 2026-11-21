@@ -165,6 +165,7 @@ FloatingWindow {
     onSeen: key => win.shell.markSeen(key)
     notice: win.shell.taskNotice
     dispatch: win.shell.agentsBoard?.dispatch ?? null
+    pending: win.shell.pendingEdits
     onEdit: (key, change) => win.shell.editTask(key, change)
     tasks: Object.assign({}, win.shell.agendaBoard?.tasks ?? {}, win.shell.agentsBoard?.tasks ?? {})
     user: win.shell.agentsBoard?.user ?? ""
@@ -182,6 +183,7 @@ FloatingWindow {
       view: win.shell.agendaView
     notice: win.shell.taskNotice
     dispatch: win.shell.agentsBoard?.dispatch ?? null
+    pending: win.shell.pendingEdits
     onEdit: (key, change) => win.shell.editTask(key, change)
     user: win.shell.agentsBoard?.user ?? ""
       agenda: win.shell.agendaBoard
@@ -266,6 +268,7 @@ FloatingWindow {
     onSeen: key => win.shell.markSeen(key)
     notice: win.shell.taskNotice
     dispatch: win.shell.agentsBoard?.dispatch ?? null
+    pending: win.shell.pendingEdits
     onEdit: (key, change) => win.shell.editTask(key, change)
     tasks: Object.assign({}, win.shell.agendaBoard?.tasks ?? {}, win.shell.agentsBoard?.tasks ?? {})
     user: win.shell.agentsBoard?.user ?? ""
@@ -285,6 +288,7 @@ FloatingWindow {
     view: win.shell.agendaView
     notice: win.shell.taskNotice
     dispatch: win.shell.agentsBoard?.dispatch ?? null
+    pending: win.shell.pendingEdits
     onEdit: (key, change) => win.shell.editTask(key, change)
     user: win.shell.agentsBoard?.user ?? ""
     agenda: win.shell.agendaBoard

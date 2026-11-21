@@ -19,9 +19,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -31,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -115,17 +126,39 @@ private fun Link.movedTask(key: String): JSONObject? {
 /** One task's page (board.mjs taskDetail), in place of the board until its back link. */
 @Composable
 private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette: Look.Palette, key: String, back: String, close: () -> Unit, modifier: Modifier) {
-    val detail by produceState<JSONObject?>(null, key, link.agents, link.agenda) {
+    val detail by produceState<JSONObject?>(null, key, link.agents, link.agenda, link.pending) {
         val task = link.task(key)
+        val held = task?.let { link.pending.optJSONObject(it.optString("key")) } ?: link.pending.optJSONObject(key)
         value = if (task == null) null else runCatching {
-            JSONObject(decisions.call("board.taskDetail", task, link.agents?.optString("user") ?: "", link.agenda?.optString("today") ?: "", System.currentTimeMillis()))
+            JSONObject(decisions.call("board.taskDetail", task, link.agents?.optString("user") ?: "", link.agenda?.optString("today") ?: "", System.currentTimeMillis(), held))
         }.getOrNull()
     }
     val open = LocalUriHandler.current
     val d = detail
     // Who a task can be handed to, and where by default; a handoff waits here for the user to confirm it.
     val dispatch = link.agents?.optJSONObject("dispatch")
-    var handoff by remember(key) { mutableStateOf<Pair<String, String>?>(null) }
+    var handoff by remember(key) { mutableStateOf<Handoff?>(null) }
+    // Which date is being picked: schedule, deadline, handoff, or "".
+    var picking by remember(key) { mutableStateOf("") }
+    // An edit on its way: the page shows it as made and takes no other until it lands or fails.
+    val busy = d?.optBoolean("busy") == true
+    if (picking.isNotEmpty() && d != null) {
+        val field = if (picking == "deadline") "deadline" else "scheduled"
+        WhenDialogs(
+            title = when (picking) { "deadline" -> "Deadline"; "handoff" -> "Start at"; else -> if (d.optBoolean("repeats")) "Scheduled, keeping its repeat" else "Scheduled" },
+            start = d.optJSONObject(field) ?: JSONObject(),
+            canClear = picking != "handoff" && d.optBoolean(if (picking == "deadline") "hasDeadline" else "hasScheduled"),
+            onPicked = { when_ ->
+                val k = d.optString("key").ifEmpty { key }
+                if (picking == "handoff") handoff = handoff?.copy(start = when_)
+                else link.editTask(k, JSONObject().put("action", picking).put("when", when_))
+                picking = ""
+            },
+            onClear = { link.editTask(d.optString("key").ifEmpty { key }, JSONObject().put("action", picking).put("when", "none")); picking = "" },
+            onDismiss = { picking = "" },
+        )
+    }
+    CompositionLocalProvider(LocalBusy provides busy) {
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("‹ $back", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = palette.pageInk, modifier = Modifier.clickable(onClick = close).padding(vertical = 8.dp)) }
         if (d == null && link.task(key) == null) item { Text("That task is no longer on the boards.", fontFamily = Look.lettering, fontSize = 14.sp, color = palette.muted) }
@@ -164,64 +197,72 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
                 item {
                     @OptIn(ExperimentalLayoutApi::class)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for (s in if (locked) listOf("TODO", "DONE") else listOf("TODO", "PROG", "EVAL", "HOLD", "DONE")) Choice(s, s == state, palette) { if (s != state) link.editTask(k, JSONObject().put("action", "state").put("state", s)) }
+                        // A state change shows at once and can be put back while "saved" shows.
+                        for (s in if (locked) listOf("TODO", "DONE") else listOf("TODO", "PROG", "EVAL", "HOLD", "DONE")) Choice(s, s == state, palette) {
+                            if (s != state) link.editTask(k, JSONObject().put("action", "state").put("state", s), JSONObject().put("action", "state").put("state", state))
+                        }
                     }
                 }
                 if (locked) item { Text("${d.optString("file")} is rebuilt by another program, so only TODO and DONE are set here; DONE may sync back.", fontFamily = Look.caption, fontSize = 13.sp, color = palette.muted) }
                 val agents = dispatch?.optJSONArray("agents")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: listOf("pi", "claude")
                 val hosts = dispatch?.optJSONArray("hosts")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
-                val pending = handoff
-                if (assignable && pending == null) item {
+                val held = handoff
+                if (assignable && held == null) item {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("hand to", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.muted)
-                        for (agent in agents) Choice(agent, false, palette) { handoff = agent to d.optString("host").ifEmpty { dispatch?.optString("host") ?: "" } }
+                        for (agent in agents) Choice(agent, false, palette) { handoff = Handoff(agent, d.optString("host").ifEmpty { dispatch?.optString("host") ?: "" }, "") }
                     }
                 }
                 // Nothing is queued until the user confirms who, where and when.
-                if (assignable && pending != null) item {
-                    var startAt by remember(key) { mutableStateOf("") }
+                if (assignable && held != null) item {
                     val starts = d.optString("starts")
                     Column(
                         Modifier.fillMaxWidth().background(Look.balloon, RoundedCornerShape(12.dp)).border(2.dp, palette.pageInk, RoundedCornerShape(12.dp)).padding(10.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("Hand to ${pending.first}, starting ${if (starts == "now") "now" else "at its schedule, $starts"}, unless you give a time.", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.pageInk)
+                        val start = if (held.start.isNotEmpty()) held.start.replace("T", " ") else if (starts == "now") "now" else "at its schedule, $starts"
+                        Text("Hand to ${held.agent}, starting $start.", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.pageInk)
                         if (hosts.size > 1) Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("on", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.muted)
-                            for (h in hosts) Choice(h, h == pending.second, palette) { handoff = pending.first to h }
+                            for (h in hosts) Choice(h, h == held.host, palette) { handoff = held.copy(host = h) }
                         }
-                        OutlinedTextField(startAt, { startAt = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("start at: fri 9:00, +2h", fontSize = 13.sp) })
+                        Choice(if (held.start.isNotEmpty()) "change the start" else "start later…", false, palette) { picking = "handoff" }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Choice(if (startAt.isBlank() && starts == "now") "Hand off now" else "Hand off", true, palette) {
-                                val change = JSONObject().put("action", "assign").put("agent", pending.first)
-                                if (pending.second.isNotEmpty()) change.put("host", pending.second)
-                                if (startAt.isNotBlank()) change.put("when", startAt.trim())
-                                link.editTask(k, change)
+                            Choice(if (held.start.isEmpty() && starts == "now") "Hand off now" else "Hand off", true, palette) {
+                                val change = JSONObject().put("action", "assign").put("agent", held.agent)
+                                if (held.host.isNotEmpty()) change.put("host", held.host)
+                                if (held.start.isNotEmpty()) change.put("when", held.start)
                                 handoff = null
+                                link.editTask(k, change)
                             }
                             Choice("Cancel", false, palette) { handoff = null }
                         }
                     }
                 }
-                if (editable) item {
-                    var whenText by remember(key) { mutableStateOf("") }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(whenText, { whenText = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("fri 9:00, +2d, none", fontSize = 13.sp) })
-                        Choice("schedule", false, palette) { if (whenText.isNotBlank()) link.editTask(k, JSONObject().put("action", "schedule").put("when", whenText.trim())) }
-                        Choice("deadline", false, palette) { if (whenText.isNotBlank()) link.editTask(k, JSONObject().put("action", "deadline").put("when", whenText.trim())) }
+                // SCHEDULED and DEADLINE, each picked on a calendar and a clock.
+                if (editable && held == null) item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Choice(if (d.optBoolean("hasScheduled")) "scheduled ${d.optString("scheduledLabel")}" else "schedule…", false, palette) { picking = "schedule" }
+                        Choice(if (d.optBoolean("hasDeadline")) "due ${d.optString("deadlineLabel")}" else "deadline…", false, palette) { picking = "deadline" }
                     }
                 }
             }
             if (!locked && state in listOf("", "TODO", "EVAL", "HOLD")) item {
                 var title by remember(key) { mutableStateOf("") }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(title, { title = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("new title", fontSize = 13.sp) })
+                    OutlinedTextField(title, { title = it }, Modifier.weight(1f), singleLine = true, enabled = !busy, placeholder = { Text("new title", fontSize = 13.sp) })
                     Choice("rename", false, palette) { if (title.isNotBlank()) { link.editTask(k, JSONObject().put("action", "title").put("title", title.trim())); title = "" } }
                 }
             }
             val (noticeKey, noticeText) = link.taskNotice
-            if ((noticeKey == key || noticeKey == k) && noticeText.isNotEmpty()) item {
-                Text(noticeText, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (noticeText == "saved" || noticeText == "saving…") palette.muted else palette.accent)
+            if (busy || ((noticeKey == key || noticeKey == k) && noticeText.isNotEmpty())) item {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val text = if (busy) "saving…" else noticeText
+                    Text(text, Modifier.weight(1f, fill = false), fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (busy || text == "saved") palette.muted else palette.accent)
+                    val undo = link.taskUndo
+                    if (!busy && text == "saved" && undo != null) Text("undo", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.pageInk,
+                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline, modifier = Modifier.clickable { link.editTask(k, undo) }.padding(8.dp))
+                }
             }
             item { SectionTitle("DIALOG", palette) }
             val dialog = d.optJSONArray("dialog").objects()
@@ -231,7 +272,7 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
             if (editable) item {
                 var reply by remember(key) { mutableStateOf("") }
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(reply, { reply = it }, Modifier.fillMaxWidth(), minLines = 2, placeholder = { Text("Reply in Dialog", fontSize = 14.sp) })
+                    OutlinedTextField(reply, { reply = it }, Modifier.fillMaxWidth(), minLines = 2, enabled = !busy, placeholder = { Text("Reply in Dialog", fontSize = 14.sp) })
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Choice("Reply", false, palette) { if (reply.isNotBlank()) { link.editTask(k, JSONObject().put("action", "reply").put("text", reply)); reply = "" } }
                         if (assignable) Choice("Reply and resume", true, palette) { if (reply.isNotBlank()) { link.editTask(k, JSONObject().put("action", "reply").put("text", reply).put("resume", true)); reply = "" } }
@@ -240,6 +281,51 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
             }
         }
         item { Spacer(Modifier.height(16.dp)) }
+    }
+    }
+}
+
+/** A handoff the user has yet to confirm: who, where, and when it starts ("" for now or its schedule). */
+private data class Handoff(val agent: String, val host: String, val start: String)
+
+/** While an edit is on its way, a task page's buttons take no other. */
+private val LocalBusy = compositionLocalOf { false }
+
+/** A date, then a time (or none), for a task's SCHEDULED, DEADLINE or a handoff's start: "YYYY-MM-DD" or
+ * "YYYY-MM-DD HH:MM", which org-edit reads. START is board.mjs pickerStart's { date, time }. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WhenDialogs(title: String, start: JSONObject, canClear: Boolean, onPicked: (String) -> Unit, onClear: () -> Unit, onDismiss: () -> Unit) {
+    val first = runCatching { java.time.LocalDate.parse(start.optString("date")) }.getOrElse { java.time.LocalDate.now() }
+    val dateState = rememberDatePickerState(initialSelectedDateMillis = first.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli())
+    var date by remember { mutableStateOf<String?>(null) }
+    val chosen = date
+    if (chosen == null) {
+        DatePickerDialog(
+            onDismissRequest = onDismiss,
+            confirmButton = { TextButton({ dateState.selectedDateMillis?.let { date = java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString() } }) { Text("Next") } },
+            dismissButton = {
+                Row {
+                    if (canClear) TextButton(onClear) { Text("Clear") }
+                    TextButton(onDismiss) { Text("Cancel") }
+                }
+            },
+        ) { DatePicker(dateState, title = { Text(title, Modifier.padding(start = 24.dp, top = 16.dp)) }) }
+    } else {
+        val time = start.optString("time").split(":")
+        val timeState = rememberTimePickerState(initialHour = time.getOrNull(0)?.toIntOrNull() ?: 9, initialMinute = time.getOrNull(1)?.toIntOrNull() ?: 0, is24Hour = false)
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("$title, $chosen") },
+            text = { TimePicker(timeState) },
+            confirmButton = { TextButton({ onPicked("$chosen ${"%02d".format(timeState.hour)}:${"%02d".format(timeState.minute)}") }) { Text("Set") } },
+            dismissButton = {
+                Row {
+                    TextButton({ onPicked(chosen) }) { Text("No time") }
+                    TextButton(onDismiss) { Text("Cancel") }
+                }
+            },
+        )
     }
 }
 
@@ -269,10 +355,10 @@ fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifie
     LaunchedEffect(Unit) { link.wantBoards() }
     val now = minute()
     val colours = rememberColours(decisions)
-    val view by produceState<JSONObject?>(null, link.agents, link.agenda, now) {
+    val view by produceState<JSONObject?>(null, link.agents, link.agenda, now, link.pending) {
         val agents = link.agents
         value = if (agents == null) null else runCatching {
-            JSONObject(decisions.call("board.agentsView", agents, now, link.agenda?.optString("today") ?: "", agents.optString("user")))
+            JSONObject(decisions.call("board.agentsView", agents, now, link.agenda?.optString("today") ?: "", agents.optString("user"), link.pending))
         }.getOrNull()
     }
     val open = LocalUriHandler.current
@@ -329,13 +415,14 @@ fun ProjectsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modif
     // agenda, projects, or one state's tasks.
     var mode by remember { mutableStateOf("agenda") }
     var drill by remember { mutableStateOf("") }
-    val view by produceState<JSONObject?>(null, link.agenda) {
+    val user = link.agents?.optString("user") ?: ""
+    val view by produceState<JSONObject?>(null, link.agenda, link.pending) {
         val agenda = link.agenda
-        value = if (agenda == null) null else runCatching { JSONObject(decisions.call("board.agendaView", agenda)) }.getOrNull()
+        value = if (agenda == null) null else runCatching { JSONObject(decisions.call("board.agendaView", agenda, link.pending, user)) }.getOrNull()
     }
-    val rows by produceState<List<JSONObject>>(emptyList(), link.agenda, drill) {
+    val rows by produceState<List<JSONObject>>(emptyList(), link.agenda, drill, link.pending) {
         val agenda = link.agenda
-        value = if (agenda == null || drill.isEmpty()) emptyList() else runCatching { JSONArray(decisions.call("board.stateRows", agenda, drill)).objects() }.getOrDefault(emptyList())
+        value = if (agenda == null || drill.isEmpty()) emptyList() else runCatching { JSONArray(decisions.call("board.stateRows", agenda, drill, link.pending, user)).objects() }.getOrDefault(emptyList())
     }
     val open = LocalUriHandler.current
     var page by remember { mutableStateOf("") }
@@ -402,11 +489,12 @@ private fun Heading(title: String, summary: String, palette: Look.Palette, trail
 /** A button on a task's page, filled when it is the current choice; at least 44 dp tall to tap. */
 @Composable
 private fun Choice(text: String, on: Boolean, palette: Look.Palette, onClick: () -> Unit) {
+    val busy = LocalBusy.current
     Text(
         text, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 14.sp,
         color = if (on) palette.page else palette.pageInk,
-        modifier = Modifier.background(if (on) palette.pageInk else Color.Transparent, RoundedCornerShape(50))
-            .border(2.dp, palette.pageInk, RoundedCornerShape(50)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp),
+        modifier = Modifier.alpha(if (busy) 0.45f else 1f).background(if (on) palette.pageInk else Color.Transparent, RoundedCornerShape(50))
+            .border(2.dp, palette.pageInk, RoundedCornerShape(50)).clickable(enabled = !busy, onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp),
     )
 }
 

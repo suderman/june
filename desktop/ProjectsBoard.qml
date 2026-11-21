@@ -24,10 +24,12 @@ Item {
   property var notice: ({ key: "", text: "" })
   // Who a task can be handed to, and where by default (the agents board's dispatch).
   property var dispatch: null
+  // The user's edits on their way (shell.qml pendingEdits), shown as made.
+  property var pending: ({})
   // A rename moves a task without an ID to a new key; its page follows.
   onNoticeChanged: if ((notice.from ?? "") !== "" && notice.from === detailKey) detailKey = notice.key
 
-  readonly property var drillRows: mode === "state" ? Board.stateRows(agenda, drill) : []
+  readonly property var drillRows: mode === "state" ? Board.stateRows(agenda, drill, pending, user) : []
   readonly property int openCount: view.counts.reduce((n, c) => n + c.n, 0)
 
   TaskDetail {
@@ -35,7 +37,9 @@ Item {
     visible: board.detailKey !== ""
     backLabel: board.mode === "state" ? board.drill : "agenda"
     id: detailPage
-    detail: board.detailKey !== "" ? Board.taskDetail(Board.findTask(board.agenda?.tasks, board.detailKey), board.user, board.agenda?.today ?? "", Date.now()) : null
+    detail: board.detailKey !== "" ? Board.taskPage(board.agenda?.tasks, board.detailKey, board.pending, board.user, board.agenda?.today ?? "", Date.now()) : null
+    today: board.agenda?.today ?? ""
+    undo: board.notice.key === board.detailKey || board.notice.key === (detailPage.detail?.key ?? "") ? (board.notice.undo ?? null) : null
     dispatch: board.dispatch
     onBack: board.detailKey = ""
     onOpen: link => board.open(link)

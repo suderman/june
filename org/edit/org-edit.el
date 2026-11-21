@@ -37,6 +37,20 @@
 (defconst org-edit--time-re
   "\\`\\([0-9]\\{1,2\\}:[0-5][0-9]\\)\\(?:-\\([0-9]\\{1,2\\}:[0-5][0-9]\\)\\)?\\'")
 
+(defconst org-edit--clock-re "\\`\\([0-9]\\{1,2\\}\\)\\(?::\\([0-5][0-9]\\)\\)?\\(am\\|pm\\)\\'"
+  "A twelve-hour time, such as 9am or 9:30pm.")
+
+(defconst org-edit--later-re "\\`\\+\\([0-9]+\\)\\(h\\|min\\)\\'"
+  "A start this many hours or minutes from now, such as +2h or +30min.")
+
+(defun org-edit--clock (word)
+  "WORD, a twelve-hour time, as HH:MM."
+  (string-match org-edit--clock-re word)
+  (let ((hour (string-to-number (match-string 1 word)))
+        (minute (or (match-string 2 word) "00")))
+    (unless (<= 1 hour 12) (error "no such time %s" word))
+    (format "%d:%s" (+ (% hour 12) (if (equal (match-string 3 word) "pm") 12 0)) minute)))
+
 (defun org-edit--args (n usage)
   "Pop N command-line arguments, or fail with USAGE."
   (let ((args (seq-take command-line-args-left n)))
@@ -51,15 +65,25 @@ range, and optional repeater and warning cookies."
   (let (date time end cookies)
     (dolist (word (split-string (downcase when)))
       (cond
+       ;; +2h is a start from now, before any date; after one, a repeater.
+       ((and (not date) (not time) (string-match org-edit--later-re word))
+        (let ((at (time-add nil (* 60 (string-to-number (match-string 1 word))
+                                    (if (equal (match-string 2 word) "h") 60 1)))))
+          (setq date (format-time-string "%F" at) time (format-time-string "%H:%M" at))))
        ;; +3d is the date until there is one, then a repeater.
        ((and date (string-match-p org-edit--cookie-re word)) (push word cookies))
        ((string-match org-edit--time-re word)
         (when time (error "two times in %S" when))
         (setq time (match-string 1 word) end (match-string 2 word)))
+       ((string-match-p org-edit--clock-re word)
+        (when time (error "two times in %S" when))
+        (setq time (org-edit--clock word)))
        ((string-match-p org-edit--date-re word)
         (when date (error "two dates in %S" when))
         (setq date word))
-       (t (error "not a date, time, or cookie: %S (use YYYY-MM-DD, +3d, fri, 14:00, +1w)" word))))
+       (t (error "not a date, time, or cookie: %S (use YYYY-MM-DD, +3d, fri, 14:00, 9am, +2h, +1w)" word))))
+    ;; A time alone is today's.
+    (when (and time (not date)) (setq date "today"))
     (unless date (error "no date in %S" when))
     (let ((day (org-read-date nil t (if (equal date "tomorrow") "+1d" date)))
           (pad (lambda (hm) (if (= (length hm) 4) (concat "0" hm) hm))))
@@ -688,11 +712,12 @@ The wrapper holds the launch lock. Replays find the receipt even after a rename.
 
 (defun org-edit-reschedule-task ()
   "Correct an AUTO start with a revision, request and note in JSON.
+With who, the user's own name, the Dialog entry is theirs rather than June's.
 The wrapper holds the dispatcher lock through validation and the atomic save."
   (pcase-let* ((`(,file ,heading ,when ,json) (org-edit--args 4 "reschedule-task FILE id:UUID WHEN JSON"))
                (spec (json-parse-string json :object-type 'plist))
                (revision (plist-get spec :revision)) (request (plist-get spec :request))
-               (note (plist-get spec :note))
+               (note (plist-get spec :note)) (who (plist-get spec :who))
                (date "[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}")
                (clock "\\(?:[01][0-9]\\|2[0-3]\\):[0-5][0-9]")
                (create-lockfiles t) (file-precious-flag t) (result nil))
@@ -702,6 +727,9 @@ The wrapper holds the dispatcher lock through validation and the atomic save."
                  (stringp note) (not (string-empty-p (string-trim note)))
                  (not (string-match-p "[\n\r]" (concat request note))))
       (error "reschedule-task needs id:UUID, revision SHA256, request and one-line note"))
+    (when who
+      (unless (org-edit--user-name-p who) (error "who needs the user's own name"))
+      (when (org-edit--worker-p) (error "who is the user's, not a coding worker's")))
     (unless (string-match-p (concat "\\`" date "\\(?: " clock "\\)?\\'") when)
       (error "use a future Calgary date as YYYY-MM-DD or YYYY-MM-DD HH:MM"))
     (setq file (file-truename file))
@@ -757,7 +785,7 @@ The wrapper holds the dispatcher lock through validation and the atomic save."
              (org-add-planning-info 'scheduled stamp)
              (org-back-to-heading t)
              (org-entry-put nil "JUNE_RESCHEDULE" request)
-             (org-dispatch--append "Dialog" (org-dispatch--entry "June"
+             (org-dispatch--append "Dialog" (org-dispatch--entry (or who "June")
                (format "Rescheduled from %s to %s. %s" (or old "no scheduled start") stamp note)))))
          (setq result `((id . ,id) (state . ,(or state :null)) (scheduled . ,(or (org-entry-get nil "SCHEDULED") :null))
                         (written . ,(if replay :false t)))))) t)
