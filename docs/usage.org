@@ -9,6 +9,8 @@ june ask "What are my agents doing?"
 june ask --json "..."    # {"requestId","status","text","reason"}
 echo "..." | june ask -
 june status [--json] # daemon, model, and conversation state; no model call
+june agenda [--json] # overdue, today and this week, as the clients get them
+june agents [--json] # agents at work, what needs you, what is queued
 june transcript --since 16:20 --detail  # the conversation as text; see below
 june usage [--since WHEN] [--json]      # what June uses, and her art picks
 june device add NAME # allow a device on the WebSocket; also list, revoke

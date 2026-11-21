@@ -1,6 +1,7 @@
 // Client/daemon protocol: one JSON object per line over a Unix socket, or per text frame over the WebSocket (remote.ts). After `attach` the daemon sends the folded view:
 // a reset with every item, then the changes to it (see "Attaching to the folded view" in docs/architecture.org).
 import type { Act } from "./tools/phone.ts";
+import type { Agenda, Agents } from "./board.ts";
 import { connect, type Socket } from "node:net";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { EntryRecord } from "@earendil-works/pi-durable";
@@ -64,6 +65,14 @@ export type Request =
 	| { op: "retake" | "restore" | "advance"; requestId: string; reply: string; revision: string }
 	/** The first frame on the WebSocket, and only there. */
 	| { op: "hello"; requestId: string; token: string; protocol: number }
+	/**
+	 * The agenda and agents boards (see "Agents and projects" in docs/interfaces.org). Asking keeps both fresh for this
+	 * connection, whose view state then carries their revisions; ask again when one changes.
+	 */
+	| { op: "agenda"; requestId: string }
+	| { op: "agents"; requestId: string }
+	/** Mark tasks' reviews seen, by task key, on every device; answered with the agents board. */
+	| { op: "seen"; requestId: string; keys: string[] }
 	/** Devices allowed on the WebSocket: Unix socket only. `add` answers with the new token, once. */
 	| { op: "device"; requestId: string; action: "add" | "list" | "revoke"; name?: string }
 	/** A device's offer to act on itself for June's `phone` tool, until the connection closes: WebSocket only. */
@@ -113,6 +122,8 @@ export type Reply =
 	/** `more` says the limit left older hits out. */
 	| { type: "search"; requestId: string; hits: SearchHit[]; more: boolean }
 	| { type: "hidden"; requestId: string; ranges: [number, number][] }
+	| { type: "agenda"; requestId: string; revision: string; agenda: Agenda }
+	| { type: "agents"; requestId: string; revision: string; agents: Agents }
 	| { type: "accepted"; requestId: string; submissionId: number }
 	| { type: "settled"; requestId: string; status: "done" | "unanswered"; text?: string; reason?: string }
 	| { type: "reply"; requestId: string; text: string }

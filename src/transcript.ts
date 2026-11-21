@@ -72,6 +72,11 @@ export type ViewState = {
 	 * (see "Activities" in docs/interfaces.org). Added by the daemon, not the fold.
 	 */
 	activity?: "thinking" | "working" | "watching";
+	/**
+	 * Revisions of the agenda and agents boards (see board.ts), once a client has asked for one; a client that shows a
+	 * board asks again when its revision changes. Added by the daemon, not the fold.
+	 */
+	boards?: { agenda?: string; agents?: string };
 };
 
 export type Change = { op: "put"; item: ViewItem; after: string | null } | { op: "drop"; id: string };

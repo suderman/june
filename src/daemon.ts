@@ -50,6 +50,7 @@ import { type Followed, listFollowing } from "./tools/follow.ts";
 import { shownFiles } from "./shown.ts";
 import { createShowExtension } from "./tools/show.ts";
 import { createHerdrExtension, Herdr, type Run, runProcess } from "./tools/herdr.ts";
+import { Boards } from "./board.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
 import { createWorkExtension, FocusDoc, WorkDoc } from "./tools/work.ts";
 import { createOrgExtension, Org } from "./tools/org.ts";
@@ -98,6 +99,8 @@ export type DaemonOptions = {
 	readonly remoteTiming?: { helloMs?: number; pingMs?: number; maxBuffered?: number };
 	/** Tests check the followed tasks more often than every 15 seconds. */
 	readonly followingMs?: number;
+	/** Tests supply the agenda and agents boards. */
+	readonly boards?: Boards;
 	/** Tests answer notmuch themselves. */
 	readonly mailRun?: Run;
 	/** Tests set the watch's clock, loop speed, home directory for local run records, and commands. */
@@ -313,11 +316,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		let remoteError: string | undefined;
 		const relax = () => root.configure({ model, thinkingLevel: agent.thinkingLevel }, BG);
 		const follows = pollFollowing(() => harness.commit((tx) => listFollowing(tx), BG), options.followingMs ?? 15_000, log);
+		const boards = options.boards ?? new Boards({ config, herdr, seenFile: `${paths.state}/seen.json`, log });
 		// How many connections have the phone app's conversation open (ntfy.ts pushes only while none does).
 		const apkViews = { count: 0 };
 		const immichServer = immichFrom({ ...(options.env ?? process.env), ...options.secrets });
 		const immich = immichServer && { server: immichServer, watch: watchImmich(immichServer, { file: `${paths.state}/immich.json`, warn: (error) => log.warn("immich_status_failed", { error: error.message }) }) };
-		const scope: Scope = { wake: config.rhythm.wake, apkViews, harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, ...(expressions ? { expressions } : {}), ...(immich ? { immich } : {}) };
+		const scope: Scope = { wake: config.rhythm.wake, apkViews, harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, boards, ...(expressions ? { expressions } : {}), ...(immich ? { immich } : {}) };
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
@@ -353,6 +357,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				stopReflection?.();
 				stopSituation();
 				follows.stop();
+				boards.stop();
 				stopHeartbeat?.();
 				stopLooseEnds?.();
 				stopConflicts?.();
@@ -385,9 +390,11 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 	});
 }
 
-type Scope = CommandScope & { wake: string; immich?: { server: Immich; watch: ImmichWatch }; apkViews: { count: number }; timeline: Timeline; hidden: Hidden; log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; expressions?: ReturnType<typeof startExpressions> };
+type Scope = CommandScope & { wake: string; immich?: { server: Immich; watch: ImmichWatch }; apkViews: { count: number }; timeline: Timeline; hidden: Hidden; log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; boards: BoardSource; expressions?: ReturnType<typeof startExpressions> };
 /** The sky a view sends with its state, and how it learns of a change. */
 type SkySource = Pick<Situation, "sky" | "onSky">;
+/** The boards' revisions a view sends with its state, and their contents for the requests. */
+type BoardSource = Pick<Boards, "revisions" | "onChange" | "agenda" | "agents" | "seen" | "subscribe">;
 /** How many followed tasks are still going, and how a view learns of a change. */
 export type FollowSource = { following(): number; follows(): Followed[]; onFollowing(listener: () => void): () => void };
 
@@ -452,6 +459,8 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 	const context = withAbortSignal(abort.signal, BG);
 	let view: View | undefined;
 	let viewingApp = false;
+	let unsubscribe: (() => void) | undefined;
+	const boards = () => (unsubscribe ??= scope.boards.subscribe(), scope.boards);
 
 	async function handle(request: Request): Promise<void> {
 		switch (request.op) {
@@ -464,7 +473,7 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 				const app = !local && request.client === "apk";
 				if (app !== viewingApp) scope.apkViews.count += app ? 1 : -1;
 				viewingApp = app;
-				view = await attachView(scope.root, context, send, request.requestId, { detail: request.detail === true, wake: scope.wake, hidden: scope.hidden, ...(scope.sky ? { sky: scope.sky } : {}), ...(scope.follows ? { follows: scope.follows } : {}) });
+				view = await attachView(scope.root, context, send, request.requestId, { detail: request.detail === true, wake: scope.wake, hidden: scope.hidden, ...(scope.sky ? { sky: scope.sky } : {}), ...(scope.follows ? { follows: scope.follows } : {}), boards: scope.boards });
 				// The connection closed while the view was starting.
 				if (abort.signal.aborted) void view.stop();
 				return;
@@ -522,6 +531,19 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 				const { items, more } = await scope.timeline.search({ query, kinds: ["user", "june"], limit }, context);
 				const hits = items.map((item) => ({ id: item.id, at: item.at, date: dayName(item.at, scope.wake), kind: item.kind as "user" | "june", text: snippet(item.text, words) }));
 				return send({ type: "search", requestId: request.requestId, hits, more });
+			}
+			case "agenda": {
+				const { revision, value } = await boards().agenda();
+				return send({ type: "agenda", requestId: request.requestId, revision, agenda: value });
+			}
+			case "agents": {
+				const { revision, value } = await boards().agents();
+				return send({ type: "agents", requestId: request.requestId, revision, agents: value });
+			}
+			case "seen": {
+				if (!Array.isArray(request.keys) || !request.keys.every((k) => typeof k === "string")) throw new Error("seen needs keys, a list of task keys");
+				const { revision, value } = await boards().seen(request.keys);
+				return send({ type: "agents", requestId: request.requestId, revision, agents: value });
 			}
 			case "hide": {
 				if (!local) throw new Error("Hidden entries are managed over the Unix socket");
@@ -648,6 +670,7 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 			withdraw?.();
 			if (viewingApp) scope.apkViews.count--;
 			viewingApp = false;
+			unsubscribe?.();
 			void view?.stop();
 		},
 	};
@@ -675,7 +698,7 @@ export async function attachView(
 	context: Context,
 	send: (reply: Reply) => void,
 	requestId: string,
-	options: { detail?: boolean; wake?: string; sky?: SkySource; follows?: FollowSource; hidden?: Pick<Hidden, "matcher"> } = {},
+	options: { detail?: boolean; wake?: string; sky?: SkySource; follows?: FollowSource; boards?: Pick<BoardSource, "revisions" | "onChange">; hidden?: Pick<Hidden, "matcher"> } = {},
 ): Promise<View> {
 	let detail = options.detail === true;
 	// The fold knows nothing of the sky or the follows; they join the state here, so a change in the weather or in what
@@ -684,7 +707,8 @@ export async function attachView(
 		const hidden = options.hidden?.matcher();
 		const folded = foldView(today(hidden ? { ...value, items: value.items.filter((item) => !(item.entry && hidden(Number((item.entry as { id?: unknown }).id)))) } : value), { detail });
 		const sky = options.sky?.sky();
-		const state: ViewState = { ...folded.state, ...(sky ? { sky } : {}), ...(options.follows ? { following: options.follows.following(), ...(options.follows.following() > 0 ? { follows: options.follows.follows() } : {}) } : {}) };
+		const boards = options.boards?.revisions();
+		const state: ViewState = { ...folded.state, ...(sky ? { sky } : {}), ...(options.follows ? { following: options.follows.following(), ...(options.follows.following() > 0 ? { follows: options.follows.follows() } : {}) } : {}), ...(boards && (boards.agenda || boards.agents) ? { boards } : {}) };
 		const activity = activityOf(state);
 		return { ...folded, state: activity ? { ...state, activity } : state };
 	};
@@ -769,6 +793,9 @@ export async function attachView(
 	const stopFollows = options.follows?.onFollowing(() => {
 		timer ??= setTimeout(flush, Math.max(0, flushed + FLUSH_MS - Date.now()));
 	});
+	const stopBoards = options.boards?.onChange(() => {
+		timer ??= setTimeout(flush, Math.max(0, flushed + FLUSH_MS - Date.now()));
+	});
 	return {
 		contains(id) { return shown?.items.some((i) => i.kind === "assistant" && i.id === id && !i.private) ?? false; },
 		// The reset holds everything a pending flush would send.
@@ -784,6 +811,7 @@ export async function attachView(
 			clearTimeout(dawn);
 			stopSky?.();
 			stopFollows?.();
+			stopBoards?.();
 			await watch.stop();
 		},
 	};

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createModels, fauxProvider } from "@earendil-works/pi-ai";
 import type { Extension } from "@earendil-works/pi-durable";
 import type { PatterTiming } from "../src/patter.ts";
+import type { Boards } from "../src/board.ts";
 import type { Config, Paths } from "../src/config.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Client, type Reply, type Source } from "../src/protocol.ts";
@@ -88,6 +89,7 @@ export async function openTestDaemon(options: {
 	mailRun?: (argv: readonly string[]) => Promise<string>;
 	watchClock?: { now: () => Date; tickMs: number; home: string; run: (argv: readonly string[]) => Promise<string> };
 	remoteTiming?: { helloMs?: number; pingMs?: number; maxBuffered?: number };
+	boards?: Boards;
 }): Promise<Daemon> {
 	const models = createModels();
 	models.setProvider(options.faux.provider);
@@ -110,6 +112,7 @@ export async function openTestDaemon(options: {
 		...(options.mailRun ? { mailRun: options.mailRun } : {}),
 		...(options.watchClock ? { watchClock: options.watchClock } : {}),
 		...(options.remoteTiming ? { remoteTiming: options.remoteTiming } : {}),
+		...(options.boards ? { boards: options.boards } : {}),
 	});
 	opened.set(options.dir, [...(opened.get(options.dir) ?? []), daemon]);
 	return daemon;

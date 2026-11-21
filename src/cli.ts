@@ -11,12 +11,15 @@ import { KINDS, parseRange, renderTimeline } from "./timeline.ts";
 import { createJuneModels, providerFromPiModels } from "./models.ts";
 import { findSkills } from "./prompt.ts";
 import { Client, DaemonUnavailable, parseCommand, type Reply, type Status } from "./protocol.ts";
+import type { Agenda, AgendaEntry, Agents } from "./board.ts";
 import { runProcess } from "./tools/herdr.ts";
 
 const USAGE = `usage:
   june                    open the terminal client
   june ask [--json] TEXT  send one message and print the answer ("-" or no text reads stdin)
   june status [--json]    daemon, model, and conversation state, without a model call
+  june agenda [--json]    overdue, today and this week from the Org agenda, as June's clients see it
+  june agents [--json]    the agents at work, what needs you, what is queued, and what finished today
   june transcript [--last N] [--since WHEN] [--detail] [--json]
                           the recent conversation as text: the last N entries (200 by default), or those since
                           WHEN (30m, 2h, 1d, 16:20, or a date); --detail adds thinking, tool output, and private looks
@@ -44,7 +47,7 @@ async function main(argv: string[]): Promise<number> {
 	const json = rest.includes("--json");
 	const args = rest.filter((a) => a !== "--json");
 	const p = paths();
-	if (["tui", "ask", "status", "transcript", "device", "usage"].includes(command)) {
+	if (["tui", "ask", "status", "agenda", "agents", "transcript", "device", "usage"].includes(command)) {
 		const remote = remoteHost(p);
 		if (remote !== undefined) return overSsh(remote, command, argv);
 	}
@@ -64,6 +67,9 @@ async function main(argv: string[]): Promise<number> {
 			return ask(p.socket, args, json);
 		case "status":
 			return status(p.socket, json);
+		case "agenda":
+		case "agents":
+			return board(p.socket, command, json);
 		case "transcript":
 			return transcript(p, args, json);
 		case "usage":
@@ -311,6 +317,59 @@ async function status(socket: string, json: boolean): Promise<number> {
 	if (json) console.log(JSON.stringify(reply.status));
 	else console.log(formatStatus(reply.status));
 	return 0;
+}
+
+/** Print one of the boards (see board.ts) the way the clients get it, or as plain lines. */
+async function board(socket: string, which: "agenda" | "agents", json: boolean): Promise<number> {
+	const client = await Client.open(socket).catch(() => undefined);
+	if (client === undefined) {
+		console.error(`June is not running (${socket})`);
+		return 3;
+	}
+	const reply = await client.request({ op: which, requestId: randomUUID() });
+	client.close();
+	if (reply.type === "agenda") console.log(json ? JSON.stringify(reply.agenda) : formatAgenda(reply.agenda));
+	else if (reply.type === "agents") console.log(json ? JSON.stringify(reply.agents) : formatAgents(reply.agents));
+	else {
+		console.error(reply.type === "error" ? reply.message : "unexpected reply");
+		return 1;
+	}
+	return 0;
+}
+
+function formatAgenda(a: Agenda): string {
+	const row = (e: AgendaEntry) => {
+		const t = a.tasks[e.task];
+		return `  ${(e.time ?? "").padEnd(5)} ${(t?.state ?? "").padEnd(4)} ${t?.title ?? e.task}${e.extra ? `  (${e.extra.replace(/\s+/g, " ")})` : ""}  · ${t?.project ?? ""}`;
+	};
+	const lines = [`Agenda for ${a.today}`];
+	if (a.overdue.length > 0) lines.push("Overdue", ...a.overdue.map(row));
+	for (const [i, day] of a.days.entries()) if (i === 0 || day.entries.length > 0) lines.push(i === 0 ? "Today" : day.date, ...day.entries.map(row));
+	lines.push(`By state: ${Object.entries(a.counts).map(([s, n]) => `${s} ${n}`).join(", ")}`);
+	return lines.join("\n");
+}
+
+function formatAgents(a: Agents): string {
+	const title = (key?: string) => (key ? (a.tasks[key]?.title ?? key) : "no task");
+	const kinds = { blocked: "blocked on a prompt", waiting: "waiting for your reply", review: "new for review" };
+	const lines: string[] = [];
+	const down = a.hosts.filter((h) => !h.ok);
+	if (down.length > 0) lines.push(`Unreachable: ${down.map((h) => `${h.host} (${h.error})`).join(", ")}`);
+	lines.push(`Needs you: ${a.needs.length === 0 ? "nothing" : ""}`);
+	for (const n of a.needs) lines.push(`  ${n.level} ${kinds[n.kind]}: ${title(n.task)}${n.worker ? ` · ${n.worker.host}/${n.worker.terminal}` : ""}`);
+	lines.push(`Workers: ${a.workers.length === 0 ? "none" : ""}`);
+	for (const w of a.workers) lines.push(`  ${w.agent}@${w.host}/${w.terminal} ${w.status}: ${w.taskKey ? title(w.taskKey) : (w.title ?? w.cwd)}`);
+	if (a.queued.length > 0) lines.push("Queued:");
+	for (const k of a.queued) {
+		const t = a.tasks[k]!;
+		lines.push(`  ${t.title} · ${t.agent ?? "?"} on ${t.host ?? "?"}${t.scheduled ? ` · ${t.scheduled}` : ""}${t.dependency && t.dependency.kind !== "ready" ? ` · ${t.dependency.kind}: ${t.dependency.reason}` : ""}`);
+	}
+	if (a.recent.length > 0) lines.push("Reported today:");
+	for (const k of a.recent) {
+		const t = a.tasks[k]!;
+		lines.push(`  ${t.state} ${t.title}: ${t.headline?.text ?? ""}`);
+	}
+	return lines.join("\n");
 }
 
 function formatStatus(s: Status): string {
