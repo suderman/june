@@ -214,3 +214,15 @@ test("the boards show the week of an agenda that carries a fortnight, for the ph
 	const week = agendaView(agenda).sections.find((s) => s.id === "week");
 	assert.equal(week.rows.length, 6, "tomorrow through six days on");
 });
+
+test("a task's page offers the states its state flows to, and a protected file's only TODO and DONE", async () => {
+	const { nextStates } = await import("../desktop/board.mjs");
+	assert.deepEqual(nextStates("TODO"), ["AUTO", "PROG", "HOLD", "DONE"]);
+	assert.deepEqual(nextStates("PROG"), ["TODO", "EVAL", "HOLD", "DONE"]);
+	assert.deepEqual(nextStates("EVAL"), ["TODO", "PROG", "AUTO", "HOLD", "DONE"]);
+	assert.deepEqual(nextStates("AUTO"), ["TODO", "HOLD", "DONE"]);
+	assert.deepEqual(nextStates("HOLD"), ["TODO", "PROG", "AUTO", "DONE"]);
+	assert.deepEqual(nextStates("DONE"), ["TODO"]);
+	assert.deepEqual([nextStates("TODO", true), nextStates("DONE", true), nextStates("")], [["DONE"], ["TODO"], []]);
+	assert.deepEqual(taskDetail(task("id:x", { state: "HOLD" }), "Alex", "2026-11-21").next, ["TODO", "PROG", "AUTO", "DONE"]);
+});

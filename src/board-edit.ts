@@ -15,13 +15,24 @@ const REPO = dirname(import.meta.dirname);
 const ORG_EDIT = join(REPO, "org/edit/org-edit");
 
 export type TaskEdit =
-	| { action: "state"; state: "TODO" | "PROG" | "EVAL" | "HOLD" | "DONE" }
+	| { action: "state"; state: "TODO" | "PROG" | "EVAL" | "HOLD" | "DONE"; /** Putting back the last change: its reverse is allowed. */ undo?: boolean }
 	| { action: "assign"; agent: string; host?: string; when?: string }
 	| { action: "reply"; text: string; resume?: boolean }
 	| { action: "schedule" | "deadline"; when: string }
 	| { action: "title"; title: string };
 
 const SETTABLE = ["TODO", "PROG", "EVAL", "HOLD", "DONE"];
+
+/** desktop/board.mjs FLOW: where each state may go; an undo may make a move's reverse. */
+const FLOW: Record<string, string[]> = {
+	TODO: ["AUTO", "PROG", "HOLD", "DONE"],
+	PROG: ["TODO", "EVAL", "HOLD", "DONE"],
+	EVAL: ["TODO", "PROG", "AUTO", "HOLD", "DONE"],
+	AUTO: ["TODO", "HOLD", "DONE"],
+	HOLD: ["TODO", "PROG", "AUTO", "DONE"],
+	DONE: ["TODO"],
+};
+const flows = (from: string, to: string, undo: boolean) => (FLOW[from] ?? []).includes(to) || (undo && (FLOW[to] ?? []).includes(from));
 const ASSIGNABLE = ["TODO", "EVAL", "HOLD"];
 
 /** How org-edit names a task: its ID, else its outline path. */
@@ -77,6 +88,7 @@ export class TaskEdits {
 				case "state": {
 					if (!SETTABLE.includes(edit.state)) throw new Error(`State must be one of ${SETTABLE.join(", ")}; assign a clanker for AUTO`);
 					if (!task.state) throw new Error("That heading has no state to change");
+					if (!task.protected && !flows(task.state, edit.state, edit.undo === true)) throw new Error(`${task.state} does not go to ${edit.state}; its next states are ${(FLOW[task.state] ?? []).filter((s) => s !== "AUTO").join(", ")}`);
 					return this.#edit("todo", file, heading, edit.state, "--expect", task.state, ...(task.protected ? ["--protected"] : []));
 				}
 				case "assign": {

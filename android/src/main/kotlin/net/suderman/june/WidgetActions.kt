@@ -37,8 +37,8 @@ import org.json.JSONObject
 
 /**
  * A tap on the agenda widget's list (AgendaWidget.kt). A widget list sends every tap through one intent, so this
- * invisible screen takes them all: a row opens its task's page in June; its ○ marks the task DONE in the background
- * (TaskEditJob), showing it ticked at once, and the screen closes without being seen.
+ * invisible screen takes them all: a row opens its task's page in June; its state pill opens the state picker
+ * (StatePickerActivity). It closes without being seen.
  */
 class WidgetTapActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,10 +46,9 @@ class WidgetTapActivity : Activity() {
         val data = intent?.data
         val key = data?.getQueryParameter("key")
         when {
-            key != null && intent.getStringExtra("action") == "done" -> {
-                AgendaWidget.markDone(this, key)
-                TaskEditJob.done(this, key)
-            }
+            key != null && intent.getStringExtra("action") == "state" -> startActivity(Intent(this, StatePickerActivity::class.java)
+                .putExtra("key", key).putExtra("state", intent.getStringExtra("state")).putExtra("title", intent.getStringExtra("title"))
+                .putExtra("protected", intent.getBooleanExtra("protected", false)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             data != null -> startActivity(Intent(this, ConversationActivity::class.java).setAction(Intent.ACTION_VIEW).setData(data)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
         }
@@ -57,18 +56,18 @@ class WidgetTapActivity : Activity() {
     }
 }
 
-/** The widget's DONE for a task, sent to the daemon as the boards send it, as soon as there is a network. */
+/** A state picked on the widget, sent to the daemon as the boards send it, as soon as there is a network. */
 class TaskEditJob : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
         val key = params.extras.getString("key") ?: return false
+        val state = params.extras.getString("state") ?: return false
         Thread {
-            val reply = DaemonCall.request(this, JSONObject().put("op", "task").put("key", key).put("edit", JSONObject().put("action", "state").put("state", "DONE")))
-            val done = reply?.optString("type") == "task"
-            if (done) AgendaJob.refresh(this)
+            val reply = DaemonCall.request(this, JSONObject().put("op", "task").put("key", key).put("edit", JSONObject().put("action", "state").put("state", state)))
+            if (reply?.optString("type") == "task") AgendaJob.refresh(this)
             else {
                 // Refused or out of reach: the widget shows the task as the daemon has it again.
-                AgendaWidget.unmarkDone(this, key)
-                android.os.Handler(mainLooper).post { Toast.makeText(this, reply?.optString("message")?.takeIf { it.isNotEmpty() } ?: "June couldn't be reached; not marked done", Toast.LENGTH_LONG).show() }
+                AgendaWidget.unmarkState(this, key)
+                android.os.Handler(mainLooper).post { Toast.makeText(this, reply?.optString("message")?.takeIf { it.isNotEmpty() } ?: "June couldn't be reached; not changed", Toast.LENGTH_LONG).show() }
             }
             jobFinished(params, false)
         }.start()
@@ -78,15 +77,68 @@ class TaskEditJob : JobService() {
     override fun onStopJob(params: JobParameters) = true
 
     companion object {
-        fun done(context: Context, key: String) {
+        fun state(context: Context, key: String, state: String) {
             context.getSystemService(JobScheduler::class.java).schedule(
                 JobInfo.Builder(key.hashCode() and 0x0fffffff or 0x10000000, ComponentName(context, TaskEditJob::class.java))
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                     .setExpedited(true)
-                    .setExtras(PersistableBundle().apply { putString("key", key) })
+                    .setExtras(PersistableBundle().apply { putString("key", key); putString("state", state) })
                     .build(),
             )
         }
+    }
+}
+
+/** desktop/board.mjs FLOW: where each state may go. */
+val FLOW = mapOf(
+    "TODO" to listOf("AUTO", "PROG", "HOLD", "DONE"),
+    "PROG" to listOf("TODO", "EVAL", "HOLD", "DONE"),
+    "EVAL" to listOf("TODO", "PROG", "AUTO", "HOLD", "DONE"),
+    "AUTO" to listOf("TODO", "HOLD", "DONE"),
+    "HOLD" to listOf("TODO", "PROG", "AUTO", "DONE"),
+    "DONE" to listOf("TODO"),
+)
+
+/**
+ * The widget's state picker: where the task's state can go (FLOW; only TODO and DONE in a protected file). A state
+ * shows on the widget at once and goes to the daemon in the background; AUTO opens the task's page, where the handoff
+ * names its agent, host and start.
+ */
+class StatePickerActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val key = intent.getStringExtra("key") ?: return finish()
+        val state = intent.getStringExtra("state") ?: ""
+        val locked = intent.getBooleanExtra("protected", false)
+        val next = if (locked) (if (state == "TODO") listOf("DONE") else if (state == "DONE") listOf("TODO") else emptyList()) else FLOW[state] ?: emptyList()
+        setContent {
+            MaterialTheme {
+                Surface {
+                    Column(Modifier.padding(20.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(intent.getStringExtra("title") ?: "", style = MaterialTheme.typography.titleMedium)
+                        Text("$state, then:", style = MaterialTheme.typography.bodySmall)
+                        for (to in next) Button({ pick(key, to) }, Modifier.fillMaxWidth()) { Text(if (to == "AUTO") "AUTO: hand to an agent…" else to) }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            TextButton({ open(key) }) { Text("Open in June") }
+                            TextButton({ finish() }) { Text("Cancel") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun pick(key: String, to: String) {
+        if (to == "AUTO") return open(key)
+        AgendaWidget.markState(this, key, to)
+        TaskEditJob.state(this, key, to)
+        finish()
+    }
+
+    private fun open(key: String) {
+        startActivity(Intent(this, ConversationActivity::class.java).setAction(Intent.ACTION_VIEW).setData(AgendaWidget.taskUri(key))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        finish()
     }
 }
 

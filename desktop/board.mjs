@@ -145,6 +145,25 @@ function uniqueKeys(rows) {
 	return rows;
 }
 
+/**
+ * Where a task can go from each state, as Jon's states flow (2026-11-21): the moves a state picker offers, here, on the
+ * phone's pages and in its widget. AUTO is a handoff (agent, host, start) wherever it appears. A protected file's
+ * headings only go between TODO and DONE. The daemon allows these and their reverses, so an undo works (board-edit.ts).
+ */
+export const FLOW = {
+	TODO: ["AUTO", "PROG", "HOLD", "DONE"],
+	PROG: ["TODO", "EVAL", "HOLD", "DONE"],
+	EVAL: ["TODO", "PROG", "AUTO", "HOLD", "DONE"],
+	AUTO: ["TODO", "HOLD", "DONE"],
+	HOLD: ["TODO", "PROG", "AUTO", "DONE"],
+	DONE: ["TODO"],
+};
+
+export function nextStates(state, locked) {
+	if (locked) return state === "TODO" ? ["DONE"] : state === "DONE" ? ["TODO"] : [];
+	return FLOW[state] ?? [];
+}
+
 /** The lists under the agenda, in the order they want attention. */
 export const LISTS = [["PROG", "IN PROGRESS"], ["EVAL", "IN REVIEW"], ["HOLD", "ON HOLD"], ["TODO", "TO DO"]];
 const PREVIEW = 5;
@@ -477,6 +496,7 @@ export function taskDetail(task, user, today, now, pending) {
 	return {
 		key: task.key, title: task.title, state: task.state ?? "", project: task.project, file: task.file,
 		protected: task.protected === true, host: task.host ?? "", agent, starts: startsAt(task, today, now),
+		next: nextStates(task.state ?? "", task.protected === true),
 		// While an edit is on its way, the page shows it as made and takes no other.
 		busy: task.pending === true,
 		scheduled: pickerStart(task.scheduled, today), deadline: pickerStart(task.deadline, today),

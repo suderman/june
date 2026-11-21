@@ -25,7 +25,7 @@ Item {
   // A file another program rebuilds (org.protected): only TODO or DONE, which the mirror may sync back.
   readonly property bool locked: detail?.protected ?? false
   readonly property bool editable: orgState !== "" && !locked
-  readonly property bool assignable: !locked && ["TODO", "EVAL", "HOLD"].includes(orgState)
+  readonly property bool assignable: !locked && (detail?.next ?? []).includes("AUTO")
   // An edit on its way: the page shows it as made; taps meanwhile queue behind it (shell.qml editTask).
   readonly property bool busy: detail?.busy ?? false
   // A handoff waiting for the user to confirm it: { agent, host, when }, or null; when "" starts as the page says.
@@ -142,7 +142,8 @@ Item {
         width: parent.width
         spacing: 6
         Repeater {
-          model: page.locked ? ["TODO", "DONE"] : ["TODO", "PROG", "EVAL", "HOLD", "DONE"]
+          // The state, then where it flows (board.mjs FLOW); AUTO is the hand-to row below.
+          model: [page.orgState].concat((page.detail?.next ?? []).filter(s => s !== "AUTO"))
           delegate: Choice {
             required property string modelData
             text: modelData

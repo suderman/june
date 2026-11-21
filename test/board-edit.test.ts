@@ -34,6 +34,7 @@ test("each board edit is one org-edit call that names the task and expects the s
 	await edits.apply(task({ state: "TODO" }), { action: "assign", agent: "pi", when: "sat 9:00" }, "r7");
 	await edits.apply(task({ file: "asana.org", protected: true, state: "TODO" }), { action: "state", state: "DONE" }, "r8");
 	await edits.apply(task({ state: "AUTO", revision: "c".repeat(64) }), { action: "schedule", when: "2026-11-30 09:00" }, "r9");
+	await edits.apply(task({ state: "DONE" }), { action: "state", state: "PROG", undo: true }, "r10");
 	assert.deepEqual(calls, [
 		["todo", file, "id:t1", "DONE", "--expect", "EVAL"],
 		["todo", file, "id:t1", "AUTO", "--expect", "EVAL", "--request", "r2", "--host", "cog", "--agent", "claude", "--who", "Alex", "--note", "Handed to claude on cog from June's board."],
@@ -46,6 +47,7 @@ test("each board edit is one org-edit call that names the task and expects the s
 		["todo", file, "id:t1", "AUTO", "--expect", "TODO", "--request", "r7", "--host", "kit", "--agent", "pi", "--who", "Alex", "--note", "Handed to pi on kit from June's board."],
 		["todo", join(config.org.root, "asana.org"), "id:t1", "DONE", "--expect", "TODO", "--protected"],
 		["reschedule-task", file, "id:t1", "2026-11-30 09:00", JSON.stringify({ revision: "c".repeat(64), request: "r9", note: "Moved from June's board.", who: "Alex" })],
+		["todo", file, "id:t1", "PROG", "--expect", "DONE"],
 	]);
 	assert.equal(headingOf(task({ id: undefined, path: ["A", "B"] })), "A / B / Hand off");
 	const refused: [TaskEdit, Partial<Task>, RegExp][] = [
@@ -65,9 +67,12 @@ test("each board edit is one org-edit call that names the task and expects the s
 		[{ action: "reply", text: "Back to you", resume: true }, { state: "PROG" }, /Only a TODO, EVAL or HOLD/],
 		[{ action: "schedule", when: "fri 9:00" }, { state: "AUTO", revision: "c".repeat(64) }, /Pick a date and time/],
 		[{ action: "schedule", when: "2026-11-30" }, { state: "AUTO", id: undefined }, /once the board has its ID/],
+		[{ action: "state", state: "EVAL" }, { state: "TODO" }, /TODO does not go to EVAL; its next states are PROG, HOLD, DONE/],
+		[{ action: "state", state: "PROG" }, { state: "AUTO" }, /AUTO does not go to PROG/],
+		[{ action: "state", state: "PROG" }, { state: "DONE" }, /DONE does not go to PROG/, ],
 	];
 	for (const [edit, extra, error] of refused) await assert.rejects(edits.apply(task(extra), edit, "r"), error);
-	assert.equal(calls.length, 11, "a refused edit runs nothing");
+	assert.equal(calls.length, 12, "a refused edit runs nothing; undoing PROG to DONE goes back");
 });
 
 test("a board edit reports org-edit's own words, and says when the dispatcher held the file too long", async () => {

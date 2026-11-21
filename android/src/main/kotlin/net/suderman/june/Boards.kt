@@ -188,7 +188,8 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
                     modifier = Modifier.fillMaxWidth().background(Look.balloon, RoundedCornerShape(12.dp)).border(2.dp, Look.ink, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 7.dp))
             }
             val state = d.optString("state")
-            val assignable = !locked && state in listOf("TODO", "EVAL", "HOLD")
+            val next = d.optJSONArray("next")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+            val assignable = !locked && "AUTO" in next
             val editable = !locked && state.isNotEmpty()
             if (state.isNotEmpty()) {
                 item { SectionTitle("STATE", palette) }
@@ -196,8 +197,9 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
                     @OptIn(ExperimentalLayoutApi::class)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         // A state change shows at once and can be put back while "saved" shows.
-                        for (s in if (locked) listOf("TODO", "DONE") else listOf("TODO", "PROG", "EVAL", "HOLD", "DONE")) Choice(s, s == state, palette) {
-                            if (s != state) link.editTask(k, JSONObject().put("action", "state").put("state", s), JSONObject().put("action", "state").put("state", state))
+                        // The state, then where it flows (board.mjs FLOW); AUTO is the hand-to row below.
+                        for (s in listOf(state) + next.filter { it != "AUTO" }) Choice(s, s == state, palette) {
+                            if (s != state) link.editTask(k, JSONObject().put("action", "state").put("state", s), if (state == "AUTO") null else JSONObject().put("action", "state").put("state", state).put("undo", true))
                         }
                     }
                 }

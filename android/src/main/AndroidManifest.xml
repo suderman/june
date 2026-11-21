@@ -112,6 +112,9 @@
             android:theme="@android:style/Theme.NoDisplay" android:excludeFromRecents="true" android:noHistory="true"
             android:taskAffinity="" />
         <service android:name=".TaskEditJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
+        <activity android:name=".StatePickerActivity" android:exported="false" android:label="Change state"
+            android:theme="@android:style/Theme.DeviceDefault.Dialog.NoActionBar" android:excludeFromRecents="true"
+            android:taskAffinity="" />
         <activity android:name=".QuickAddActivity" android:exported="false" android:label="Add a TODO"
             android:theme="@android:style/Theme.DeviceDefault.Dialog.NoActionBar" android:excludeFromRecents="true"
             android:taskAffinity="" android:windowSoftInputMode="stateVisible" />

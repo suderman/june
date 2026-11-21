@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The state pills' colours, desktop/board.mjs CHIPS. -->
+<resources>
+    <color name="agenda_pill_todo_ink">#8a1f12</color>
+    <color name="agenda_pill_prog_ink">#1c3a66</color>
+    <color name="agenda_pill_eval_ink">#3d3466</color>
+    <color name="agenda_pill_hold_ink">#6b4e00</color>
+    <color name="agenda_pill_auto_ink">#0f5148</color>
+    <color name="agenda_pill_done_ink">#2f5a22</color>
+</resources>

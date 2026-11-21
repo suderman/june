@@ -167,7 +167,8 @@ ShellRoot {
     // As shown: a saved edit the board has yet to carry counts.
     const task = Board.applyEntry(Board.findTask(Object.assign({}, agendaBoard?.tasks ?? {}, agentsBoard?.tasks ?? {}), key), held, "");
     // A state change can be put back, to the state it showed before.
-    const undo = change.action === "state" && (task?.state ?? "") !== "" ? { action: "state", state: task.state } : null;
+    // Not from AUTO: going back there is a handoff, not a state.
+    const undo = change.action === "state" && (task?.state ?? "") !== "" && task.state !== "AUTO" ? { action: "state", state: task.state, undo: true } : null;
     // A saved edit the board has yet to show stays drawn under the new one.
     sendEdit(key, change, held ? (held.applied ?? []).concat([held.change]) : [], [], undo);
   }

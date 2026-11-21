@@ -53,20 +53,32 @@ class AgendaWidget : AppWidgetProvider() {
             for (id in ids) manager.updateAppWidget(id, views)
         }
 
-        private fun marks(context: Context) = context.getSharedPreferences("widget_done", Context.MODE_PRIVATE)
+        /** Each state's pill: its background and its ink, desktop/board.mjs CHIPS. */
+        private val PILLS = mapOf(
+            "TODO" to (R.drawable.agenda_pill_todo to R.color.agenda_pill_todo_ink),
+            "PROG" to (R.drawable.agenda_pill_prog to R.color.agenda_pill_prog_ink),
+            "EVAL" to (R.drawable.agenda_pill_eval to R.color.agenda_pill_eval_ink),
+            "HOLD" to (R.drawable.agenda_pill_hold to R.color.agenda_pill_hold_ink),
+            "AUTO" to (R.drawable.agenda_pill_auto to R.color.agenda_pill_auto_ink),
+            "DONE" to (R.drawable.agenda_pill_done to R.color.agenda_pill_done_ink),
+        )
 
-        /** Tasks ticked on the widget in the last two minutes, while their DONE is on its way. */
-        private fun ticked(context: Context): Set<String> {
+        private fun marks(context: Context) = context.getSharedPreferences("widget_states", Context.MODE_PRIVATE)
+
+        /** States picked on the widget in the last two minutes, while they are on their way: key to state. */
+        private fun ticked(context: Context): Map<String, String> {
             val cutoff = System.currentTimeMillis() - 120_000
-            return marks(context).all.filter { (it.value as? Long ?: 0L) > cutoff }.keys
+            return marks(context).all.mapNotNull { (key, value) ->
+                (value as? String)?.split("|", limit = 2)?.takeIf { it.size == 2 && (it[1].toLongOrNull() ?: 0L) > cutoff }?.let { key to it[0] }
+            }.toMap()
         }
 
-        fun markDone(context: Context, key: String) {
-            marks(context).edit().putLong(key, System.currentTimeMillis()).apply()
+        fun markState(context: Context, key: String, state: String) {
+            marks(context).edit().putString(key, "$state|${System.currentTimeMillis()}").apply()
             updateAll(context)
         }
 
-        fun unmarkDone(context: Context, key: String) {
+        fun unmarkState(context: Context, key: String) {
             marks(context).edit().remove(key).apply()
             updateAll(context)
         }
@@ -125,19 +137,23 @@ class AgendaWidget : AppWidgetProvider() {
                 val v = RemoteViews(context.packageName, R.layout.agenda_row)
                 v.setTextViewText(R.id.agenda_time, entry.optString("time"))
                 v.setTextViewText(R.id.agenda_title, task?.optString("title") ?: key)
-                val meta = listOf(task?.optString("state") ?: "", label(entry), task?.optString("project") ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
+                val meta = listOf(label(entry), task?.optString("project") ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
                 v.setTextViewText(R.id.agenda_meta, meta)
                 v.setColorStateList(R.id.agenda_meta, "setTextColor", if (overdueRow) R.color.agenda_accent else R.color.agenda_muted)
                 if (key.isNotEmpty()) v.setOnClickFillInIntent(R.id.agenda_row, Intent().setData(taskUri(key)).putExtra("action", "open"))
-                // A task's ○; ticked at once when tapped, until the daemon's agenda has it DONE or refuses.
-                val state = task?.optString("state") ?: ""
-                if (state in listOf("TODO", "PROG", "EVAL", "HOLD")) {
-                    val done = key in ticked
-                    v.setViewVisibility(R.id.agenda_done, View.VISIBLE)
-                    v.setTextViewText(R.id.agenda_done, if (done) "✓" else "○")
-                    if (done) v.setColorStateList(R.id.agenda_title, "setTextColor", R.color.agenda_muted)
-                    else v.setOnClickFillInIntent(R.id.agenda_done, Intent().setData(taskUri(key)).putExtra("action", "done"))
-                } else v.setViewVisibility(R.id.agenda_done, View.INVISIBLE)
+                // A task's state as a pill in its colours, which opens the state picker; a state just picked shows at
+                // once, until the daemon's agenda has it or refuses. An event has none.
+                val state = ticked[key] ?: task?.optString("state") ?: ""
+                val pill = PILLS[state]
+                if (pill != null) {
+                    v.setViewVisibility(R.id.agenda_state, View.VISIBLE)
+                    v.setTextViewText(R.id.agenda_state, state)
+                    v.setInt(R.id.agenda_state, "setBackgroundResource", pill.first)
+                    v.setColorStateList(R.id.agenda_state, "setTextColor", pill.second)
+                    if (state == "DONE") v.setColorStateList(R.id.agenda_title, "setTextColor", R.color.agenda_muted)
+                    v.setOnClickFillInIntent(R.id.agenda_state, Intent().setData(taskUri(key)).putExtra("action", "state")
+                        .putExtra("state", state).putExtra("title", task?.optString("title") ?: "").putExtra("protected", task?.optBoolean("protected") == true))
+                } else v.setViewVisibility(R.id.agenda_state, View.GONE)
                 items.addItem(n++, v)
             }
             if (overdue.isNotEmpty()) {
