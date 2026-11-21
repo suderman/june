@@ -38,6 +38,11 @@ export const HARNESS = {
 	other: { eye: "#e0b419", band: "#b8911a" },
 };
 
+/** The chip and clanker colours together, for clients that cannot read the constants directly (the phone). */
+export function colours() {
+	return { chips: CHIPS, harness: HARNESS };
+}
+
 export function harnessOf(agent) {
 	const name = String(agent ?? "").replace(/-code$/, "");
 	return HARNESS[name] ? name : "other";

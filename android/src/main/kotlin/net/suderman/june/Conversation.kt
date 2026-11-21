@@ -225,6 +225,8 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     val links = remember(leave, link) { Links.Handler(context, leave, link::openMoment) }
     // The calendar and search, in place of the strip while open (Browse.kt).
     var browsing by remember { mutableStateOf(false) }
+    // The full screen's tabs: the strip, or the agents or projects board (Boards.kt). The assistant sheet keeps the strip.
+    var tab by remember { mutableStateOf("strip") }
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides links) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
         Column(Modifier.fillMaxWidth().then(header ?: Modifier)) {
@@ -278,7 +280,16 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
         }
         if (link.status is LinkStatus.Linked) DayBar(link, palette, browsing) { browsing = !browsing }
         val ready = decisions
-        if (browsing) {
+        val boards = !fromSheet && ready != null && link.status is LinkStatus.Linked
+        if (boards) {
+            val needs = link.agents?.optJSONArray("needs")?.length() ?: 0
+            BoardTabs(tab, needs, palette) { tab = it; if (it != "strip") link.wantBoards() }
+        }
+        if (boards && tab == "agents") {
+            AgentsBoard(link, ready!!, palette, Modifier.weight(1f).fillMaxWidth())
+        } else if (boards && tab == "projects") {
+            ProjectsBoard(link, ready!!, palette, Modifier.weight(1f).fillMaxWidth())
+        } else if (browsing) {
             Browse(link, palette, close = { browsing = false }, modifier = Modifier.weight(1f).fillMaxWidth())
         } else if (ready != null && LookChoice.console) {
             ConsoleStrip(link, ready, palette, Modifier.weight(1f).fillMaxWidth())

@@ -81,6 +81,40 @@ class Link(private val context: Context) {
     /** A moment asked for before the link was up, such as june://at/ID from another app, opened once it is. */
     private var pendingMoment: Long? = null
 
+    // The agenda and agents boards (src/board.ts), as the daemon sends them; fetched once a board shows, again whenever
+    // a revision in the view state moves, and after a reconnect (see "Agents and projects" in docs/interfaces.org).
+    var agenda: JSONObject? by mutableStateOf(null)
+        private set
+    var agents: JSONObject? by mutableStateOf(null)
+        private set
+    private var boardsWanted = false
+    private var agendaRevision = ""
+    private var agentsRevision = ""
+
+    fun wantBoards() {
+        if (boardsWanted) return
+        boardsWanted = true
+        fetchBoards(agenda = true, agents = true)
+    }
+
+    private fun fetchBoards(agenda: Boolean, agents: Boolean) {
+        if (agenda) send(JSONObject().put("op", "agenda"))
+        if (agents) send(JSONObject().put("op", "agents"))
+    }
+
+    /** The state's board revisions: ask for a board whose revision moved, once per revision. */
+    private fun boardsMoved(state: JSONObject?) {
+        val revisions = state?.optJSONObject("boards") ?: return
+        if (!boardsWanted) return
+        val a = revisions.optString("agenda")
+        val g = revisions.optString("agents")
+        val moveAgenda = a.isNotEmpty() && a != agendaRevision
+        val moveAgents = g.isNotEmpty() && g != agentsRevision
+        if (moveAgenda) agendaRevision = a
+        if (moveAgents) agentsRevision = g
+        fetchBoards(moveAgenda, moveAgents)
+    }
+
     /** What the strip shows: the past day's items, or today's. */
     val shownItems: List<Item> get() = past?.items ?: items
     /** A past day is fixed: nothing runs in it. */
@@ -208,10 +242,12 @@ class Link(private val context: Context) {
                             // As the app's own view, so a reply shown here is not also pushed to this phone (src/ntfy.ts).
                             webSocket.send(JSONObject().put("op", "attach").put("requestId", requestId()).put("client", "apk").toString())
                             pendingMoment?.let { pendingMoment = null; openMoment(it) }
+                            // A new connection must ask again to keep the boards fresh.
+                            if (boardsWanted) fetchBoards(agenda = true, agents = true)
                         }
                         "view" -> {
                             items = if (reply.optBoolean("reset")) parseItems(reply.getJSONArray("items")) else applyChanges(items, reply.optJSONArray("changes") ?: org.json.JSONArray())
-                            reply.optJSONObject("state")?.let { state = ViewState.from(it) }
+                            reply.optJSONObject("state")?.let { state = ViewState.from(it); boardsMoved(it) }
                             // A fresh view, on attach or at the day's start: the days may have moved on.
                             if (reply.optBoolean("reset")) listDays()
                         }
@@ -229,6 +265,14 @@ class Link(private val context: Context) {
                             hits = (0 until list.length()).map { list.getJSONObject(it).let { h -> SearchHit(h.optLong("id"), h.optLong("at"), h.optString("date"), h.optString("kind"), h.optString("text")) } }
                             hitsMore = reply.optBoolean("more")
                             searchDone = true
+                        }
+                        "agenda" -> {
+                            agenda = reply.optJSONObject("agenda")
+                            agendaRevision = reply.optString("revision")
+                        }
+                        "agents" -> {
+                            agents = reply.optJSONObject("agents")
+                            agentsRevision = reply.optString("revision")
                         }
                         "reply" -> notice = reply.optString("text")
                         "error" -> notice = reply.optString("message")
