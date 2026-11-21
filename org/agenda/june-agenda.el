@@ -128,7 +128,7 @@
       (dependency . ,(and auto (june-agenda--dependency index)))
       (review . ,(symbol-name (org-dispatch--review-mode)))
       (reviewParent . ,(org-entry-get nil "REVIEW_PARENT"))
-      (devReview . ,(and (org-entry-get nil "DEV_REVIEW") t))
+      (devReview . ,(and (org-dispatch--loop) t))
       (reviewPhase . ,(plist-get (org-dispatch--loop) :phase))
       (asked . ,(org-entry-get nil "ASKED"))
       (headline . ,(org-entry-get nil "HEADLINE"))

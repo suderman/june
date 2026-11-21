@@ -282,9 +282,9 @@ Prevent retries from applying the same delivery twice without changing the provi
 
 ## Independent development review
 
-When June enrolls an explicitly delegated loop, the development heading has
-`DEV_REVIEW` and linked ordinary review tasks have `REVIEW_PARENT` and
-`REVIEW_COMMIT`. Read the `development-review` skill for that workflow. Keep
+When June or a standing `REVIEW agent` setting enrolls a loop, the development
+heading has `REVIEW_PHASE` while it runs and linked ordinary review tasks have
+`REVIEW_PARENT` and `REVIEW_COMMIT`. Read the `development-review` skill for that workflow. Keep
 one development outcome. Developers handle only authorized findings and end
 EVAL with an exact new commit. Reviewers use their snapshot, record the exact
 verdict with the command in their task, and end EVAL. Neither worker grants

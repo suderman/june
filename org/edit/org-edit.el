@@ -237,7 +237,7 @@ Coding workers must not set AUTO; that permission lives in instructions."
            ;; Keywords are buffer-local, and a file may set its own.
            (unless (member state org-todo-keywords-1)
              (error "STATE is one of %s" (string-join org-todo-keywords-1 " ")))
-           (when (and (or (org-entry-get nil "DEV_REVIEW") (org-entry-get nil "REVIEW_PARENT"))
+           (when (and (org-dispatch--in-loop-p)
                       (member state '("AUTO" "DONE")))
              (error "task has a review contract; use org-edit review for fixes or acceptance, ask Jon to change scope"))
            (when depends (setq depends (org-edit--depends depends)))
@@ -557,7 +557,7 @@ The wrapper holds the launch lock. Replays find the receipt even after a rename.
              (error "task revision changed; read the whole task and Dialog again"))
            (unless (member (org-get-todo-state) '(nil "TODO" "HOLD" "EVAL"))
              (error "only plain, TODO, HOLD or EVAL tasks can be updated; never active or queued work"))
-           (when (or (org-entry-get nil "DEV_REVIEW") (org-entry-get nil "REVIEW_PARENT"))
+           (when (org-dispatch--in-loop-p)
              (error "task has a review contract; ask Jon before changing scope"))
            (when-let* ((host (org-entry-get nil "HOST")))
              (unless (equal host org-dispatch-host) (error "update on the task's dispatcher host")))

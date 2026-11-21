@@ -128,6 +128,13 @@ Nil takes dispatch.settle from June's config.json, else 120.")
   (org-dispatch--append "Dialog" (org-dispatch--entry who text))
   (org-entry-put nil "ASKED" (org-dispatch--stamp)))
 
+(defun org-dispatch--in-loop-p ()
+  "Whether the entry at point is in an independent review loop: a development
+task with live review state, or a review task."
+  (and (or (org-entry-get nil "REVIEW_PHASE") (org-entry-get nil "DEV_REVIEW")
+           (org-entry-get nil "REVIEW_PARENT"))
+       t))
+
 (defun org-dispatch--review-mode ()
   "Who reviews the entry at point: `jon', `agent', or `none'.
 REVIEW may be inherited, so a project file's #+PROPERTY can set it."
@@ -672,7 +679,7 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
           :depends (split-string (or (org-entry-get nil "DEPENDS") ""))
           :retry (string-to-number (or (org-entry-get nil "RETRY") "0"))
           :june (or (org-entry-get nil "JUNE_REQUEST") (org-entry-get nil "PLAN_REQUEST"))
-          :review-loop (and (or (org-entry-get nil "DEV_REVIEW") (org-entry-get nil "REVIEW_PARENT")) t)
+          :review-loop (org-dispatch--in-loop-p)
           :review (not (eq (org-dispatch--review-mode) 'none))
           :agent-review (eq (org-dispatch--review-mode) 'agent)
           :deploy (equal (downcase (or (org-entry-get nil "DEPLOY") "no")) "yes")
@@ -1516,9 +1523,18 @@ The original file may still exist after its heading has been archived."
                         (replace-regexp-in-string "\n+\\'" "" (org-dispatch--subtree-text)) 'utf-8)))
 
 (defun org-dispatch--loop ()
-  "This entry's DEV_REVIEW contract, or nil."
-  (when-let* ((text (org-entry-get nil "DEV_REVIEW")))
-    (ignore-errors (json-parse-string text :object-type 'plist :array-type 'list :null-object nil :false-object :false))))
+  "This development task's live review state, or nil: :phase, :round, :commit
+and :review, from its properties (see org-review.el), or the JSON older loops
+kept in DEV_REVIEW."
+  (cond
+   ((org-entry-get nil "REVIEW_PHASE")
+    (list :phase (org-entry-get nil "REVIEW_PHASE")
+          :round (string-to-number (or (org-entry-get nil "REVIEW_ROUND") "0"))
+          :commit (org-entry-get nil "REVIEW_COMMIT")
+          :review (org-entry-get nil "REVIEW_TASK")))
+   ((org-entry-get nil "DEV_REVIEW")
+    (ignore-errors (json-parse-string (org-entry-get nil "DEV_REVIEW") :object-type 'plist
+                                      :array-type 'list :null-object nil :false-object :false)))))
 
 (defun org-dispatch--review-spec (task commit)
   "The standing contract for TASK's first review of COMMIT."
@@ -1554,7 +1570,7 @@ The original file may still exist after its heading has been archived."
                       (not (file-exists-p (org-dispatch--state-file id))))
              (if parent
                  (save-excursion
-                   (let ((verdict (org-entry-get nil "REVIEW_RESULT")))
+                   (let ((verdict (or (org-entry-get nil "REVIEW_VERDICT") (org-entry-get nil "REVIEW_RESULT"))))
                      (when-let* ((at (org-find-property "ID" parent)))
                        (goto-char at)
                        (let ((loop (org-dispatch--loop)))
@@ -1673,7 +1689,7 @@ only files whose text contains one of those strings."
                      (setq start (match-end 0)))
                    (push (list :id (org-entry-get nil "ID") :file file :hash hash
                                :todo (org-get-todo-state) :repeat (and (org-get-repeat) t)
-                               :review-loop (and (or (org-entry-get nil "DEV_REVIEW")
+                               :review-loop (and (or (org-entry-get nil "DEV_REVIEW") (org-entry-get nil "REVIEW_PHASE")
                                                      (org-entry-get nil "REVIEW_PARENT")) t)
                                :conflict (and conflict t) :sessions (delete-dups sessions))
                          records)))))))))
@@ -2009,7 +2025,7 @@ ASK (a question for Jon in NOTE, recorded in Dialog with the task at EVAL)."
              (let ((task (org-dispatch--task))
                    (ask (equal todo "ASK")))
                (when (and (equal todo "DONE")
-                          (or (plist-get task :review) (org-entry-get nil "DEV_REVIEW")
+                          (or (plist-get task :review) (org-dispatch--in-loop-p)
                               (org-entry-get nil "REVIEW_PARENT")))
                  (setq todo "EVAL"))
                (when ask (setq todo "EVAL"))

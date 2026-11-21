@@ -41,13 +41,13 @@ export type Task = {
 	depends?: string[];
 	/** Who reviews it at EVAL, as the dispatcher reads REVIEW (inherited from the file too): jon, agent, or none. */
 	review?: string;
-	/** The phase of its independent review loop (DEV_REVIEW): review, fixes, human, accepted, or escalated. */
+	/** The phase of its independent review loop (REVIEW_PHASE): review, fixes, human, or escalated; gone once accepted. */
 	reviewPhase?: string;
 	/** When it was put to the user: an EVAL with a question or a problem for them (ASKED). */
 	asked?: string;
 	/** For an independent review task, the ID of the development task it reviews (REVIEW_PARENT). */
 	reviewParent?: string;
-	/** The task has an independent development and review loop (DEV_REVIEW). */
+	/** The task has an independent development and review loop under way (REVIEW_PHASE). */
 	devReview?: true;
 	/** For AUTO with DEPENDS, the dispatcher's verdict: ready, waiting, or blocked, with the task it waits on. */
 	dependency?: { kind: string; reason?: string };

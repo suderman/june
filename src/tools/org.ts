@@ -313,15 +313,16 @@ export class Org {
 		const report: Record<string, string> = {};
 		if (lines[at]?.trim() === ":PROPERTIES:") {
 			for (at++; at < end && lines[at]?.trim() !== ":END:"; at++) {
-				const value = /^[ \t]*:(HEADLINE(?:_STATE|_AT)?|ASKED|REVIEW|REVIEW_PARENT|DEV_REVIEW):[ \t]+(\S(?:[^\r\n]*\S)?)[ \t]*$/i.exec(lines[at]!);
+				const value = /^[ \t]*:(HEADLINE(?:_STATE|_AT)?|ASKED|REVIEW|REVIEW_PARENT|REVIEW_PHASE|REVIEW_TASK|DEV_REVIEW):[ \t]+(\S(?:[^\r\n]*\S)?)[ \t]*$/i.exec(lines[at]!);
 				if (value) report[value[1]!.toUpperCase()] = value[2]!;
 			}
 		}
 		// REVIEW may also come from the file's #+PROPERTY, as the dispatcher reads it.
 		const review = (report.REVIEW ?? lines.map((l) => /^#\+PROPERTY:[ \t]+REVIEW[ \t]+(\S+)/i.exec(l)?.[1]).find(Boolean) ?? "yes").toLowerCase();
-		const loop = (() => { try { return report.DEV_REVIEW ? JSON.parse(report.DEV_REVIEW) : undefined; } catch { return undefined; } })();
-		const phase = typeof loop?.phase === "string" && loop.phase ? loop.phase : undefined;
-		const reviewId = typeof loop?.review === "string" && loop.review ? loop.review : undefined;
+		// The loop's live state is in plain properties; older loops kept it as JSON in DEV_REVIEW.
+		const legacy = (() => { try { return report.DEV_REVIEW ? JSON.parse(report.DEV_REVIEW) : undefined; } catch { return undefined; } })();
+		const phase = report.REVIEW_PHASE ?? (typeof legacy?.phase === "string" && legacy.phase ? legacy.phase : undefined);
+		const reviewId = report.REVIEW_TASK ?? (typeof legacy?.review === "string" && legacy.review ? legacy.review : undefined);
 		const stamp = Number(report.HEADLINE_AT);
 		const headlineAt = Number.isFinite(stamp) && stamp > 0 ? stamp : undefined;
 		const headline = headlineAt !== undefined && report.HEADLINE_STATE === heading.state ? report.HEADLINE : undefined;

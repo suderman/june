@@ -66,12 +66,19 @@ test("Org reads the question, who reviews, and the review phase a follow needs",
 * EVAL Standing
 :PROPERTIES:
 :ID: 11111111-aaaa-4bbb-8ccc-000000000002
-:DEV_REVIEW: {"phase":"review","round":1,"review":"11111111-aaaa-4bbb-8ccc-000000000009"}
+:REVIEW_PHASE: review
+:REVIEW_ROUND: 1
+:REVIEW_TASK: 11111111-aaaa-4bbb-8ccc-000000000009
 :END:
 * EVAL Own
 :PROPERTIES:
 :ID: 11111111-aaaa-4bbb-8ccc-000000000003
 :REVIEW: yes
+:END:
+* EVAL Older
+:PROPERTIES:
+:ID: 11111111-aaaa-4bbb-8ccc-000000000004
+:DEV_REVIEW: {"phase":"fixes","review":"11111111-aaaa-4bbb-8ccc-000000000008"}
 :END:
 `);
 	const org = new Org(root);
@@ -79,6 +86,8 @@ test("Org reads the question, who reviews, and the review phase a follow needs",
 	assert.equal(asked!.asked, true);
 	assert.deepEqual([standing!.review, standing!.reviewPhase, standing!.reviewId], ["agent", "review", "11111111-aaaa-4bbb-8ccc-000000000009"], "the file's #+PROPERTY is inherited");
 	assert.equal(own!.review, "yes");
+	const older = await org.byId("11111111-aaaa-4bbb-8ccc-000000000004");
+	assert.deepEqual([older!.reviewPhase, older!.reviewId], ["fixes", "11111111-aaaa-4bbb-8ccc-000000000008"], "an older loop's JSON is still read");
 });
 
 test("a task scheduled ahead is followed quietly until its start, then on the usual launch clock", () => {
@@ -653,7 +662,7 @@ test("review handoffs recover save-follow-kick failure, restart and re-review wi
 	const reports = async () => (await daemon.root.context(BG)).entries.filter((e) => (e.data as { source?: string })?.source === "follow");
 	await replaceFile(file, orgText("EVAL", "EVAL"));
 	await until(async () => (await reports()).length === 1 && !(await daemon.status()).busy);
-	assert.match(JSON.stringify((await reports())[0]!.data), /DEV_REVIEW or REVIEW_PARENT/);
+	assert.match(JSON.stringify((await reports())[0]!.data), /REVIEW_PHASE or REVIEW_PARENT/);
 	await ask(tmp.paths.socket, "return findings");
 	await replaceFile(file, orgText("EVAL", "DONE"));
 	await until(async () => (await reports()).length === 2 && !(await daemon.status()).busy);

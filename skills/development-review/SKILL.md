@@ -1,6 +1,6 @@
 ---
 name: development-review
-description: Coordinate a user-delegated independent development/review loop with org_review_task. Use for DEV_REVIEW or REVIEW_PARENT tasks, review findings, exact-commit acceptance and return-for-fixes. Keep one development outcome, scoped permissions and human checks. Not permission to enroll work without the user's delegation.
+description: Coordinate a user-delegated independent development/review loop with org_review_task. Use for REVIEW_PHASE or REVIEW_PARENT tasks, review findings, exact-commit acceptance and return-for-fixes. Keep one development outcome, scoped permissions and human checks. Not permission to enroll work without the user's delegation.
 ---
 
 # Development and independent review
@@ -15,7 +15,7 @@ A task whose `REVIEW` is `agent` (in its drawer, or the project file's `#+PROPER
 
 Read the whole development task, including Dialog and prior linked reviews. The user must have delegated independent review and bounded in-scope fixes, not merely requested a second opinion. If that authority is missing, ask. Do not enroll unrelated work or use a review finding to expand implementation scope.
 
-Keep a single development task as outcome owner. Use `org_review_task`, not general resume/complete, once it has `DEV_REVIEW`. Review records have `REVIEW_PARENT` and `REVIEW_COMMIT`. All review and acceptance records stay in the same project Org file. The tool supports one local Git repository and branch. Multiple repositories, cross-host sessions or changed assignments need a decision, not an improvised extension.
+Keep a single development task as outcome owner. Use `org_review_task`, not general resume/complete, once it has `REVIEW_PHASE`. While a loop runs, the development task holds `REVIEW_PHASE`, `REVIEW_ROUND`, `REVIEW_COMMIT` (the commit under review), `REVIEW_TASK` (the current review) and `REVIEW_AGENT`, plus `REVIEW_ACCEPTED` while human checks are confirmed; its contract and the repository, branch, developer and host it pins are the lines of its `Review contract` section. Accepting the loop removes those properties, leaving the Review contract, Reviews and Dialog sections as its history. Older tasks kept this as JSON in `DEV_REVIEW`, still read. Review records have `REVIEW_PARENT` and `REVIEW_COMMIT`, and `REVIEW_VERDICT` once the reviewer records it, with the note in their `Verdict` section; when the verdict is consumed they drop their run-only `DIR`, `JUNE_REQUEST`, `DEPLOY` and `DISPATCH_FINISH`. All review and acceptance records stay in the same project Org file. The tool supports one local Git repository and branch. Multiple repositories, cross-host sessions or changed assignments need a decision, not an improvised extension.
 
 ## Start at EVAL
 

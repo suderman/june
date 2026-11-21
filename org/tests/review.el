@@ -79,7 +79,7 @@
       (replace-regexp-in-string "\n+\\'" "" (org-dispatch--subtree-text)) 'utf-8)))))
 
 (defun test-review-loop ()
-  (test-review-at test-review-id (lambda () (org-review--read "DEV_REVIEW"))))
+  (test-review-at test-review-id (lambda () (org-review--loop))))
 
 (defun test-review-state (&optional id)
   (test-review-at (or id test-review-id) #'org-get-todo-state))
@@ -290,7 +290,7 @@
     (let* ((id (plist-get (test-review-loop) :review))
            (spec (list :commit test-review-commit :verdict "pass" :note "fake verdict")))
       (should-error (test-review-command "verdict" spec id))
-      (test-review-at id (lambda () (should-not (org-review--read "REVIEW_RESULT")))))))
+      (test-review-at id (lambda () (should-not (org-review--result)))))))
 
 (ert-deftest review-verdict-is-immutable-and-does-not-waive-human-or-scope ()
   (test-with-review
@@ -576,5 +576,63 @@
       (should (string-search "Agent review stopped: revision changed or worktree dirty" (test-review-text)))
       (should-not (string-match-p "^\\* AUTO Review" (test-review-text)))
       (should (equal (replace-regexp-in-string "^:ASKED:.*\n\\|^- Dispatcher .*\n" "" (test-review-text)) before)))))
+
+;;; Where the loop keeps its state: plain properties, the contract in its section.
+
+(defun test-review-drawer (id)
+  "ID's property drawer as text."
+  (test-review-at id (lambda ()
+    (let ((end (save-excursion (outline-next-heading) (point))))
+      (buffer-substring-no-properties (point) (save-excursion (re-search-forward "^[ \t]*:END:" end) (point)))))))
+
+(ert-deftest review-state-reads-as-properties-and-goes-once-accepted ()
+  (test-with-review
+    (test-review-start)
+    (let* ((loop (test-review-loop)) (review (plist-get loop :review)) (drawer (test-review-drawer test-review-id)))
+      (should (string-match-p "^:REVIEW_PHASE: +review$" drawer))
+      (should (string-match-p "^:REVIEW_ROUND: +1$" drawer))
+      (should (string-match-p (concat "^:REVIEW_COMMIT: +" test-review-commit "$") drawer))
+      (should (string-match-p (concat "^:REVIEW_TASK: +" review "$") drawer))
+      (should (string-match-p "^:REVIEW_AGENT: +pi$" drawer))
+      (should-not (string-match-p "DEV_REVIEW\\|[{}]" drawer))
+      ;; The assignment the loop pins is read back from the contract people read.
+      (should (string-search (format "- Source: =%s=, branch =main=; developer pi on kit" (file-truename test-review-repo)) (test-review-text)))
+      (should (equal (plist-get loop :repo) (file-truename test-review-repo)))
+      (should (equal (plist-get loop :snapshot)
+                     (test-review-at test-review-id (lambda () (org-review--snapshot-path 1 test-review-commit test-review-id)))))
+      (test-review-report "pass")
+      (should (string-match-p "^:REVIEW_VERDICT: +pass$" (test-review-drawer review)))
+      (should-not (string-match-p "REVIEW_RESULT\\|[{}]" (test-review-drawer review)))
+      (test-review-advance)
+      (should (equal (test-review-state) "DONE"))
+      (should-not (string-match-p ":REVIEW_\\(PHASE\\|ROUND\\|COMMIT\\|TASK\\|AGENT\\|ACCEPTED\\):" (test-review-drawer test-review-id)))
+      (let ((closed (test-review-drawer review)))
+        (should (string-match-p "^:REVIEW_PARENT: " closed))
+        (should (string-match-p "^:REVIEW_COMMIT: " closed))
+        (should (string-match-p "^:REVIEW_VERDICT: +pass$" closed))
+        (should-not (string-match-p "^:\\(DIR\\|JUNE_REQUEST\\|DEPLOY\\|REVIEW\\|DISPATCH_FINISH\\):" closed)))
+      ;; The history stays readable, and a replay reports the outcome rather than failing.
+      (should (string-search "** Reviews" (test-review-text)))
+      (should (equal (plist-get (plist-get (json-parse-string (string-trim (test-review-advance)) :object-type 'plist) :review) :phase)
+                     "accepted")))))
+
+(ert-deftest review-state-keeps-human-checks-and-reads-an-older-json-record ()
+  (test-with-review
+    (test-review-start '("Phone check"))
+    (test-review-report "pass")
+    (test-review-advance)
+    (should (equal (plist-get (test-review-loop) :phase) "human"))
+    (should (equal (plist-get (test-review-loop) :human) '("Phone check"))))
+  (test-with-review
+    (should-error (test-review-start '("One; two")))
+    (should-not (test-review-loop)))
+  (test-with-review
+    ;; A loop an older version started, kept as JSON, is still read; the next save converts it.
+    (test-review-at test-review-id (lambda ()
+      (org-entry-put nil "DEV_REVIEW" (org-review--json (list :phase "fixes" :round 1 :commit "0000000000000000000000000000000000000000"
+        :repo (file-truename test-review-repo) :branch "main" :developer "pi" :host "kit" :agent "pi"
+        :authorization "Jon delegated." :permissions "Local only." :checks "Agent checks." :human nil)))))
+    (should (equal (plist-get (test-review-loop) :phase) "fixes"))
+    (test-review-at test-review-id (lambda () (should (org-dispatch--in-loop-p))))))
 
 (ert-run-tests-batch-and-exit)

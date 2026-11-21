@@ -2,6 +2,17 @@
 
 ;; Org is the record, and org-dispatch still owns launching and session recovery.
 ;; All edits happen under org-edit's launch lock, in one agenda file/save.
+;;
+;; A development task in a loop keeps its live state in plain properties
+;; (REVIEW_PHASE, REVIEW_ROUND, REVIEW_COMMIT, REVIEW_TASK, REVIEW_AGENT, and
+;; REVIEW_ACCEPTED while human checks are confirmed) and its contract, with the
+;; repository, branch, developer and host it pins, in its "Review contract"
+;; section, which people read. An accepted loop removes the properties; its
+;; Reviews, Verdict and Dialog sections are the history. A review task records
+;; REVIEW_VERDICT, with its note in its Verdict section; once consumed it keeps
+;; only REVIEW_PARENT, REVIEW_COMMIT and REVIEW_VERDICT of its review state.
+;; Older tasks kept all of this as JSON in DEV_REVIEW and REVIEW_RESULT, which
+;; are still read.
 (require 'org-edit)
 (require 'json)
 
@@ -24,12 +35,95 @@ which means waiting on something outside."
   (let ((json-encoding-pretty-print nil) (json-false :false) (json-null nil))
     (json-encode value)))
 
-(defun org-review--read (property)
+(defun org-review--legacy (property)
+  "PROPERTY as the JSON older loops wrote, or nil."
   (when-let* ((text (org-entry-get nil property)))
     (json-parse-string text :object-type 'plist :array-type 'list :null-object nil :false-object :false)))
 
-(defun org-review--put (property value)
-  (org-entry-put nil property (org-review--json value)))
+(defconst org-review--live
+  '("REVIEW_PHASE" "REVIEW_ROUND" "REVIEW_COMMIT" "REVIEW_TASK" "REVIEW_AGENT" "REVIEW_ACCEPTED")
+  "The development task's live loop properties, removed once it is accepted.")
+
+(defconst org-review--contract-lines
+  '((:authorization . "Authorized fixes, at most three exact-revision reviews:")
+    (:permissions . "Permissions for every handoff:")
+    (:checks . "Agent checks:")
+    (:human . "Human checks:")
+    (:source . "Source:"))
+  "The Review contract section's lines, by the loop field each holds.")
+
+(defun org-review--section-text (title)
+  "The body of this entry's child section TITLE, or nil."
+  (when-let* ((bounds (org-dispatch--section-bounds title)))
+    (buffer-substring-no-properties
+     (save-excursion (goto-char (car bounds)) (forward-line 1) (point)) (cdr bounds))))
+
+(defun org-review--contract ()
+  "The Review contract section as loop fields."
+  (let ((text (or (org-review--section-text "Review contract")
+                  (error "the task has no Review contract section; ask Jon")))
+        contract)
+    (pcase-dolist (`(,key . ,prefix) org-review--contract-lines)
+      (unless (string-match (concat "^- " (regexp-quote prefix) " \\(.+\\)$") text)
+        (error "the Review contract has no \"%s\" line; ask Jon" prefix))
+      (setq contract (plist-put contract key (match-string 1 text))))
+    (let ((source (plist-get contract :source)) (human (plist-get contract :human)))
+      (unless (string-match "\\`=\\(.+\\)=, branch =\\(.+\\)=; developer \\([^ ]+\\) on \\([^ ]+\\)\\'" source)
+        (error "the Review contract's Source line is malformed; ask Jon"))
+      (list :repo (match-string 1 source) :branch (match-string 2 source)
+            :developer (match-string 3 source) :host (match-string 4 source)
+            :authorization (plist-get contract :authorization)
+            :permissions (plist-get contract :permissions)
+            :checks (plist-get contract :checks)
+            :human (unless (equal human "none") (split-string human "; " t))))))
+
+(defun org-review--loop ()
+  "This development task's loop, or nil: live properties and its contract."
+  (cond
+   ((org-entry-get nil "REVIEW_PHASE")
+    (let* ((round (string-to-number (or (org-entry-get nil "REVIEW_ROUND") "0")))
+           (commit (org-entry-get nil "REVIEW_COMMIT")))
+      (append (list :phase (org-entry-get nil "REVIEW_PHASE") :round round :commit commit
+                    :review (org-entry-get nil "REVIEW_TASK") :agent (org-entry-get nil "REVIEW_AGENT")
+                    :accepted (split-string (or (org-entry-get nil "REVIEW_ACCEPTED") "") "; " t)
+                    :snapshot (and commit (> round 0)
+                                   (org-review--snapshot-path round commit (org-entry-get nil "ID"))))
+              (org-review--contract))))
+   ((org-entry-get nil "DEV_REVIEW") (org-review--legacy "DEV_REVIEW"))))
+
+(defun org-review--save (loop)
+  "Write LOOP's live fields as properties; an older JSON record goes."
+  (org-entry-put nil "REVIEW_PHASE" (plist-get loop :phase))
+  (org-entry-put nil "REVIEW_ROUND" (number-to-string (plist-get loop :round)))
+  (org-entry-put nil "REVIEW_COMMIT" (plist-get loop :commit))
+  (org-entry-put nil "REVIEW_TASK" (plist-get loop :review))
+  (org-entry-put nil "REVIEW_AGENT" (plist-get loop :agent))
+  (if (plist-get loop :accepted)
+      (org-entry-put nil "REVIEW_ACCEPTED" (string-join (plist-get loop :accepted) "; "))
+    (org-entry-delete nil "REVIEW_ACCEPTED"))
+  (org-entry-delete nil "DEV_REVIEW"))
+
+(defun org-review--clear ()
+  "Remove an accepted loop's live state; its sections keep the history."
+  (dolist (property (cons "DEV_REVIEW" org-review--live))
+    (org-entry-delete nil property)))
+
+(defun org-review--finished-p ()
+  "Whether this task's loop was accepted and cleared, for a replay."
+  (and (equal (org-get-todo-state) "DONE")
+       (not (org-review--loop))
+       (org-dispatch--section-bounds "Reviews")
+       t))
+
+(defun org-review--result ()
+  "This review task's recorded verdict, or nil: (:commit :verdict :note)."
+  (if-let* ((verdict (org-entry-get nil "REVIEW_VERDICT")))
+      (let* ((commit (org-entry-get nil "REVIEW_COMMIT"))
+             (text (or (org-review--section-text "Verdict") ""))
+             (note (and (string-match (format "^=%s=: %s\\. \\(.*\\)$" (regexp-quote commit) (regexp-quote verdict)) text)
+                        (match-string 1 text))))
+        (list :commit commit :verdict verdict :note note))
+    (org-review--legacy "REVIEW_RESULT")))
 
 (defun org-review--git (dir &rest args)
   (let ((default-directory (file-name-as-directory dir)))
@@ -74,14 +168,18 @@ which means waiting on something outside."
       (error "%s needs one non-empty line" key))
     value))
 
+(defun org-review--snapshot-path (round commit id)
+  "Where ROUND's private clone of COMMIT lives, for task ID in this file."
+  (let ((relative (file-relative-name buffer-file-name (org-dispatch--org-root))))
+    (unless (string-match "\\`work/\\([^/]+\\)/\\([^/]+\\)/[^/]+\\.org\\'" relative)
+      (error "review loops need a work/<domain>/<project>/<project>.org file"))
+    (expand-file-name
+     (format "~/.local/state/org-work/%s/%s/review-loop/%s/%d-%s/"
+             (match-string 1 relative) (match-string 2 relative) id round commit))))
+
 (defun org-review--snapshot (loop commit round id)
   "A private clone, never a linked Git worktree or a source remote."
-  (let* ((relative (file-relative-name buffer-file-name (org-dispatch--org-root)))
-         (_ (unless (string-match "\\`work/\\([^/]+\\)/\\([^/]+\\)/[^/]+\\.org\\'" relative)
-              (error "review loops need a work/<domain>/<project>/<project>.org file")))
-         (dir (expand-file-name
-               (format "~/.local/state/org-work/%s/%s/review-loop/%s/%d-%s/"
-                       (match-string 1 relative) (match-string 2 relative) id round commit)))
+  (let* ((dir (org-review--snapshot-path round commit id))
          (source (plist-get loop :repo)))
     (make-directory (file-name-directory (directory-file-name dir)) t)
     (set-file-modes (file-name-directory (directory-file-name dir)) #o700)
@@ -102,7 +200,7 @@ which means waiting on something outside."
 (defun org-review--start (spec)
   (let* ((task (org-dispatch--task)) (id (plist-get task :id))
          (commit (org-review--text spec :commit))
-         (loop (org-review--read "DEV_REVIEW"))
+         (loop (org-review--loop))
          (round (1+ (or (plist-get loop :round) 0)))
          (developer (plist-get task :agent)) (host (plist-get task :host)))
     (unless (string-match-p "\\`[0-9a-f]\\{40\\}\\'" commit) (error "commit needs the full Git SHA"))
@@ -122,8 +220,8 @@ which means waiting on something outside."
                (branch (org-review--git repo "symbolic-ref" "--short" "HEAD"))
                (human (plist-get spec :human)))
           (unless (and (plist-member spec :human) (listp human) (seq-every-p (lambda (s) (and (stringp s) (not (string-empty-p s))
-                                                                                (not (string-match-p "[\n\r]" s)))) human))
-            (error "human must list specific checks, or be empty"))
+                                                                                (not (string-match-p "[\n\r;]" s)))) human))
+            (error "human must list specific checks, each one line without semicolons, or be empty"))
           (setq loop (list :repo repo :branch branch :developer developer :host host
                            :authorization (org-review--text spec :authorization)
                            :permissions (org-review--text spec :permissions)
@@ -134,9 +232,10 @@ which means waiting on something outside."
             (error "%s cannot review unattended: it stops at its workspace trust prompt in each new review snapshot; use %s"
                    (plist-get loop :agent) (string-join org-review-unattended-agents " or ")))
           (org-dispatch--append "Review contract"
-            (format "- Authorized fixes, at most three exact-revision reviews: %s\n- Permissions for every handoff: %s\n- Agent checks: %s\n- Human checks: %s"
+            (format "- Authorized fixes, at most three exact-revision reviews: %s\n- Permissions for every handoff: %s\n- Agent checks: %s\n- Human checks: %s\n- Source: =%s=, branch =%s=; developer %s on %s"
                     (plist-get loop :authorization) (plist-get loop :permissions) (plist-get loop :checks)
-                    (if human (string-join human "; ") "none")))))
+                    (if human (string-join (delete-dups human) "; ") "none")
+                    repo branch developer host))))
       (unless (and (equal host (plist-get loop :host)) (equal developer (plist-get loop :developer))
                    (equal (file-truename (org-review--git (plist-get task :dir) "rev-parse" "--show-toplevel"))
                           (plist-get loop :repo)))
@@ -151,13 +250,13 @@ which means waiting on something outside."
               loop (plist-put loop :snapshot snapshot)
               loop (plist-put loop :accepted nil)
               loop (plist-put loop :phase "review"))
-        (org-review--put "DEV_REVIEW" loop)
+        (org-review--save loop)
         (org-dispatch--append "Reviews" (format "- [[id:%s][Round %d]]: =%s=, reviewer %s, snapshot =%s:%s=." review round commit (plist-get loop :agent) host snapshot))
         ;; A separate ordinary dispatcher task, with no inherited Sessions.
         (goto-char (point-max))
         (unless (bolp) (insert "\n"))
         (unless (save-excursion (forward-line -1) (looking-at-p "^$")) (insert "\n"))
-        (insert (format "* AUTO %s\n:PROPERTIES:\n:ID: %s\n:HOST: %s\n:AGENT: %s\n:DIR: %s\n:JUNE_REQUEST: review-%s\n:REVIEW: yes\n:DEPLOY: no\n:REVIEW_PARENT: %s\n:REVIEW_COMMIT: %s\n:END:\nQueued by %s: Independent exact-revision review of [[id:%s][the development task]].\n\n** Scope\nReview commit =%s= in this private snapshot only. Read the whole development task and Dialog for requirements, but do not modify its source checkout. This is a fresh reviewer session. Find and test defects; do not implement fixes, commit, push, activate, deploy, start services or commission work. Local verification and remote reads are allowed only within the contract below.\n\nPermissions: %s\n\nAgent checks: %s\n\nHuman checks remain with Jon: %s\n\nRecord exact commands, results, findings and what was tested with fakes versus for real in Outcome. Then run =org-edit review verdict %s id:%s '{\"commit\":\"%s\",\"verdict\":\"pass|fixes|blocked\",\"note\":\"specific findings and evidence\"}'=, choosing one verdict, and finish EVAL through org-dispatch. pass means all agent checks passed, never human acceptance. fixes means in-scope corrections for the original developer. blocked means missing permission, out-of-scope findings or an untestable requirement needing Jon. Never silently waive a required check.\n" title review host (plist-get loop :agent) snapshot review id commit org-review-author id commit (plist-get loop :permissions) (plist-get loop :checks)
+        (insert (format "* AUTO %s\n:PROPERTIES:\n:ID: %s\n:HOST: %s\n:AGENT: %s\n:DIR: %s\n:JUNE_REQUEST: review-%s\n:DEPLOY: no\n:REVIEW_PARENT: %s\n:REVIEW_COMMIT: %s\n:END:\nQueued by %s: Independent exact-revision review of [[id:%s][the development task]].\n\n** Scope\nReview commit =%s= in this private snapshot only. Read the whole development task and Dialog for requirements, but do not modify its source checkout. This is a fresh reviewer session. Find and test defects; do not implement fixes, commit, push, activate, deploy, start services or commission work. Local verification and remote reads are allowed only within the contract below.\n\nPermissions: %s\n\nAgent checks: %s\n\nHuman checks remain with Jon: %s\n\nRecord exact commands, results, findings and what was tested with fakes versus for real in Outcome. Then run =org-edit review verdict %s id:%s '{\"commit\":\"%s\",\"verdict\":\"pass|fixes|blocked\",\"note\":\"specific findings and evidence\"}'=, choosing one verdict, and finish EVAL through org-dispatch. pass means all agent checks passed, never human acceptance. fixes means in-scope corrections for the original developer. blocked means missing permission, out-of-scope findings or an untestable requirement needing Jon. Never silently waive a required check.\n" title review host (plist-get loop :agent) snapshot review id commit org-review-author id commit (plist-get loop :permissions) (plist-get loop :checks)
                         (if (plist-get loop :human) (string-join (plist-get loop :human) "; ") "none")
                         (shell-quote-argument buffer-file-name) review commit))
         (goto-char parent)
@@ -173,7 +272,7 @@ which means waiting on something outside."
     (unless (and parent (equal commit (plist-get spec :commit))
                  (member verdict '("pass" "fixes" "blocked")))
       (error "verdict needs a linked review, its exact commit and pass|fixes|blocked"))
-    (if-let* ((old (org-review--read "REVIEW_RESULT")))
+    (if-let* ((old (org-review--result)))
         (unless (equal old result) (error "verdict is immutable; send corrections to Jon"))
       (org-dispatch--check-stopped-task t)
       (let* ((file (org-dispatch--state-file (org-entry-get nil "ID")))
@@ -195,7 +294,7 @@ which means waiting on something outside."
         (unless (and sessions reviewer) (error "reviewer has no dispatcher session identity"))
         (save-excursion
           (org-review--at parent)
-          (let* ((loop (org-review--read "DEV_REVIEW"))
+          (let* ((loop (org-review--loop))
                  (section (org-dispatch--section-bounds "Sessions")))
             (unless (and loop (equal review-id (plist-get loop :review))
                          (equal commit (plist-get loop :commit))
@@ -203,12 +302,12 @@ which means waiting on something outside."
               (error "review no longer current"))
             (when (and section (string-search reviewer (buffer-substring-no-properties (car section) (cdr section))))
               (error "developer cannot review their own revision")))))
-      (org-review--put "REVIEW_RESULT" result)
+      (org-entry-put nil "REVIEW_VERDICT" verdict)
       (org-dispatch--append "Verdict" (format "=%s=: %s. %s" commit verdict note)))
     result))
 
 (defun org-review--advance (spec)
-  (let* ((loop (or (org-review--read "DEV_REVIEW") (error "task has no review contract")))
+  (let* ((loop (or (org-review--loop) (error "task has no review contract")))
          (id (org-entry-get nil "ID")) (parent (point-marker))
          (commit (plist-get loop :commit)) result)
     (unless (equal commit (plist-get spec :commit)) (error "stale review commit"))
@@ -231,9 +330,14 @@ which means waiting on something outside."
                      (equal (org-get-todo-state) "EVAL"))
           (error "linked reviewer is not ready at EVAL"))
         (org-review--settled)
-        (setq result (or (org-review--read "REVIEW_RESULT") (error "reviewer recorded no verdict")))
+        (setq result (or (org-review--result) (error "reviewer recorded no verdict")))
         (unless (equal (plist-get result :commit) commit) (error "reviewer verdict is stale"))
-        (org-todo "DONE"))
+        (org-todo "DONE")
+        ;; Only a running review needs these, and its finish note repeats the
+        ;; Verdict section; the link, commit, verdict and headline stay.
+        (dolist (property '("DIR" "JUNE_REQUEST" "DEPLOY" "REVIEW" "REVIEW_RESULT" "DISPATCH_FINISH"))
+          (org-entry-delete nil property))
+        (org-entry-put nil "REVIEW_VERDICT" (plist-get result :verdict)))
       (goto-char parent)
       (pcase (plist-get result :verdict)
         ("pass"
@@ -251,7 +355,7 @@ which means waiting on something outside."
            (org-todo "AUTO")))
         ("blocked" (setq loop (plist-put loop :phase "escalated")) (org-review--escalate))
         (_ (error "invalid review verdict")))
-      (org-review--put "DEV_REVIEW" loop)
+      (if (equal (plist-get loop :phase) "accepted") (org-review--clear) (org-review--save loop))
       (org-dispatch--append "Dialog" (org-dispatch--entry org-review-author
         (format "Review [[id:%s][round %d]] of %s: %s. %s Phase: %s. %s Permissions remain: %s No activation or deployment is authorized by review approval."
                 (plist-get loop :review) (plist-get loop :round) commit (plist-get result :verdict)
@@ -266,7 +370,7 @@ which means waiting on something outside."
       loop)))
 
 (defun org-review--human (spec)
-  (let* ((loop (or (org-review--read "DEV_REVIEW") (error "no review contract")))
+  (let* ((loop (or (org-review--loop) (error "no review contract")))
          (commit (plist-get spec :commit)) (checks (plist-get spec :checks))
          (note (org-review--text spec :note)))
     (unless (and (equal commit (plist-get loop :commit))
@@ -290,7 +394,7 @@ which means waiting on something outside."
       (when (seq-every-p (lambda (check) (member check (plist-get loop :accepted))) (plist-get loop :human))
         (setq loop (plist-put loop :phase "accepted"))
         (org-todo "DONE"))
-      (org-review--put "DEV_REVIEW" loop)
+      (if (equal (plist-get loop :phase) "accepted") (org-review--clear) (org-review--save loop))
       (org-dispatch--append "Dialog" (org-dispatch--entry "June"
         (format "Jon accepted these human checks for %s: %s. %s" commit (string-join checks "; ") note))))
     loop))
@@ -319,6 +423,9 @@ June coordinates start/advance/human; the reviewer records verdict."
                        (not (plist-get task :problem)) (equal (plist-get task :host) org-dispatch-host))
             (error "review needs a unique live agenda task on this dispatcher host")))
         (setq result (pcase action
+                       ;; An accepted loop's state is gone; a replay reports the outcome.
+                       ((guard (and (not (equal action "verdict")) (org-review--finished-p)))
+                        (list :phase "accepted"))
                        ("start" (org-review--start spec))
                        ("verdict" (org-review--verdict spec))
                        ("advance" (org-review--advance spec))

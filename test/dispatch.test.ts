@@ -819,7 +819,10 @@ test("real review wrapper creates one isolated exact-hash task and refuses ordin
 	assert.equal(text.match(/^\* AUTO Review /gm)?.length, 1);
 	assert.ok(text.includes(`:REVIEW_COMMIT: ${commit}`));
 	const parent = await new Org(f.root).read(request.file, "id:resume123");
-	const metadata = JSON.parse(/^:DEV_REVIEW: +(.+)$/m.exec(parent.text)![1]!);
+	// The live state is plain properties; the snapshot is named in the Reviews section.
+	assert.doesNotMatch(parent.text, /DEV_REVIEW|^:[A-Z_]+: *\{/m);
+	assert.match(parent.text, /^:REVIEW_PHASE: +review$/m);
+	const metadata = { snapshot: /snapshot =kit:([^=]+)=/.exec(parent.text)![1]! };
 	assert.notEqual(metadata.snapshot, source);
 	assert.equal(execFileSync("git", ["-C", metadata.snapshot, "rev-parse", "HEAD"], f.options).trim(), commit);
 	assert.equal(execFileSync("git", ["-C", metadata.snapshot, "remote"], f.options).trim(), "");
