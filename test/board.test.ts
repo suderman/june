@@ -241,3 +241,36 @@ CLOSED: [2026-01-01 Thu 10:00]
 	assert.equal(byTitle["Today thing"]!.project, "Demo");
 	assert.deepEqual(a.counts, { TODO: 3, AUTO: 1, HOLD: 1, EVAL: 1, DONE: 1 });
 });
+
+test("a change to the agenda alone tells clients, and a refresh after an edit reads the file again", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const config = testConfig(tmp.dir, { dispatch: { hosts: ["kit", "cog"], host: "cog", agents: ["pi", "claude"] } });
+	let state = "TODO";
+	let release: () => void = () => {};
+	let slow = false;
+	const run = exportRun(() => ({ "/o/asana.org::1": { file: "/o/asana.org", line: 1, level: 1, title: "Mirrored", state, tags: [], path: [], sessions: [] }, "/o/w.org::1": { file: "/o/w.org", line: 1, level: 1, title: "Party", state, tags: [], path: [], sessions: [] } }));
+	const herdr = new Herdr(config.herdr, async () => JSON.stringify({ terminals: [] }));
+	const boards = new Boards({ config: { ...config, org: { ...config.org, root: "/o" } }, herdr, seenFile: join(tmp.dir, "seen.json"), log: createLogger({ sink: () => {} }),
+		run: async (argv, ms) => { const out = await run(argv); if (slow) await new Promise<void>((r) => { release = r; }); return out; } });
+	t.after(() => boards.stop());
+	const agents = await boards.agents();
+	assert.deepEqual(agents.value.dispatch, { hosts: ["kit", "cog"], host: "cog", agents: ["pi", "claude"] }, "the agents board says who a task can go to");
+	assert.equal(agents.value.tasks["asana.org::*Mirrored"], undefined);
+	assert.equal((await boards.agenda()).value.tasks["asana.org::*Mirrored"]?.protected, true, "asana.org is protected without config");
+	assert.equal((await boards.agenda()).value.tasks["w.org::*Party"]?.protected, undefined);
+	let told = 0;
+	boards.onChange(() => told++);
+	// An export already under way read the file before the edit; the refresh waits for it and reads again.
+	slow = true;
+	const inFlight = boards.agenda(0);
+	await until(async () => release.toString() !== "() => {}");
+	state = "DONE";
+	slow = false;
+	const refreshed = boards.refresh();
+	release();
+	await inFlight;
+	await refreshed;
+	assert.equal((await boards.agenda()).value.tasks["w.org::*Party"]?.state, "DONE");
+	assert.ok(told >= 1, "a task on no agent's list changed, and listeners heard");
+});

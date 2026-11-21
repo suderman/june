@@ -248,7 +248,34 @@ export function stampShort(stamp) {
  * One task's page: its state, title, where it is, what it waits on, who works it, its last report, the links that
  * open it in Emacs and its newest session in Herdr, and its Dialog as a conversation, oldest first.
  */
-export function taskDetail(task, user, today) {
+/** The task a board names by KEY, or the same heading under a new key: the dispatcher gives a task an ID when it
+ * claims it, so FILE::*Path/Title becomes id:UUID while its page is open. */
+export function findTask(tasks, key) {
+	if (!tasks || !key) return null;
+	if (tasks[key]) return tasks[key];
+	for (const k in tasks) {
+		const t = tasks[k];
+		if (`${t.file}::*${(t.path ?? []).concat([t.title]).join("/")}` === key) return t;
+	}
+	return null;
+}
+
+/** A local "YYYY-MM-DD HH:MM", to compare with Org timestamps. */
+function localStamp(ms) {
+	const d = new Date(ms);
+	const two = (n) => String(n).padStart(2, "0");
+	return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
+/** When a task handed to a clanker now would start: "now", or its SCHEDULED when that is still ahead. */
+export function startsAt(task, today, now) {
+	const m = /(\d{4}-\d{2}-\d{2})(?: \S+)?(?: (\d{1,2}:\d{2}))?/.exec(String(task?.scheduled ?? ""));
+	if (!m) return "now";
+	const at = `${m[1]} ${(m[2] ?? "00:00").padStart(5, "0")}`;
+	return at > localStamp(now ?? Date.now()) ? startOf(task.scheduled, today) : "now";
+}
+
+export function taskDetail(task, user, today, now) {
 	if (!task) return null;
 	const sessions = task.sessions ?? [];
 	const agent = taskAgent(task);
@@ -260,7 +287,8 @@ export function taskDetail(task, user, today) {
 	if (task.review === "agent") facts.push("agent review");
 	if (task.review === "none") facts.push("no review");
 	return {
-		key: task.key, title: task.title, state: task.state ?? "", project: task.project,
+		key: task.key, title: task.title, state: task.state ?? "", project: task.project, file: task.file,
+		protected: task.protected === true, host: task.host ?? "", agent, starts: startsAt(task, today, now),
 		path: (task.path ?? []).join(" / "), facts: facts.join(" · "), headline: task.headline?.text ?? "",
 		asked: task.asked !== undefined, harness: harnessOf(agent), emacs: taskLink(task),
 		herdr: sessions.length ? sessions[sessions.length - 1] : null,

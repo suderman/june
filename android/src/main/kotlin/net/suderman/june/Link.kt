@@ -95,6 +95,9 @@ class Link(private val context: Context) {
     var taskNotice: Pair<String, String> by mutableStateOf("" to "")
         private set
     private var taskPending = ""
+    /** A rename that moved a task without an ID to a new key: (old key, new key), so its page follows. */
+    var taskMoved: Pair<String, String> by mutableStateOf("" to "")
+        private set
 
     /** The user's edit of a task (src/board-edit.ts TaskEdit), by its key. */
     fun editTask(key: String, edit: JSONObject) {
@@ -284,6 +287,7 @@ class Link(private val context: Context) {
                         "task" -> if (reply.optString("requestId") == taskPending) {
                             taskPending = ""
                             taskNotice = reply.optString("key") to "saved"
+                            reply.optString("from").takeIf { it.isNotEmpty() }?.let { taskMoved = it to reply.optString("key") }
                         }
                         "agenda" -> {
                             agenda = reply.optJSONObject("agenda")

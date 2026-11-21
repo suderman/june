@@ -46,7 +46,16 @@ export type Config = {
 	/** The host that runs the daemon; elsewhere the client commands run there over SSH. */
 	readonly daemonHost: string | undefined;
 	readonly skillDirs: readonly string[];
-	readonly org: { readonly root: string; readonly agendaFiles: string; /** The user's rolodex, one heading per person. */ readonly people: string };
+	readonly org: {
+		readonly root: string;
+		readonly agendaFiles: string;
+		/** The user's rolodex, one heading per person. */
+		readonly people: string;
+		/** Files under the root that another program rebuilds, such as the Asana mirror: June's boards may set a heading
+		 * there to TODO or DONE (which the mirror may sync back) and edit nothing else, and agents may not edit them.
+		 * asana.org without it; see protectedFiles. */
+		readonly protected?: readonly string[];
+	};
 	/**
 	 * Hosts June may queue AUTO tasks for; empty turns the dispatch tools off. `host` and `agent` are the defaults the
 	 * dispatcher writes into an AUTO task's drawer when it lacks them and no tag names one: `host` defaults to the first
@@ -172,7 +181,7 @@ const DEFAULTS = {
 	envFiles: [] as string[],
 	contextCap: 200_000,
 	skillDirs: [] as string[],
-	org: { root: "~/org", agendaFiles: "~/.local/state/org-dispatch/agenda-files", people: "~/org/people.org" },
+	org: { root: "~/org", agendaFiles: "~/.local/state/org-dispatch/agenda-files", people: "~/org/people.org", protected: ["asana.org"] as string[] },
 	herdr: { hosts: {}, allowPrompt: true },
 	rhythm: { wake: "05:00", quiet: "22:00", sleep: "01:00" },
 	reflection: { enabled: true, quietMinutes: 60, recentDays: 3, periods: ["week", "month", "quarter", "year"], bitcoin: false },
@@ -199,6 +208,18 @@ export function readConfigFile(p: Paths): Record<string, any> {
 /** The daemon's host, from the environment June's Home Manager module sets; undefined runs June here. */
 export const daemonHost = (env: NodeJS.ProcessEnv = process.env) => env.JUNE_DAEMON_HOST?.trim() || undefined;
 
+/** A config's protected files, asana.org when it names none. */
+export const PROTECTED_DEFAULT: readonly string[] = ["asana.org"];
+export const protectedOf = (org: Config["org"]): readonly string[] => org.protected ?? PROTECTED_DEFAULT;
+
+/** org.protected: paths relative to the Org root, one line each. */
+function protectedFiles(value: unknown): string[] {
+	if (!Array.isArray(value) || value.some((f) => typeof f !== "string" || f.trim() === "" || f.startsWith("/") || f.includes("..") || /[\n:]/.test(f))) {
+		throw new Error("org.protected must list files relative to org.root, such as \"asana.org\"");
+	}
+	return value.map((f: string) => f.trim());
+}
+
 /** config.json over the defaults, with the machine's settings from the environment. */
 export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.env): Config {
 	const raw = readConfigFile(p);
@@ -221,7 +242,7 @@ export function loadConfig(p: Paths = paths(), env: NodeJS.ProcessEnv = process.
 		...promptFiles(p),
 		daemonHost: daemonHost(env),
 		skillDirs: (raw.skillDirs ?? DEFAULTS.skillDirs).map(expandHome),
-		org: { root: expandHome(org.root), agendaFiles: expandHome(org.agendaFiles), people: expandHome(org.people) },
+		org: { root: expandHome(org.root), agendaFiles: expandHome(org.agendaFiles), people: expandHome(org.people), protected: protectedFiles(org.protected) },
 		dispatch: dispatch(raw.dispatch),
 		herdr: {
 			// hc takes its session from HC_SESSION; an old herdr.session setting is ignored.

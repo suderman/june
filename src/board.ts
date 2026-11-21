@@ -4,7 +4,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import type { Config } from "./config.ts";
+import { type Config, protectedOf } from "./config.ts";
 import type { Logger } from "./runtime.ts";
 import { type AgentSummary, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { orgTime } from "./tools/org.ts";
@@ -47,6 +47,8 @@ export type Task = {
 	asked?: string;
 	/** The subtree's SHA256 when the board was made, which a title edit must still match. */
 	revision?: string;
+	/** Its file is one another program rebuilds (org.protected), where the boards only set TODO or DONE. */
+	protected?: true;
 	/** For an independent review task, the ID of the development task it reviews (REVIEW_PARENT). */
 	reviewParent?: string;
 	/** The task has an independent development and review loop under way (REVIEW_PHASE). */
@@ -100,6 +102,8 @@ export type Agents = {
 	recent: string[];
 	/** Every task the lists above name. */
 	tasks: Record<string, Task>;
+	/** Who a task can be handed to from the boards, and where by default (the dispatch config). */
+	dispatch?: { hosts: string[]; host?: string; agents: string[] };
 };
 
 /** The JSON june-agenda.el prints, before it is shaped for clients. */
@@ -162,11 +166,16 @@ export function shapeAgenda(raw: Raw, root: string, now = Date.now()): Agenda {
 	return { generatedAt: now, today: raw.today, overdue, days, tasks, counts, projects };
 }
 
+/** How the boards name a task without an ID: its file and outline path. */
+export function outlineKey(file: string, path: readonly string[], title: string): string {
+	return `${file}::*${[...path, title].join("/")}`;
+}
+
 function shapeTask(key: string, t: any, root: string): Task {
 	const file = relative(root, t.file);
 	const at = Number(t.headlineAt);
 	return compact({
-		key: key.startsWith("id:") ? key : `${file}::*${[...(t.path ?? []), t.title].join("/")}`,
+		key: key.startsWith("id:") ? key : outlineKey(file, t.path ?? [], t.title),
 		id: t.id ?? undefined,
 		file,
 		line: t.line,
@@ -380,8 +389,10 @@ export class Boards {
 		return this.#agents!;
 	}
 
-	/** Recompute the agenda now, after an edit, rather than wait for the file watch. */
+	/** Recompute the agenda now, after an edit, rather than wait for the file watch. An export already running may
+	 * have read the file before the edit, so this waits for it and starts another. */
 	async refresh(): Promise<void> {
+		await this.#agendaRun?.catch(() => {});
 		await this.#refreshAgenda().catch(() => {});
 	}
 
@@ -463,9 +474,12 @@ export class Boards {
 		return (this.#agendaRun ??= (async () => {
 			try {
 				const value = await loadAgenda(this.#o.config.org.agendaFiles, this.#o.config.org.root, this.#o.run, this.#o.env);
+				const protectedFiles = new Set(protectedOf(this.#o.config.org));
+				for (const task of Object.values(value.tasks)) if (protectedFiles.has(task.file)) task.protected = true;
+				const before = this.revisions();
 				const held = hold(value, this.#agenda);
 				this.#agenda = held;
-				this.#recompute();
+				this.#recompute(before);
 				return held;
 			} catch (error) {
 				this.#o.log.warn("agenda_failed", { error: (error as Error).message.slice(0, 500) });
@@ -500,15 +514,16 @@ export class Boards {
 	}
 
 	/** Join the latest agenda and workers into the agents board, and tell listeners when either board changed. */
-	#recompute(): void {
+	#recompute(before = this.revisions()): void {
 		if (!this.#agenda) return;
 		const agenda = this.#agenda.value;
 		const reviews = Object.values(agenda.tasks).filter((t) => t.state === "EVAL").map(reviewKey);
 		if (!this.#seen.started) this.#seen.add(reviews);
 		else this.#seen.prune(new Set(reviews));
-		const before = this.revisions();
 		if (this.#workers) {
-			const value = shapeAgents({ ...this.#workers, agenda, seen: this.#seen.marks(), user: this.#o.config.user.name ?? "" });
+			const { hosts, host, agent, agents } = this.#o.config.dispatch;
+			const dispatch = { hosts: [...hosts], ...(host ?? hosts[0] ? { host: host ?? hosts[0] } : {}), agents: [...(agents ?? [agent ?? "pi"])] };
+			const value = { ...shapeAgents({ ...this.#workers, agenda, seen: this.#seen.marks(), user: this.#o.config.user.name ?? "" }), dispatch };
 			this.#agents = hold(value, this.#agents);
 		}
 		const after = this.revisions();

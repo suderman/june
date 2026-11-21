@@ -1,7 +1,7 @@
 // The boards as the clients draw them (desktop/board.mjs), shared by the desktop client and the phone.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agendaView, agentsView, boardLayout, dayHeading, dialogKind, entryMeta, harnessOf, stampShort, startOf, stateRows, taskDetail, taskLink } from "../desktop/board.mjs";
+import { agendaView, agentsView, boardLayout, dayHeading, dialogKind, entryMeta, findTask, harnessOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink } from "../desktop/board.mjs";
 
 test("three columns fit a 1400 px window with the strip a little narrower, and tabs take over below about 1300", () => {
 	assert.deepEqual(boardLayout(1400), { columns: true, side: 268, gap: 20, strip: 784 });
@@ -101,5 +101,20 @@ test("a task's page names who works it, what it waits on, and draws its Dialog b
 	assert.deepEqual(d.dialog.map((e) => [e.kind, e.at]), [["dispatcher", "Nov 18 14:02"], ["agent", "Nov 18 15:40"], ["june", "Nov 18 15:41"], ["user", "Nov 19"]]);
 	assert.equal(taskDetail(undefined, "Alex", ""), null);
 	assert.equal(dialogKind("Pi", "Alex"), "agent");
+	const sat = new Date(2026, 10, 21, 8, 0).getTime();
+	assert.equal(taskDetail(t, "Alex", "2026-11-21", sat).starts, "Sun 09:00", "a schedule still ahead is when it would start");
+	assert.equal(startsAt(task("x", { scheduled: "<2026-11-21 Sat 07:30>" }), "2026-11-21", sat), "now");
+	assert.equal(startsAt(task("x", { scheduled: "<2026-11-21 Sat 9:30>" }), "2026-11-21", sat), "today 9:30");
+	assert.equal(startsAt(task("x"), "2026-11-21", sat), "now");
+	assert.deepEqual([d.host, d.agent, d.protected, d.file], ["cog", "claude", false, "work/demo/demo.org"]);
 	assert.equal(stampShort("nonsense"), "");
+});
+
+test("a page follows its task when the dispatcher gives it an ID", () => {
+	const claimed = task("id:new", { title: "Set up forwarding", path: ["Clinic"], file: "work/c/c.org" });
+	const tasks = { "id:new": claimed, "id:other": task("id:other") };
+	assert.equal(findTask(tasks, "id:new"), claimed);
+	assert.equal(findTask(tasks, "work/c/c.org::*Clinic/Set up forwarding"), claimed);
+	assert.equal(findTask(tasks, "work/c/c.org::*Gone"), null);
+	assert.equal(findTask(null, "x"), null);
 });

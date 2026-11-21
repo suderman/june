@@ -98,7 +98,19 @@ private fun minute(): Long {
 private fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).map { getJSONObject(it) }
 
 /** A task by key from either board, for its page. */
-private fun Link.task(key: String): JSONObject? = agents?.optJSONObject("tasks")?.optJSONObject(key) ?: agenda?.optJSONObject("tasks")?.optJSONObject(key)
+private fun Link.task(key: String): JSONObject? =
+    agents?.optJSONObject("tasks")?.optJSONObject(key) ?: agenda?.optJSONObject("tasks")?.optJSONObject(key) ?: movedTask(key)
+
+/** The same heading under a new key, as board.mjs findTask: the dispatcher gives a task an ID when it claims it. */
+private fun Link.movedTask(key: String): JSONObject? {
+    val tasks = agenda?.optJSONObject("tasks") ?: return null
+    for (k in tasks.keys()) {
+        val t = tasks.optJSONObject(k) ?: continue
+        val path = t.optJSONArray("path").let { a -> (0 until (a?.length() ?: 0)).map { a!!.optString(it) } } + t.optString("title")
+        if ("${t.optString("file")}::*${path.joinToString("/")}" == key) return t
+    }
+    return null
+}
 
 /** One task's page (board.mjs taskDetail), in place of the board until its back link. */
 @Composable
@@ -106,14 +118,22 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
     val detail by produceState<JSONObject?>(null, key, link.agents, link.agenda) {
         val task = link.task(key)
         value = if (task == null) null else runCatching {
-            JSONObject(decisions.call("board.taskDetail", task, link.agents?.optString("user") ?: "", link.agenda?.optString("today") ?: ""))
+            JSONObject(decisions.call("board.taskDetail", task, link.agents?.optString("user") ?: "", link.agenda?.optString("today") ?: "", System.currentTimeMillis()))
         }.getOrNull()
     }
     val open = LocalUriHandler.current
     val d = detail
+    // Who a task can be handed to, and where by default; a handoff waits here for the user to confirm it.
+    val dispatch = link.agents?.optJSONObject("dispatch")
+    var handoff by remember(key) { mutableStateOf<Pair<String, String>?>(null) }
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("‹ $back", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = palette.pageInk, modifier = Modifier.clickable(onClick = close).padding(vertical = 8.dp)) }
+        if (d == null && link.task(key) == null) item { Text("That task is no longer on the boards.", fontFamily = Look.lettering, fontSize = 14.sp, color = palette.muted) }
         if (d != null) {
+            // Edits go to the task's key now, which the dispatcher may have changed since the page opened.
+            val k = d.optString("key").ifEmpty { key }
+            // A file another program rebuilds (org.protected): only TODO or DONE, which the mirror may sync back.
+            val locked = d.optBoolean("protected")
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (d.optString("state").isNotEmpty()) StateChip(d.optString("state"), colours, big = true)
@@ -137,39 +157,70 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
                     modifier = Modifier.fillMaxWidth().background(Look.balloon, RoundedCornerShape(12.dp)).border(2.dp, Look.ink, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 7.dp))
             }
             val state = d.optString("state")
-            val assignable = state in listOf("TODO", "EVAL", "HOLD")
+            val assignable = !locked && state in listOf("TODO", "EVAL", "HOLD")
+            val editable = !locked && state.isNotEmpty()
             if (state.isNotEmpty()) {
                 item { SectionTitle("STATE", palette) }
                 item {
                     @OptIn(ExperimentalLayoutApi::class)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for (s in listOf("TODO", "PROG", "EVAL", "HOLD", "DONE")) Choice(s, s == state, palette) { if (s != state) link.editTask(key, JSONObject().put("action", "state").put("state", s)) }
+                        for (s in if (locked) listOf("TODO", "DONE") else listOf("TODO", "PROG", "EVAL", "HOLD", "DONE")) Choice(s, s == state, palette) { if (s != state) link.editTask(k, JSONObject().put("action", "state").put("state", s)) }
                     }
                 }
-                if (assignable) item {
+                if (locked) item { Text("${d.optString("file")} is rebuilt by another program, so only TODO and DONE are set here; DONE may sync back.", fontFamily = Look.caption, fontSize = 13.sp, color = palette.muted) }
+                val agents = dispatch?.optJSONArray("agents")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: listOf("pi", "claude")
+                val hosts = dispatch?.optJSONArray("hosts")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+                val pending = handoff
+                if (assignable && pending == null) item {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("assign", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.muted)
-                        for (agent in listOf("pi", "claude")) Choice(agent, false, palette) { link.editTask(key, JSONObject().put("action", "assign").put("agent", agent)) }
+                        Text("hand to", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.muted)
+                        for (agent in agents) Choice(agent, false, palette) { handoff = agent to d.optString("host").ifEmpty { dispatch?.optString("host") ?: "" } }
                     }
                 }
-                item {
+                // Nothing is queued until the user confirms who, where and when.
+                if (assignable && pending != null) item {
+                    var startAt by remember(key) { mutableStateOf("") }
+                    val starts = d.optString("starts")
+                    Column(
+                        Modifier.fillMaxWidth().background(Look.balloon, RoundedCornerShape(12.dp)).border(2.dp, palette.pageInk, RoundedCornerShape(12.dp)).padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("Hand to ${pending.first}, starting ${if (starts == "now") "now" else "at its schedule, $starts"}, unless you give a time.", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.pageInk)
+                        if (hosts.size > 1) Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("on", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.muted)
+                            for (h in hosts) Choice(h, h == pending.second, palette) { handoff = pending.first to h }
+                        }
+                        OutlinedTextField(startAt, { startAt = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("start at: fri 9:00, +2h", fontSize = 13.sp) })
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Choice(if (startAt.isBlank() && starts == "now") "Hand off now" else "Hand off", true, palette) {
+                                val change = JSONObject().put("action", "assign").put("agent", pending.first)
+                                if (pending.second.isNotEmpty()) change.put("host", pending.second)
+                                if (startAt.isNotBlank()) change.put("when", startAt.trim())
+                                link.editTask(k, change)
+                                handoff = null
+                            }
+                            Choice("Cancel", false, palette) { handoff = null }
+                        }
+                    }
+                }
+                if (editable) item {
                     var whenText by remember(key) { mutableStateOf("") }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(whenText, { whenText = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("fri 9:00, +2d, none", fontSize = 13.sp) })
-                        Choice("schedule", false, palette) { if (whenText.isNotBlank()) link.editTask(key, JSONObject().put("action", "schedule").put("when", whenText.trim())) }
-                        Choice("deadline", false, palette) { if (whenText.isNotBlank()) link.editTask(key, JSONObject().put("action", "deadline").put("when", whenText.trim())) }
+                        Choice("schedule", false, palette) { if (whenText.isNotBlank()) link.editTask(k, JSONObject().put("action", "schedule").put("when", whenText.trim())) }
+                        Choice("deadline", false, palette) { if (whenText.isNotBlank()) link.editTask(k, JSONObject().put("action", "deadline").put("when", whenText.trim())) }
                     }
                 }
             }
-            if (state in listOf("", "TODO", "EVAL", "HOLD")) item {
+            if (!locked && state in listOf("", "TODO", "EVAL", "HOLD")) item {
                 var title by remember(key) { mutableStateOf("") }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(title, { title = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("new title", fontSize = 13.sp) })
-                    Choice("rename", false, palette) { if (title.isNotBlank()) { link.editTask(key, JSONObject().put("action", "title").put("title", title.trim())); title = "" } }
+                    Choice("rename", false, palette) { if (title.isNotBlank()) { link.editTask(k, JSONObject().put("action", "title").put("title", title.trim())); title = "" } }
                 }
             }
             val (noticeKey, noticeText) = link.taskNotice
-            if (noticeKey == key && noticeText.isNotEmpty()) item {
+            if ((noticeKey == key || noticeKey == k) && noticeText.isNotEmpty()) item {
                 Text(noticeText, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (noticeText == "saved" || noticeText == "saving…") palette.muted else palette.accent)
             }
             item { SectionTitle("DIALOG", palette) }
@@ -177,13 +228,13 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
             if (dialog.isEmpty()) item { Text("No Dialog yet.", fontFamily = Look.lettering, fontSize = 14.sp, color = palette.muted) }
             for (e in dialog) item(key = "dialog|" + e.optString("key")) { DialogEntry(e, d.optString("harness"), colours, palette) }
             // A reply in the user's name; with resume, the task goes back to its clanker with it.
-            if (state.isNotEmpty()) item {
+            if (editable) item {
                 var reply by remember(key) { mutableStateOf("") }
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(reply, { reply = it }, Modifier.fillMaxWidth(), minLines = 2, placeholder = { Text("Reply in Dialog", fontSize = 14.sp) })
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Choice("Reply", false, palette) { if (reply.isNotBlank()) { link.editTask(key, JSONObject().put("action", "reply").put("text", reply)); reply = "" } }
-                        if (assignable) Choice("Reply and resume", true, palette) { if (reply.isNotBlank()) { link.editTask(key, JSONObject().put("action", "reply").put("text", reply).put("resume", true)); reply = "" } }
+                        Choice("Reply", false, palette) { if (reply.isNotBlank()) { link.editTask(k, JSONObject().put("action", "reply").put("text", reply)); reply = "" } }
+                        if (assignable) Choice("Reply and resume", true, palette) { if (reply.isNotBlank()) { link.editTask(k, JSONObject().put("action", "reply").put("text", reply).put("resume", true)); reply = "" } }
                     }
                 }
             }
@@ -235,6 +286,8 @@ fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifie
             if (view?.optJSONArray("needs").objects().any { it.optString("task") == task && it.optString("kind") != "blocked" }) link.markSeen(task)
         } else if (target.isNotEmpty() && target != "null") open.openUri(target)
     }
+    // A rename moves a task without an ID to a new key; its page follows.
+    LaunchedEffect(link.taskMoved) { if (link.taskMoved.first == page && page.isNotEmpty()) page = link.taskMoved.second }
     if (page.isNotEmpty() && colours != null) { TaskPage(link, decisions, colours, palette, page, "agents", { page = "" }, modifier); return }
     val v = view
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -286,6 +339,7 @@ fun ProjectsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modif
     }
     val open = LocalUriHandler.current
     var page by remember { mutableStateOf("") }
+    LaunchedEffect(link.taskMoved) { if (link.taskMoved.first == page && page.isNotEmpty()) page = link.taskMoved.second }
     if (page.isNotEmpty() && colours != null) { TaskPage(link, decisions, colours, palette, page, if (mode == "state") drill else "agenda", { page = "" }, modifier); return }
     val show: (JSONObject) -> Unit = { e -> val task = e.optString("task"); if (task.isNotEmpty() && link.task(task) != null) page = task else e.optString("link").takeIf { it.isNotEmpty() && it != "null" }?.let { open.openUri(it) } }
     val v = view

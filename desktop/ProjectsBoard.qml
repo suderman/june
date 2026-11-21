@@ -22,6 +22,10 @@ Item {
   // An edit from a task's page, and what the last one said for the task on show.
   signal edit(string key, var change)
   property var notice: ({ key: "", text: "" })
+  // Who a task can be handed to, and where by default (the agents board's dispatch).
+  property var dispatch: null
+  // A rename moves a task without an ID to a new key; its page follows.
+  onNoticeChanged: if ((notice.from ?? "") !== "" && notice.from === detailKey) detailKey = notice.key
 
   readonly property var drillRows: mode === "state" ? Board.stateRows(agenda, drill) : []
   readonly property int openCount: view.counts.reduce((n, c) => n + c.n, 0)
@@ -30,11 +34,13 @@ Item {
     anchors.fill: parent
     visible: board.detailKey !== ""
     backLabel: board.mode === "state" ? board.drill : "agenda"
-    detail: board.detailKey !== "" && board.agenda ? Board.taskDetail(board.agenda.tasks[board.detailKey], board.user, board.agenda.today) : null
+    id: detailPage
+    detail: board.detailKey !== "" ? Board.taskDetail(Board.findTask(board.agenda?.tasks, board.detailKey), board.user, board.agenda?.today ?? "", Date.now()) : null
+    dispatch: board.dispatch
     onBack: board.detailKey = ""
     onOpen: link => board.open(link)
-    notice: board.notice.key === board.detailKey ? board.notice.text : ""
-    onEdit: change => board.edit(board.detailKey, change)
+    notice: board.notice.key === board.detailKey || board.notice.key === (detailPage.detail?.key ?? "") ? board.notice.text : ""
+    onEdit: change => board.edit(detailPage.detail?.key ?? board.detailKey, change)
   }
 
   Flickable {
@@ -222,7 +228,7 @@ Item {
       enabled: (r.entry.task ?? "") !== "" || (r.entry.link ?? "") !== ""
       cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
       // A task opens its page, where Emacs is a button away.
-      onClicked: (r.entry.task ?? "") !== "" && board.agenda?.tasks[r.entry.task] ? board.detailKey = r.entry.task : board.open(r.entry.link)
+      onClicked: (r.entry.task ?? "") !== "" && Board.findTask(board.agenda?.tasks, r.entry.task) !== null ? board.detailKey = r.entry.task : board.open(r.entry.link)
     }
   }
 }

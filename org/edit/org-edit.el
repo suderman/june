@@ -105,6 +105,26 @@ from its end, or id:UUID. A title containing \" / \" still matches whole."
       (nreverse (or titles paths)))))
 
 
+(defvar org-edit-protected
+  (let ((env (getenv "ORG_EDIT_PROTECTED")))
+    (if (and env (not (string-empty-p env))) (split-string env ":" t) '("asana.org")))
+  "Files under `org-directory' that another program rebuilds, such as the Asana mirror.
+Nothing edits them, except the user's own TODO or DONE from June's boards
+\(`org-edit todo --protected'), which the mirror may sync back.
+June sets ORG_EDIT_PROTECTED from its org.protected config, colon-separated.")
+
+(defvar org-edit--allow-protected nil
+  "Non-nil while the user's own state change in a protected file is being made.")
+
+(defun org-edit--protected-p (file)
+  "Non-nil when FILE is one of `org-edit-protected'."
+  (seq-some (lambda (name) (file-equal-p file (expand-file-name name org-directory))) org-edit-protected))
+
+(defun org-edit--user-name-p (who)
+  "Non-nil when WHO can sign the user's own Dialog entry: a capitalized name, not an agent's."
+  (and (stringp who) (string-match-p "\\`[A-Z][[:alnum:]-]*\\'" who)
+       (not (member who '("Agent" "June" "Dispatcher" "Pi" "Claude")))))
+
 (defun org-edit--at (file heading function &optional quiet)
   "Call FUNCTION at the one heading HEADING names in FILE and save.
 Print the heading unless QUIET is non-nil."
@@ -112,8 +132,9 @@ Print the heading unless QUIET is non-nil."
   (unless (file-regular-p file) (error "no file %s" file))
   (when (string-search ".sync-conflict-" file)
     (error "%s is a Syncthing conflict copy" file))
-  (when (file-equal-p file (expand-file-name "asana.org" org-directory))
-    (error "asana.org is rebuilt from Asana; never edit it"))
+  (when (and (org-edit--protected-p file) (not org-edit--allow-protected))
+    (error "%s is rebuilt by another program; only its TODO or DONE can be set, from June's boards"
+           (file-name-nondirectory file)))
   (let ((buffer (find-file-noselect file t)))
     (unwind-protect
         (with-current-buffer buffer
@@ -173,6 +194,10 @@ started carries an org.session label."
 (defun org-edit-todo ()
   "Set FILE HEADING to STATE, optionally checking --expect STATE.
 For EVAL, DONE or HOLD, --headline LINE binds a fresh worker report to this write.
+--protected makes the user's own TODO or DONE in a file another program
+rebuilds (`org-edit-protected'), and allows nothing else.
+--who NAME makes a resume the user's own, from June's boards: the note is
+written in NAME's Dialog entry, and REVIEW and DEPLOY are left as they are.
 June uses --request KEY --host HOST --note TEXT to resume a task once, --agent
 AGENT to change who runs it, and --depends \"id:A id:B\" to add prerequisites in
 the same save, so the dispatcher never sees the task AUTO without them.
@@ -181,14 +206,17 @@ it leaves DEPLOY=no and retains only approval bound to unchanged task scope.
 Coding workers must not set AUTO; that permission lives in instructions."
   (let* ((args command-line-args-left)
          (file (pop args)) (heading (pop args)) (state (upcase (or (pop args) "")))
-         expected request host agent note depends headline revision live-content grant result)
+         expected request host agent note depends headline revision live-content grant result protected who)
     (setq command-line-args-left nil)
     (unless (and file heading (not (string-empty-p state)))
       (error "usage: org-edit todo FILE HEADING STATE [--expect STATE] [--headline LINE] [--request KEY --host HOST [--agent AGENT] [--depends REFS] [--revision SHA256] [--live-content JSON|none] --note TEXT]"))
     (while args
-      (let ((flag (pop args)) (value (pop args)))
+      (let ((flag (pop args)) value)
+        (if (equal flag "--protected") (setq protected t)
+        (setq value (pop args))
         (unless (and value (not (string-empty-p value))) (error "missing value for %s" flag))
         (pcase flag
+          ("--who" (setq who value))
           ("--expect" (setq expected (upcase value)))
           ("--request" (setq request value))
           ("--host" (setq host value))
@@ -198,7 +226,18 @@ Coding workers must not set AUTO; that permission lives in instructions."
           ("--headline" (setq headline (org-dispatch--validate-headline value)))
           ("--revision" (setq revision value))
           ("--live-content" (setq live-content value))
-          (_ (error "unknown option %s" flag)))))
+          (_ (error "unknown option %s" flag))))))
+    (when protected
+      (unless (member state '("TODO" "DONE")) (error "--protected sets only TODO or DONE"))
+      (when (or request host agent note depends headline revision live-content who)
+        (error "--protected allows only --expect"))
+      (when (org-edit--worker-p) (error "--protected is the user's, not a coding worker's"))
+      (unless (org-edit--protected-p (expand-file-name file))
+        (error "%s is not a protected file" file)))
+    (when who
+      (unless (org-edit--user-name-p who) (error "--who needs the user's own name"))
+      (unless request (error "--who goes with a resume's --request"))
+      (when (org-edit--worker-p) (error "--who is the user's, not a coding worker's")))
     (when (and headline (not (member state '("EVAL" "DONE" "HOLD"))))
       (error "--headline is only for EVAL, DONE, or HOLD"))
     (when (and revision (not (string-match-p "\\`[0-9a-f]\\{64\\}\\'" revision)))
@@ -216,6 +255,7 @@ Coding workers must not set AUTO; that permission lives in instructions."
       (dolist (ref depends)
         (unless (string-match-p "\\`id:[[:alnum:]][[:alnum:]-]*\\'" ref)
           (error "--depends takes id:UUID references, not %s" ref))))
+    (let ((org-edit--allow-protected protected))
     (org-edit--at
      file heading
      (lambda ()
@@ -256,8 +296,10 @@ Coding workers must not set AUTO; that permission lives in instructions."
                  (org-entry-put nil "AGENT" (org-dispatch--default "agent" "pi"))))
              (org-entry-put nil "HOST" host)
              (org-entry-put nil "JUNE_REQUEST" request)
-             (org-entry-put nil "REVIEW" "yes")
-             (org-entry-put nil "DEPLOY" "no")
+             ;; June's resume keeps the user's review and forbids deploying; the user's own keeps what they set.
+             (unless who
+               (org-entry-put nil "REVIEW" "yes")
+               (org-entry-put nil "DEPLOY" "no"))
              (when live-content
                (if grant
                    (progn
@@ -266,7 +308,7 @@ Coding workers must not set AUTO; that permission lives in instructions."
                  (org-entry-delete nil "LIVE_CONTENT")
                  (org-entry-delete nil "LIVE_CONTENT_SCOPE")))
              (when depends (org-entry-put nil "DEPENDS" (string-join depends " ")))
-             (org-dispatch--append "Dialog" (org-dispatch--entry "June" note))
+             (org-dispatch--append "Dialog" (org-dispatch--entry (or who "June") note))
              (when live-content
                (org-dispatch--append "Dialog" (org-dispatch--entry "June"
                  (if grant
@@ -281,7 +323,7 @@ Coding workers must not set AUTO; that permission lives in instructions."
                           (host . ,host)
                           (depends . ,(vconcat (split-string (or (org-entry-get nil "DEPENDS") ""))))
                           (written . ,(if replay :false t)))))))
-     request)
+     request))
     (when request (princ (concat (json-serialize result) "\n")))))
 
 (defun org-edit-stop-task ()
@@ -500,8 +542,7 @@ Dialog stays append-only and last; no state, schedule or worker changes."
                (create-lockfiles t) (file-precious-flag t))
     (cl-loop for (key _value) on spec by #'cddr do
              (unless (memq key '(:who :text)) (error "unknown reply field %s" key)))
-    (unless (and (stringp who) (string-match-p "\\`[A-Z][[:alnum:]-]*\\'" who)
-                 (not (member who '("Agent" "June" "Dispatcher" "Pi" "Claude"))))
+    (unless (org-edit--user-name-p who)
       (error "reply needs who, the user's own name"))
     (unless (and (stringp text) (not (string-empty-p (string-trim text)))
                  (not (string-match-p "\r" text)) (not (string-match-p "^\\*+[ \t]" text)))

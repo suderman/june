@@ -554,9 +554,9 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 				const task = value.tasks[request.key];
 				if (task === undefined) throw new Error("That task is no longer on the agenda; the board will catch up");
 				scope.log.info("board_edit", { key: request.key, action: request.edit.action, device: device ?? "socket" });
-				const text = await scope.edits.apply(task, request.edit, `board:${request.requestId}`);
+				const { text, key } = await scope.edits.apply(task, request.edit, `board:${request.requestId}`);
 				await scope.boards.refresh();
-				return send({ type: "task", requestId: request.requestId, key: request.key, text: text.trim() });
+				return send({ type: "task", requestId: request.requestId, key, ...(key !== request.key ? { from: request.key } : {}), text: text.trim() });
 			}
 			case "hide": {
 				if (!local) throw new Error("Hidden entries are managed over the Unix socket");

@@ -312,7 +312,15 @@ check "a refused date leaves the heading unscheduled" test "$(<"$shifted")" = '*
 check "missing zone data stops instead of using UTC" has "$(TZDIR=/nonexistent run date '+0d')" 'No zone data for America/Edmonton'
 
 cp "$tasks" "$HOME/org/asana.org"
-check "asana.org is refused" has "$(run todo "$HOME/org/asana.org" Plan DONE)" 'never edit it'
+check "asana.org is refused" has "$(run todo "$HOME/org/asana.org" Plan DONE)" 'rebuilt by another program'
+check "asana.org takes the user's protected DONE" has "$(run todo "$HOME/org/asana.org" Plan DONE --protected)" '^\* DONE Plan'
+check "a protected DONE writes CLOSED as Org does" line "$HOME/org/asana.org" '^CLOSED: \['
+check "a protected write sets only TODO or DONE" has "$(run todo "$HOME/org/asana.org" Plan HOLD --protected)" 'only TODO or DONE'
+check "a protected write takes no other options" has "$(run todo "$HOME/org/asana.org" Plan TODO --protected --headline 'Done.')" 'allows only --expect'
+check "--protected is only for protected files" has "$(run todo "$tasks" Plan DONE --protected)" 'not a protected file'
+check "a protected file is whatever June configures" has "$(ORG_EDIT_PROTECTED=other.org run todo "$HOME/org/asana.org" Plan TODO --protected)" 'not a protected file'
+check "--who needs the user's name" has "$(run todo "$tasks" Plan AUTO --expect TODO --request fixture:who --host kit --who June --note 'Handed off.')" 'own name'
+check "--who goes with a resume" has "$(run todo "$tasks" Plan DONE --who Jon)" "goes with a resume"
 cp "$tasks" "$HOME/org/tasks.sync-conflict-20261024-000000-ABC.org"
 check "conflict copies are refused" \
   has "$(run todo "$HOME/org/tasks.sync-conflict-20261024-000000-ABC.org" Plan DONE)" 'conflict copy'

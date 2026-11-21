@@ -20,13 +20,17 @@ Item {
   // An edit from a task's page, and what the last one said for the task on show.
   signal edit(string key, var change)
   property var notice: ({ key: "", text: "" })
+  // Who a task can be handed to, and where by default (the agents board's dispatch).
+  property var dispatch: null
+  // A rename moves a task without an ID to a new key; its page follows.
+  onNoticeChanged: if ((notice.from ?? "") !== "" && notice.from === detailKey) detailKey = notice.key
 
   // Opening a page counts as seeing a task's review or question, on every device.
   signal seen(string key)
 
   // A row with a task opens its page; one without opens where it can.
   function show(task, link) {
-    if (task !== "" && board.tasks[task] !== undefined) {
+    if (task !== "" && Board.findTask(board.tasks, task) !== null) {
       board.detailKey = task;
       if (board.view.needs.some(n => n.task === task && n.kind !== "blocked")) board.seen(task);
     } else if (link !== "") board.open(link);
@@ -36,11 +40,13 @@ Item {
     anchors.fill: parent
     visible: board.detailKey !== ""
     backLabel: "agents"
-    detail: board.detailKey !== "" ? Board.taskDetail(board.tasks[board.detailKey], board.user, board.today) : null
+    id: detailPage
+    detail: board.detailKey !== "" ? Board.taskDetail(Board.findTask(board.tasks, board.detailKey), board.user, board.today, Date.now()) : null
+    dispatch: board.dispatch
     onBack: board.detailKey = ""
     onOpen: link => board.open(link)
-    notice: board.notice.key === board.detailKey ? board.notice.text : ""
-    onEdit: change => board.edit(board.detailKey, change)
+    notice: board.notice.key === board.detailKey || board.notice.key === (detailPage.detail?.key ?? "") ? board.notice.text : ""
+    onEdit: change => board.edit(detailPage.detail?.key ?? board.detailKey, change)
   }
 
   Flickable {

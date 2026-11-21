@@ -573,7 +573,7 @@ ShellRoot {
       return;
     }
     if (reply.type === "task") {
-      if (reply.requestId === taskNotice.pending) taskNotice = { key: reply.key, text: "saved", pending: "" };
+      if (reply.requestId === taskNotice.pending) taskNotice = { key: reply.key, from: reply.from ?? "", text: "saved", pending: "" };
       return;
     }
     if (reply.type === "error" && reply.requestId !== undefined && reply.requestId === taskNotice.pending) {
@@ -883,6 +883,7 @@ ShellRoot {
           view: root.agentsView
     onSeen: key => root.markSeen(key)
     notice: root.taskNotice
+    dispatch: root.agentsBoard?.dispatch ?? null
     onEdit: (key, change) => root.editTask(key, change)
     tasks: Object.assign({}, root.agendaBoard?.tasks ?? {}, root.agentsBoard?.tasks ?? {})
     user: root.agentsBoard?.user ?? ""
@@ -895,6 +896,7 @@ ShellRoot {
           height: parent.height
           view: root.agendaView
     notice: root.taskNotice
+    dispatch: root.agentsBoard?.dispatch ?? null
     onEdit: (key, change) => root.editTask(key, change)
     user: root.agentsBoard?.user ?? ""
           agenda: root.agendaBoard

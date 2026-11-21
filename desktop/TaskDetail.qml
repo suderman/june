@@ -15,9 +15,37 @@ Item {
   signal open(string link)
   // The user's edit (board-edit.ts TaskEdit): a state, an assignment, a reply, a date.
   signal edit(var change)
+  // Who a task can be handed to, and where by default: { hosts, host, agents }.
+  property var dispatch: null
 
   readonly property string orgState: detail?.state ?? ""
-  readonly property bool assignable: ["TODO", "EVAL", "HOLD"].includes(orgState)
+  // A file another program rebuilds (org.protected): only TODO or DONE, which the mirror may sync back.
+  readonly property bool locked: detail?.protected ?? false
+  readonly property bool editable: orgState !== "" && !locked
+  readonly property bool assignable: !locked && ["TODO", "EVAL", "HOLD"].includes(orgState)
+  // A handoff waiting for the user to confirm it: { agent, host }, or null.
+  property var handoff: null
+  onDetailChanged: if (detail === null || !assignable) handoff = null
+
+  // The page's task left the boards: archived, or no longer in an agenda file.
+  Column {
+    visible: page.detail === null
+    width: parent.width
+    spacing: 10
+    Text {
+      text: "‹ " + page.backLabel
+      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
+      color: Theme.pageInk
+      MouseArea { anchors.fill: parent; anchors.margins: -6; cursorShape: Qt.PointingHandCursor; onClicked: page.back() }
+    }
+    Text {
+      width: parent.width
+      wrapMode: Text.Wrap
+      text: "That task is no longer on the boards."
+      font.family: Theme.lettering; font.pixelSize: 13
+      color: Theme.muted
+    }
+  }
 
   Flickable {
     anchors.fill: parent
@@ -100,7 +128,7 @@ Item {
         width: parent.width
         spacing: 6
         Repeater {
-          model: ["TODO", "PROG", "EVAL", "HOLD", "DONE"]
+          model: page.locked ? ["TODO", "DONE"] : ["TODO", "PROG", "EVAL", "HOLD", "DONE"]
           delegate: Choice {
             required property string modelData
             text: modelData
@@ -109,16 +137,93 @@ Item {
           }
         }
       }
+      Text {
+        visible: page.locked
+        width: parent.width
+        wrapMode: Text.Wrap
+        text: (page.detail?.file ?? "") + " is rebuilt by another program, so only TODO and DONE are set here; DONE may sync back."
+        font.family: Theme.caption; font.pixelSize: 12
+        color: Theme.muted
+      }
       Flow {
-        visible: page.assignable
+        visible: page.assignable && page.handoff === null
         width: parent.width
         spacing: 6
-        Text { text: "assign"; height: 28; verticalAlignment: Text.AlignVCenter; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: Theme.muted }
-        Choice { text: "pi"; onClicked: page.edit({ action: "assign", agent: "pi" }) }
-        Choice { text: "claude"; onClicked: page.edit({ action: "assign", agent: "claude" }) }
+        Text { text: "hand to"; height: 28; verticalAlignment: Text.AlignVCenter; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: Theme.muted }
+        Repeater {
+          model: page.dispatch?.agents ?? ["pi", "claude"]
+          delegate: Choice {
+            required property string modelData
+            text: modelData
+            onClicked: page.handoff = { agent: modelData, host: (page.detail?.host ?? "") !== "" ? page.detail.host : (page.dispatch?.host ?? "") }
+          }
+        }
+      }
+      // Nothing is queued until the user confirms who, where and when.
+      Rectangle {
+        visible: page.handoff !== null
+        width: parent.width
+        height: handoffColumn.implicitHeight + 20
+        radius: 12
+        color: Theme.balloon
+        border.color: Theme.pageInk
+        border.width: 2
+        Column {
+          id: handoffColumn
+          x: 10; y: 10
+          width: parent.width - 20
+          spacing: 8
+          Text {
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: "Hand to " + (page.handoff?.agent ?? "") + ", starting " + (page.detail?.starts === "now" ? "now" : "at its schedule, " + (page.detail?.starts ?? "")) + ", unless you give a time."
+            font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
+            color: Theme.pageInk
+          }
+          Flow {
+            visible: (page.dispatch?.hosts ?? []).length > 1
+            width: parent.width
+            spacing: 6
+            Text { text: "on"; height: 28; verticalAlignment: Text.AlignVCenter; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: Theme.muted }
+            Repeater {
+              model: page.dispatch?.hosts ?? []
+              delegate: Choice {
+                required property string modelData
+                text: modelData
+                on: (page.handoff?.host ?? "") === modelData
+                onClicked: page.handoff = { agent: page.handoff.agent, host: modelData }
+              }
+            }
+          }
+          TextField {
+            id: handoffWhen
+            width: parent.width
+            height: 28
+            placeholderText: "start at: fri 9:00, +2h, 2026-11-28 14:00"
+            font.family: Theme.caption; font.pixelSize: 12
+            color: Theme.ink
+            background: Rectangle { radius: 8; color: Theme.paper; border.color: Theme.pageInk; border.width: 1.5 }
+          }
+          Row {
+            spacing: 6
+            Choice {
+              text: handoffWhen.text.trim() === "" && page.detail?.starts === "now" ? "Hand off now" : "Hand off"
+              on: true
+              onClicked: {
+                const change = { action: "assign", agent: page.handoff.agent };
+                if ((page.handoff.host ?? "") !== "") change.host = page.handoff.host;
+                if (handoffWhen.text.trim() !== "") change.when = handoffWhen.text.trim();
+                page.edit(change);
+                page.handoff = null;
+                handoffWhen.text = "";
+              }
+            }
+            Choice { text: "Cancel"; onClicked: { page.handoff = null; handoffWhen.text = ""; } }
+          }
+        }
       }
       Row {
-        visible: page.orgState !== ""
+        visible: page.editable
         width: parent.width
         spacing: 6
         TextField {
@@ -135,7 +240,7 @@ Item {
       }
       // A new title, as June's org_update_task makes it: refused if the task changed since the board read it.
       Row {
-        visible: ["", "TODO", "EVAL", "HOLD"].includes(page.orgState)
+        visible: !page.locked && ["", "TODO", "EVAL", "HOLD"].includes(page.orgState)
         width: parent.width
         spacing: 6
         TextField {
@@ -178,7 +283,7 @@ Item {
       // A reply in the user's name; with resume, the task goes back to its clanker with it.
       TextArea {
         id: reply
-        visible: page.orgState !== ""
+        visible: page.editable
         width: parent.width
         height: Math.max(64, implicitHeight)
         wrapMode: TextEdit.Wrap
@@ -188,7 +293,7 @@ Item {
         background: Rectangle { radius: 12; color: Theme.balloon; border.color: Theme.pageInk; border.width: 2 }
       }
       Row {
-        visible: page.orgState !== ""
+        visible: page.editable
         spacing: 6
         Choice { text: "Reply"; onClicked: if (reply.text.trim() !== "") { page.edit({ action: "reply", text: reply.text }); reply.text = ""; } }
         Choice {

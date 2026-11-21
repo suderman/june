@@ -127,7 +127,8 @@ export type Reply =
 	| { type: "hidden"; requestId: string; ranges: [number, number][] }
 	| { type: "agenda"; requestId: string; revision: string; agenda: Agenda }
 	| { type: "agents"; requestId: string; revision: string; agents: Agents }
-	| { type: "task"; requestId: string; key: string; text: string }
+	/** An edit made: what org-edit printed, and the task's key afterwards, with `from` when a rename changed it. */
+	| { type: "task"; requestId: string; key: string; from?: string; text: string }
 	| { type: "accepted"; requestId: string; submissionId: number }
 	| { type: "settled"; requestId: string; status: "done" | "unanswered"; text?: string; reason?: string }
 	| { type: "reply"; requestId: string; text: string }
