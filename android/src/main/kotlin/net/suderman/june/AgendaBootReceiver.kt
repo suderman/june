@@ -12,6 +12,7 @@ class AgendaBootReceiver : BroadcastReceiver() {
         Thread {
             try {
                 AgendaJob.schedule(context)
+                Push.register(context)
                 Reminders.schedule(context)
                 AgendaWidget.updateAll(context)
                 AgendaJob.now(context)

@@ -22,6 +22,8 @@
         <package android:name="com.termux" />
         <package android:name="org.gnu.emacs" />
         <package android:name="dev.herdr.app" />
+        <!-- The ntfy app, June's UnifiedPush distributor for agenda pushes (Push.kt). -->
+        <package android:name="io.heckel.ntfy" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -104,6 +106,15 @@
         </receiver>
         <service android:name=".AgendaJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
         <receiver android:name=".ReminderReceiver" android:exported="false" />
+        <!-- ntfy's UnifiedPush answers and pushes (Push.kt); a broadcast without June's token is dropped. -->
+        <receiver android:name=".PushReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.MESSAGE" />
+                <action android:name="org.unifiedpush.android.connector.NEW_ENDPOINT" />
+                <action android:name="org.unifiedpush.android.connector.REGISTRATION_FAILED" />
+                <action android:name="org.unifiedpush.android.connector.UNREGISTERED" />
+            </intent-filter>
+        </receiver>
         <receiver android:name=".AgendaBootReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />

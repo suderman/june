@@ -48,6 +48,7 @@ class ConversationActivity : ComponentActivity() {
         openBoard(intent)
         // The agenda widget and reminders (AgendaWidget.kt, Reminders.kt) work from here on, and remind with notices.
         AgendaJob.schedule(this)
+        Push.register(this)
         if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 7)
         }

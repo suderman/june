@@ -74,6 +74,8 @@ export type Request =
 	| { op: "agents"; requestId: string }
 	/** Mark tasks' reviews seen, by task key, on every device; answered with the agents board. */
 	| { op: "seen"; requestId: string; keys: string[] }
+	/** A paired phone's UnifiedPush address on the ntfy server, pushed to when the agenda changes (src/push.ts). */
+	| { op: "push"; requestId: string; endpoint: string }
 	/** The user's edit of a task the boards show, by key (see board-edit.ts); answered with what org-edit printed. */
 	| { op: "task"; requestId: string; key: string; edit: TaskEdit }
 	/** Devices allowed on the WebSocket: Unix socket only. `add` answers with the new token, once. */
@@ -129,6 +131,7 @@ export type Reply =
 	| { type: "agents"; requestId: string; revision: string; agents: Agents }
 	/** An edit made: what org-edit printed, and the task's key afterwards, with `from` when a rename changed it. */
 	| { type: "task"; requestId: string; key: string; from?: string; text: string }
+	| { type: "push"; requestId: string }
 	| { type: "accepted"; requestId: string; submissionId: number }
 	| { type: "settled"; requestId: string; status: "done" | "unanswered"; text?: string; reason?: string }
 	| { type: "reply"; requestId: string; text: string }

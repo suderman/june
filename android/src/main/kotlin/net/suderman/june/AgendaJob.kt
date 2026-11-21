@@ -40,12 +40,12 @@ class AgendaJob : JobService() {
             )
         }
 
-        /** A refresh as soon as there is a network. */
+        /** A refresh as soon as there is a network, expedited, so a push's refresh runs within seconds. */
         fun now(context: Context) {
             context.getSystemService(JobScheduler::class.java).schedule(
                 JobInfo.Builder(NOW, ComponentName(context, AgendaJob::class.java))
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                    .setBackoffCriteria(30_000, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
+                    .setExpedited(true)
                     .build(),
             )
         }

@@ -376,7 +376,10 @@ export class Boards {
 	#agendaRun?: Promise<Held<Agenda>>;
 	#workersRun?: Promise<void>;
 	#subscribers = 0;
+	/** Those watching the agenda alone, such as phone pushes, which need no agents polled. */
+	#agendaWatchers = 0;
 	#timers: ReturnType<typeof setInterval>[] = [];
+	#agentTimers: ReturnType<typeof setInterval>[] = [];
 	#watchers: FSWatcher[] = [];
 	#debounce?: ReturnType<typeof setTimeout>;
 	/** When the agenda files were first watched in the current subscription. */
@@ -431,31 +434,57 @@ export class Boards {
 
 	/** Keep both boards fresh until the returned function is called. */
 	subscribe(): () => void {
-		if (this.#subscribers++ === 0) this.#start();
+		if (this.#subscribers++ === 0) {
+			this.#startAgents();
+			this.#startAgenda();
+		}
 		let done = false;
 		return () => {
 			if (done) return;
 			done = true;
-			if (--this.#subscribers === 0) this.#stop();
+			if (--this.#subscribers === 0) {
+				this.#stopAgents();
+				if (this.#agendaWatchers === 0) this.#stopAgenda();
+			}
+		};
+	}
+
+	/** Keep the agenda alone fresh, following its files, until the returned function is called: for phone pushes. */
+	watchAgenda(): () => void {
+		if (this.#agendaWatchers++ === 0 && this.#subscribers === 0) this.#startAgenda();
+		let done = false;
+		return () => {
+			if (done) return;
+			done = true;
+			if (--this.#agendaWatchers === 0 && this.#subscribers === 0) this.#stopAgenda();
 		};
 	}
 
 	stop(): void {
 		this.#subscribers = 0;
-		this.#stop();
+		this.#agendaWatchers = 0;
+		this.#stopAgents();
+		this.#stopAgenda();
 	}
 
-	#start(): void {
+	#startAgenda(): void {
+		if (this.#watchedSince !== undefined) return;
 		this.#watchedSince = Date.now();
 		void this.#refreshAgenda().catch(() => {});
-		this.#timers.push(
-			setInterval(() => void this.#refreshWorkers().catch(() => {}), this.#o.agentsMs),
-			setInterval(() => void this.#refreshAgenda().catch(() => {}), this.#o.agendaMs),
-		);
+		this.#timers.push(setInterval(() => void this.#refreshAgenda().catch(() => {}), this.#o.agendaMs));
 		this.#watch();
 	}
 
-	#stop(): void {
+	#startAgents(): void {
+		this.#agentTimers.push(setInterval(() => void this.#refreshWorkers().catch(() => {}), this.#o.agentsMs));
+	}
+
+	#stopAgents(): void {
+		for (const timer of this.#agentTimers) clearInterval(timer);
+		this.#agentTimers = [];
+	}
+
+	#stopAgenda(): void {
 		this.#watchedSince = undefined;
 		for (const timer of this.#timers) clearInterval(timer);
 		for (const watcher of this.#watchers) watcher.close();
