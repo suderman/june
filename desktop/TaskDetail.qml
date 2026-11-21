@@ -26,7 +26,7 @@ Item {
   readonly property bool locked: detail?.protected ?? false
   readonly property bool editable: orgState !== "" && !locked
   readonly property bool assignable: !locked && ["TODO", "EVAL", "HOLD"].includes(orgState)
-  // An edit on its way: the page shows it as made and takes no other until it lands or fails.
+  // An edit on its way: the page shows it as made; taps meanwhile queue behind it (shell.qml editTask).
   readonly property bool busy: detail?.busy ?? false
   // A handoff waiting for the user to confirm it: { agent, host, when }, or null; when "" starts as the page says.
   property var handoff: null
@@ -37,7 +37,6 @@ Item {
     if (detail === null) picking = "";
   }
   function send(change) {
-    if (page.busy) return;
     page.picking = "";
     page.edit(change);
   }
@@ -278,7 +277,7 @@ Item {
           color: Theme.ink
           background: Rectangle { radius: 8; color: Theme.balloon; border.color: Theme.pageInk; border.width: 1.5 }
         }
-        Choice { id: renameButton; text: "rename"; onClicked: if (rename.text.trim() !== "" && !page.busy) { page.send({ action: "title", title: rename.text.trim() }); rename.text = ""; } }
+        Choice { id: renameButton; text: "rename"; onClicked: if (rename.text.trim() !== "") { page.send({ action: "title", title: rename.text.trim() }); rename.text = ""; } }
       }
       Row {
         visible: page.busy || page.notice !== ""
@@ -339,12 +338,12 @@ Item {
       Row {
         visible: page.editable
         spacing: 6
-        Choice { id: replyButton; text: "Reply"; onClicked: if (reply.text.trim() !== "" && !page.busy) { page.send({ action: "reply", text: reply.text }); reply.text = ""; } }
+        Choice { id: replyButton; text: "Reply"; onClicked: if (reply.text.trim() !== "") { page.send({ action: "reply", text: reply.text }); reply.text = ""; } }
         Choice {
           visible: page.assignable
           text: "Reply and resume"
           on: true
-          onClicked: if (reply.text.trim() !== "" && !page.busy) { page.send({ action: "reply", text: reply.text, resume: true }); reply.text = ""; }
+          onClicked: if (reply.text.trim() !== "") { page.send({ action: "reply", text: reply.text, resume: true }); reply.text = ""; }
         }
       }
     }
@@ -362,10 +361,8 @@ Item {
     color: on ? Theme.pageInk : "transparent"
     border.color: Theme.pageInk
     border.width: 2
-    opacity: page.busy ? 0.45 : 1
-    Behavior on opacity { NumberAnimation { duration: 120 } }
     Text { id: choiceLabel; anchors.centerIn: parent; text: choice.text; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: choice.on ? Theme.paper : Theme.pageInk }
-    MouseArea { anchors.fill: parent; enabled: !page.busy; cursorShape: page.busy ? Qt.BusyCursor : Qt.PointingHandCursor; onClicked: choice.clicked() }
+    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: choice.clicked() }
   }
 
   component Action: Rectangle {

@@ -28,25 +28,24 @@ export function headingOf(task: Task): string {
 	return task.id ? `id:${task.id}` : [...task.path, task.title].join(" / ");
 }
 
+/** How long a board edit waits for the dispatcher's lock, which it holds through each pass (8 to 12 s on kit). */
+const LOCK_WAIT_S = 25;
+
 /** What org-edit said, without the command line: its last line of stderr. */
 function said(error: unknown): string {
 	const e = error as { stderr?: string; message?: string; exitCode?: number };
 	const lines = String(e.stderr ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
-	if (e.exitCode === 75 || lines.length === 0) return "The dispatcher is busy with that file; try again in a moment";
-	return lines[lines.length - 1]!;
+	if (e.exitCode === 75) return `The dispatcher held the file for over ${LOCK_WAIT_S} s; try again`;
+	return lines.length > 0 ? lines[lines.length - 1]! : "org-edit failed without saying why";
 }
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class TaskEdits {
 	readonly #config: Config;
 	readonly #run: Run;
-	readonly #retryMs: number;
 
-	constructor(config: Config, run: Run = runProcess, retryMs = 2_000) {
+	constructor(config: Config, run: Run = runProcess) {
 		this.#config = config;
 		this.#run = run;
-		this.#retryMs = retryMs;
 	}
 
 	/** The agent a task is run by: its AGENT, else its newest session's, else the dispatcher's default. */
@@ -138,20 +137,13 @@ export class TaskEdits {
 		return this.#edit("todo", file, heading, "AUTO", "--expect", task.state!, "--request", request, "--host", host, "--agent", agent, "--who", user, "--note", note);
 	}
 
-	/** One org-edit call, retried while the dispatcher holds the lock. */
+	/** One org-edit call, waiting its turn behind a dispatcher pass rather than failing. */
 	async #edit(...args: string[]): Promise<string> {
-		const argv = ["env", `ORG_EDIT_PROTECTED=${protectedOf(this.#config.org).join(":")}`, "bash", ORG_EDIT, ...args];
-		for (let attempt = 0; ; attempt++) {
-			try {
-				return await this.#run(argv, 120_000);
-			} catch (error) {
-				const message = said(error);
-				if (attempt < 3 && message.startsWith("The dispatcher is busy")) {
-					await sleep(this.#retryMs);
-					continue;
-				}
-				throw new Error(message);
-			}
+		const argv = ["env", `ORG_EDIT_PROTECTED=${protectedOf(this.#config.org).join(":")}`, `ORG_EDIT_WAIT=${LOCK_WAIT_S}`, "bash", ORG_EDIT, ...args];
+		try {
+			return await this.#run(argv, (LOCK_WAIT_S + 60) * 1000);
+		} catch (error) {
+			throw new Error(said(error));
 		}
 	}
 }

@@ -10,7 +10,7 @@ import { headingOf, type TaskEdit, TaskEdits } from "../src/board-edit.ts";
 import { Client } from "../src/protocol.ts";
 import { createLogger } from "../src/runtime.ts";
 import { Herdr, runProcess } from "../src/tools/herdr.ts";
-import { openTestDaemon, tempDir, testConfig } from "./helpers.ts";
+import { openTestDaemon, tempDir, testConfig, until } from "./helpers.ts";
 
 const task = (extra: Partial<Task> = {}): Task => ({ key: "id:t1", id: "t1", file: "work/demo/demo.org", line: 3, level: 1, title: "Hand off", state: "EVAL", tags: [], path: [], project: "Demo", sessions: [], ...extra });
 
@@ -20,8 +20,8 @@ test("each board edit is one org-edit call that names the task and expects the s
 	const config = testConfig(tmp.dir, { dispatch: { hosts: ["kit", "cog"], host: "kit", agent: "pi", agents: ["pi", "claude"] } });
 	const calls: string[][] = [];
 	const edits = new TaskEdits(config, async (argv) => {
-		assert.deepEqual(argv.slice(0, 3), ["env", "ORG_EDIT_PROTECTED=asana.org", "bash"]);
-		calls.push(argv.slice(4));
+		assert.deepEqual(argv.slice(0, 4), ["env", "ORG_EDIT_PROTECTED=asana.org", "ORG_EDIT_WAIT=25", "bash"], "it waits its turn behind a dispatcher pass");
+		calls.push(argv.slice(5));
 		return "ok\n";
 	});
 	const file = join(config.org.root, "work/demo/demo.org");
@@ -70,17 +70,14 @@ test("each board edit is one org-edit call that names the task and expects the s
 	assert.equal(calls.length, 11, "a refused edit runs nothing");
 });
 
-test("a board edit reports org-edit's own words, and waits out a busy dispatcher", async () => {
+test("a board edit reports org-edit's own words, and says when the dispatcher held the file too long", async () => {
 	const tmp = await tempDir();
 	const config = testConfig(tmp.dir, { dispatch: { hosts: ["kit"], host: "kit" } });
-	let tries = 0;
-	const busy = new TaskEdits(config, async () => {
-		if (++tries < 3) throw Object.assign(new Error("env ORG_EDIT_PROTECTED=asana.org bash /x/org-edit: Command failed"), { exitCode: 1, stderr: "" });
-		return "* DONE Hand off\n";
-	}, 1);
-	assert.deepEqual(await busy.apply(task(), { action: "state", state: "DONE" }, "r"), { text: "* DONE Hand off\n", key: "id:t1" });
-	assert.equal(tries, 3);
-	const refuses = new TaskEdits(config, async () => { throw Object.assign(new Error("env ...: long command"), { exitCode: 255, stderr: "Loading x\nexpected EVAL, found AUTO; read the task again\n" }); }, 1);
+	const busy = new TaskEdits(config, async () => { throw Object.assign(new Error("env ...: Command failed"), { exitCode: 75, stderr: "dispatcher or task edit busy; read the task again before retrying\n" }); });
+	await assert.rejects(busy.apply(task(), { action: "state", state: "DONE" }, "r"), /held the file for over 25 s/);
+	const silent = new TaskEdits(config, async () => { throw Object.assign(new Error("env ...: Command failed"), { exitCode: 1, stderr: "" }); });
+	await assert.rejects(silent.apply(task(), { action: "state", state: "DONE" }, "r"), /without saying why/);
+	const refuses = new TaskEdits(config, async () => { throw Object.assign(new Error("env ...: long command"), { exitCode: 255, stderr: "Loading x\nexpected EVAL, found AUTO; read the task again\n" }); });
 	await assert.rejects(refuses.apply(task(), { action: "state", state: "DONE" }, "r"), (e: Error) => e.message === "expected EVAL, found AUTO; read the task again");
 	await tmp.cleanup();
 });
@@ -152,7 +149,30 @@ test("a client edits a task by key, and the boards refresh at once", async (t) =
 	const reply = await client.request({ op: "task", requestId: randomUUID(), key: "id:t1", edit: { action: "state", state: "PROG" } });
 	assert.deepEqual(reply.type === "task" ? [reply.key, reply.text] : reply, ["id:t1", "* PROG Hand off"]);
 	assert.deepEqual(applied, [["id:t1", { action: "state", state: "PROG" }, true]]);
-	assert.ok(exports >= 2, "the agenda was read again after the edit");
+	await until(async () => exports >= 2, 10_000);
 	const missing = await client.request({ op: "task", requestId: randomUUID(), key: "id:gone", edit: { action: "state", state: "DONE" } });
 	assert.equal(missing.type, "error");
+});
+
+test("a task's next edit waits for the agenda to be read again, so it sees what the last one wrote", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const config = testConfig(tmp.dir);
+	let state = "TODO";
+	const raw = () => ({ today: "2026-11-21", days: [{ date: "2026-11-21", entries: [] }], tasks: { "id:t1": { file: join(tmp.dir, "org", "w.org"), line: 1, level: 1, title: "Hand off", state, id: "t1", tags: [], path: [], sessions: [] } } });
+	// The export is slow, as it is on kit; the answer to an edit must not wait for it.
+	const boards = new Boards({ config: { ...config, org: { ...config.org, root: join(tmp.dir, "org") } }, herdr: new Herdr(config.herdr, async () => JSON.stringify({ terminals: [] })), seenFile: join(tmp.dir, "seen.json"), log: createLogger({ sink: () => {} }),
+		run: async () => { await new Promise((r) => setTimeout(r, 300)); return JSON.stringify(raw()); } });
+	const saw: string[] = [];
+	await openTestDaemon({ ...tmp, faux: fauxProvider(), boards, edits: { apply: async (task, edit) => { saw.push(task.state ?? ""); state = (edit as { state: string }).state; return { text: "", key: task.key }; } } });
+	const client = await Client.open(tmp.paths.socket);
+	t.after(() => client.close());
+	await client.request({ op: "agenda", requestId: randomUUID() });
+	const started = Date.now();
+	const first = await client.request({ op: "task", requestId: randomUUID(), key: "id:t1", edit: { action: "state", state: "PROG" } });
+	assert.equal(first.type, "task");
+	assert.ok(Date.now() - started < 250, "answered before the agenda is read again");
+	const second = await client.request({ op: "task", requestId: randomUUID(), key: "id:t1", edit: { action: "state", state: "DONE" } });
+	assert.equal(second.type, "task");
+	assert.deepEqual(saw, ["TODO", "PROG"], "the second edit saw the first one's state");
 });

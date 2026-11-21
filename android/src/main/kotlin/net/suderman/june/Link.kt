@@ -12,6 +12,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
@@ -103,9 +104,11 @@ class Link(private val context: Context) {
         private set
 
     /**
-     * The user's edits on their way, as shell.qml pendingEdits: { key: { change, id, done, at, undo } } and seen, the
-     * reviews opened since the last agents board. board.mjs shows them as made; a refusal, a dropped link or no answer
-     * puts back what the board says, and a saved edit stops overlaying once the boards that carry it arrive.
+     * Each task's outbox, as shell.qml pendingEdits: { key: { applied, change, queue, id, done, at, undo } } and seen,
+     * the reviews opened since the last agents board. board.mjs draws it all as made. One edit goes at a time and taps
+     * meanwhile queue behind it, the same kind settling on the last (board.mjs enqueue); a refusal, a dropped link or
+     * no answer drops the chain and the board's state shows again; a saved edit stops overlaying once the boards that
+     * carry it arrive.
      */
     var pending: JSONObject by mutableStateOf(JSONObject())
         private set
@@ -145,11 +148,45 @@ class Link(private val context: Context) {
     /** The user's edit of a task (src/board-edit.ts TaskEdit), by its key; UNDO is the edit that would put it back. */
     fun editTask(key: String, edit: JSONObject, undo: JSONObject? = null) {
         val held = pending.optJSONObject(key)
-        if (held != null && !held.optBoolean("done")) return
+        if (held != null && !held.optBoolean("done")) {
+            changePending { it.put(key, JSONObject(held.toString()).put("queue", enqueue(held.optJSONArray("queue"), edit))) }
+            return
+        }
+        // A saved edit the board has yet to show stays drawn under the new one.
+        val applied = JSONArray(held?.optJSONArray("applied")?.toString() ?: "[]")
+        held?.optJSONObject("change")?.let { applied.put(it) }
+        sendEdit(key, edit, applied, JSONArray(), undo)
+    }
+
+    private fun sendEdit(key: String, edit: JSONObject, applied: JSONArray, queue: JSONArray, undo: JSONObject?) {
         val id = requestId()
-        if (!send(JSONObject().put("op", "task").put("key", key).put("edit", edit), id)) return notice(key, "not connected")
-        changePending { it.put(key, JSONObject().put("change", edit).put("id", id).put("done", false).put("at", System.currentTimeMillis()).put("undo", undo ?: JSONObject.NULL)) }
+        if (!send(JSONObject().put("op", "task").put("key", key).put("edit", edit), id)) {
+            changePending { it.remove(key) }
+            return notice(key, "not connected")
+        }
+        changePending { it.put(key, JSONObject().put("applied", applied).put("change", edit).put("queue", queue).put("id", id).put("done", false).put("at", System.currentTimeMillis()).put("undo", undo ?: JSONObject.NULL)) }
         notice(key, "")
+    }
+
+    /** board.mjs enqueue: the same kind of change replaces the last queued one; replies all go. */
+    private fun enqueue(queue: JSONArray?, edit: JSONObject): JSONArray {
+        val q = JSONArray(queue?.toString() ?: "[]")
+        val last = if (q.length() > 0) q.optJSONObject(q.length() - 1) else null
+        if (last != null && last.optString("action") == edit.optString("action") && edit.optString("action") != "reply") q.put(q.length() - 1, edit) else q.put(edit)
+        return q
+    }
+
+    /** board.mjs nextQueued: the queue after CHANGE lands, without state changes to where the task already is. */
+    private fun nextQueued(change: JSONObject?, queue: JSONArray?): List<JSONObject> {
+        var state: String? = if (change?.optString("action") == "state") change.optString("state") else null
+        val rest = mutableListOf<JSONObject>()
+        for (i in 0 until (queue?.length() ?: 0)) {
+            val c = queue!!.optJSONObject(i) ?: continue
+            if (c.optString("action") == "state" && c.optString("state") == state && rest.isEmpty()) continue
+            rest.add(c)
+            if (c.optString("action") == "state") state = c.optString("state")
+        }
+        return rest
     }
 
     /** Once a second while edits are on their way: give up on one unanswered for 30 s, settle a save after 6 s, and
@@ -163,9 +200,13 @@ class Link(private val context: Context) {
     }
 
     private fun settlePending() {
-        if (agentsFetching) return
-        val done = editKeys().filter { pending.optJSONObject(it)?.optBoolean("done") == true }
-        if (done.isNotEmpty()) changePending { p -> done.forEach { p.remove(it) } }
+        if (agentsFetching || editKeys().isEmpty()) return
+        changePending { p ->
+            for (k in editKeys()) {
+                val e = pending.optJSONObject(k) ?: continue
+                if (e.optBoolean("done")) p.remove(k) else p.put(k, JSONObject(e.toString()).put("applied", JSONArray()))
+            }
+        }
     }
 
     /** A review or question the user opened is seen on every device at once; the daemon answers with the agents board. */
@@ -358,9 +399,17 @@ class Link(private val context: Context) {
                         "task" -> pendingById(reply.optString("requestId")).takeIf { it.isNotEmpty() }?.let { key ->
                             val held = pending.optJSONObject(key)!!
                             val now = reply.optString("key")
-                            changePending { p -> p.remove(key); p.put(now, JSONObject(held.toString()).put("done", true).put("at", System.currentTimeMillis())) }
-                            notice(now, "saved", held.optJSONObject("undo"))
                             reply.optString("from").takeIf { it.isNotEmpty() }?.let { taskMoved = it to now }
+                            val rest = nextQueued(held.optJSONObject("change"), held.optJSONArray("queue"))
+                            changePending { it.remove(key) }
+                            // What was tapped meanwhile goes next, against what this one wrote.
+                            if (rest.isNotEmpty()) {
+                                val applied = JSONArray(held.optJSONArray("applied")?.toString() ?: "[]").put(held.optJSONObject("change"))
+                                sendEdit(now, rest.first(), applied, JSONArray(rest.drop(1)), held.optJSONObject("undo"))
+                            } else {
+                                changePending { p -> p.put(now, JSONObject(held.toString()).put("queue", JSONArray()).put("done", true).put("at", System.currentTimeMillis())) }
+                                notice(now, "saved", held.optJSONObject("undo"))
+                            }
                         }
                         "agenda" -> {
                             agenda = reply.optJSONObject("agenda")

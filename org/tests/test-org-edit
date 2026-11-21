@@ -318,6 +318,14 @@ check "+2h is a repeater after a date" has "$(run date 'fri 9:00 +2h')" ' 09:00 
 check "missing zone data stops instead of using UTC" has "$(TZDIR=/nonexistent run date '+0d')" 'No zone data for America/Edmonton'
 
 cp "$tasks" "$HOME/org/asana.org"
+waiting="$HOME/org/waiting.org"
+printf '* TODO Waiting\n' >"$waiting"
+flock "$XDG_RUNTIME_DIR/org-dispatch.lock" sleep 2 &
+holder=$!
+sleep 0.3
+check "a held lock refuses at once without ORG_EDIT_WAIT" has "$(run todo "$waiting" Waiting PROG)" 'busy'
+check "ORG_EDIT_WAIT waits for the lock instead" has "$(ORG_EDIT_WAIT=10 run todo "$waiting" Waiting PROG)" '^\* PROG Waiting'
+wait "$holder"
 check "asana.org is refused" has "$(run todo "$HOME/org/asana.org" Plan DONE)" 'rebuilt by another program'
 check "asana.org takes the user's protected DONE" has "$(run todo "$HOME/org/asana.org" Plan DONE --protected)" '^\* DONE Plan'
 check "a protected DONE writes CLOSED as Org does" line "$HOME/org/asana.org" '^CLOSED: \['

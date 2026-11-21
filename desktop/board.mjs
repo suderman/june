@@ -246,6 +246,46 @@ export function quickDays(today) {
 	return picks;
 }
 
+/**
+ * A task's outbox entry, as shell.qml pendingEdits and the phone's Link.pending keep it:
+ * { applied: changes saved but not yet on the board, change: the one on its way, queue: those waiting behind it,
+ *   done: saved and nothing waits }. Everything in it is drawn as made.
+ */
+export function entryChanges(entry) {
+	if (!entry) return [];
+	return [].concat(entry.applied ?? [], entry.change ? [entry.change] : [], entry.queue ?? []);
+}
+
+/** A change queued behind the one on its way: the same kind of change replaces the last queued one, so taps settle
+ * on the last; replies all go. */
+export function enqueue(queue, change) {
+	const q = (queue ?? []).slice();
+	const last = q[q.length - 1];
+	if (last && last.action === change.action && change.action !== "reply") q[q.length - 1] = change;
+	else q.push(change);
+	return q;
+}
+
+/** What to send after CHANGE lands: the queue without state changes to where the task already is. */
+export function nextQueued(change, queue) {
+	let state = change?.action === "state" ? change.state : null;
+	const rest = [];
+	for (const c of queue ?? []) {
+		if (c.action === "state" && c.state === state && rest.length === 0) continue;
+		rest.push(c);
+		if (c.action === "state") state = c.state;
+	}
+	return rest;
+}
+
+/** A task with its whole outbox entry applied, marked pending while anything is on its way. */
+export function applyEntry(task, entry, user) {
+	if (!task || !entry) return task;
+	let t = task;
+	for (const c of entryChanges(entry)) t = pendingTask(t, c, user, !entry.done);
+	return t;
+}
+
 /** A task as it will be once the user's pending edit (board-edit.ts TaskEdit) lands, marked pending. */
 export function pendingTask(task, change, user, busy) {
 	if (!task || !change) return task;
@@ -284,12 +324,12 @@ export function taskPage(tasks, key, pending, user, today, now) {
 
 /** A board's tasks with the user's pending edits, { [key]: { change } }, shown as made. */
 function withPending(board, pending, user) {
-	const keys = pending ? Object.keys(pending).filter((k) => k !== "seen" && pending[k]?.change) : [];
+	const keys = pending ? Object.keys(pending).filter((k) => k !== "seen" && entryChanges(pending[k]).length > 0) : [];
 	if (!board || keys.length === 0) return board;
 	const tasks = Object.assign({}, board.tasks);
 	for (const key of keys) {
 		const found = findTask(tasks, key);
-		if (found) tasks[found.key] = pendingTask(found, pending[key].change, user);
+		if (found) tasks[found.key] = applyEntry(found, pending[key], user);
 	}
 	return Object.assign({}, board, { tasks });
 }
@@ -423,7 +463,7 @@ export function startsAt(task, today, now) {
 
 export function taskDetail(task, user, today, now, pending) {
 	if (!task) return null;
-	task = pendingTask(task, pending?.change, user, !pending?.done);
+	task = applyEntry(task, pending, user);
 	const sessions = task.sessions ?? [];
 	const agent = taskAgent(task);
 	const facts = [];

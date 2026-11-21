@@ -191,3 +191,18 @@ test("a task repeating every day has a row on each day, each with its own key", 
 	assert.equal(week.rows.length, 3);
 	assert.equal(new Set(week.rows.map((r) => r.key)).size, 3);
 });
+
+test("taps while an edit is on its way queue behind it, the same kind settling on the last", async () => {
+	const { enqueue, nextQueued, applyEntry } = await import("../desktop/board.mjs");
+	let q = enqueue([], { action: "state", state: "TODO" });
+	q = enqueue(q, { action: "state", state: "PROG" });
+	q = enqueue(q, { action: "reply", text: "a" });
+	q = enqueue(q, { action: "reply", text: "b" });
+	assert.deepEqual(q.map((c) => c.state ?? c.text), ["PROG", "a", "b"]);
+	assert.deepEqual(nextQueued({ action: "state", state: "PROG" }, [{ action: "state", state: "PROG" }]), [], "back where it already is: nothing to send");
+	assert.deepEqual(nextQueued({ action: "state", state: "PROG" }, [{ action: "state", state: "DONE" }]).map((c) => c.state), ["DONE"]);
+	const t = task("id:x", { state: "TODO", dialog: [] });
+	const shown = applyEntry(t, { applied: [{ action: "state", state: "PROG" }], change: { action: "title", title: "New" }, queue: [{ action: "state", state: "DONE" }] }, "Alex");
+	assert.deepEqual([shown.state, shown.title, shown.pending], ["DONE", "New", true]);
+	assert.equal(applyEntry(t, { change: { action: "state", state: "EVAL" }, done: true }).pending, false);
+});

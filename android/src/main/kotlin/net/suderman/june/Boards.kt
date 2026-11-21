@@ -30,8 +30,6 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -41,7 +39,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -140,7 +137,7 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
     var handoff by remember(key) { mutableStateOf<Handoff?>(null) }
     // Which date is being picked: schedule, deadline, handoff, or "".
     var picking by remember(key) { mutableStateOf("") }
-    // An edit on its way: the page shows it as made and takes no other until it lands or fails.
+    // An edit on its way: the page shows it as made; taps meanwhile queue behind it (Link.editTask).
     val busy = d?.optBoolean("busy") == true
     if (picking.isNotEmpty() && d != null) {
         val field = if (picking == "deadline") "deadline" else "scheduled"
@@ -158,7 +155,7 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
             onDismiss = { picking = "" },
         )
     }
-    CompositionLocalProvider(LocalBusy provides busy) {
+    run {
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("‹ $back", fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = palette.pageInk, modifier = Modifier.clickable(onClick = close).padding(vertical = 8.dp)) }
         if (d == null && link.task(key) == null) item { Text("That task is no longer on the boards.", fontFamily = Look.lettering, fontSize = 14.sp, color = palette.muted) }
@@ -250,7 +247,7 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
             if (!locked && state in listOf("", "TODO", "EVAL", "HOLD")) item {
                 var title by remember(key) { mutableStateOf("") }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(title, { title = it }, Modifier.weight(1f), singleLine = true, enabled = !busy, placeholder = { Text("new title", fontSize = 13.sp) })
+                    OutlinedTextField(title, { title = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("new title", fontSize = 13.sp) })
                     Choice("rename", false, palette) { if (title.isNotBlank()) { link.editTask(k, JSONObject().put("action", "title").put("title", title.trim())); title = "" } }
                 }
             }
@@ -272,7 +269,7 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
             if (editable) item {
                 var reply by remember(key) { mutableStateOf("") }
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(reply, { reply = it }, Modifier.fillMaxWidth(), minLines = 2, enabled = !busy, placeholder = { Text("Reply in Dialog", fontSize = 14.sp) })
+                    OutlinedTextField(reply, { reply = it }, Modifier.fillMaxWidth(), minLines = 2, placeholder = { Text("Reply in Dialog", fontSize = 14.sp) })
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Choice("Reply", false, palette) { if (reply.isNotBlank()) { link.editTask(k, JSONObject().put("action", "reply").put("text", reply)); reply = "" } }
                         if (assignable) Choice("Reply and resume", true, palette) { if (reply.isNotBlank()) { link.editTask(k, JSONObject().put("action", "reply").put("text", reply).put("resume", true)); reply = "" } }
@@ -287,9 +284,6 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, palette
 
 /** A handoff the user has yet to confirm: who, where, and when it starts ("" for now or its schedule). */
 private data class Handoff(val agent: String, val host: String, val start: String)
-
-/** While an edit is on its way, a task page's buttons take no other. */
-private val LocalBusy = compositionLocalOf { false }
 
 /** A date, then a time (or none), for a task's SCHEDULED, DEADLINE or a handoff's start: "YYYY-MM-DD" or
  * "YYYY-MM-DD HH:MM", which org-edit reads. START is board.mjs pickerStart's { date, time }. */
@@ -500,12 +494,11 @@ private fun Heading(title: String, summary: String, palette: Look.Palette, trail
 /** A button on a task's page, filled when it is the current choice; at least 44 dp tall to tap. */
 @Composable
 private fun Choice(text: String, on: Boolean, palette: Look.Palette, onClick: () -> Unit) {
-    val busy = LocalBusy.current
     Text(
         text, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 14.sp,
         color = if (on) palette.page else palette.pageInk,
-        modifier = Modifier.alpha(if (busy) 0.45f else 1f).background(if (on) palette.pageInk else Color.Transparent, RoundedCornerShape(50))
-            .border(2.dp, palette.pageInk, RoundedCornerShape(50)).clickable(enabled = !busy, onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp),
+        modifier = Modifier.background(if (on) palette.pageInk else Color.Transparent, RoundedCornerShape(50))
+            .border(2.dp, palette.pageInk, RoundedCornerShape(50)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp),
     )
 }
 

@@ -324,7 +324,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const apkViews = { count: 0 };
 		const immichServer = immichFrom({ ...(options.env ?? process.env), ...options.secrets });
 		const immich = immichServer && { server: immichServer, watch: watchImmich(immichServer, { file: `${paths.state}/immich.json`, warn: (error) => log.warn("immich_status_failed", { error: error.message }) }) };
-		const scope: Scope = { wake: config.rhythm.wake, apkViews, harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, boards, edits, ...(expressions ? { expressions } : {}), ...(immich ? { immich } : {}) };
+		const scope: Scope = { wake: config.rhythm.wake, apkViews, harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, boards, edits, edited: new Map(), ...(expressions ? { expressions } : {}), ...(immich ? { immich } : {}) };
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
@@ -393,7 +393,10 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 	});
 }
 
-type Scope = CommandScope & { wake: string; immich?: { server: Immich; watch: ImmichWatch }; apkViews: { count: number }; timeline: Timeline; hidden: Hidden; log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; boards: BoardSource; edits: Pick<TaskEdits, "apply">; expressions?: ReturnType<typeof startExpressions> };
+type Scope = CommandScope & { wake: string; immich?: { server: Immich; watch: ImmichWatch }; apkViews: { count: number }; timeline: Timeline; hidden: Hidden; log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; boards: BoardSource; edits: Pick<TaskEdits, "apply">;
+	/** Tasks edited from a board since the agenda was last read, each with the refresh that will read it again. */
+	edited: Map<string, Promise<void>>;
+	expressions?: ReturnType<typeof startExpressions> };
 /** The sky a view sends with its state, and how it learns of a change. */
 type SkySource = Pick<Situation, "sky" | "onSky">;
 /** The boards' revisions a view sends with its state, and their contents for the requests. */
@@ -550,13 +553,20 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 			}
 			case "task": {
 				if (typeof request.key !== "string" || typeof request.edit?.action !== "string") throw new Error("task needs a key and an edit");
+				// The next edit of a task waits for the agenda to be read again, so it is checked against what the last one wrote.
+				await scope.edited.get(request.key);
 				const { value } = await boards().agenda();
 				const task = value.tasks[request.key];
 				if (task === undefined) throw new Error("That task is no longer on the agenda; the board will catch up");
 				scope.log.info("board_edit", { key: request.key, action: request.edit.action, device: device ?? "socket" });
 				const { text, key } = await scope.edits.apply(task, request.edit, `board:${request.requestId}`);
-				await scope.boards.refresh();
-				return send({ type: "task", requestId: request.requestId, key, ...(key !== request.key ? { from: request.key } : {}), text: text.trim() });
+				// Answered once org-edit has saved; the boards follow a few seconds later, and clients show the edit until then.
+				send({ type: "task", requestId: request.requestId, key, ...(key !== request.key ? { from: request.key } : {}), text: text.trim() });
+				const refreshed = scope.boards.refresh();
+				const keys = [...new Set([request.key, key])];
+				for (const k of keys) scope.edited.set(k, refreshed);
+				void refreshed.finally(() => { for (const k of keys) if (scope.edited.get(k) === refreshed) scope.edited.delete(k); });
+				return;
 			}
 			case "hide": {
 				if (!local) throw new Error("Hidden entries are managed over the Unix socket");

@@ -146,27 +146,41 @@ ShellRoot {
     fetchBoards(true, true);
   }
   // The user's edits from a task's page (src/board-edit.ts), and what the last one said.
-  // An edit shows as made the moment it is sent (board.mjs pendingTask), and its task takes no other until the daemon
-  // answers. A refusal, a dropped connection or no answer puts back what the board says; once saved, the overlay goes
-  // when the boards that carry the edit arrive.
-  // pendingEdits: { [key]: { change, id, done, at, undo } }, and seen: the reviews opened since the last agents board.
+  // Each task has an outbox (board.mjs entryChanges): an edit shows as made the moment it is tapped; one goes to the
+  // daemon at a time, and taps meanwhile queue behind it, the same kind settling on the last. A refusal drops it and
+  // all queued behind it, a dropped connection or no answer does too, and the board's state shows again; once saved,
+  // the overlay goes when the boards that carry the edit arrive.
+  // pendingEdits: { [key]: { applied, change, queue, id, done, at, undo } }, and seen: the reviews opened since the
+  // last agents board.
   property var taskNotice: ({ key: "", text: "", pending: "", from: "", undo: null })
   property var pendingEdits: ({})
   property bool agentsFetching: false
   function setPending(next) { pendingEdits = next; }
   function editTask(key, change) {
     const held = pendingEdits[key];
-    if (held && !held.done) return;
-    const task = Board.findTask(Object.assign({}, agendaBoard?.tasks ?? {}, agentsBoard?.tasks ?? {}), key);
+    if (held && !held.done) {
+      const next = Object.assign({}, pendingEdits);
+      next[key] = Object.assign({}, held, { queue: Board.enqueue(held.queue ?? [], change) });
+      setPending(next);
+      return;
+    }
+    // As shown: a saved edit the board has yet to carry counts.
+    const task = Board.applyEntry(Board.findTask(Object.assign({}, agendaBoard?.tasks ?? {}, agentsBoard?.tasks ?? {}), key), held, "");
+    // A state change can be put back, to the state it showed before.
+    const undo = change.action === "state" && (task?.state ?? "") !== "" ? { action: "state", state: task.state } : null;
+    // A saved edit the board has yet to show stays drawn under the new one.
+    sendEdit(key, change, held ? (held.applied ?? []).concat([held.change]) : [], [], undo);
+  }
+  function sendEdit(key, change, applied, queue, undo) {
     const id = rid();
+    const next = Object.assign({}, pendingEdits);
     if (!send({ op: "task", requestId: id, key: key, edit: change })) {
+      delete next[key];
+      setPending(next);
       taskNotice = { key: key, text: "not connected", pending: "", from: "", undo: null };
       return;
     }
-    // A state change can be put back; the board's state is what it goes back to.
-    const undo = change.action === "state" && (task?.state ?? "") !== "" ? { action: "state", state: task.state } : null;
-    const next = Object.assign({}, pendingEdits);
-    next[key] = { change: change, id: id, done: false, at: Date.now(), undo: undo };
+    next[key] = { applied: applied, change: change, queue: queue, id: id, done: false, at: Date.now(), undo: undo };
     setPending(next);
     taskNotice = { key: key, text: "", pending: id, from: "", undo: null };
   }
@@ -183,7 +197,13 @@ ShellRoot {
   // Saved edits stop overlaying once a board newer than the save has arrived.
   function settlePending() {
     if (agentsFetching) return;
-    dropPending(Object.keys(pendingEdits).filter(k => k !== "seen" && pendingEdits[k].done));
+    const next = Object.assign({}, pendingEdits);
+    for (const k of Object.keys(pendingEdits)) {
+      if (k === "seen") continue;
+      if (pendingEdits[k].done) delete next[k];
+      else if ((pendingEdits[k].applied ?? []).length > 0) next[k] = Object.assign({}, pendingEdits[k], { applied: [] });
+    }
+    setPending(next);
   }
   Timer {
     interval: 1000; repeat: true; running: Object.keys(root.pendingEdits).length > 0
@@ -645,8 +665,16 @@ ShellRoot {
       const held = pendingEdits[key];
       const next = Object.assign({}, pendingEdits);
       delete next[key];
-      next[reply.key] = Object.assign({}, held, { done: true, at: Date.now() });
+      const rest = Board.nextQueued(held.change, held.queue ?? []);
       setPending(next);
+      // What was tapped meanwhile goes next, against what this one wrote.
+      if (rest.length > 0) {
+        sendEdit(reply.key, rest[0], (held.applied ?? []).concat([held.change]), rest.slice(1), held.undo);
+        if (reply.from) taskNotice = Object.assign({}, taskNotice, { from: reply.from });
+        return;
+      }
+      next[reply.key] = Object.assign({}, held, { queue: [], done: true, at: Date.now() });
+      setPending(Object.assign({}, next));
       taskNotice = { key: reply.key, from: reply.from ?? "", text: "saved", pending: "", undo: held.undo };
       noticeFade.restart();
       return;
