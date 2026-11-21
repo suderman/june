@@ -63,6 +63,7 @@ FloatingWindow {
       onDismissed: (key) => win.shell.dismiss(key)
       quiet: win.shell.quiet
       browser: win.shell
+      showDays: win.layout.columns || win.tab === "strip"
     }
 
     // This device's toggles: state for now, gone when the desktop client restarts.
@@ -135,7 +136,7 @@ FloatingWindow {
       }
     }
 
-    // Narrow, the boards are tabs beside the strip.
+    // Narrow, the boards are tabs beside the strip, in the order they lie when wide: agents, strip, projects.
     Row {
       id: tabs
       visible: !win.layout.columns
@@ -145,12 +146,12 @@ FloatingWindow {
       anchors.topMargin: visible ? 10 : 0
       height: visible ? 30 : 0
       spacing: 8
-      Pill { text: "strip"; on: win.tab === "strip"; onClicked: win.shell.windowTab = "strip" }
       Pill {
         text: win.shell.agentsView.needs.length > 0 ? "agents · " + win.shell.agentsView.needs.length : "agents"
         on: win.tab === "agents"
         onClicked: win.shell.windowTab = "agents"
       }
+      Pill { text: "strip"; on: win.tab === "strip"; onClicked: win.shell.windowTab = "strip" }
       Pill { text: "projects"; on: win.tab === "projects"; onClicked: win.shell.windowTab = "projects" }
     }
 

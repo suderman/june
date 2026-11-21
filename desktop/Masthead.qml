@@ -20,6 +20,8 @@ Row {
   property bool quiet: false
   // The shell, for browsing June's history from the date (Browse.qml); null leaves the date out.
   property var browser: null
+  // The day picker is the strip's: off while a narrow window shows a board instead.
+  property bool showDays: true
 
   height: 30
   spacing: 12
@@ -30,7 +32,7 @@ Row {
   // date opens the calendar and search.
   Row {
     id: day
-    visible: masthead.browser !== null && masthead.linked
+    visible: masthead.browser !== null && masthead.showDays && masthead.linked
     anchors.verticalCenter: parent.verticalCenter
     spacing: 8
     readonly property var b: masthead.browser
