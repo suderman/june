@@ -1566,6 +1566,9 @@ kept in DEV_REVIEW."
          (let ((id (org-entry-get nil "ID")) (parent (org-entry-get nil "REVIEW_PARENT")))
            (when (and id (equal (org-get-todo-state) "EVAL")
                       (not (org-entry-get nil "ASKED"))
+                      ;; Each host runs only its own loops: Org syncs everywhere,
+                      ;; but the repository, snapshot and worker are on HOST.
+                      (equal (org-entry-get nil "HOST") org-dispatch-host)
                       ;; A run still holding its slot is not settled yet.
                       (not (file-exists-p (org-dispatch--state-file id))))
              (if parent

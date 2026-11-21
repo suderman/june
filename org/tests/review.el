@@ -635,4 +635,21 @@
     (should (equal (plist-get (test-review-loop) :phase) "fixes"))
     (test-review-at test-review-id (lambda () (should (org-dispatch--in-loop-p))))))
 
+(ert-deftest standing-review-runs-only-on-its-own-host ()
+  (test-with-review
+    (test-review-standing)
+    ;; Another host's dispatcher sees the same synced file but neither starts nor advances it.
+    (let ((org-dispatch-host "cog")) (org-dispatch--agent-reviews (list test-review-file)))
+    (should-not (test-review-loop))
+    (org-dispatch--agent-reviews (list test-review-file))
+    (let ((review (plist-get (test-review-loop) :review)))
+      (test-review-report "pass")
+      (test-review-settle review)
+      (let ((org-dispatch-host "cog")) (org-dispatch--agent-reviews (list test-review-file)))
+      (should (equal (test-review-state review) "EVAL"))
+      (should-not (test-review-asked))
+      (should-not (string-search "Agent review stopped" (test-review-text)))
+      (org-dispatch--agent-reviews (list test-review-file))
+      (should (equal (test-review-state) "DONE")))))
+
 (ert-run-tests-batch-and-exit)
