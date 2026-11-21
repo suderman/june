@@ -687,7 +687,7 @@ ShellRoot {
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "june-desktop"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
-    onVisibleChanged: if (visible) composer.focusInput()
+    onVisibleChanged: if (visible) { composer.focusInput(); if (boardsPaper.fits) root.wantBoards(); }
 
     // Esc closes a preview first, then hides from anywhere in the desktop client, even after a click put the focus in a balloon
     // to select its words.
@@ -836,6 +836,47 @@ ShellRoot {
         unattach: index => root.unattach(index)
         paste: fallback => root.pasteInto(fallback)
         pick: () => filePicker.open()
+      }
+    }
+
+    // A wide screen has room left of the strip for the agents and projects boards, on paper that unfolds with it (see
+    // "Agents and projects" in docs/interfaces.org). What a board opens takes the desktop client away, as a link does.
+    Rectangle {
+      id: boardsPaper
+      readonly property bool fits: window.width - page.width >= 2 * Board.SIDE + 3 * Board.GAP + 40
+      visible: fits && page.stripPhase > 0
+      anchors.right: page.left
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      width: 2 * Board.SIDE + 3 * Board.GAP
+      color: Theme.paper
+      opacity: page.stripPhase
+      transform: Translate { y: (1 - page.stripPhase) * 56 }
+      MouseArea { anchors.fill: parent } // clicks on the boards stay on them
+      onFitsChanged: if (fits && root.shown) root.wantBoards()
+      Rectangle { anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1.5; color: Theme.pageInk; opacity: 0.25 }
+      Row {
+        anchors.fill: parent
+        anchors.margins: Board.GAP
+        anchors.topMargin: 16
+        spacing: Board.GAP
+        AgentsBoard {
+          width: Board.SIDE
+          height: parent.height
+          view: root.agentsView
+          loaded: root.agentsBoard !== null
+          onOpen: link => { if (root.openLink(link)) root.hide(); }
+        }
+        ProjectsBoard {
+          width: Board.SIDE
+          height: parent.height
+          view: root.agendaView
+          agenda: root.agendaBoard
+          loaded: root.agendaBoard !== null
+          host: root.host
+          generatedAt: root.agendaBoard?.generatedAt ?? 0
+          onOpen: link => { if (root.openLink(link)) root.hide(); }
+        }
       }
     }
 
