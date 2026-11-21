@@ -226,7 +226,7 @@ CLOSED: [2026-01-01 Thu 10:00]
 	assert.deepEqual(titles(a.overdue), ["Overdue thing"]);
 	assert.deepEqual(titles(a.days[0]!.entries).sort(), ["Today thing", "Weekly planning"]);
 	assert.equal(a.days[0]!.entries.find((e) => a.tasks[e.task]!.title === "Today thing")!.time, "09:30");
-	assert.deepEqual(a.days.map((d) => titles(d.entries).includes("Due soon")), [false, false, false, true, false, false, false]);
+	assert.deepEqual(a.days.map((d) => titles(d.entries).includes("Due soon")), [false, false, false, true, false, false, false, false, false, false, false, false, false, false]);
 	assert.deepEqual(titles(a.days[1]!.entries), ["Queued work"]);
 	const byTitle = Object.fromEntries(Object.values(a.tasks).map((t) => [t.title, t]));
 	assert.deepEqual(Object.keys(byTitle).sort(), ["Due soon", "Finished recently", "Overdue thing", "Queued work", "Review of the waiting task", "Today thing", "Waiting for Alex", "Weekly planning"]);

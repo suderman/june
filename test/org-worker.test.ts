@@ -35,7 +35,7 @@ test("the long-running Emacs reads the agenda as the one-off export does, and se
 	const f = await fixture();
 	t.after(f.cleanup);
 	const once = JSON.parse((await f.run(exportArgv(f.list), 60_000)).trimEnd().split("\n").pop()!);
-	const warm = JSON.parse((await f.worker.agenda(f.list)).trimEnd().split("\n").pop()!);
+	const warm = JSON.parse((await f.worker.agenda(f.list, 14)).trimEnd().split("\n").pop()!);
 	assert.deepEqual(warm.days, once.days);
 	assert.deepEqual(Object.keys(warm.tasks).sort(), Object.keys(once.tasks).sort());
 	// Another writer changes the file; the next read has it, and Emacs never stops to ask.
@@ -72,7 +72,7 @@ test("a dead worker is replaced on the next request, and board edits fall back t
 	t.after(f.cleanup);
 	assert.match(await f.worker.edit(["date", "fri"], 5), /Fri>/);
 	// Kill it under a request: that one fails as down, the next starts a new Emacs.
-	const slow = f.worker.agenda(f.list);
+	const slow = f.worker.agenda(f.list, 14);
 	process.kill(f.worker.pid!);
 	await slow.then(() => {}, (e: Error) => assert.ok(e instanceof OrgWorkerDown, e.message));
 	assert.match(await f.worker.edit(["date", "fri"], 5), /Fri>/);

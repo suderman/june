@@ -110,12 +110,15 @@ export type Agents = {
 /** The JSON june-agenda.el prints, before it is shaped for clients. */
 type Raw = { today: string; days: { date: string; entries: AgendaEntry[] }[]; tasks: Record<string, any> };
 
+/** Days the agenda covers from today: the boards show the week, the phone's widget and reminders all of them. */
+export const AGENDA_DAYS = 14;
+
 /** The argv that runs the export: this checkout's Emacs Lisp, Calgary zone data, and `env` for tests. */
 export function exportArgv(listFile: string, env: Record<string, string> = {}): string[] {
 	const zones = process.env.TZDIR ?? (existsSync("/usr/share/zoneinfo") ? undefined : "/etc/zoneinfo");
 	const vars = { ...(zones ? { TZDIR: zones } : {}), ...env };
 	return ["env", ...Object.entries(vars).map(([k, v]) => `${k}=${v}`), "emacs", "-Q", "--batch",
-		"-l", join(REPO, "org/dispatch/org-dispatch.el"), "-l", join(REPO, "org/agenda/june-agenda.el"), "-f", "june-agenda-export", listFile];
+		"-l", join(REPO, "org/dispatch/org-dispatch.el"), "-l", join(REPO, "org/agenda/june-agenda.el"), "-f", "june-agenda-export", listFile, String(AGENDA_DAYS)];
 }
 
 /** Run the export and shape it. The JSON is the last line; Org may log before it. */
@@ -124,7 +127,7 @@ export async function loadAgenda(listFile: string, root: string, run: Run = runP
 	let out: string | undefined;
 	if (org) {
 		try {
-			out = await org.agenda(listFile);
+			out = await org.agenda(listFile, AGENDA_DAYS);
 		} catch (error) {
 			if (!(error instanceof OrgWorkerDown)) throw error;
 		}

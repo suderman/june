@@ -109,8 +109,9 @@ export function agendaView(agenda, pending, user) {
 		sections.push({ id: "overdue", title: `OVERDUE · ${agenda.overdue.length}`, alert: true, rows: agenda.overdue.map((e) => row(e, agenda, { overdue: true })) });
 	const first = agenda.days[0];
 	sections.push({ id: "today", title: `TODAY · ${dayHeading(agenda.today)}`, alert: false, rows: (first?.entries ?? []).map((e) => row(e, agenda, {})) });
+	// The rest of the week; the phone's widget shows the agenda's later days too.
 	const week = [];
-	for (let i = 1; i < agenda.days.length; i++) {
+	for (let i = 1; i < Math.min(agenda.days.length, 7); i++) {
 		const day = agenda.days[i];
 		const label = calendar(day.date).weekday;
 		day.entries.forEach((e, j) => week.push(row(e, agenda, { day: j === 0 ? label : "" })));

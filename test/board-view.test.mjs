@@ -206,3 +206,11 @@ test("taps while an edit is on its way queue behind it, the same kind settling o
 	assert.deepEqual([shown.state, shown.title, shown.pending], ["DONE", "New", true]);
 	assert.equal(applyEntry(t, { change: { action: "state", state: "EVAL" }, done: true }).pending, false);
 });
+
+test("the boards show the week of an agenda that carries a fortnight, for the phone's widget", () => {
+	const days = [];
+	for (let i = 0; i < 14; i++) days.push({ date: `2026-11-${String(21 + i).padStart(2, "0")}`.replace("2026-11-31", "2026-12-01").replace("2026-11-32", "2026-12-02").replace("2026-11-33", "2026-12-03").replace("2026-11-34", "2026-12-04"), entries: [{ task: "id:e", type: "timestamp", date: "x" }] });
+	const agenda = { generatedAt: 0, today: "2026-11-21", overdue: [], days, tasks: { "id:e": task("id:e", { title: "Every day" }) }, counts: {}, projects: [] };
+	const week = agendaView(agenda).sections.find((s) => s.id === "week");
+	assert.equal(week.rows.length, 6, "tomorrow through six days on");
+});

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="agenda_paper">#1C1B21</color>
+    <color name="agenda_ink">#ECE6DA</color>
+    <color name="agenda_muted">#A39FAB</color>
+    <color name="agenda_accent">#FF7A66</color>
+    <color name="agenda_rule">#34323B</color>
+</resources>

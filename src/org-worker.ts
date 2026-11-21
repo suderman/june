@@ -73,9 +73,9 @@ export class OrgWorker {
 		});
 	}
 
-	/** The agenda export's JSON for the agenda files listed in LIST. */
-	agenda(list: string): Promise<string> {
-		return this.#serial(() => this.#request("agenda", [list]));
+	/** The agenda export's JSON for the agenda files listed in LIST, for DAYS days from today. */
+	agenda(list: string, days: number): Promise<string> {
+		return this.#serial(() => this.#request("agenda", [list, String(days)]));
 	}
 
 	/** The running Emacs's pid, if one is up. */

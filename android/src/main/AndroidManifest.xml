@@ -7,6 +7,9 @@
          app; it cannot be granted any other way. -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Reminders.kt: exact alarms at timed SCHEDULED and DEADLINE entries, as Bloom set them, and their notices. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Links.kt: a herdr: link opens a Termux session attached to the agent's terminal. Granted over ADB. -->
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 
@@ -47,6 +50,14 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="june" android:host="conversation" />
             </intent-filter>
+            <!-- The agenda widget and reminders: june://task?key=KEY opens a task's page, june://projects the board.
+                 Not BROWSABLE, so a web page cannot open them. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="june" android:host="task" />
+                <data android:scheme="june" android:host="projects" />
+            </intent-filter>
             <!-- A moment in June's history from another app, such as a link in Org: june://at/ID opens its day there. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -75,6 +86,23 @@
 
         <!-- After an app update or a boot, June checks her assistant settings and hands are still on (Keep.kt). -->
         <receiver android:name=".KeepReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- June's agenda on the home screen, in place of Bloom's (AgendaWidget.kt), kept fresh by AgendaJob.kt, with
+             reminders from it (Reminders.kt), all set again after a boot or an update (AgendaBootReceiver). -->
+        <receiver android:name=".AgendaWidget" android:exported="true" android:label="June agenda">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/agenda_widget" />
+        </receiver>
+        <service android:name=".AgendaJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
+        <receiver android:name=".ReminderReceiver" android:exported="false" />
+        <receiver android:name=".AgendaBootReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

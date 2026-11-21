@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="hands_description">Lets June read the screen and act on the phone when you ask her: tap, type, scroll, open apps, and use the power menu, lock, notifications, and quick settings. A bar across the top shows while she acts; tap it to stop her until you next open June.</string>
+    <string name="agenda_widget_description">Your Org agenda: overdue, today and the next two weeks, from June.</string>
 </resources>

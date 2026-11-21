@@ -99,6 +99,14 @@ class Link(private val context: Context) {
     var taskUndo: JSONObject? by mutableStateOf(null)
         private set
     private var noticeAt = 0L
+    /** A board and task a link asked for (june://task?key=KEY, june://projects): the tab, and the task's key or "". */
+    var requested: Pair<String, String>? by mutableStateOf(null)
+
+    fun openTask(key: String) {
+        requested = "projects" to key
+        wantBoards()
+    }
+
     /** A rename that moved a task without an ID to a new key: (old key, new key), so its page follows. */
     var taskMoved: Pair<String, String> by mutableStateOf("" to "")
         private set
@@ -416,6 +424,8 @@ class Link(private val context: Context) {
                         "agenda" -> {
                             agenda = reply.optJSONObject("agenda")
                             agendaRevision = reply.optString("revision")
+                            // The widget and reminders draw from the phone's copy while June is closed.
+                            agenda?.let { AgendaStore.save(context, it, agendaRevision) }
                             settlePending()
                         }
                         "agents" -> {

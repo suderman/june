@@ -229,6 +229,8 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     // The full screen's tabs: the strip, or the agents or projects board (Boards.kt). The assistant sheet keeps the strip.
     // Kept across Android remaking the screen, as the boards keep their place.
     var tab by rememberSaveable { mutableStateOf("strip") }
+    // A link asked for a board (the agenda widget, a reminder): show it; the board opens the task.
+    LaunchedEffect(link.requested) { link.requested?.let { tab = it.first } }
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides links) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
         Column(Modifier.fillMaxWidth().then(header ?: Modifier)) {

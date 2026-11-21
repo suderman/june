@@ -1,6 +1,7 @@
 package net.suderman.june
 
 import android.app.KeyguardManager
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -44,6 +45,12 @@ class ConversationActivity : ComponentActivity() {
         link = Link(this)
         // Opened for a moment in June's history (june://at/ID): its day shows once the link is up.
         intent?.dataString?.let(::momentOf)?.let(link::openMoment)
+        openBoard(intent)
+        // The agenda widget and reminders (AgendaWidget.kt, Reminders.kt) work from here on, and remind with notices.
+        AgendaJob.schedule(this)
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 7)
+        }
         setContent {
             val palette = pagePalette()
             // Dark status bar icons on a light page, light ones on a dark page.
@@ -120,6 +127,23 @@ class ConversationActivity : ComponentActivity() {
     // Checked every time the screen comes to the front, not only when it is made: Android brings back an existing one
     // over the lock screen, and one made while the phone was unlocked would otherwise show the conversation there.
     // isDeviceLocked, not isKeyguardLocked: the phone wants the user's credentials, whatever shows on screen.
+    // The widget or a reminder opened June over herself: june://task?key=KEY or june://projects.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.dataString?.let(::momentOf)?.let(link::openMoment)
+        openBoard(intent)
+    }
+
+    private fun openBoard(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme != "june") return
+        when (data.host) {
+            "task" -> data.getQueryParameter("key")?.takeIf { it.isNotEmpty() }?.let(link::openTask)
+            "projects" -> { link.requested = "projects" to ""; link.wantBoards() }
+        }
+    }
+
     override fun onStart() {
         super.onStart()
         Keep.restore(this)

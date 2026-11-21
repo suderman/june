@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The agenda widget's colours, June's page as desktop/Theme.qml draws it; values-night holds the dark page. -->
+<resources>
+    <color name="agenda_paper">#F6F1E7</color>
+    <color name="agenda_ink">#1B1A1F</color>
+    <color name="agenda_muted">#6D6A73</color>
+    <color name="agenda_accent">#D8432F</color>
+    <color name="agenda_rule">#D9D2C3</color>
+</resources>

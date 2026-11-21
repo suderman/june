@@ -422,6 +422,13 @@ fun ProjectsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modif
     val open = LocalUriHandler.current
     var page by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(link.taskMoved) { if (link.taskMoved.first == page && page.isNotEmpty()) page = link.taskMoved.second }
+    // The agenda widget or a reminder asked for this task's page, or for the agenda.
+    LaunchedEffect(link.requested) {
+        link.requested?.takeIf { it.first == "projects" }?.let { (_, key) ->
+            if (key.isNotEmpty()) page = key else { page = ""; mode = "agenda"; drill = "" }
+            link.requested = null
+        }
+    }
     if (page.isNotEmpty() && colours != null) { TaskPage(link, decisions, colours, palette, page, if (mode == "state") listTitle(drill).lowercase() else mode, { page = "" }, modifier); return }
     val show: (JSONObject) -> Unit = { e -> val task = e.optString("task"); if (task.isNotEmpty() && link.task(task) != null) page = task else e.optString("link").takeIf { it.isNotEmpty() && it != "null" }?.let { open.openUri(it) } }
     val v = view
