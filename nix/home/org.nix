@@ -89,7 +89,8 @@ in {
         Type = "oneshot";
         Nice = 10;
         IOSchedulingClass = "idle";
-        Environment = ["PATH=${lib.makeBinPath (with pkgs; [coreutils git ripgrep])}"];
+        # The package's june, built with these flags, never a checkout that may lag behind them.
+        Environment = ["PATH=${lib.makeBinPath (with pkgs; [coreutils git ripgrep])}" "JUNE_SOURCE=none"];
         ExecStart = lib.concatStringsSep " " ([(lib.getExe cfg.package) "org-work" "--clean" "--after-days" (toString cfg.orgWork.afterDays)]
           ++ map (path: "--keep ${lib.escapeShellArg path}") cfg.orgWork.keep
           ++ lib.optional (cfg.orgWork.record != null) "--record ${lib.escapeShellArg cfg.orgWork.record}");
