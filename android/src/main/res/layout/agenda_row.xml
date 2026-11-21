@@ -9,6 +9,18 @@
     android:paddingTop="4dp"
     android:paddingBottom="4dp">
 
+    <!-- ○ marks a task DONE; an event has none. -->
+    <TextView
+        android:id="@+id/agenda_done"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_marginEnd="4dp"
+        android:contentDescription="Mark done"
+        android:gravity="center"
+        android:text="○"
+        android:textColor="@color/agenda_muted"
+        android:textSize="18sp" />
+
     <TextView
         android:id="@+id/agenda_time"
         android:layout_width="46dp"

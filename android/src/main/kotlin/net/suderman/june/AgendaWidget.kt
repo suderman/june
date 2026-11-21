@@ -53,6 +53,24 @@ class AgendaWidget : AppWidgetProvider() {
             for (id in ids) manager.updateAppWidget(id, views)
         }
 
+        private fun marks(context: Context) = context.getSharedPreferences("widget_done", Context.MODE_PRIVATE)
+
+        /** Tasks ticked on the widget in the last two minutes, while their DONE is on its way. */
+        private fun ticked(context: Context): Set<String> {
+            val cutoff = System.currentTimeMillis() - 120_000
+            return marks(context).all.filter { (it.value as? Long ?: 0L) > cutoff }.keys
+        }
+
+        fun markDone(context: Context, key: String) {
+            marks(context).edit().putLong(key, System.currentTimeMillis()).apply()
+            updateAll(context)
+        }
+
+        fun unmarkDone(context: Context, key: String) {
+            marks(context).edit().remove(key).apply()
+            updateAll(context)
+        }
+
         /** The page a widget row or a reminder opens: june://task?key=KEY, handled by ConversationActivity. */
         fun taskUri(key: String): Uri = Uri.Builder().scheme("june").authority("task").appendQueryParameter("key", key).build()
 
@@ -62,8 +80,11 @@ class AgendaWidget : AppWidgetProvider() {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             views.setOnClickPendingIntent(R.id.agenda_header, PendingIntent.getActivity(context, 1, Intent(open).setData(Uri.parse("june://projects")), PendingIntent.FLAG_IMMUTABLE))
             views.setOnClickPendingIntent(R.id.agenda_refresh, PendingIntent.getBroadcast(context, 2, Intent(context, AgendaWidget::class.java).setAction(REFRESH), PendingIntent.FLAG_IMMUTABLE))
-            // Each row fills in its own task's link.
-            views.setPendingIntentTemplate(R.id.agenda_list, PendingIntent.getActivity(context, 3, open, PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            views.setOnClickPendingIntent(R.id.agenda_add, PendingIntent.getActivity(context, 4, Intent(context, QuickAddActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE))
+            // Each row fills in its own task's link, and its ○ the DONE; WidgetTapActivity takes both.
+            views.setPendingIntentTemplate(R.id.agenda_list, PendingIntent.getActivity(context, 3,
+                Intent(context, WidgetTapActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            val ticked = ticked(context)
 
             val stored = AgendaStore.load(context)
             if (stored == null) {
@@ -107,7 +128,16 @@ class AgendaWidget : AppWidgetProvider() {
                 val meta = listOf(task?.optString("state") ?: "", label(entry), task?.optString("project") ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
                 v.setTextViewText(R.id.agenda_meta, meta)
                 v.setColorStateList(R.id.agenda_meta, "setTextColor", if (overdueRow) R.color.agenda_accent else R.color.agenda_muted)
-                if (key.isNotEmpty()) v.setOnClickFillInIntent(R.id.agenda_row, Intent().setData(taskUri(key)))
+                if (key.isNotEmpty()) v.setOnClickFillInIntent(R.id.agenda_row, Intent().setData(taskUri(key)).putExtra("action", "open"))
+                // A task's ○; ticked at once when tapped, until the daemon's agenda has it DONE or refuses.
+                val state = task?.optString("state") ?: ""
+                if (state in listOf("TODO", "PROG", "EVAL", "HOLD")) {
+                    val done = key in ticked
+                    v.setViewVisibility(R.id.agenda_done, View.VISIBLE)
+                    v.setTextViewText(R.id.agenda_done, if (done) "✓" else "○")
+                    if (done) v.setColorStateList(R.id.agenda_title, "setTextColor", R.color.agenda_muted)
+                    else v.setOnClickFillInIntent(R.id.agenda_done, Intent().setData(taskUri(key)).putExtra("action", "done"))
+                } else v.setViewVisibility(R.id.agenda_done, View.INVISIBLE)
                 items.addItem(n++, v)
             }
             if (overdue.isNotEmpty()) {

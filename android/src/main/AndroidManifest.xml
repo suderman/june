@@ -106,6 +106,15 @@
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/agenda_widget" />
         </receiver>
         <service android:name=".AgendaJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
+        <!-- The widget's taps (WidgetActions.kt): an invisible screen that opens a task or sends its DONE, the job that
+             sends it, and the small box behind its + that hands June a TODO to add. -->
+        <activity android:name=".WidgetTapActivity" android:exported="false"
+            android:theme="@android:style/Theme.NoDisplay" android:excludeFromRecents="true" android:noHistory="true"
+            android:taskAffinity="" />
+        <service android:name=".TaskEditJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
+        <activity android:name=".QuickAddActivity" android:exported="false" android:label="Add a TODO"
+            android:theme="@android:style/Theme.DeviceDefault.Dialog.NoActionBar" android:excludeFromRecents="true"
+            android:taskAffinity="" android:windowSoftInputMode="stateVisible" />
         <receiver android:name=".ReminderReceiver" android:exported="false" />
         <!-- ntfy's UnifiedPush answers and pushes (Push.kt); a broadcast without June's token is dropped. -->
         <receiver android:name=".PushReceiver" android:exported="true">
