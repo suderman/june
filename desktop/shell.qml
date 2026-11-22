@@ -1003,7 +1003,7 @@ ShellRoot {
             text: root.toast
           }
 
-          TabBar {
+          NavBar {
             id: overlayTabBar
             visible: !boardsPaper.fits
             anchors.left: parent.left

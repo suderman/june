@@ -270,7 +270,7 @@ FloatingWindow {
       pick: () => windowPicker.open()
     }
 
-    TabBar {
+    NavBar {
       id: tabBar
       visible: !win.layout.columns
       anchors.left: parent.left
