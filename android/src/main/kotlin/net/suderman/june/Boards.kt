@@ -48,6 +48,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -62,19 +67,104 @@ import org.json.JSONObject
  * agendaView), each row opening where it can. See "Agents and projects" in docs/interfaces.org.
  */
 
-/** The strip, agents and projects tabs under the day bar; agents counts what needs the user. */
+/**
+ * The bar of icons along the bottom, as Muse has it: Herdr's terminal, the agents, the chat (the strip), the projects
+ * and Emacs, left to right. The three middle ones are the pager's pages, in the same order; the outer two open the
+ * apps where the work is watched and edited. Agents counts what needs the user.
+ */
+private enum class Tab(val label: String, val page: Int?, val app: String?) {
+    Terminal("terminal", null, "dev.herdr.app"),
+    Agents("agents", 0, null),
+    Chat("chat", 1, null),
+    Projects("projects", 2, null),
+    Editor("editor", null, "org.gnu.emacs"),
+}
+
 @Composable
-fun PageNames(page: Int, needs: Int, palette: Look.Palette, onPage: (Int) -> Unit) {
-    // Where each page lies: agents left of the strip, projects right; swiping is the way, a tap jumps.
-    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        for ((i, name) in listOf("‹ agents", "strip", "projects ›").withIndex()) {
-            val on = page == i
-            Text(
-                if (i == 0 && needs > 0) "$name · $needs" else name,
-                fontFamily = Look.caption, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, fontSize = 13.sp,
-                color = if (on) palette.pageInk else if (i == 0 && needs > 0) palette.accent else palette.muted,
-                modifier = Modifier.clickable { onPage(i) }.padding(horizontal = 6.dp, vertical = 6.dp),
-            )
+fun Tabs(page: Int, needs: Int, palette: Look.Palette, onPage: (Int) -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        for (tab in Tab.entries) {
+            val on = tab.page == page
+            Box(
+                Modifier.weight(1f).height(52.dp)
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = androidx.compose.material3.ripple(bounded = false, radius = 26.dp),
+                    ) {
+                        tab.page?.let(onPage)
+                        tab.app?.let { pkg -> Swipes.open(context, pkg)?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() } }
+                    }
+                    .semantics {
+                        contentDescription = tab.label
+                        role = if (tab.page != null) Role.Tab else Role.Button
+                        if (tab.page != null) selected = on
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                val ink = if (on) palette.pageInk else palette.muted
+                Canvas(Modifier.size(26.dp)) { scale(size.width / 24f, pivot = Offset.Zero) { tabIcon(tab, on, ink, palette.page) } }
+                if (tab == Tab.Agents && needs > 0) Text(
+                    "$needs", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = palette.page,
+                    modifier = Modifier.padding(start = 26.dp, bottom = 22.dp)
+                        .background(palette.accent, androidx.compose.foundation.shape.CircleShape).padding(horizontal = 5.dp),
+                )
+            }
+        }
+    }
+}
+
+/** One tab's icon on a 24-unit grid: outlined, or filled where it is the page showing. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.tabIcon(tab: Tab, on: Boolean, ink: Color, page: Color) {
+    val line = Stroke(1.8f, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+    fun box(l: Float, t: Float, r: Float, b: Float, radius: Float, color: Color, fill: Boolean) =
+        drawRoundRect(color, Offset(l, t), Size(r - l, b - t), androidx.compose.ui.geometry.CornerRadius(radius), style = if (fill) androidx.compose.ui.graphics.drawscope.Fill else line)
+    fun stroke(color: Color, vararg xy: Float) = drawPath(Path().apply { moveTo(xy[0], xy[1]); for (i in 2 until xy.size step 2) lineTo(xy[i], xy[i + 1]) }, color, style = line)
+    when (tab) {
+        // A command prompt: a window with a chevron and a cursor.
+        Tab.Terminal -> {
+            box(2.5f, 4.5f, 21.5f, 19.5f, 2.5f, ink, false)
+            stroke(ink, 6.5f, 9f, 9.5f, 12f, 6.5f, 15f)
+            stroke(ink, 11.5f, 15f, 16.5f, 15f)
+        }
+        // A robot's head: antenna, ears, two eyes and a mouth.
+        Tab.Agents -> {
+            stroke(ink, 12f, 6f, 12f, 4f)
+            drawCircle(ink, 1.3f, Offset(12f, 2.9f))
+            stroke(ink, 2.4f, 10.5f, 2.4f, 14.5f)
+            stroke(ink, 21.6f, 10.5f, 21.6f, 14.5f)
+            box(4.5f, 6f, 19.5f, 19.5f, 3.5f, ink, on)
+            val face = if (on) page else ink
+            drawCircle(face, 1.5f, Offset(9f, 11.6f))
+            drawCircle(face, 1.5f, Offset(15f, 11.6f))
+            stroke(face, 9.5f, 15.6f, 14.5f, 15.6f)
+        }
+        // Muse's speech bubble: an oval with its tail at the lower left.
+        Tab.Chat -> {
+            val bubble = Path().apply {
+                op(
+                    Path().apply { addOval(androidx.compose.ui.geometry.Rect(3f, 3.5f, 21f, 17.5f)) },
+                    Path().apply { moveTo(6.5f, 14.5f); lineTo(4f, 20.5f); lineTo(11f, 17f); close() },
+                    androidx.compose.ui.graphics.PathOperation.Union,
+                )
+            }
+            if (on) drawPath(bubble, ink) else drawPath(bubble, ink, style = line)
+        }
+        // Muse's checkbox: a rounded square with a tick.
+        Tab.Projects -> {
+            box(4f, 4f, 20f, 20f, 4f, ink, on)
+            stroke(if (on) page else ink, 8f, 12.3f, 10.9f, 15.2f, 16.2f, 9.2f)
+        }
+        // A pen over a sheet of paper.
+        Tab.Editor -> {
+            box(3.5f, 2.5f, 15.5f, 21.5f, 2f, ink, false)
+            stroke(ink, 6.5f, 7f, 12.5f, 7f)
+            stroke(ink, 6.5f, 10.5f, 11f, 10.5f)
+            stroke(ink, 6.5f, 14f, 9f, 14f)
+            val pen = Path().apply { moveTo(19.8f, 6.3f); lineTo(22.2f, 8.7f); lineTo(15.84f, 15.06f); lineTo(12.5f, 16f); lineTo(13.44f, 12.66f); close() }
+            drawPath(pen, page)
+            drawPath(pen, ink, style = line)
+            stroke(ink, 18.03f, 8.07f, 20.43f, 10.47f)
         }
     }
 }

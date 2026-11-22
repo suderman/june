@@ -24,7 +24,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -42,6 +41,13 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -196,6 +202,7 @@ private fun Prompt(text: String, onClick: () -> Unit, modifier: Modifier = Modif
  * pads itself above the keyboard: neither the app's window (Android 15 and later) nor the session's (set still in
  * JuneSession) moves or shrinks for one.
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fromSheet: Boolean = false, header: Modifier? = null, summoned: Int = 0) {
     val list = rememberLazyListState()
@@ -234,6 +241,10 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     val pages = androidx.compose.runtime.rememberCoroutineScope()
     // A link asked for a board (the agenda widget, a reminder): show it; the board opens the task.
     LaunchedEffect(link.requested) { link.requested?.let { pager.scrollToPage(if (it.first == "agents") 0 else 2) } }
+    // Summoned again while this shows: back to the chat, whose field then takes focus. Only a change since this
+    // screen opened counts, and each only once.
+    var answered by remember { androidx.compose.runtime.mutableIntStateOf(summoned) }
+    LaunchedEffect(summoned) { if (summoned != answered) pager.scrollToPage(1) }
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides links) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
         Column(Modifier.fillMaxWidth().then(header ?: Modifier)) {
@@ -305,10 +316,15 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
         }
         // The boards stay while the link comes back after June was in the background, so their place is kept.
         val boards = !fromSheet && ready != null && (link.status is LinkStatus.Linked || link.agenda != null || link.agents != null)
+        // The words to send belong to the chat alone. Leaving it, or putting the keyboard away, lets go of the field.
+        val chat = !boards || pager.currentPage == 1
+        val focus = androidx.compose.ui.platform.LocalFocusManager.current
+        val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+        val typing = androidx.compose.foundation.layout.WindowInsets.isImeVisible
+        LaunchedEffect(typing) { if (!typing) focus.clearFocus() }
+        LaunchedEffect(chat) { if (!chat) { focus.clearFocus(); keyboard?.hide() } }
         if (boards) {
             LaunchedEffect(Unit) { link.wantBoards() }
-            val needs = link.agents?.optJSONArray("needs")?.length() ?: 0
-            PageNames(pager.currentPage, needs, palette) { page -> pages.launch { pager.animateScrollToPage(page) } }
             androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1, pageSpacing = 16.dp) { page ->
                 when (page) {
                     0 -> AgentsBoard(link, ready!!, palette, Modifier.fillMaxSize())
@@ -318,6 +334,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
             }
         } else stripPage(Modifier.weight(1f).fillMaxWidth())
         if (link.notice.isNotEmpty()) Text(link.notice, color = Color(0xFFFFD36B), fontSize = 13.sp, modifier = Modifier.padding(vertical = 4.dp))
+        if (chat) {
         // The screen she was summoned over, offered for the next message: off until Jon adds it, since most messages do
         // not need the picture's tokens; gone once sent.
         var attach by remember(screen) { mutableStateOf(false) }
@@ -356,48 +373,82 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
             }
         }
         if (Outbox.notice.isNotEmpty()) Text("not attached: ${Outbox.notice}", color = palette.accent, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
-        Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // One rounded field, as Muse has it: the attach button inside on the left, and no send button, since return
+        // sends; alt+return starts a new line.
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = if (boards) 4.dp else 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             var choosing by remember { mutableStateOf(false) }
-            Box {
-                OutlinedButton(onClick = { choosing = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp)) { Text("+") }
-                androidx.compose.material3.DropdownMenu(choosing, { choosing = false }) {
-                    for ((source, label) in listOf("camera" to "camera", "photos" to "photos", "files" to "files")) androidx.compose.material3.DropdownMenuItem(
-                        text = { Text(label) },
-                        onClick = {
-                            choosing = false
-                            // The screen goes with the rest if Jon added it: the sheet forgets it once it hides.
-                            if (showing != null) {
-                                Outbox.add(Outbox.picture(showing.picture, "screen from ${showing.app}"))
-                                used = true
-                            }
-                            AttachActivity.open(context, source, fromSheet)
-                            if (fromSheet) leave()
-                        },
-                    )
+            val send = {
+                val anything = Outbox.draft.isNotBlank() || showing != null || waiting.isNotEmpty()
+                if (link.status is LinkStatus.Linked && anything && link.submit(Outbox.draft, images = Outbox.pictures.map { it.data } + listOfNotNull(showing?.jpeg()), files = Outbox.files)) {
+                    Outbox.clear()
+                    if (showing != null) used = true
                 }
             }
-            // Summoned again while this shows: ready to type. Only a change since this screen opened counts.
+            // The field keeps its cursor; the outbox keeps the words, so they outlast the chat page and the screen.
+            var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(Outbox.draft, androidx.compose.ui.text.TextRange(Outbox.draft.length))) }
+            LaunchedEffect(Outbox.draft) { if (field.text != Outbox.draft) field = androidx.compose.ui.text.input.TextFieldValue(Outbox.draft, androidx.compose.ui.text.TextRange(Outbox.draft.length)) }
+            // Summoned again while this shows: ready to type. Only a change since this screen opened counts, once.
             val words = remember { androidx.compose.ui.focus.FocusRequester() }
-            val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-            val opened = remember { summoned }
             LaunchedEffect(summoned) {
-                if (summoned != opened) {
+                if (summoned != answered) {
+                    answered = summoned
                     words.requestFocus()
                     keyboard?.show()
                 }
             }
-            OutlinedTextField(Outbox.draft, { Outbox.draft = it }, Modifier.weight(1f).focusRequester(words), placeholder = { Text(if (showing != null) "about this screen…" else "to june…") }, maxLines = 5)
-            if (link.state.running || link.state.compacting) OutlinedButton(onClick = link::stop) { Text("Stop") }
-            val anything = Outbox.draft.isNotBlank() || showing != null || waiting.isNotEmpty()
-            Button(
-                onClick = {
-                    if (link.submit(Outbox.draft, images = Outbox.pictures.map { it.data } + listOfNotNull(showing?.jpeg()), files = Outbox.files)) {
-                        Outbox.clear()
-                        if (showing != null) used = true
+            androidx.compose.material3.TextField(
+                field, { field = it; Outbox.draft = it.text },
+                Modifier.weight(1f).focusRequester(words).onPreviewKeyEvent { e ->
+                    if (e.key != Key.Enter && e.key != Key.NumPadEnter) return@onPreviewKeyEvent false
+                    if (e.type == KeyEventType.KeyDown) {
+                        if (e.isAltPressed) {
+                            val at = field.selection
+                            val text = field.text.replaceRange(at.min, at.max, "\n")
+                            field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(at.min + 1))
+                            Outbox.draft = text
+                        } else send()
+                    }
+                    true
+                },
+                placeholder = { Text(if (showing != null) "about this screen…" else "to june…") },
+                leadingIcon = {
+                    Box {
+                        Text("+", fontSize = 24.sp, color = palette.pageInk, modifier = Modifier.clickable { choosing = true }.padding(horizontal = 10.dp, vertical = 2.dp))
+                        androidx.compose.material3.DropdownMenu(choosing, { choosing = false }) {
+                            for ((source, label) in listOf("camera" to "camera", "photos" to "photos", "files" to "files")) androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = {
+                                    choosing = false
+                                    // The screen goes with the rest if Jon added it: the sheet forgets it once it hides.
+                                    if (showing != null) {
+                                        Outbox.add(Outbox.picture(showing.picture, "screen from ${showing.app}"))
+                                        used = true
+                                    }
+                                    AttachActivity.open(context, source, fromSheet)
+                                    if (fromSheet) leave()
+                                },
+                            )
+                        }
                     }
                 },
-                enabled = link.status is LinkStatus.Linked && anything,
-            ) { Text("Send") }
+                maxLines = 5,
+                shape = RoundedCornerShape(24.dp),
+                colors = androidx.compose.material3.TextFieldDefaults.colors(
+                    focusedContainerColor = palette.field, unfocusedContainerColor = palette.field,
+                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                    focusedTextColor = palette.pageInk, unfocusedTextColor = palette.pageInk,
+                    focusedPlaceholderColor = palette.muted, unfocusedPlaceholderColor = palette.muted,
+                ),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { send() }),
+            )
+            if (link.state.running || link.state.compacting) OutlinedButton(onClick = link::stop) { Text("Stop") }
+        }
+        }
+        // The bar of tabs, away while the keyboard is up, as Muse puts it away.
+        if (boards && !typing) {
+            val needs = link.agents?.optJSONArray("needs")?.length() ?: 0
+            Tabs(pager.currentPage, needs, palette) { page -> pages.launch { pager.animateScrollToPage(page) } }
         }
     }
     }
