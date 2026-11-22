@@ -51,29 +51,59 @@ object Swipes {
         LEFT("left", "Swipe right to left"),
     }
 
-    /** What a swipe does: nothing, June full screen, close June, or open an app by its package. */
+    /** Companion apps June opens from her tab bar, agenda widget and header swipes. */
+    enum class AppSlot(val key: String, val name_: String, val settingLabel: String, val defaultPkg: String, val legacySwipeKey: String) {
+        Terminal("terminal", "Terminal", "Terminal app", "dev.herdr.app", "right"),
+        Editor("editor", "Editor", "Editor app", "org.gnu.emacs", "left"),
+    }
+
+    /** What a swipe does: nothing, June full screen, close June, or open the chosen Terminal or Editor app. */
     sealed interface Action {
         data object None : Action
         data object Full : Action
         data object Close : Action
-        data class App(val pkg: String) : Action
+        data class Slot(val slot: AppSlot) : Action
     }
 
     // Jon's agents app (Herdr) and his editor, read off his phone on 2026-11-20.
     private val defaults = mapOf(
         Direction.UP to Action.Full,
         Direction.DOWN to Action.Close,
-        Direction.RIGHT to Action.App("dev.herdr.app"),
-        Direction.LEFT to Action.App("org.gnu.emacs"),
+        Direction.RIGHT to Action.Slot(AppSlot.Terminal),
+        Direction.LEFT to Action.Slot(AppSlot.Editor),
     )
 
     private fun prefs(context: Context) = context.getSharedPreferences("swipes", Context.MODE_PRIVATE)
+
+    /** The package chosen for Terminal or Editor, falling back to any earlier sideways-swipe choice, then the default. */
+    fun app(context: Context, slot: AppSlot): String {
+        val p = prefs(context)
+        p.getString("slot:${slot.key}", null)?.let { return it }
+        val legacy = p.getString(slot.legacySwipeKey, null)
+        if (legacy != null && legacy.startsWith("app:")) return legacy.removePrefix("app:")
+        return slot.defaultPkg
+    }
+
+    fun setApp(context: Context, slot: AppSlot, pkg: String) {
+        prefs(context).edit().putString("slot:${slot.key}", pkg).apply()
+        AgendaWidget.updateAll(context)
+    }
+
+    fun appLabel(context: Context, pkg: String): String = runCatching {
+        context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(pkg, 0)).toString()
+    }.getOrDefault("$pkg (not installed)")
 
     fun get(context: Context, direction: Direction): Action = when (val saved = prefs(context).getString(direction.key, null)) {
         "none" -> Action.None
         "full" -> Action.Full
         "close" -> Action.Close
-        else -> if (saved != null && saved.startsWith("app:")) Action.App(saved.removePrefix("app:")) else defaults.getValue(direction)
+        "slot:terminal" -> Action.Slot(AppSlot.Terminal)
+        "slot:editor" -> Action.Slot(AppSlot.Editor)
+        else -> when {
+            saved != null && saved.startsWith("app:") && direction == Direction.RIGHT -> Action.Slot(AppSlot.Terminal)
+            saved != null && saved.startsWith("app:") && direction == Direction.LEFT -> Action.Slot(AppSlot.Editor)
+            else -> defaults.getValue(direction)
+        }
     }
 
     fun set(context: Context, direction: Direction, action: Action) {
@@ -81,7 +111,7 @@ object Swipes {
             Action.None -> "none"
             Action.Full -> "full"
             Action.Close -> "close"
-            is Action.App -> "app:${action.pkg}"
+            is Action.Slot -> "slot:${action.slot.key}"
         }
         prefs(context).edit().putString(direction.key, value).apply()
     }
@@ -89,15 +119,22 @@ object Swipes {
     /** Whether `action` does anything on a screen: June full screen does nothing on the full screen itself. */
     fun does(action: Action, fullScreen: Boolean): Boolean = action != Action.None && !(fullScreen && action == Action.Full)
 
-    /** The action's name, as settings and a swipe's hint show it. */
+    /** The action's name, as a swipe's hint shows it. */
     fun label(context: Context, action: Action): String = when (action) {
         Action.None -> "nothing"
         Action.Full -> "June full screen"
         Action.Close -> "close June"
-        is Action.App -> runCatching {
-            context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(action.pkg, 0)).toString()
-        }.getOrDefault("${action.pkg} (not installed)")
+        is Action.Slot -> appLabel(context, app(context, action.slot))
     }
+
+    /** The action's name in settings, showing both the slot and the app currently chosen for it. */
+    fun settingLabel(context: Context, action: Action): String = when (action) {
+        is Action.Slot -> "${action.slot.name_} (${appLabel(context, app(context, action.slot))})"
+        else -> label(context, action)
+    }
+
+    /** Open the app chosen for Terminal or Editor; returns why it could not be, or null. */
+    fun openSlot(context: Context, slot: AppSlot): String? = open(context, app(context, slot))
 
     /** Open an app at its launcher entry; returns why it could not be, or null. */
     fun open(context: Context, pkg: String): String? {

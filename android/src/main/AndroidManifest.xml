@@ -55,12 +55,14 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="june" android:host="conversation" />
             </intent-filter>
-            <!-- The agenda widget and reminders: june://task?key=KEY opens a task's page, june://projects the board.
+            <!-- The agenda widget and reminders: june://task?key=KEY opens a task's page, and agents, chat, projects open their views.
                  Not BROWSABLE, so a web page cannot open them. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="june" android:host="task" />
+                <data android:scheme="june" android:host="agents" />
+                <data android:scheme="june" android:host="chat" />
                 <data android:scheme="june" android:host="projects" />
             </intent-filter>
             <!-- A moment in June's history from another app, such as a link in Org: june://at/ID opens its day there. -->

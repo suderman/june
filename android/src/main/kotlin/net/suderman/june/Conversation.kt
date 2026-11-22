@@ -125,7 +125,7 @@ fun Conversation(link: Link, locked: Boolean, screen: Screen?, dismiss: () -> Un
           } else when (val action = Swipes.get(context, d)) {
               Swipes.Action.Full -> unlock()
               Swipes.Action.Close -> dismiss()
-              is Swipes.Action.App -> Swipes.open(context, action.pkg)?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() } ?: dismiss()
+              is Swipes.Action.Slot -> Swipes.openSlot(context, action.slot)?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() } ?: dismiss()
               Swipes.Action.None -> {}
           }
       }
@@ -241,8 +241,12 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     // The pager keeps its page across Android remaking the screen, and each board its place.
     val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = 1) { 3 }
     val pages = androidx.compose.runtime.rememberCoroutineScope()
-    // A link asked for a board (the agenda widget, a reminder): show it; the board opens the task.
-    LaunchedEffect(link.requested) { link.requested?.let { pager.scrollToPage(if (it.first == "agents") 0 else 2) } }
+    // A link asked for a view (the agenda widget, a reminder): jump there; a plain tab jump clears itself so tapping it again works.
+    LaunchedEffect(link.requested) {
+        val r = link.requested ?: return@LaunchedEffect
+        pager.scrollToPage(when (r.first) { "agents" -> 0; "chat" -> 1; else -> 2 })
+        if (r.second.isEmpty()) link.requested = null
+    }
     // Summoned again while this shows: back to the chat, whose field then takes focus. Only a change since this
     // screen opened counts, and each only once.
     var answered by remember { androidx.compose.runtime.mutableIntStateOf(summoned) }

@@ -47,6 +47,10 @@ class WidgetTapActivity : Activity() {
         val data = intent?.data
         val key = data?.getQueryParameter("key")
         when {
+            intent.getStringExtra("action") == "slot" -> {
+                val slot = Swipes.AppSlot.entries.find { it.key == intent.getStringExtra("slot") }
+                if (slot != null) Swipes.openSlot(this, slot)?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
+            }
             key != null && intent.getStringExtra("action") == "state" -> startActivity(Intent(this, StatePickerActivity::class.java)
                 .putExtra("key", key).putExtra("state", intent.getStringExtra("state")).putExtra("title", intent.getStringExtra("title"))
                 .putExtra("protected", intent.getBooleanExtra("protected", false)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

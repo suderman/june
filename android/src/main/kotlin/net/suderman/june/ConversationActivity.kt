@@ -65,7 +65,7 @@ class ConversationActivity : ComponentActivity() {
             val act: (Swipes.Direction) -> Unit = { d ->
                 when (val action = Swipes.get(this, d)) {
                     Swipes.Action.Close -> moveTaskToBack(true)
-                    is Swipes.Action.App -> Swipes.open(this, action.pkg)?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
+                    is Swipes.Action.Slot -> Swipes.openSlot(this, action.slot)?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
                     Swipes.Action.Full, Swipes.Action.None -> {}
                 }
             }
@@ -141,6 +141,8 @@ class ConversationActivity : ComponentActivity() {
         if (data.scheme != "june") return
         when (data.host) {
             "task" -> data.getQueryParameter("key")?.takeIf { it.isNotEmpty() }?.let(link::openTask)
+            "agents" -> { link.requested = "agents" to ""; link.wantBoards() }
+            "chat", "conversation" -> link.requested = "chat" to ""
             "projects" -> { link.requested = "projects" to ""; link.wantBoards() }
         }
     }

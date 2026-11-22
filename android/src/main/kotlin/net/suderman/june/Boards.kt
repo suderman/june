@@ -72,12 +72,12 @@ import org.json.JSONObject
  * and Emacs, left to right. The three middle ones are the pager's pages, in the same order; the outer two open the
  * apps where the work is watched and edited. Agents counts what needs the user.
  */
-private enum class Tab(val label: String, val page: Int?, val app: String?) {
-    Terminal("terminal", null, "dev.herdr.app"),
+private enum class Tab(val label: String, val page: Int?, val slot: Swipes.AppSlot?) {
+    Terminal("terminal", null, Swipes.AppSlot.Terminal),
     Agents("agents", 0, null),
     Chat("chat", 1, null),
     Projects("projects", 2, null),
-    Editor("editor", null, "org.gnu.emacs"),
+    Editor("editor", null, Swipes.AppSlot.Editor),
 }
 
 /** Height of the bottom tab bar, shared with Sheet so content rests above it until the keyboard rises past it. */
@@ -96,7 +96,7 @@ fun Tabs(page: Int, needs: Int, palette: Look.Palette, onPage: (Int) -> Unit) {
                         indication = androidx.compose.material3.ripple(bounded = false, radius = 26.dp),
                     ) {
                         tab.page?.let(onPage)
-                        tab.app?.let { pkg -> Swipes.open(context, pkg)?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() } }
+                        tab.slot?.let { slot -> Swipes.openSlot(context, slot)?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() } }
                     }
                     .semantics {
                         contentDescription = tab.label

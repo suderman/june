@@ -121,41 +121,78 @@ private fun Status(resumed: Int) {
 }
 
 /**
- * What each swipe on June's header does (Swipes.kt), in the sheet and the full screen. A tap on a row picks from what
- * June does herself and the launcher's apps.
+ * The Terminal and Editor apps June opens from her tab bar, agenda widget and header swipes, followed by what each
+ * swipe on June's header does (Swipes.kt) in the sheet and the full screen.
  */
 @Composable
 private fun SwipeSettings() {
     val context = LocalContext.current
     var changed by remember { mutableIntStateOf(0) }
-    var choosing by remember { mutableStateOf<Swipes.Direction?>(null) }
+    var choosingSlot by remember { mutableStateOf<Swipes.AppSlot?>(null) }
+    var choosingDirection by remember { mutableStateOf<Swipes.Direction?>(null) }
+    Text("Apps", style = MaterialTheme.typography.titleMedium)
+    for (slot in Swipes.AppSlot.entries) {
+        val name = remember(changed) { Swipes.appLabel(context, Swipes.app(context, slot)) }
+        Row(Modifier.fillMaxWidth().clickable { choosingSlot = slot }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(slot.settingLabel, Modifier.weight(1f))
+            Text(name, color = MaterialTheme.colorScheme.primary)
+        }
+    }
     Text("Swipes on June's header", style = MaterialTheme.typography.titleMedium)
     for (direction in Swipes.Direction.entries) {
-        val name = remember(changed) { Swipes.label(context, Swipes.get(context, direction)) }
-        Row(Modifier.fillMaxWidth().clickable { choosing = direction }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        val name = remember(changed) { Swipes.settingLabel(context, Swipes.get(context, direction)) }
+        Row(Modifier.fillMaxWidth().clickable { choosingDirection = direction }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(direction.label, Modifier.weight(1f))
             Text(name, color = MaterialTheme.colorScheme.primary)
         }
     }
-    val direction = choosing ?: return
-    val apps = remember { Swipes.apps(context) }
-    val pick = { action: Swipes.Action ->
-        Swipes.set(context, direction, action)
-        changed++
-        choosing = null
+    choosingSlot?.let { slot ->
+        val apps = remember { Swipes.apps(context) }
+        AlertDialog(
+            onDismissRequest = { choosingSlot = null },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { choosingSlot = null }) { Text("Cancel") } },
+            title = { Text(slot.settingLabel) },
+            text = {
+                LazyColumn(Modifier.heightIn(max = 480.dp)) {
+                    items(apps, key = { it.first }) { (pkg, label) ->
+                        Choice(label, pkg) {
+                            Swipes.setApp(context, slot, pkg)
+                            changed++
+                            choosingSlot = null
+                        }
+                    }
+                }
+            },
+        )
     }
-    AlertDialog(
-        onDismissRequest = { choosing = null },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = { choosing = null }) { Text("Cancel") } },
-        title = { Text(direction.label) },
-        text = {
-            LazyColumn(Modifier.heightIn(max = 480.dp)) {
-                items(listOf(Swipes.Action.None, Swipes.Action.Full, Swipes.Action.Close)) { Choice(Swipes.label(context, it), null) { pick(it) } }
-                items(apps, key = { it.first }) { (pkg, label) -> Choice(label, pkg) { pick(Swipes.Action.App(pkg)) } }
-            }
-        },
-    )
+    choosingDirection?.let { direction ->
+        val actions = listOf(
+            Swipes.Action.None,
+            Swipes.Action.Full,
+            Swipes.Action.Close,
+            Swipes.Action.Slot(Swipes.AppSlot.Terminal),
+            Swipes.Action.Slot(Swipes.AppSlot.Editor),
+        )
+        AlertDialog(
+            onDismissRequest = { choosingDirection = null },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { choosingDirection = null }) { Text("Cancel") } },
+            title = { Text(direction.label) },
+            text = {
+                LazyColumn(Modifier.heightIn(max = 480.dp)) {
+                    items(actions) { action ->
+                        val pkg = (action as? Swipes.Action.Slot)?.let { Swipes.app(context, it.slot) }
+                        Choice(Swipes.settingLabel(context, action), pkg) {
+                            Swipes.set(context, direction, action)
+                            changed++
+                            choosingDirection = null
+                        }
+                    }
+                }
+            },
+        )
+    }
 }
 
 /** One choice in the swipe picker, with the app's icon when it is an app. */

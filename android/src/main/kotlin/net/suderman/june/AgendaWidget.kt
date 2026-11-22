@@ -130,6 +130,25 @@ class AgendaWidget : AppWidgetProvider() {
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             views.setOnClickPendingIntent(R.id.agenda_refresh, PendingIntent.getBroadcast(context, 2, Intent(context, AgendaWidget::class.java).setAction(REFRESH), PendingIntent.FLAG_IMMUTABLE))
             views.setOnClickPendingIntent(R.id.agenda_add, PendingIntent.getActivity(context, 4, Intent(context, QuickAddActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE))
+            // Bottom shortcuts matching June's tab bar: Terminal, Agents, Chat, Projects, Editor.
+            fun openView(code: Int, host: String) = PendingIntent.getActivity(
+                context, code,
+                Intent(context, ConversationActivity::class.java).setAction(Intent.ACTION_VIEW)
+                    .setData(Uri.parse("june://$host"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            fun openSlot(code: Int, slot: Swipes.AppSlot) = PendingIntent.getActivity(
+                context, code,
+                Intent(context, WidgetTapActivity::class.java).putExtra("action", "slot").putExtra("slot", slot.key)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            views.setOnClickPendingIntent(R.id.agenda_tab_terminal, openSlot(10, Swipes.AppSlot.Terminal))
+            views.setOnClickPendingIntent(R.id.agenda_tab_agents, openView(11, "agents"))
+            views.setOnClickPendingIntent(R.id.agenda_tab_chat, openView(12, "chat"))
+            views.setOnClickPendingIntent(R.id.agenda_tab_projects, openView(13, "projects"))
+            views.setOnClickPendingIntent(R.id.agenda_tab_editor, openSlot(14, Swipes.AppSlot.Editor))
             // Each row fills in its own task's link, and its pill the state picker; WidgetTapActivity takes both.
             views.setPendingIntentTemplate(R.id.agenda_list, PendingIntent.getActivity(context, 3,
                 Intent(context, WidgetTapActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
