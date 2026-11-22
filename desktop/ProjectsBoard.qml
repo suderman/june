@@ -29,6 +29,10 @@ Item {
   // A rename moves a task without an ID to a new key; its page follows.
   onNoticeChanged: if ((notice.from ?? "") !== "" && notice.from === detailKey) detailKey = notice.key
 
+  // Wide mode offers a direct Editor shortcut in the board header; narrow mode puts it in the bottom bar.
+  property bool showLaunch: false
+  signal launchEditor()
+
   readonly property var drillRows: mode === "state" ? Board.stateRows(agenda, drill, pending, user) : []
   readonly property int openCount: view.counts.reduce((n, c) => n + c.n, 0)
 
@@ -72,11 +76,37 @@ Item {
         }
         Text {
           anchors.left: parent.left
+          anchors.right: editorLaunch.visible ? editorLaunch.left : parent.right
+          anchors.rightMargin: editorLaunch.visible ? 8 : 0
           anchors.bottom: parent.bottom
           anchors.bottomMargin: 8
+          elide: Text.ElideRight
           text: board.loaded ? board.openCount + " open in " + board.view.projects.length + " projects" : ""
           font.family: Theme.caption; font.pixelSize: 13
           color: Theme.muted
+        }
+        Item {
+          id: editorLaunch
+          visible: board.showLaunch
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.topMargin: 2
+          width: 30; height: 30
+          Rectangle {
+            anchors.fill: parent; radius: 7; color: Theme.pageInk
+            opacity: editorHover.containsMouse ? 0.1 : 0
+          }
+          TabIcon {
+            anchors.centerIn: parent; width: 20; height: 20
+            kind: "editor"; on: false
+            ink: editorHover.containsMouse ? Theme.pageInk : Theme.muted
+            paper: Theme.paper
+          }
+          MouseArea {
+            id: editorHover
+            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+            onClicked: board.launchEditor()
+          }
         }
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 2.5; color: Theme.pageInk }
       }

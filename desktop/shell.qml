@@ -32,8 +32,9 @@ ShellRoot {
   property bool shown: false
   // The windowed strip, and this device's toggles: state while the desktop client runs, never written to config.
   property bool windowShown: false
-  // In a narrow window, which of the strip and the two boards shows: strip, agents, or projects.
-  property string windowTab: "strip"
+  // In a narrow window or narrow overlay, which of chat and the two boards shows: chat, agents, or projects.
+  property string windowTab: "chat"
+  property string overlayTab: "chat"
   // Live June in the corner: off, she never pops up and the key goes straight between hidden and the strip.
   property bool liveEnabled: true
   // The comic strip, or the console look for when June should look professional (a client meeting).
@@ -81,6 +82,19 @@ ShellRoot {
   Timer { id: quietSettle; interval: 4000; onTriggered: root.askedQuiet = null }
   // Opens a herdr link (herdr-link focuses or resumes the agent's pane in kitty) or a file link (emacsclient).
   Process { id: linker }
+  // Focuses or launches Terminal (Herdr) or Editor (Emacs) from the icon shortcuts.
+  Process { id: appLauncher }
+  function openApp(app) {
+    if (appLauncher.running) return false;
+    const cmd = Desktop.appLaunchCommand(app, {
+      JUNE_DESKTOP_TERMINAL: Quickshell.env("JUNE_DESKTOP_TERMINAL") || "",
+      JUNE_DESKTOP_EDITOR: Quickshell.env("JUNE_DESKTOP_EDITOR") || "",
+    });
+    if (!cmd) return false;
+    appLauncher.command = cmd;
+    appLauncher.running = true;
+    return true;
+  }
   // Opens a link from June's words as Strip.linkKind allows: a web page in the browser, an agent's session through
   // herdr-link, a file in Emacs through emacsclient. Returns whether it opened, so the desktop client can step aside for what did.
   function openLink(url) {
@@ -536,8 +550,8 @@ ShellRoot {
     function light(hour: string): void { const h = Number(hour); root.lightHour = hour === "now" || isNaN(h) ? -1 : h; }
     // The strip in an ordinary window, for the launcher.
     function window(): void { root.windowShown = true; }
-    // The windowed strip on one of its tabs: strip, agents, or projects.
-    function tab(name: string): void { if (["strip", "agents", "projects"].includes(name)) root.windowTab = name; root.windowShown = true; }
+    // The windowed strip on one of its tabs: chat (or legacy strip), agents, or projects.
+    function tab(name: string): void { const t = Desktop.normalizeTab(name); if (t) root.windowTab = t; root.windowShown = true; }
     // June's history: a day by its date (YYYY-MM-DD), a moment by its entry id, or back to today.
     function day(date: string): void { root.openDay(date); }
     function at(id: string): void { root.openMoment(Strip.momentOf("june:at/" + id)); }
@@ -813,7 +827,19 @@ ShellRoot {
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "june-desktop"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
-    onVisibleChanged: if (visible) { composer.focusInput(); if (boardsPaper.fits) root.wantBoards(); }
+    onVisibleChanged: {
+      if (visible) {
+        if (boardsPaper.fits || root.overlayTab === "chat") composer.focusInput();
+        root.wantBoards();
+      }
+    }
+    Connections {
+      target: root
+      function onOverlayTabChanged() {
+        if (!boardsPaper.fits && root.overlayTab !== "chat") composer.blurInput();
+        else if (window.visible) composer.focusInput();
+      }
+    }
 
     // Esc closes a preview first, then hides from anywhere in the desktop client, even after a click put the focus in a balloon
     // to select its words.
@@ -825,6 +851,11 @@ ShellRoot {
     Shortcut { sequence: "Ctrl+N"; onActivated: list.page(1) }
     Shortcut { sequence: "Ctrl+P"; onActivated: list.page(-1) }
     Shortcut { sequence: "Ctrl+R"; onActivated: root.refresh() }
+    Shortcut { sequence: "Alt+1"; onActivated: if (root.openApp("terminal")) root.hide() }
+    Shortcut { sequence: "Alt+2"; enabled: !boardsPaper.fits; onActivated: root.overlayTab = "agents" }
+    Shortcut { sequence: "Alt+3"; enabled: !boardsPaper.fits; onActivated: root.overlayTab = "chat" }
+    Shortcut { sequence: "Alt+4"; enabled: !boardsPaper.fits; onActivated: root.overlayTab = "projects" }
+    Shortcut { sequence: "Alt+5"; onActivated: if (root.openApp("editor")) root.hide() }
 
     // The backdrop dims as the strip unfolds; a click on it puts everything away.
     Rectangle { anchors.fill: parent; color: Theme.backdrop; opacity: root.unfold }
@@ -891,10 +922,54 @@ ShellRoot {
             onDismissed: (key) => root.dismiss(key)
             quiet: root.quiet
             browser: root
+            showDays: boardsPaper.fits || root.overlayTab === "chat"
+          }
+
+          AgentsBoard {
+            visible: !boardsPaper.fits && root.overlayTab === "agents"
+            anchors.top: masthead.bottom
+            anchors.bottom: overlayTabBar.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: 16
+            anchors.bottomMargin: 8
+            view: root.agentsView
+            onSeen: key => root.markSeen(key)
+            notice: root.taskNotice
+            dispatch: root.agentsBoard?.dispatch ?? null
+            pending: root.pendingEdits
+            onEdit: (key, change) => root.editTask(key, change)
+            tasks: Object.assign({}, root.agendaBoard?.tasks ?? {}, root.agentsBoard?.tasks ?? {})
+            user: root.agentsBoard?.user ?? ""
+            today: root.agendaBoard?.today ?? ""
+            loaded: root.agentsBoard !== null
+            onOpen: link => { if (root.openLink(link)) root.hide(); }
+          }
+
+          ProjectsBoard {
+            visible: !boardsPaper.fits && root.overlayTab === "projects"
+            anchors.top: masthead.bottom
+            anchors.bottom: overlayTabBar.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: 16
+            anchors.bottomMargin: 8
+            view: root.agendaView
+            notice: root.taskNotice
+            dispatch: root.agentsBoard?.dispatch ?? null
+            pending: root.pendingEdits
+            onEdit: (key, change) => root.editTask(key, change)
+            user: root.agentsBoard?.user ?? ""
+            agenda: root.agendaBoard
+            loaded: root.agendaBoard !== null
+            host: root.host
+            generatedAt: root.agendaBoard?.generatedAt ?? 0
+            onOpen: link => { if (root.openLink(link)) root.hide(); }
           }
 
           StripList {
             id: list
+            visible: boardsPaper.fits || root.overlayTab === "chat"
             anchors.top: masthead.bottom
             anchors.bottom: parent.bottom
             anchors.bottomMargin: page.dockHeight + 8
@@ -927,12 +1002,29 @@ ShellRoot {
             anchors.bottomMargin: 6
             text: root.toast
           }
+
+          TabBar {
+            id: overlayTabBar
+            visible: !boardsPaper.fits
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: 16
+            anchors.rightMargin: root.overlayTab === "chat" ? (150 + 22 + 14) : 16
+            anchors.bottomMargin: 10
+            height: 46
+            tab: root.overlayTab
+            needs: root.agentsView.needs.length
+            onChooseTab: name => root.overlayTab = name
+            onLaunch: app => { if (root.openApp(app)) root.hide(); }
+          }
         }
       }
 
       // Live June's card, in the corner where min mode keeps her; a click shrinks the strip back down to her.
       LiveCard {
         id: maxCard
+        visible: boardsPaper.fits || root.overlayTab === "chat"
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 22
@@ -941,7 +1033,7 @@ ShellRoot {
         art: root.liveArt[root.liveState] ?? root.liveArt["sipping"] ?? null
         reaction: root.reaction
         face: root.liveFace
-        running: root.shown
+        running: root.shown && visible
         // Already on screen when the strip grows out of min mode or shrinks back to it; otherwise she fades in with it.
         opacity: root.cardSteady ? 1 : Math.min(1, root.unfold * 3)
         onClicked: root.toMini()
@@ -955,7 +1047,7 @@ ShellRoot {
         anchors.bottom: maxCard.bottom
         anchors.bottomMargin: 44
         width: Math.max(0, maxCard.x - 14 - 16) * page.inputPhase
-        visible: width > 30
+        visible: (boardsPaper.fits || root.overlayTab === "chat") && width > 30
         send: (text, followUp) => root.submit(text, followUp)
         stop: () => root.stopJune()
         attachments: root.outbox
@@ -999,6 +1091,8 @@ ShellRoot {
     user: root.agentsBoard?.user ?? ""
     today: root.agendaBoard?.today ?? ""
           loaded: root.agentsBoard !== null
+          showLaunch: true
+          onLaunchTerminal: { if (root.openApp("terminal")) root.hide(); }
           onOpen: link => { if (root.openLink(link)) root.hide(); }
         }
         ProjectsBoard {
@@ -1014,6 +1108,8 @@ ShellRoot {
           loaded: root.agendaBoard !== null
           host: root.host
           generatedAt: root.agendaBoard?.generatedAt ?? 0
+          showLaunch: true
+          onLaunchEditor: { if (root.openApp("editor")) root.hide(); }
           onOpen: link => { if (root.openLink(link)) root.hide(); }
         }
       }

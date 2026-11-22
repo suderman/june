@@ -10,7 +10,7 @@ import { PAGE, pageTarget, rest, step, wheel } from "../desktop/scroll.mjs";
 import { CALM_GROUND, LONG_SHARE, PATTERNS, TIMES, WEATHER_MS, backdrop, cutaway, fallingPath, graded, hourOf, look, moment, patternPath, place, skyLook, sunFor, sunKeys, sunTimes } from "../desktop/light.mjs";
 import { MAX_PROPS, focusBlur, panelScene, SEASONS as SCENE_SEASONS, SETTINGS as SCENE_SETTINGS, SPOTS, choosePlate, chooseProps, chooseRoom, mergeScenery, placeProps, placeRoom, readScenery, roomPoint, season } from "../desktop/scenery.mjs";
 import { SEASONS, SETTINGS, SPOTS as AVATAR_SPOTS } from "../src/avatar.ts";
-import { DND_MODE, MODES_CALL, SCHEMES, SCHEME_CALL, isDark, parseModes, parseScheme, quietIn, setQuietCall } from "../desktop/desktop.mjs";
+import { DND_MODE, MODES_CALL, SCHEMES, SCHEME_CALL, TABS, appLaunchCommand, isDark, normalizeTab, parseModes, parseScheme, quietIn, setQuietCall } from "../desktop/desktop.mjs";
 import { FACES, LOOKS, face, liveFace, lines as consoleLines } from "../desktop/console.mjs";
 import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent } from "../desktop/live.mjs";
 
@@ -1477,4 +1477,22 @@ test("browsing June's days: header names, calendar keys, stepping between days w
 	assert.equal(panelOf(list, "99"), "");
 	assert.equal(momentPanel(items, "21"), list[1].id, "the phone finds the moment's panel from the items, in either look");
 	assert.deepEqual(phoneConsole(items, emptyView().state, false).map((p) => p.id), list.map((p) => p.id), "the console's panels share the comic's ids");
+});
+
+test("desktop tab names normalize strip to chat and companion app launchers respect overrides", () => {
+	assert.deepEqual(TABS, ["agents", "chat", "projects"]);
+	assert.equal(normalizeTab("strip"), "chat");
+	assert.equal(normalizeTab("chat"), "chat");
+	assert.equal(normalizeTab("agents"), "agents");
+	assert.equal(normalizeTab("projects"), "projects");
+	assert.equal(normalizeTab("other"), null);
+	const term = appLaunchCommand("terminal");
+	assert.equal(term[0], "sh");
+	assert.match(term[2], /herdr-app/);
+	const editor = appLaunchCommand("editor");
+	assert.equal(editor[0], "sh");
+	assert.match(editor[2], /emacs/);
+	assert.deepEqual(appLaunchCommand("terminal", { JUNE_DESKTOP_TERMINAL: "alacritty" }), ["sh", "-c", "setsid -f alacritty >/dev/null 2>&1 </dev/null"]);
+	assert.deepEqual(appLaunchCommand("editor", { JUNE_DESKTOP_EDITOR: "nvim" }), ["sh", "-c", "setsid -f nvim >/dev/null 2>&1 </dev/null"]);
+	assert.equal(appLaunchCommand("unknown"), null);
 });

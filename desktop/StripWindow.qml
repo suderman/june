@@ -22,19 +22,32 @@ FloatingWindow {
   color: Theme.paper
   visible: shell.windowShown
   onVisibleChanged: {
-    if (visible) { strip.landOnNewest(); composer.focusInput(); shell.wantBoards(); }
-    else shell.windowShown = false;
+    if (visible) {
+      strip.landOnNewest();
+      if (win.layout.columns || win.tab === "chat") composer.focusInput();
+      shell.wantBoards();
+    } else shell.windowShown = false;
   }
 
   readonly property var layout: Board.boardLayout(width)
-  // In a narrow window, which of the strip and the two boards shows (the shell keeps it, for `june-desktop tab`).
+  // In a narrow window, which of chat and the two boards shows (the shell keeps it, for `june-desktop tab`).
   readonly property string tab: shell.windowTab
+  property bool settingsOpen: false
   onClosed: shell.windowShown = false
+  onTabChanged: {
+    if (!win.layout.columns && win.tab !== "chat") composer.blurInput();
+    else if (win.visible) composer.focusInput();
+  }
 
   Shortcut { sequence: "Ctrl+N"; onActivated: strip.page(1) }
   Shortcut { sequence: "Ctrl+P"; onActivated: strip.page(-1) }
   Shortcut { sequence: "Ctrl+W"; onActivated: win.shell.windowShown = false }
   Shortcut { sequence: "Ctrl+R"; onActivated: win.shell.refresh() }
+  Shortcut { sequence: "Alt+1"; onActivated: win.shell.openApp("terminal") }
+  Shortcut { sequence: "Alt+2"; enabled: !win.layout.columns; onActivated: win.shell.windowTab = "agents" }
+  Shortcut { sequence: "Alt+3"; enabled: !win.layout.columns; onActivated: win.shell.windowTab = "chat" }
+  Shortcut { sequence: "Alt+4"; enabled: !win.layout.columns; onActivated: win.shell.windowTab = "projects" }
+  Shortcut { sequence: "Alt+5"; onActivated: win.shell.openApp("editor") }
   Shortcut { sequence: "Escape"; enabled: preview.open; onActivated: preview.close() }
   Shortcut { sequences: ["Right", "PgDown"]; enabled: preview.paging || preview.stepping; onActivated: preview.next() }
   Shortcut { sequences: ["Left", "PgUp"]; enabled: preview.paging || preview.stepping; onActivated: preview.previous() }
@@ -48,12 +61,38 @@ FloatingWindow {
     // The column pads its contents 16 px, so with the boards beside it, it is the strip plus that padding.
     width: win.layout.columns ? win.layout.strip + 32 : Math.min(parent.width, Theme.stripWidth)
 
+    Row {
+      id: topControls
+      anchors.top: parent.top
+      anchors.right: parent.right
+      anchors.margins: 16
+      height: 30
+      spacing: 10
+      z: 6
+
+      Pill {
+        anchors.verticalCenter: parent.verticalCenter
+        text: "console"
+        on: win.shell.look === "console"
+        onClicked: win.shell.look = win.shell.look === "console" ? "comic" : "console"
+      }
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        text: win.settingsOpen ? "settings ▴" : "settings"
+        font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
+        color: win.settingsOpen ? Theme.pageInk : Theme.muted
+        MouseArea { anchors.fill: parent; anchors.margins: -4; cursorShape: Qt.PointingHandCursor; onClicked: win.settingsOpen = !win.settingsOpen }
+      }
+    }
+
     Masthead {
       id: masthead
       anchors.top: parent.top
       anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.margins: 16
+      anchors.right: topControls.left
+      anchors.leftMargin: 16
+      anchors.topMargin: 16
+      anchors.rightMargin: 8
       linked: win.shell.linked
       refusals: win.shell.refusals
       host: win.shell.host
@@ -63,25 +102,22 @@ FloatingWindow {
       onDismissed: (key) => win.shell.dismiss(key)
       quiet: win.shell.quiet
       browser: win.shell
-      showDays: win.layout.columns || win.tab === "strip"
+      showDays: win.layout.columns || win.tab === "chat"
     }
 
-    // This device's toggles: state for now, gone when the desktop client restarts.
+    // This device's toggles: tucked under settings (like Android), gone when the desktop client restarts.
     Flow {
       id: toggles
+      visible: win.settingsOpen
       anchors.top: masthead.bottom
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.leftMargin: 16
       anchors.rightMargin: 16
-      anchors.topMargin: 10
+      anchors.topMargin: visible ? 10 : 0
+      height: visible ? implicitHeight : 0
       spacing: 8
 
-      Pill {
-        text: "console"
-        on: win.shell.look === "console"
-        onClicked: win.shell.look = win.shell.look === "console" ? "comic" : "console"
-      }
       Pill {
         text: "do not disturb"
         on: win.shell.quiet
@@ -136,32 +172,16 @@ FloatingWindow {
       }
     }
 
-    // Narrow, the boards are tabs beside the strip, in the order they lie when wide: agents, strip, projects.
-    Row {
-      id: tabs
-      visible: !win.layout.columns
-      anchors.top: toggles.bottom
-      anchors.left: parent.left
-      anchors.leftMargin: 16
-      anchors.topMargin: visible ? 10 : 0
-      height: visible ? 30 : 0
-      spacing: 8
-      Pill {
-        text: win.shell.agentsView.needs.length > 0 ? "agents · " + win.shell.agentsView.needs.length : "agents"
-        on: win.tab === "agents"
-        onClicked: win.shell.windowTab = "agents"
-      }
-      Pill { text: "strip"; on: win.tab === "strip"; onClicked: win.shell.windowTab = "strip" }
-      Pill { text: "projects"; on: win.tab === "projects"; onClicked: win.shell.windowTab = "projects" }
-    }
-
     AgentsBoard {
       visible: !win.layout.columns && win.tab === "agents"
-      anchors.top: tabs.bottom
-      anchors.bottom: composer.top
+      anchors.top: toggles.bottom
+      anchors.bottom: tabBar.top
       anchors.left: parent.left
       anchors.right: parent.right
-      anchors.margins: 16
+      anchors.leftMargin: 16
+      anchors.rightMargin: 16
+      anchors.topMargin: 10
+      anchors.bottomMargin: 8
       view: win.shell.agentsView
     onSeen: key => win.shell.markSeen(key)
     notice: win.shell.taskNotice
@@ -176,11 +196,14 @@ FloatingWindow {
     }
     ProjectsBoard {
       visible: !win.layout.columns && win.tab === "projects"
-      anchors.top: tabs.bottom
-      anchors.bottom: composer.top
+      anchors.top: toggles.bottom
+      anchors.bottom: tabBar.top
       anchors.left: parent.left
       anchors.right: parent.right
-      anchors.margins: 16
+      anchors.leftMargin: 16
+      anchors.rightMargin: 16
+      anchors.topMargin: 10
+      anchors.bottomMargin: 8
       view: win.shell.agendaView
     notice: win.shell.taskNotice
     dispatch: win.shell.agentsBoard?.dispatch ?? null
@@ -196,12 +219,15 @@ FloatingWindow {
 
     StripList {
       id: strip
-      visible: win.layout.columns || win.tab === "strip"
-      anchors.top: tabs.bottom
+      visible: win.layout.columns || win.tab === "chat"
+      anchors.top: toggles.bottom
       anchors.bottom: composer.top
       anchors.left: parent.left
       anchors.right: parent.right
-      anchors.margins: 16
+      anchors.leftMargin: 16
+      anchors.rightMargin: 16
+      anchors.topMargin: 10
+      anchors.bottomMargin: 16
       model: win.shell.stripModel
       activity: win.shell.activity
       poses: win.shell.poses
@@ -229,16 +255,34 @@ FloatingWindow {
 
     Composer {
       id: composer
+      visible: win.layout.columns || win.tab === "chat"
       anchors.left: parent.left
       anchors.right: parent.right
-      anchors.bottom: parent.bottom
-      anchors.margins: 16
+      anchors.bottom: win.layout.columns ? parent.bottom : tabBar.top
+      anchors.leftMargin: 16
+      anchors.rightMargin: 16
+      anchors.bottomMargin: win.layout.columns ? 16 : 8
       send: (text, followUp) => win.shell.submit(text, followUp)
       stop: () => win.shell.stopJune()
       attachments: win.shell.outbox
       unattach: index => win.shell.unattach(index)
       paste: fallback => win.shell.pasteInto(fallback)
       pick: () => windowPicker.open()
+    }
+
+    TabBar {
+      id: tabBar
+      visible: !win.layout.columns
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      anchors.leftMargin: 16
+      anchors.rightMargin: 16
+      anchors.bottomMargin: 6
+      tab: win.tab
+      needs: win.shell.agentsView.needs.length
+      onChooseTab: name => win.shell.windowTab = name
+      onLaunch: app => win.shell.openApp(app)
     }
     // A picker for +, inside this window: a dialog needs a window to open in.
     FileDialog {
@@ -275,6 +319,8 @@ FloatingWindow {
     user: win.shell.agentsBoard?.user ?? ""
     today: win.shell.agendaBoard?.today ?? ""
     loaded: win.shell.agentsBoard !== null
+    showLaunch: true
+    onLaunchTerminal: win.shell.openApp("terminal")
     onOpen: link => win.shell.openLink(link)
   }
   ProjectsBoard {
@@ -296,6 +342,8 @@ FloatingWindow {
     loaded: win.shell.agendaBoard !== null
     host: win.shell.host
     generatedAt: win.shell.agendaBoard?.generatedAt ?? 0
+    showLaunch: true
+    onLaunchEditor: win.shell.openApp("editor")
     onOpen: link => win.shell.openLink(link)
   }
 

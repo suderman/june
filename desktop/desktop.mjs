@@ -51,3 +51,39 @@ export function isDark(choice, system) {
 	if (choice === "light") return false;
 	return system === "dark";
 }
+
+/** Valid tab names for narrow desktop views: chat (formerly strip), agents, and projects. */
+export const TABS = ["agents", "chat", "projects"];
+
+/** Normalizes a tab name from IPC or state, mapping the legacy "strip" alias to "chat". */
+export function normalizeTab(name) {
+	if (name === "strip") return "chat";
+	return TABS.includes(name) ? name : null;
+}
+
+/**
+ * Shell command to focus or launch a desktop companion app ("terminal" for Herdr, "editor" for Emacs), respecting
+ * optional JUNE_DESKTOP_TERMINAL / JUNE_DESKTOP_EDITOR overrides. Exits promptly so Process never stays busy.
+ */
+export function appLaunchCommand(app, env) {
+	const overrides = env || {};
+	if (app === "terminal") {
+		const custom = String(overrides.JUNE_DESKTOP_TERMINAL || "").trim();
+		if (custom) return ["sh", "-c", `setsid -f ${custom} >/dev/null 2>&1 </dev/null`];
+		return [
+			"sh",
+			"-c",
+			'if command -v hyprctl >/dev/null && hyprctl clients 2>/dev/null | grep -q "class: herdr-app"; then hyprctl dispatch \'hl.dsp.focus({ window = "class:herdr-app" })\' >/dev/null 2>&1 || hyprctl dispatch focuswindow "class:^herdr-app$" >/dev/null 2>&1; elif command -v herdr-app >/dev/null; then setsid -f herdr-app >/dev/null 2>&1 </dev/null; else setsid -f kitty >/dev/null 2>&1 </dev/null; fi',
+		];
+	}
+	if (app === "editor") {
+		const custom = String(overrides.JUNE_DESKTOP_EDITOR || "").trim();
+		if (custom) return ["sh", "-c", `setsid -f ${custom} >/dev/null 2>&1 </dev/null`];
+		return [
+			"sh",
+			"-c",
+			'if command -v hyprctl >/dev/null && hyprctl clients 2>/dev/null | grep -q "class: emacs"; then hyprctl dispatch \'hl.dsp.focus({ window = "class:emacs" })\' >/dev/null 2>&1 || hyprctl dispatch focuswindow "class:^emacs$" >/dev/null 2>&1; elif command -v emacsclient >/dev/null; then emacsclient -c -n >/dev/null 2>&1 </dev/null; else setsid -f emacs >/dev/null 2>&1 </dev/null; fi',
+		];
+	}
+	return null;
+}

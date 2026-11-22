@@ -21,6 +21,7 @@ Rectangle {
 
   function clear() { input.clear(); }
   function focusInput() { input.forceActiveFocus(); }
+  function blurInput() { input.focus = false; }
 
   readonly property real shelf: attachments.length > 0 ? 54 : 0
   height: Math.min(input.contentHeight + 34, 220) + shelf

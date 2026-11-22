@@ -77,6 +77,8 @@ Row {
   Text {
     id: said
     anchors.verticalCenter: parent.verticalCenter
+    width: Math.min(implicitWidth, Math.max(0, masthead.width - x - (meanwhileBox.visible ? meanwhileBox.width + masthead.spacing : 0)))
+    elide: Text.ElideRight
     text: (!masthead.linked ? (masthead.refusals >= 2 ? "pairing needed: check this device's token" : "reconnecting to " + masthead.host + "…") : masthead.status) + (masthead.quiet ? " · do not disturb" : "") + (masthead.linked && masthead.detail.length > 0 ? (masthead.detailOpen ? "  ▴" : "  ▾") : "")
     font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
     color: masthead.linked && !masthead.detail.some(f => f.needsYou) ? Theme.muted : Theme.accent
@@ -124,6 +126,7 @@ Row {
   }
   // Background briefs: a small inked "meanwhile" card, the comic's cutaway to work going on elsewhere.
   Rectangle {
+    id: meanwhileBox
     visible: masthead.linked && masthead.background > 0
     anchors.verticalCenter: parent.verticalCenter
     width: meanwhile.implicitWidth + 20

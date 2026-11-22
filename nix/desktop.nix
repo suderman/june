@@ -58,9 +58,9 @@ in
         look) exec qs -p "$config" ipc call june look "''${2:-flip}" ;;
         quiet) exec qs -p "$config" ipc call june quiet "''${2:-flip}" ;;
         scheme) exec qs -p "$config" ipc call june scheme "''${2:-system}" ;;
-        tab) exec qs -p "$config" ipc call june tab "''${2:-strip}" ;;
+        tab) exec qs -p "$config" ipc call june tab "''${2:-chat}" ;;
         *)
-          echo "usage: june-desktop [cycle|toggle|open|close|mini|window|refresh|light HOUR|live on/off|look comic/console|quiet on/off|scheme system/dark/light|tab strip/agents/projects]" >&2
+          echo "usage: june-desktop [cycle|toggle|open|close|mini|window|refresh|light HOUR|live on/off|look comic/console|quiet on/off|scheme system/dark/light|tab chat/agents/projects]" >&2
           exit 2
           ;;
       esac
