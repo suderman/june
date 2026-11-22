@@ -80,10 +80,13 @@ private enum class Tab(val label: String, val page: Int?, val app: String?) {
     Editor("editor", null, "org.gnu.emacs"),
 }
 
+/** Height of the bottom tab bar, shared with Sheet so content rests above it until the keyboard rises past it. */
+val TabsHeight = 58.dp
+
 @Composable
 fun Tabs(page: Int, needs: Int, palette: Look.Palette, onPage: (Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(TabsHeight).padding(top = 2.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         for (tab in Tab.entries) {
             val on = tab.page == page
             Box(
@@ -155,16 +158,20 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.tabIcon(tab: Tab, o
             box(4f, 4f, 20f, 20f, 4f, ink, on)
             stroke(if (on) page else ink, 8f, 12.3f, 10.9f, 15.2f, 16.2f, 9.2f)
         }
-        // A pen over a sheet of paper.
+        // A pen over a square sheet of paper, matching the boxy weight of the other four icons.
         Tab.Editor -> {
-            box(3.5f, 2.5f, 15.5f, 21.5f, 2f, ink, false)
-            stroke(ink, 6.5f, 7f, 12.5f, 7f)
-            stroke(ink, 6.5f, 10.5f, 11f, 10.5f)
-            stroke(ink, 6.5f, 14f, 9f, 14f)
-            val pen = Path().apply { moveTo(19.8f, 6.3f); lineTo(22.2f, 8.7f); lineTo(15.84f, 15.06f); lineTo(12.5f, 16f); lineTo(13.44f, 12.66f); close() }
+            box(3.5f, 4.5f, 19f, 20f, 3.5f, ink, false)
+            stroke(ink, 6.8f, 8.8f, 11.2f, 8.8f)
+            stroke(ink, 6.8f, 12.4f, 9.5f, 12.4f)
+            stroke(ink, 6.8f, 16f, 15.7f, 16f)
+            val pen = Path().apply {
+                moveTo(19.14f, 4.04f); lineTo(21.26f, 6.16f)
+                lineTo(15.46f, 11.96f); lineTo(12.3f, 13f); lineTo(13.34f, 9.84f); close()
+            }
             drawPath(pen, page)
+            drawPath(pen, page, style = Stroke(3.6f, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
             drawPath(pen, ink, style = line)
-            stroke(ink, 18.03f, 8.07f, 20.43f, 10.47f)
+            stroke(ink, 17.94f, 5.24f, 20.06f, 7.36f)
         }
     }
 }

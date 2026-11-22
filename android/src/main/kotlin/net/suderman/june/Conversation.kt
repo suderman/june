@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -41,10 +40,13 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -245,8 +247,28 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     // screen opened counts, and each only once.
     var answered by remember { androidx.compose.runtime.mutableIntStateOf(summoned) }
     LaunchedEffect(summoned) { if (summoned != answered) pager.scrollToPage(1) }
+    val ready = decisions
+    // The boards stay while the link comes back after June was in the background, so their place is kept.
+    val boards = !fromSheet && ready != null && (link.status is LinkStatus.Linked || link.agenda != null || link.agents != null)
+    val ime = androidx.compose.foundation.layout.WindowInsets.ime
+    val nav = androidx.compose.foundation.layout.WindowInsets.navigationBars
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides links) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding().imePadding()) {
+    Box(Modifier.fillMaxSize().padding(horizontal = 16.dp).navigationBarsPadding()) {
+        // The tab bar stays anchored at the bottom so the keyboard slides over it going up and reveals it going down.
+        if (boards) {
+            val needs = link.agents?.optJSONArray("needs")?.length() ?: 0
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                Tabs(pager.currentPage, needs, palette) { page -> pages.launch { pager.animateScrollToPage(page) } }
+            }
+        }
+        Column(
+            Modifier.fillMaxWidth().layout { measurable, constraints ->
+                val pad = maxOf(if (boards) TabsHeight.roundToPx() else 0, (ime.getBottom(this) - nav.getBottom(this)).coerceAtLeast(0))
+                val h = (constraints.maxHeight - pad).coerceAtLeast(0)
+                val placeable = measurable.measure(constraints.copy(minHeight = h, maxHeight = h))
+                layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+            },
+        ) {
         Column(Modifier.fillMaxWidth().then(header ?: Modifier)) {
         if (header != null) Box(
             Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp).size(width = 36.dp, height = 4.dp)
@@ -296,7 +318,6 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                 }
             }
         }
-        val ready = decisions
         // The strip, with its day picker above it, which is the strip's alone.
         val stripPage: @Composable (Modifier) -> Unit = { modifier ->
             Column(modifier) {
@@ -314,8 +335,6 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                 }
             }
         }
-        // The boards stay while the link comes back after June was in the background, so their place is kept.
-        val boards = !fromSheet && ready != null && (link.status is LinkStatus.Linked || link.agenda != null || link.agents != null)
         // The words to send belong to the chat alone. Leaving it, or putting the keyboard away, lets go of the field.
         val chat = !boards || pager.currentPage == 1
         val focus = androidx.compose.ui.platform.LocalFocusManager.current
@@ -401,7 +420,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                 Modifier.weight(1f).focusRequester(words).onPreviewKeyEvent { e ->
                     if (e.key != Key.Enter && e.key != Key.NumPadEnter) return@onPreviewKeyEvent false
                     if (e.type == KeyEventType.KeyDown) {
-                        if (e.isAltPressed) {
+                        if (e.isAltPressed || e.isShiftPressed) {
                             val at = field.selection
                             val text = field.text.replaceRange(at.min, at.max, "\n")
                             field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(at.min + 1))
@@ -445,11 +464,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
             if (link.state.running || link.state.compacting) OutlinedButton(onClick = link::stop) { Text("Stop") }
         }
         }
-        // The bar of tabs, away while the keyboard is up, as Muse puts it away.
-        if (boards && !typing) {
-            val needs = link.agents?.optJSONArray("needs")?.length() ?: 0
-            Tabs(pager.currentPage, needs, palette) { page -> pages.launch { pager.animateScrollToPage(page) } }
-        }
+    }
     }
     }
 }
