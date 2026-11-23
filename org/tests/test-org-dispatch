@@ -755,7 +755,7 @@ cat >"$fixture/launch-tests.el" <<'EOF'
           (should (equal (org-dispatch--command "claude") "claude-auto"))
           (should-not (org-dispatch--command "pi")))
       (delete-file org-dispatch-config)))
-  (dolist (json '("null" "[]" "false" "\"claude-auto\"" "{\"codex\":\"codex\"}"
+  (dolist (json '("null" "[]" "false" "\"claude-auto\"" "{\"gemini\":\"gemini\"}"
                   "{\"claude\":1}" "{\"claude\":\"\"}" "{\"claude\":\"./claude\"}"
                   "{\"claude\":\"claude-auto --explain\"}" "{\"claude\":\"claude;true\"}"
                   "{\"claude\":\"--help\"}" "{\"claude\":\"/\"}" "{\"claude\":\"claude\\n\"}"))
@@ -854,8 +854,8 @@ cat >"$fixture/launch-tests.el" <<'EOF'
            (should (equal (plist-get one :roster) '("bolt" "sprocket")))
            (should (equal (mapcar (lambda (task) (plist-get task :agent)) chosen) '("claude" "claude")))
            (should (equal (split-string (with-temp-buffer (insert-file-contents calls) (buffer-string)) "\n" t)
-                          '("agents pick --json --host kit --harnesses pi,claude bolt sprocket"
-                            "agents pick --json --host kit --harnesses pi,claude --except bolt bolt sprocket")))
+                          '("agents pick --json --host kit --harnesses pi,claude,codex,agy bolt sprocket"
+                            "agents pick --json --host kit --harnesses pi,claude,codex,agy --except bolt bolt sprocket")))
            (should (org-dispatch--launch (car chosen)))
            (let ((run (test-run-call)) (argv (test-argv)))
              (should (equal (car argv) "claude"))
@@ -900,6 +900,70 @@ cat >"$fixture/launch-tests.el" <<'EOF'
       (dolist (file (file-expand-wildcards (expand-file-name "roster-*.org" org-dispatch-root)))
         (delete-file file))
       (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id))))))
+
+(defun test-fake-june (bin card)
+  "A june in BIN whose pick always answers with roster CARD, a JSON object string."
+  (let ((june (expand-file-name "june" bin)))
+    (with-temp-file june
+      (insert "#!/bin/sh\necho '{\"chosen\":\"x\",\"why\":\"first\",\"card\":" card "}'\n"))
+    (set-file-modes june #o755)
+    june))
+
+(ert-deftest codex-and-antigravity-agents-launch-and-link-the-session-they-start ()
+  ;; Neither takes a session ID, so the dispatcher finds the one each starts in
+  ;; the task's directory, relabels the terminal with it and links it in the task.
+  (let ((bin (make-temp-file "june-bin" t)))
+    (unwind-protect
+        (pcase-dolist (`(,n ,card ,expected ,make-session)
+                       `((5 "{\"name\":\"Rivet\",\"slug\":\"rivet\",\"host\":\"kit\",\"harness\":\"codex\",\"model\":\"gpt-6.2-sol\",\"effort\":\"medium\",\"instructions\":\"Keep diffs tight.\",\"problems\":[]}"
+                            ("codex" "--dangerously-bypass-approvals-and-sandbox" "--model" "gpt-6.2-sol"
+                             "-c" "model_reasoning_effort=\"medium\"" "-c" "developer_instructions=\"Keep diffs tight.\"")
+                            ,(lambda (dir)
+                               (let ((file (expand-file-name "~/.codex/sessions/2026/11/23/rollout-2026-11-23T10-00-00-0000aaaa-0000-0000-0000-000000000001.jsonl")))
+                                 (make-directory (file-name-directory file) t)
+                                 (write-region (concat (json-serialize `((type . "session_meta") (payload . ((id . "0000aaaa-0000-0000-0000-000000000001") (cwd . ,dir))))) "\n") nil file)
+                                 "0000aaaa-0000-0000-0000-000000000001")))
+                         (6 "{\"name\":\"Gyro\",\"slug\":\"gyro\",\"host\":\"kit\",\"harness\":\"agy\",\"model\":\"gemini-4-neon\",\"effort\":\"high\",\"instructions\":\"Cite sources.\",\"problems\":[]}"
+                            ("agy" "--model" "gemini-4-neon" "--effort" "high" "--prompt-interactive")
+                            ,(lambda (dir)
+                               (let ((file (expand-file-name "~/.gemini/antigravity-cli/conversations/0000bbbb-0000-0000-0000-000000000002.db")))
+                                 (make-directory (file-name-directory file) t)
+                                 (write-region (concat "SQLite format 3\0workspace " dir "\0") nil file)
+                                 "0000bbbb-0000-0000-0000-000000000002")))))
+          (let ((org-dispatch-june (test-fake-june bin card)))
+            (test-with-hc
+             (let* ((task (test-roster-task n "x"))
+                    (session (funcall make-session (plist-get task :dir)))
+                    (chosen (car (org-dispatch--eligible (list task) nil))))
+               (should (org-dispatch--launch chosen))
+               (let ((argv (test-argv)))
+                 (should (equal (seq-take argv (length expected)) expected))
+                 (should-not (member "--name" argv))
+                 (should-not (member "--session-id" argv))
+                 (when (equal (car argv) "agy")
+                   (should (string-prefix-p "Cite sources.\n\n" (car (last argv))))))
+               (should (seq-find (lambda (call) (equal call (list "label" (plist-get (car (org-dispatch--states)) :terminal)
+                                                                  (concat "org.session=" session))))
+                                 test-calls))
+               (should (equal (plist-get (car (org-dispatch--states)) :session) session))
+               (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                                   (lambda ()
+                                     (should (string-search (format "herdr:kit/%s:%s" (car expected) session)
+                                                            (buffer-substring-no-properties (point) (point-max))))))
+               (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id)))))))
+      (delete-directory bin t)
+      (dolist (dir '("~/.codex" "~/.gemini")) (delete-directory (expand-file-name dir) t))
+      (dolist (file (file-expand-wildcards (expand-file-name "roster-*.org" org-dispatch-root)))
+        (delete-file file)))))
+
+(ert-deftest a-codex-session-resumes-through-its-subcommand ()
+  (test-with-hc
+   (let* ((task (plist-put (plist-put (copy-sequence (test-task "codex" t)) :agent "codex") :card nil))
+          (argv (org-dispatch--agent-argv task "codex" "0000aaaa-0000-0000-0000-000000000001" nil "Continue.")))
+     (should (equal argv '("codex" "resume" "--dangerously-bypass-approvals-and-sandbox"
+                           "0000aaaa-0000-0000-0000-000000000001" "Continue.")))
+     (should (equal (org-dispatch--agent-argv (plist-put task :agent "agy") "agy" "c-1" nil "Continue.")
+                    '("agy" "--conversation" "c-1" "--prompt-interactive" "Continue."))))))
 
 (ert-deftest roster-tasks-wait-with-the-reason-june-gives ()
   (let* ((bin (make-temp-file "june-bin" t))

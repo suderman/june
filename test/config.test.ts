@@ -136,7 +136,7 @@ test("dispatch commands select executables, not agent types or shell snippets", 
 	assert.deepEqual((await config({ claude: "claude-auto", pi: "/opt/workers/pi" })).dispatch.commands,
 		{ claude: "claude-auto", pi: "/opt/workers/pi" });
 	assert.deepEqual((await config({})).dispatch.commands, {});
-	for (const commands of [null, [], "claude-auto", { codex: "codex" }, { claude: 1 }, { claude: "" },
+	for (const commands of [null, [], "claude-auto", { gemini: "gemini" }, { claude: 1 }, { claude: "" },
 		{ claude: "claude-auto --explain" }, { claude: "claude;true" }, { claude: "./claude" },
 		{ claude: "--help" }, { claude: "/" }, { claude: "claude\n" }]) {
 		await assert.rejects(config(commands), /dispatch\.commands must map/);

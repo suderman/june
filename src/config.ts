@@ -70,7 +70,7 @@ export type Config = {
 		readonly agent?: string;
 		readonly agents?: readonly string[];
 		/** Executable overrides for AUTO workers, resolved on the launching host. */
-		readonly commands?: Readonly<Partial<Record<"pi" | "claude", string>>>;
+		readonly commands?: Readonly<Partial<Record<"pi" | "claude" | "codex" | "agy", string>>>;
 		readonly settle?: number;
 		readonly improve?: { readonly file: string; readonly agent?: string; readonly host?: string };
 		/** Roster agents (ROSTER.org) a task with no AGENT, AGENTS or agent tag goes to, in order; read by the dispatcher. */
@@ -336,9 +336,9 @@ function dispatch(given: Partial<Config["dispatch"]> | undefined): Config["dispa
 		throw new Error("dispatch.roster must be a list of roster agent names, such as [\"bolt\", \"sprocket\"]");
 	const commands = given?.commands;
 	if (commands !== undefined && (!commands || typeof commands !== "object" || Array.isArray(commands) ||
-		Object.entries(commands).some(([agent, command]) => !["pi", "claude"].includes(agent) ||
+		Object.entries(commands).some(([agent, command]) => !["pi", "claude", "codex", "agy"].includes(agent) ||
 			typeof command !== "string" || !/^(?:[A-Za-z0-9_][A-Za-z0-9_.+-]*|\/[A-Za-z0-9_./+-]+)$/.test(command))))
-		throw new Error("dispatch.commands must map pi or claude to executable names or absolute paths, without arguments");
+		throw new Error("dispatch.commands must map pi, claude, codex or agy to executable names or absolute paths, without arguments");
 	const improve = given?.improve;
 	if (improve !== undefined) {
 		if (!(typeof improve?.file === "string" && improve.file.endsWith(".org"))) throw new Error("dispatch.improve.file must be an Org file");

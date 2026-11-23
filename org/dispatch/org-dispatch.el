@@ -40,9 +40,9 @@
 (defvar org-dispatch-hosts
   (split-string (org-dispatch--env "ORG_DISPATCH_HOSTS" "kit cog lux")))
 (defvar org-dispatch-agents
-  (split-string (org-dispatch--env "ORG_DISPATCH_AGENTS" "pi claude"))
+  (split-string (org-dispatch--env "ORG_DISPATCH_AGENTS" "pi claude codex agy"))
   "Agents a task may name in AGENT or a tag.")
-(defconst org-dispatch-launchable '("pi" "claude")
+(defconst org-dispatch-launchable '("pi" "claude" "codex" "agy")
   "Agents this dispatcher can start; a task for another waits until it can.")
 (defvar org-dispatch-config
   (expand-file-name "config.json"
@@ -611,7 +611,7 @@ has none of FALLBACK's type. A nil FALLBACK returns the untyped value."
        (lambda (kind command)
          (unless (and (member kind org-dispatch-launchable) (stringp command)
                       (string-match-p "\\`\\(?:[A-Za-z0-9_][A-Za-z0-9_.+-]*\\|/[A-Za-z0-9_./+-]+\\)\\'" command))
-           (error "dispatch.commands must map pi or claude to executable names or absolute paths, without arguments")))
+           (error "dispatch.commands must map pi, claude, codex or agy to executable names or absolute paths, without arguments")))
        commands)
       (gethash agent commands))))
 
@@ -1373,31 +1373,105 @@ hc refuses to type into a blocked dialog."
 RESUME names the session to continue; nil starts SESSION fresh."
   (let ((agent (plist-get task :agent))
         (label (truncate-string-to-width (concat "auto · " (plist-get task :heading)) 60)))
-    (append
-     (list command)
-     (if (equal agent "claude")
-         ;; CLAUDE_CODE_DISABLE_TERMINAL_TITLE also turns off Claude's OSC 7501
-         ;; status, which the watcher needs; clear it for this worker only.
-         (list "--dangerously-skip-permissions"
-               "--settings" "{\"env\":{\"CLAUDE_CODE_DISABLE_TERMINAL_TITLE\":\"\"}}")
-       (list "--no-approve"))
-     (list "--name" label)
-     (when (plist-get task :model) (list "--model" (plist-get task :model)))
-     (org-dispatch--card-flags agent (plist-get task :card))
-     (cond ((and resume (equal agent "claude")) (list "--resume" resume))
-           (resume (list "--session" (or (org-dispatch--session-file resume) resume)))
-           (t (list "--session-id" session)))
-     (list prompt))))
+    (pcase agent
+      ;; Codex resumes through a subcommand, its options after it, and names
+      ;; its own sessions, found once it starts (org-dispatch--find-session).
+      ("codex"
+       (append (list command) (when resume (list "resume"))
+               (list "--dangerously-bypass-approvals-and-sandbox")
+               (when (plist-get task :model) (list "--model" (plist-get task :model)))
+               (org-dispatch--card-flags agent (plist-get task :card))
+               (when resume (list resume))
+               (list prompt)))
+      ;; Antigravity's wrapper skips permissions already; it has no
+      ;; instructions flag, so a card's instructions lead the prompt.
+      ("agy"
+       (let ((text (alist-get 'instructions (plist-get task :card))))
+         (append (list command)
+                 (when (plist-get task :model) (list "--model" (plist-get task :model)))
+                 (org-dispatch--card-flags agent (plist-get task :card))
+                 (when resume (list "--conversation" resume))
+                 (list "--prompt-interactive"
+                       (if (and text (not (string-empty-p text))) (concat text "\n\n" prompt) prompt)))))
+      (_
+       (append
+        (list command)
+        (if (equal agent "claude")
+            ;; CLAUDE_CODE_DISABLE_TERMINAL_TITLE also turns off Claude's OSC 7501
+            ;; status, which the watcher needs; clear it for this worker only.
+            (list "--dangerously-skip-permissions"
+                  "--settings" "{\"env\":{\"CLAUDE_CODE_DISABLE_TERMINAL_TITLE\":\"\"}}")
+          (list "--no-approve"))
+        (list "--name" label)
+        (when (plist-get task :model) (list "--model" (plist-get task :model)))
+        (org-dispatch--card-flags agent (plist-get task :card))
+        (cond ((and resume (equal agent "claude")) (list "--resume" resume))
+              (resume (list "--session" (or (org-dispatch--session-file resume) resume)))
+              (t (list "--session-id" session)))
+        (list prompt))))))
 
 (defun org-dispatch--card-flags (agent card)
   "AGENT's flags for roster CARD's effort and instructions.
 The card's model comes through the task's :model."
   (let ((effort (alist-get 'effort card))
         (instructions (alist-get 'instructions card)))
-    (append
-     (when effort (list (if (equal agent "pi") "--thinking" "--effort") effort))
-     (when (and instructions (not (string-empty-p instructions)))
-       (list "--append-system-prompt" instructions)))))
+    (pcase agent
+      ("codex"
+       (append
+        (when effort (list "-c" (format "model_reasoning_effort=%S" (if (equal effort "max") "xhigh" effort))))
+        (when (and instructions (not (string-empty-p instructions)))
+          (list "-c" (concat "developer_instructions=" (json-serialize instructions))))))
+      ;; Its instructions lead the prompt instead.
+      ("agy" (when effort (list "--effort" effort)))
+      (_
+       (append
+        (when effort (list (if (equal agent "pi") "--thinking" "--effort") effort))
+        (when (and instructions (not (string-empty-p instructions)))
+          (list "--append-system-prompt" instructions)))))))
+
+(defun org-dispatch--find-session (agent dir since)
+  "The session AGENT started in DIR after SINCE (float time), or nil.
+Codex and Antigravity pick their own IDs: Codex names its working directory
+in each session log's first line; an Antigravity conversation database
+mentions it."
+  (pcase agent
+    ("codex"
+     (seq-some (lambda (file)
+                 (and (time-less-p (seconds-to-time (- since 5)) (file-attribute-modification-time (file-attributes file)))
+                      (with-temp-buffer
+                        (insert-file-contents file nil 0 65536)
+                        (goto-char (point-min))
+                        (let ((meta (ignore-errors
+                                      (json-parse-string (buffer-substring (point) (line-end-position))
+                                                         :object-type 'alist))))
+                          (and (equal (alist-get 'cwd (alist-get 'payload meta)) dir)
+                               (alist-get 'id (alist-get 'payload meta)))))))
+               (sort (file-expand-wildcards (expand-file-name "~/.codex/sessions/*/*/*/rollout-*.jsonl"))
+                     #'file-newer-than-file-p)))
+    ("agy"
+     (seq-some (lambda (file)
+                 (and (time-less-p (seconds-to-time (- since 5)) (file-attribute-modification-time (file-attributes file)))
+                      (with-temp-buffer
+                        (set-buffer-multibyte nil)
+                        (insert-file-contents-literally file)
+                        (when (file-exists-p (concat file "-wal")) (insert-file-contents-literally (concat file "-wal")))
+                        (search-forward (encode-coding-string dir 'utf-8) nil t))
+                      (file-name-base file)))
+               (sort (file-expand-wildcards (expand-file-name "~/.gemini/antigravity-cli/conversations/*.db"))
+                     #'file-newer-than-file-p)))))
+
+(defun org-dispatch--await-session (state agent dir since)
+  "STATE with the session AGENT started in DIR, once it shows within 30 s.
+The terminal is relabelled with it; STATE is unchanged when none shows."
+  (let ((deadline (+ (float-time) 30)) found)
+    (while (and (not (setq found (org-dispatch--find-session agent dir since)))
+                (< (float-time) deadline))
+      (sleep-for 1))
+    (if (not found)
+        (progn (org-dispatch--log "%s at %s: no session found; the task restarts fresh if resumed" agent (plist-get state :terminal))
+               state)
+      (org-dispatch--hc "label" (plist-get state :terminal) (concat "org.session=" found))
+      (plist-put state :session found))))
 
 (defun org-dispatch--await-start (address agent)
   "Wait until the worker at ADDRESS reports a status, or fail.
@@ -1498,7 +1572,10 @@ is accepted as unknown, which the watcher never mistakes for idle."
                   (unless address (error "hc run returned no terminal address"))
                   (setq state (plist-put state :terminal address))
                   (org-dispatch--save-state state)
-                  (org-dispatch--await-start address agent)))
+                  (org-dispatch--await-start address agent)
+                  (when (and (member agent '("codex" "agy")) (not (and resume (not fresh))))
+                    (setq state (org-dispatch--await-session state agent (plist-get task :dir) (plist-get state :started)))
+                    (org-dispatch--save-state state))))
               (org-dispatch--claim task address (plist-get state :session))
               (setq state (plist-put state :status "running"))
               (org-dispatch--save-state state)
@@ -1844,7 +1921,9 @@ only files whose text contains one of those strings."
   (pcase (car session)
     ("pi" (org-dispatch--session-file (cdr session)))
     ("claude" (or (org-dispatch--claude-launcher (cdr session))
-                  (org-dispatch--shared-claude-session-p (cdr session))))))
+                  (org-dispatch--shared-claude-session-p (cdr session))))
+    ("codex" (file-expand-wildcards (format (expand-file-name "~/.codex/sessions/*/*/*/rollout-*-%s.jsonl") (cdr session))))
+    ("agy" (file-exists-p (expand-file-name (concat (cdr session) ".db") "~/.gemini/antigravity-cli/conversations")))))
 
 (defun org-dispatch--retire-file ()
   (expand-file-name "retire.json" org-dispatch-state-dir))
