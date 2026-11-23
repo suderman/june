@@ -31,6 +31,8 @@ Several subscriptions per provider become numbered logins on each host: =claude1
 
 Each login has a folder under =~/.local/state/june/accounts= that keeps only its own sign-in files and links the rest, sessions included, to the harness's usual home. A session started on one account therefore resumes on another. =june accounts apply= makes the folders and writes the wrappers into =~/.local/bin=: a numbered one per login, and one per harness name that asks =june accounts pick= for the account with quota to spare. A numbered wrapper runs the launcher the host hands June at =~/.local/libexec/june/<harness>=, or else the first command of that name on PATH. Set =programs.june.accounts.enable= in Home Manager on hosts that use this, so harness modules hand their launchers over instead of holding the names in =~/.local/bin=, and so the links come back after a reboot; persist =~/.local/state/june=.
 
+Each launch trusts the folder it starts in first, as the harness would record a "yes, trust this folder": the Git checkout's root (and a worktree's main checkout), or the folder itself outside Git, in Claude's per-login =.claude.json=, Codex's =config.toml=, Pi's =trust.json= and Antigravity's =trustedWorkspaces=. These harnesses ask again inside a repository even when a parent folder is trusted, so no folder is trusted ahead of time; =june accounts trust NAME [DIR]= does it by hand.
+
 On a new host: =agents apply=, =june accounts apply=, =june accounts login=. Sign in to each account in a private browser window. =june quota= reads each account's usage through one of its logins, renewing a lapsed Claude or ChatGPT token only while no process uses that login.
 
 * Attach images

@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { accountsConfig, anthropicWindows, apply, autoWrapper, googleWindows, inUse, loginCommand, openaiWindows, parseAccountsOrg, places, quotas, rank, refresh, slots, status } from "../src/accounts.ts";
+import { accountsConfig, anthropicWindows, apply, autoWrapper, googleWindows, inUse, loginCommand, openaiWindows, parseAccountsOrg, places, projectRoots, quotas, rank, refresh, slots, status, trust } from "../src/accounts.ts";
 import { tempDir } from "./helpers.ts";
 
 const jwt = (payload: object) => `x.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.y`;
@@ -278,4 +278,63 @@ test("a numbered wrapper runs the launcher the host hands over in libexec, and p
 	const configured = apply(accountsConfig({ pi: 1, commands: { pi: "pi-other" } }), p);
 	assert.ok(configured.wrappers.includes("pi1"));
 	assert.doesNotMatch(readFileSync(join(p.bin, "pi1"), "utf8"), /libexec/);
+});
+
+test("a project's trust root is its checkout, and a worktree's main checkout too; elsewhere the folder itself", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const repo = join(tmp.dir, "repo");
+	const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-C", repo, ...args], { stdio: "pipe" });
+	mkdirSync(join(repo, "sub"), { recursive: true });
+	git("init", "-q", "-b", "main");
+	git("commit", "-q", "--allow-empty", "-m", "x");
+	git("worktree", "add", "-q", "-b", "other", join(tmp.dir, "wt"));
+	assert.deepEqual(await projectRoots(join(repo, "sub")), [repo]);
+	assert.deepEqual(await projectRoots(join(tmp.dir, "wt")), [repo, join(tmp.dir, "wt")]);
+	mkdirSync(join(tmp.dir, "plain"));
+	assert.deepEqual(await projectRoots(join(tmp.dir, "plain")), [join(tmp.dir, "plain")]);
+});
+
+test("trust records a root the way each harness records its own yes, once", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const home = tmp.dir;
+	const p = places(home);
+	mkdirSync(join(home, ".claude"), { recursive: true });
+	mkdirSync(join(home, ".codex"), { recursive: true });
+	writeFileSync(join(home, ".codex/config.toml"), 'model_reasoning_effort = "high"\n');
+	mkdirSync(join(home, ".pi/agent"), { recursive: true });
+	writeFileSync(join(home, ".pi/agent/trust.json"), JSON.stringify({ "/a": true }));
+	mkdirSync(join(home, ".gemini/antigravity-cli"), { recursive: true });
+	writeFileSync(join(home, ".gemini/antigravity-cli/settings.json"), JSON.stringify({ toolPermission: "always-proceed", trustedWorkspaces: ["/a"] }));
+	const config = accountsConfig({ claude: 1, codex: 1, pi: 1, agy: 1 });
+	apply(config, p);
+	writeFileSync(join(p.root, "claude1/.claude.json"), JSON.stringify({ oauthAccount: { emailAddress: "a@x" }, projects: { "/r": { allowedTools: [] } } }));
+	const [claude1, codex1, pi1, agy1] = slots(config, p);
+	for (const slot of [claude1!, codex1!, pi1!, agy1!]) assert.deepEqual(trust(slot, ["/r"], p), ["/r"], slot.name);
+	for (const slot of [claude1!, codex1!, pi1!, agy1!]) assert.deepEqual(trust(slot, ["/r"], p), [], `${slot.name} again`);
+	const claude = JSON.parse(readFileSync(join(p.root, "claude1/.claude.json"), "utf8"));
+	assert.deepEqual([claude.oauthAccount.emailAddress, claude.projects["/r"]], ["a@x", { allowedTools: [], hasTrustDialogAccepted: true }]);
+	assert.equal(readFileSync(join(home, ".codex/config.toml"), "utf8"), 'model_reasoning_effort = "high"\n\n[projects."/r"]\ntrust_level = "trusted"\n');
+	assert.ok(lstatSync(join(p.root, "codex1/config.toml")).isSymbolicLink(), "the shared config stays shared");
+	assert.deepEqual(JSON.parse(readFileSync(join(home, ".pi/agent/trust.json"), "utf8")), { "/a": true, "/r": true });
+	assert.deepEqual(JSON.parse(readFileSync(join(home, ".gemini/antigravity-cli/settings.json"), "utf8")), { toolPermission: "always-proceed", trustedWorkspaces: ["/a", "/r"] });
+});
+
+test("wrappers trust the folder they start in: the plain name through pick, a numbered one itself", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const home = tmp.dir;
+	const p = places(home);
+	mkdirSync(join(home, ".codex"), { recursive: true });
+	mkdirSync(join(home, "real"));
+	const calls = join(home, "calls");
+	writeFileSync(join(home, "real", "codex"), "#!/bin/sh\necho ran\n");
+	writeFileSync(join(home, "real", "june"), `#!/bin/sh\necho "$*" >> ${calls}\necho codex2\n`);
+	for (const f of ["codex", "june"]) chmodSync(join(home, "real", f), 0o755);
+	apply(accountsConfig({ codex: 2 }), p);
+	const env = { HOME: home, PATH: `${p.links}:${join(home, "real")}:/run/current-system/sw/bin:/usr/bin:/bin` };
+	execFileSync("codex", [], { env });
+	execFileSync("codex1", [], { env });
+	assert.deepEqual(readFileSync(calls, "utf8").trim().split("\n"), ["accounts pick codex --trust", "accounts trust codex1"]);
 });

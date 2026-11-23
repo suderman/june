@@ -5,7 +5,7 @@
 // have how many accounts is `accounts` in config.json; who each number is, and the address each login must be, is the
 // private ACCOUNTS.org table beside SOUL.org. Quota is read from each provider's usage endpoint with a login's own token,
 // as CLIProxyAPI's sampler did; tokens are read, never refreshed or printed.
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { type Run, runProcess } from "./tools/herdr.ts";
@@ -142,6 +142,9 @@ export function wrapper(slot: Slot, command: string, p: Places = places(), hando
 		"#!/bin/sh",
 		`# ${slot.name}: ${slot.harness} on ${PROVIDERS[slot.provider]} account ${slot.number}. Written by \`june accounts apply\`; changes are overwritten.`,
 		`export JUNE_ACCOUNT=${slot.name}`,
+		"# Trust the folder this starts in, as the harness would after asking; the plain name has done it already.",
+		`[ -n "\${JUNE_TRUSTED-}" ] || june accounts trust ${slot.name} >/dev/null 2>&1 || true`,
+		"unset JUNE_TRUSTED",
 		...(spec.env && slot.dir
 			? [`export ${spec.env}="${rel(slot.dir)}"`, `[ -d "$${spec.env}" ] || { echo "${slot.name}: no account folder; run june accounts apply" >&2; exit 1; }`]
 			: []),
@@ -270,7 +273,7 @@ export function autoWrapper(harness: HarnessName, accounts: readonly Slot[], p: 
 		lines.push(
 			`case "\${1-}" in ${SIGN_IN[harness].join("|")}) echo "${harness} $1 acts on one login; use ${names}" >&2; exit 2 ;; esac`,
 		);
-	if (accounts.length > 1) lines.push(`slot=$(june accounts pick ${harness}) || exit 1`, `exec "${rel(p.bin)}/$slot" "$@"`, "");
+	if (accounts.length > 1) lines.push(`slot=$(june accounts pick ${harness} --trust) || exit 1`, `JUNE_TRUSTED=1 exec "${rel(p.bin)}/$slot" "$@"`, "");
 	else lines.push(`exec "${rel(p.bin)}/${accounts[0]!.name}" "$@"`, "");
 	return lines.join("\n");
 }
@@ -702,4 +705,64 @@ export function rank(accounts: readonly { slot: Slot; quota?: Quota }[], now = D
 	return out
 		.sort((a, b) => a.tier - b.tier || b.score - a.score || a.resets - b.resets || a.slot.localeCompare(b.slot, undefined, { numeric: true }))
 		.map(({ tier: _, resets: __, ...r }) => r);
+}
+
+/**
+ * The folders a harness keys project trust on for DIR: its Git checkout's root, and for a worktree its main checkout's
+ * too, since Claude and Codex trust a worktree through the main one; DIR itself outside Git. Codex, Claude and Antigravity
+ * ask again inside a repository even when a parent folder is trusted, so each launch trusts its own root.
+ */
+export async function projectRoots(dir: string, run: Run = runProcess): Promise<string[]> {
+	try {
+		const [top, common] = (await run(["git", "-C", dir, "rev-parse", "--show-toplevel", "--git-common-dir"], 5_000)).trim().split("\n");
+		if (!top) return [dir];
+		const commonDir = common?.startsWith("/") ? common : join(dir, common ?? ".git");
+		const main = commonDir.endsWith("/.git") ? dirname(commonDir) : top;
+		return [...new Set([main, top])];
+	} catch {
+		return [dir];
+	}
+}
+
+/** Record `roots` as trusted in `slot`'s harness, the way it records a "yes, trust this folder" itself. Returns roots added. */
+export function trust(slot: Slot, roots: readonly string[], p: Places = places()): string[] {
+	const added: string[] = [];
+	const target = (file: string) => (existsSync(file) ? realpathSync(file) : file);
+	switch (slot.harness) {
+		case "claude": {
+			// Each Claude login keeps its own .claude.json, holding trust beside the sign-in.
+			const file = join(slot.dir!, ".claude.json");
+			const state = readJson(file) ?? {};
+			state.projects ??= {};
+			for (const root of roots) {
+				if (state.projects[root]?.hasTrustDialogAccepted === true) continue;
+				state.projects[root] = { ...state.projects[root], hasTrustDialogAccepted: true };
+				added.push(root);
+			}
+			if (added.length) writePrivate(file, state);
+			return added;
+		}
+		case "codex": {
+			const file = target(join(slot.dir!, "config.toml"));
+			const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+			const tables = roots.filter((root) => !text.includes(`[projects.${JSON.stringify(root)}]`));
+			if (tables.length) appendFileSync(file, tables.map((root) => `\n[projects.${JSON.stringify(root)}]\ntrust_level = "trusted"\n`).join(""));
+			return tables;
+		}
+		case "pi": {
+			const file = target(join(slot.dir!, "trust.json"));
+			const state = readJson(file) ?? {};
+			for (const root of roots) if (state[root] !== true) (state[root] = true), added.push(root);
+			if (added.length) writePrivate(file, state);
+			return added;
+		}
+		case "agy": {
+			const file = target(join(p.home, HARNESSES.agy.base, "antigravity-cli/settings.json"));
+			const state = readJson(file) ?? {};
+			const list: string[] = Array.isArray(state.trustedWorkspaces) ? state.trustedWorkspaces : [];
+			for (const root of roots) if (!list.includes(root)) list.push(root), added.push(root);
+			if (added.length) writePrivate(file, { ...state, trustedWorkspaces: list });
+			return added;
+		}
+	}
 }

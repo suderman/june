@@ -41,9 +41,11 @@ const USAGE = `usage:
                           Claude folder its trust, MCP servers and first-run answers (agents apply)
   june accounts login [NAME]
                           sign in each login this host lacks, or NAME, as the person ACCOUNTS.org names
-  june accounts pick HARNESS [--explain]
+  june accounts pick HARNESS [--explain] [--trust]
                           the login the plain claude, codex or pi runs: the account with quota to spare, five-hour
-                          allowances first; --explain shows every account's standing as JSON
+                          allowances first; --explain shows every account's standing as JSON; --trust also trusts here
+  june accounts trust NAME [DIR]
+                          trust DIR's project root (here by default) in login NAME's harness, which each launch does
   june quota [NAME] [--refresh] [--json]
                           each provider account's remaining quota, read with a login on this host (NAME: codex2,
                           openai2, ...); reads within two minutes reuse the last one unless --refresh
@@ -550,7 +552,9 @@ async function accountsCommand(p: ReturnType<typeof paths>, args: string[], json
 		return result.problems.length ? 1 : 0;
 	}
 	if (args[0] === "login" && args.length <= 2) return accountsLogin(a, config, p, args[1]);
-	if (args[0] === "pick" && (args.length === 2 || (args.length === 3 && args[2] === "--explain"))) return accountsPick(a, config, p, args[1]!, args[2] === "--explain");
+	if (args[0] === "pick" && args.length >= 2 && args.slice(2).every((x) => x === "--explain" || x === "--trust"))
+		return accountsPick(a, config, p, args[1]!, args.includes("--explain"), args.includes("--trust"));
+	if (args[0] === "trust" && (args.length === 2 || args.length === 3)) return accountsTrust(a, config, args[1]!, args[2] ?? process.cwd());
 	if (args.length) {
 		console.error(USAGE);
 		return 2;
@@ -632,7 +636,14 @@ async function currentQuotas(a: typeof import("./accounts.ts"), config: import("
  * `june accounts pick HARNESS [--explain]`: the login the plain-name wrapper runs, printed alone. Without fresh quota
  * for any account it falls back to the lowest-numbered login, so a session still starts.
  */
-async function accountsPick(a: typeof import("./accounts.ts"), config: import("./accounts.ts").AccountsConfig, p: ReturnType<typeof paths>, harness: string, explain: boolean): Promise<number> {
+async function accountsPick(
+	a: typeof import("./accounts.ts"),
+	config: import("./accounts.ts").AccountsConfig,
+	p: ReturnType<typeof paths>,
+	harness: string,
+	explain: boolean,
+	trustHere = false,
+): Promise<number> {
 	if (!(harness in a.HARNESSES) || !config.harnesses[harness as keyof typeof a.HARNESSES]) {
 		console.error(`june accounts pick: ${harness} has no accounts here`);
 		return 2;
@@ -646,10 +657,28 @@ async function accountsPick(a: typeof import("./accounts.ts"), config: import(".
 	const ranked = a.rank(rows.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })));
 	const chosen = ranked.find((r) => r.usable)?.slot;
 	const fallback = chosen ? undefined : rows[0]!.name;
+	if (trustHere) await accountsTrust(a, config, chosen ?? fallback!, process.cwd());
 	if (explain) console.log(JSON.stringify({ selected: chosen ?? fallback, fallback: !!fallback, accounts: ranked }));
 	else {
 		if (fallback) console.error(`june accounts pick: no account has fresh quota to spare (${ranked.map((r) => `${r.slot}: ${r.reason}`).join("; ")}); using ${fallback}`);
 		console.log(chosen ?? fallback);
+	}
+	return 0;
+}
+
+/** `june accounts trust NAME [DIR]`: trust DIR's project root (the working directory's by default) in login NAME's harness,
+ * as the harness records a "trust this folder" answer. The wrappers run it before each launch; it never stops one. */
+async function accountsTrust(a: typeof import("./accounts.ts"), config: import("./accounts.ts").AccountsConfig, name: string, dir: string): Promise<number> {
+	const slot = a.slots(config).find((s) => s.name === name);
+	if (!slot) {
+		console.error(`june accounts trust: ${name} is not a login here`);
+		return 2;
+	}
+	try {
+		for (const root of a.trust(slot, await a.projectRoots(dir))) console.error(`${name}: trusted ${root}`);
+	} catch (error) {
+		console.error(`june accounts trust: ${(error as Error).message}`);
+		return 1;
 	}
 	return 0;
 }
