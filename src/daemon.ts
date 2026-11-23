@@ -52,6 +52,7 @@ import { createShowExtension } from "./tools/show.ts";
 import { createHerdrExtension, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { Boards } from "./board.ts";
 import { TaskEdits } from "./board-edit.ts";
+import { editRosterFile } from "./roster.ts";
 import { OrgWorker } from "./org-worker.ts";
 import { Pushes } from "./push.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
@@ -324,7 +325,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const follows = pollFollowing(() => harness.commit((tx) => listFollowing(tx), BG), options.followingMs ?? 15_000, log);
 		// One long-running Emacs for the boards' agenda reads and edits; it starts on first use.
 		const orgWorker = new OrgWorker({ log, env: { ORG_EDIT_PROTECTED: protectedOf(config.org).join(":") } });
-		const boards = options.boards ?? new Boards({ config, herdr, seenFile: `${paths.state}/seen.json`, log, org: orgWorker });
+		const boards = options.boards ?? new Boards({ config, herdr, seenFile: `${paths.state}/seen.json`, log, org: orgWorker, dataDir: paths.data, stateDir: paths.state, configFile: paths.config });
 		const edits = options.edits ?? new TaskEdits(config, undefined, orgWorker);
 		// A phone's push address: the agenda changed, so its widget and reminders refresh at once (src/push.ts).
 		const pushes = new Pushes({ file: `${paths.state}/push.json`, origin: config.ntfy ? new URL(config.ntfy.url).origin : undefined, boards, log, ...(options.pushPost ? { post: options.pushPost } : {}) });
@@ -332,7 +333,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const apkViews = { count: 0 };
 		const immichServer = immichFrom({ ...(options.env ?? process.env), ...options.secrets });
 		const immich = immichServer && { server: immichServer, watch: watchImmich(immichServer, { file: `${paths.state}/immich.json`, warn: (error) => log.warn("immich_status_failed", { error: error.message }) }) };
-		const scope: Scope = { wake: config.rhythm.wake, apkViews, harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, boards, edits, edited: new Map(), pushes, ...(expressions ? { expressions } : {}), ...(immich ? { immich } : {}) };
+		const scope: Scope = { wake: config.rhythm.wake, apkViews, harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, boards, edits, edited: new Map(), rosterFile: `${paths.data}/ROSTER.org`, pushes, ...(expressions ? { expressions } : {}), ...(immich ? { immich } : {}) };
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
@@ -406,12 +407,13 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 type Scope = CommandScope & { wake: string; immich?: { server: Immich; watch: ImmichWatch }; apkViews: { count: number }; timeline: Timeline; hidden: Hidden; log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; boards: BoardSource; edits: Pick<TaskEdits, "apply">;
 	/** Tasks edited from a board since the agenda was last read, each with the refresh that will read it again. */
 	edited: Map<string, Promise<void>>;
+	rosterFile: string;
 	pushes: Pick<Pushes, "register">;
 	expressions?: ReturnType<typeof startExpressions> };
 /** The sky a view sends with its state, and how it learns of a change. */
 type SkySource = Pick<Situation, "sky" | "onSky">;
 /** The boards' revisions a view sends with its state, and their contents for the requests. */
-type BoardSource = Pick<Boards, "revisions" | "onChange" | "agenda" | "agents" | "seen" | "subscribe" | "refresh" | "watchAgenda">;
+type BoardSource = Pick<Boards, "revisions" | "onChange" | "agenda" | "agents" | "seen" | "subscribe" | "refresh" | "refreshRoster" | "watchAgenda">;
 /** How many followed tasks are still going, and how a view learns of a change. */
 export type FollowSource = { following(): number; follows(): Followed[]; onFollowing(listener: () => void): () => void };
 
@@ -584,6 +586,13 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 				for (const k of keys) scope.edited.set(k, refreshed);
 				void refreshed.finally(() => { for (const k of keys) if (scope.edited.get(k) === refreshed) scope.edited.delete(k); });
 				return;
+			}
+			case "roster": {
+				if (!request.edit || typeof request.edit.action !== "string") throw new Error("roster needs an edit");
+				const { slug } = editRosterFile(scope.rosterFile, request.edit);
+				scope.log.info("roster_edit", { action: request.edit.action, slug: slug ?? "", device: device ?? "socket" });
+				await scope.boards.refreshRoster();
+				return send({ type: "roster", requestId: request.requestId, ...(slug ? { slug } : {}) });
 			}
 			case "hide": {
 				if (!local) throw new Error("Hidden entries are managed over the Unix socket");

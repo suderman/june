@@ -8,9 +8,30 @@ Item {
   id: board
 
   // agentsView's shape; empty until the daemon's board arrives.
-  property var view: ({ summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [] })
+  property var view: ({ summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], roster: [], rosterHosts: ["kit", "cog"] })
   property bool loaded: false
   property bool idleOpen: false
+  // activity (needs, workers, queued, recent) or roster (clanker cards and editor).
+  property string mode: "activity"
+  property string rosterSlug: ""
+  property bool rosterNew: false
+  property var rosterNotice: ({ text: "", busy: false, seq: 0, saved: "" })
+  signal rosterEdit(var edit)
+  onRosterNoticeChanged: {
+    if ((rosterNotice.saved ?? "") !== "") {
+      rosterSlug = rosterNotice.saved;
+      rosterNew = false;
+    } else if (rosterNotice.deleted) {
+      rosterSlug = "";
+      rosterNew = false;
+    }
+  }
+  readonly property var activeCard: {
+    if (rosterSlug === "") return null;
+    const cards = view.roster ?? [];
+    for (let i = 0; i < cards.length; i++) if (cards[i].slug === rosterSlug) return cards[i];
+    return null;
+  }
   // Every task the board names, by key, and how the user signs Dialog, for a task's page; the page open, or "".
   property var tasks: ({})
   property string user: ""
@@ -57,8 +78,20 @@ Item {
     onEdit: change => board.edit(detailPage.detail?.key ?? board.detailKey, change)
   }
 
+  RosterDetail {
+    anchors.fill: parent
+    visible: board.detailKey === "" && (board.rosterSlug !== "" || board.rosterNew)
+    card: board.activeCard
+    creating: board.rosterNew
+    hosts: board.view.rosterHosts ?? ["kit", "cog"]
+    notice: board.rosterNotice
+    onBack: { board.rosterSlug = ""; board.rosterNew = false; }
+    onSave: edit => board.rosterEdit(edit)
+    onRemove: slug => board.rosterEdit({ action: "delete", slug: slug })
+  }
+
   Flickable {
-    visible: board.detailKey === ""
+    visible: board.detailKey === "" && board.rosterSlug === "" && !board.rosterNew
     anchors.fill: parent
     contentHeight: column.implicitHeight + 16
     clip: true
@@ -117,6 +150,57 @@ Item {
         }
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 2.5; color: Theme.pageInk }
       }
+
+      // Live room activity, or the roster of named clanker cards.
+      Row {
+        spacing: 6
+        Segment { text: "activity"; on: board.mode === "activity"; onClicked: board.mode = "activity" }
+        Segment {
+          text: (board.view.roster ?? []).length > 0 ? "roster · " + board.view.roster.length : "roster"
+          on: board.mode === "roster"
+          onClicked: board.mode = "roster"
+        }
+      }
+
+      // ---- ROSTER PAGE ----
+      Column {
+        visible: board.mode === "roster"
+        width: parent.width
+        spacing: 9
+
+        Item {
+          width: parent.width
+          height: 26
+          SectionTitle {
+            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+            text: "CLANKERS · " + (board.view.roster ?? []).length
+          }
+          Segment {
+            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+            text: "+ new"
+            on: false
+            onClicked: { board.rosterSlug = ""; board.rosterNew = true; }
+          }
+        }
+        Text {
+          visible: board.loaded && (board.view.roster ?? []).length === 0
+          width: parent.width
+          wrapMode: Text.Wrap
+          text: "No agents in ROSTER.org yet."
+          font.family: Theme.lettering; font.pixelSize: 13
+          color: Theme.muted
+        }
+        Repeater {
+          model: board.mode === "roster" ? (board.view.roster ?? []) : []
+          delegate: RosterCard { required property var modelData; entry: modelData; width: column.width }
+        }
+      }
+
+      // ---- ACTIVITY PAGE ----
+      Column {
+        visible: board.mode === "activity"
+        width: parent.width
+        spacing: 10
 
       SectionTitle { text: "NEEDS YOU · " + board.view.needs.length; alert: true; visible: board.view.needs.length > 0 }
       Repeater {
@@ -181,6 +265,120 @@ Item {
         text: "Out of reach: " + board.view.down.join(", ")
         font.family: Theme.caption; font.pixelSize: 12
         color: Theme.muted
+      }
+      }
+    }
+  }
+
+  component Segment: Rectangle {
+    id: seg
+    property string text: ""
+    property bool on: false
+    signal clicked()
+    width: segLabel.implicitWidth + 20
+    height: 24
+    radius: 12
+    color: on ? Theme.pageInk : "transparent"
+    border.color: Theme.pageInk
+    border.width: 2
+    Text { id: segLabel; anchors.centerIn: parent; text: seg.text; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: seg.on ? Theme.paper : Theme.pageInk }
+    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: seg.clicked() }
+  }
+
+  // One roster agent as a Pokemon-style clanker card: harness band, clanker, status, spec and battery gauge.
+  component RosterCard: Rectangle {
+    id: rc
+    property var entry
+    readonly property var colours: Board.HARNESS[entry.clanker] ?? Board.HARNESS.other
+    readonly property color batFill: entry.batteryTone === "high" ? "#2f8a4e" : entry.batteryTone === "mid" ? "#c88a12" : entry.batteryTone === "low" ? "#b3311f" : "#8b8892"
+    height: rcInner.implicitHeight + 22
+    radius: 14
+    color: Theme.balloon
+    border.color: Theme.ink
+    border.width: 2
+    clip: true
+    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { board.rosterNew = false; board.rosterSlug = rc.entry.slug; } }
+
+    Rectangle { width: parent.width; height: 5; color: rc.colours.band }
+
+    Column {
+      id: rcInner
+      x: 10; y: 12
+      width: parent.width - 20
+      spacing: 6
+      Row {
+        width: parent.width
+        spacing: 9
+        Clanker { size: 38; harness: rc.entry.clanker; claws: rc.entry.available || rc.entry.busy }
+        Column {
+          width: parent.width - 47
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: 2
+          Row {
+            width: parent.width
+            spacing: 6
+            Text {
+              width: Math.min(implicitWidth, parent.width - badge.width - 6)
+              elide: Text.ElideRight
+              text: rc.entry.name
+              font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 15
+              color: Theme.ink
+            }
+            Rectangle {
+              id: badge
+              anchors.verticalCenter: parent.verticalCenter
+              height: 17
+              width: badgeLabel.implicitWidth + 10
+              radius: 8.5
+              color: rc.entry.busy ? "#d7e4f2" : rc.entry.status === "idle" ? "#dfead6" : "#ffd6cf"
+              border.color: rc.entry.busy ? "#1c3a66" : rc.entry.status === "idle" ? "#2f5a22" : "#8a1f12"
+              border.width: 1.5
+              Text {
+                id: badgeLabel
+                anchors.centerIn: parent
+                text: rc.entry.statusLabel
+                font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 9
+                color: rc.entry.busy ? "#1c3a66" : rc.entry.status === "idle" ? "#2f5a22" : "#8a1f12"
+              }
+            }
+          }
+          Text {
+            width: parent.width
+            elide: Text.ElideRight
+            text: rc.entry.specLine
+            font.family: Theme.caption; font.pixelSize: 11
+            color: "#6d6a73"
+          }
+        }
+      }
+      // Battery gauge row (or active terminal when busy).
+      Row {
+        visible: rc.entry.batteryText !== "" || rc.entry.terminal !== ""
+        width: parent.width
+        spacing: 7
+        Item {
+          visible: rc.entry.batteryLevel >= 0
+          anchors.verticalCenter: parent.verticalCenter
+          width: 28; height: 13
+          Rectangle {
+            x: 0; y: 0; width: 25; height: 13; radius: 3.5
+            color: "transparent"; border.color: Theme.ink; border.width: 1.8
+            Rectangle {
+              x: 2.5; y: 2.5
+              width: Math.max(rc.entry.batteryLevel > 0 ? 2.5 : 0, Math.round((parent.width - 5) * rc.entry.batteryLevel / 100))
+              height: parent.height - 5; radius: 1; color: rc.batFill
+            }
+          }
+          Rectangle { x: 26; y: 3.5; width: 2; height: 6; radius: 1; color: Theme.ink }
+        }
+        Text {
+          width: parent.width - (rc.entry.batteryLevel >= 0 ? 35 : 0)
+          anchors.verticalCenter: parent.verticalCenter
+          elide: Text.ElideRight
+          text: rc.entry.terminal !== "" ? rc.entry.terminal : rc.entry.batteryText
+          font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 11
+          color: rc.entry.batteryLevel >= 0 ? Theme.ink : "#6d6a73"
+        }
       }
     }
   }

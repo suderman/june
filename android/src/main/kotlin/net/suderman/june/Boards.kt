@@ -40,6 +40,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -180,6 +183,10 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.tabIcon(tab: Tab, o
 private class Colours(json: JSONObject) {
     private val chips = json.optJSONObject("chips") ?: JSONObject()
     private val harness = json.optJSONObject("harness") ?: JSONObject()
+    val harnesses: List<String> = json.optJSONArray("harnesses")?.let { a -> (0 until a.length()).map { a.optString(it) } }?.ifEmpty { null }
+        ?: listOf("claude", "codex", "pi", "opencode", "agy")
+    val efforts: List<String> = json.optJSONArray("efforts")?.let { a -> (0 until a.length()).map { a.optString(it) } }?.ifEmpty { null }
+        ?: listOf("", "low", "medium", "high", "xhigh", "max")
     fun chip(state: String): Pair<Color, Color>? = chips.optJSONObject(state)?.let { Look.color(it.optString("fill")) to Look.color(it.optString("ink")) }
     fun clanker(name: String): Pair<Color, Color> = (harness.optJSONObject(name) ?: harness.optJSONObject("other"))
         ?.let { Look.color(it.optString("eye")) to Look.color(it.optString("band")) } ?: (Color(0xFFE0B419) to Color(0xFFB8911A))
@@ -454,8 +461,22 @@ fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifie
         }.getOrNull()
     }
     val open = LocalUriHandler.current
+    var mode by rememberSaveable { mutableStateOf("activity") }
     var idleOpen by rememberSaveable { mutableStateOf(false) }
     var page by rememberSaveable { mutableStateOf("") }
+    var rosterSlug by rememberSaveable { mutableStateOf("") }
+    var rosterCreating by rememberSaveable { mutableStateOf(false) }
+    var rosterEditing by rememberSaveable { mutableStateOf(false) }
+    var seenRosterDone by remember { mutableStateOf(link.rosterDone.first) }
+    LaunchedEffect(link.rosterDone) {
+        val (seq, slug) = link.rosterDone
+        if (seq != seenRosterDone) {
+            seenRosterDone = seq
+            rosterCreating = false
+            rosterEditing = false
+            rosterSlug = slug
+        }
+    }
     // A row with a task opens its page; one without opens where it can.
     val show: (String, String) -> Unit = { task, target ->
         if (task.isNotEmpty() && link.task(task) != null) {
@@ -468,9 +489,44 @@ fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifie
     LaunchedEffect(link.taskMoved) { if (link.taskMoved.first == page && page.isNotEmpty()) page = link.taskMoved.second }
     if (page.isNotEmpty() && colours != null) { TaskPage(link, decisions, colours, palette, page, "agents", { page = "" }, modifier); return }
     val v = view
+    val roster = v?.optJSONArray("roster").objects()
+    val rosterHosts = v?.optJSONArray("rosterHosts")?.let { a -> (0 until a.length()).map { a.optString(it) } }?.ifEmpty { null } ?: listOf("kit", "cog")
+    if ((rosterCreating || rosterSlug.isNotEmpty()) && colours != null) {
+        val activeCard = if (rosterCreating) null else roster.firstOrNull { it.optString("slug") == rosterSlug }
+        RosterDetailPage(
+            link = link,
+            card = activeCard,
+            hosts = rosterHosts,
+            creating = rosterCreating,
+            editing = rosterEditing,
+            colours = colours,
+            palette = palette,
+            onEditing = { rosterEditing = it },
+            onBack = { rosterCreating = false; rosterEditing = false; rosterSlug = "" },
+            modifier = modifier,
+        )
+        return
+    }
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Heading("agents", v?.optString("summary") ?: "asking hc…", palette) }
-        if (v != null && colours != null) {
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Segment("activity", mode == "activity", palette) { mode = "activity" }
+                Segment("roster" + if (roster.isNotEmpty()) " · ${roster.size}" else "", mode == "roster", palette) { mode = "roster" }
+            }
+        }
+        if (v != null && colours != null && mode == "roster") {
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    SectionTitle("AGENTS · ${roster.size}", palette)
+                    Segment("+ new", false, palette) { rosterSlug = ""; rosterCreating = true; rosterEditing = true }
+                }
+            }
+            if (roster.isEmpty()) item { Text("No agents in ROSTER.org yet.", fontFamily = Look.lettering, fontSize = 15.sp, color = palette.muted) }
+            for (card in roster) item(key = "roster|" + card.optString("slug")) {
+                RosterCard(card, colours) { rosterCreating = false; rosterEditing = false; rosterSlug = card.optString("slug") }
+            }
+        } else if (v != null && colours != null) {
             val needs = v.optJSONArray("needs").objects()
             if (needs.isNotEmpty()) item { SectionTitle("NEEDS YOU · ${needs.size}", palette, alert = true) }
             else item { Text("Nothing needs you.", fontFamily = Look.lettering, fontSize = 15.sp, color = palette.muted) }
@@ -496,6 +552,248 @@ fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifie
             if (down != null && down.length() > 0) item { Text("Out of reach: " + (0 until down.length()).joinToString(", ") { down.getString(it) }, fontFamily = Look.caption, fontSize = 12.sp, color = palette.muted) }
         }
         item { Spacer(Modifier.height(16.dp)) }
+    }
+}
+
+/** One Pokemon-style roster card: harness accent stripe, Clanker, status badge, spec line, and battery gauge. */
+@Composable
+private fun RosterCard(card: JSONObject, colours: Colours, onClick: () -> Unit) {
+    val (_, band) = colours.clanker(card.optString("clanker"))
+    val shape = RoundedCornerShape(14.dp)
+    val busy = card.optBoolean("busy")
+    val status = card.optString("status")
+    val badgeFill = if (busy) Color(0xFFD7E4F2) else if (status == "idle") Color(0xFFDFEAD6) else Color(0xFFFFD6CF)
+    val badgeInk = if (busy) Color(0xFF1C3A66) else if (status == "idle") Color(0xFF2F5A22) else Color(0xFF8A1F12)
+    Column(
+        Modifier.fillMaxWidth().clip(shape).background(Look.balloon, shape).border(2.dp, Look.ink, shape).clickable(onClick = onClick),
+    ) {
+        Box(Modifier.fillMaxWidth().height(6.dp).background(band))
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Clanker(card.optString("clanker"), colours, 42)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(card.optString("name"), Modifier.weight(1f), fontFamily = Look.display, fontSize = 16.sp, color = Look.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            card.optString("statusLabel"), fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 10.sp, color = badgeInk,
+                            modifier = Modifier.background(badgeFill, RoundedCornerShape(50)).border(1.5.dp, badgeInk, RoundedCornerShape(50)).padding(horizontal = 7.dp, vertical = 2.dp),
+                        )
+                    }
+                    Text(card.optString("specLine"), fontFamily = Look.caption, fontSize = 12.sp, color = Color(0xFF6D6A73), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            val batText = card.optString("batteryText")
+            if (batText.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                BatteryMeter(card.optInt("batteryLevel", -1), card.optString("batteryTone", "unknown"))
+                Text(batText, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Look.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** Drawn battery gauge filled to `level` (0..100, or -1 for unknown). */
+@Composable
+private fun BatteryMeter(level: Int, tone: String) {
+    val fill = when (tone) {
+        "high" -> Color(0xFF2F8A4E)
+        "mid" -> Color(0xFFC88A12)
+        "low" -> Color(0xFFB3311F)
+        else -> Color(0xFF8B8892)
+    }
+    Canvas(Modifier.size(34.dp, 15.dp)) {
+        val sx = size.width / 34f
+        val sy = size.height / 15f
+        val stroke = Stroke(2f * sx)
+        drawRoundRect(Look.ink, Offset(1f * sx, 1f * sy), Size(28f * sx, 13f * sy), CornerRadius(3.5f * sx), style = stroke)
+        if (level >= 0) {
+            val innerW = 24f * sx
+            val w = if (level > 0) maxOf(3f * sx, innerW * level / 100f) else 0f
+            if (w > 0f) drawRoundRect(fill, Offset(3f * sx, 3f * sy), Size(w, 9f * sy), CornerRadius(1.5f * sx))
+        }
+        drawRoundRect(Look.ink, Offset(30.5f * sx, 4f * sy), Size(3.5f * sx, 7f * sy), CornerRadius(1.5f * sx))
+    }
+}
+
+/** Inspect, edit, create or remove one ROSTER.org card. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RosterDetailPage(
+    link: Link,
+    card: JSONObject?,
+    hosts: List<String>,
+    creating: Boolean,
+    editing: Boolean,
+    colours: Colours,
+    palette: Look.Palette,
+    onEditing: (Boolean) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier,
+) {
+    val cardKey = if (creating) "__new__" else (card?.optString("slug") ?: "")
+    var fName by remember(cardKey, editing) { mutableStateOf(card?.optString("name") ?: "") }
+    var fHost by remember(cardKey, editing) { mutableStateOf(card?.optString("host")?.ifEmpty { null } ?: hosts.firstOrNull() ?: "kit") }
+    var fHarness by remember(cardKey, editing) {
+        val h = card?.optString("harness") ?: ""
+        mutableStateOf(if (h in colours.harnesses) h else "claude")
+    }
+    var fModel by remember(cardKey, editing) { mutableStateOf(card?.optString("model") ?: "") }
+    var fEffort by remember(cardKey, editing) { mutableStateOf(card?.optString("effort") ?: if (creating) "high" else "") }
+    var fAvatar by remember(cardKey, editing) { mutableStateOf(card?.optString("avatar") ?: "") }
+    var fInstructions by remember(cardKey, editing) { mutableStateOf(card?.optString("instructions") ?: "") }
+    var confirmingDelete by remember(cardKey, editing) { mutableStateOf(false) }
+
+    LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (editing && !creating) "‹ card" else "‹ roster",
+                    fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = palette.pageInk,
+                    modifier = Modifier.clickable {
+                        if (editing && !creating) { confirmingDelete = false; onEditing(false) } else onBack()
+                    }.padding(vertical = 8.dp),
+                )
+                if (!editing && card != null) Choice("edit", false, palette) { onEditing(true) }
+            }
+        }
+        if (!editing && card == null) {
+            item { Text("That agent is no longer in ROSTER.org.", fontFamily = Look.lettering, fontSize = 14.sp, color = palette.muted) }
+        } else if (!editing && card != null) {
+            val (_, band) = colours.clanker(card.optString("clanker"))
+            val busy = card.optBoolean("busy")
+            val status = card.optString("status")
+            val badgeFill = if (busy) Color(0xFFD7E4F2) else if (status == "idle") Color(0xFFDFEAD6) else Color(0xFFFFD6CF)
+            val badgeInk = if (busy) Color(0xFF1C3A66) else if (status == "idle") Color(0xFF2F5A22) else Color(0xFF8A1F12)
+            val shape = RoundedCornerShape(14.dp)
+            item {
+                Column(Modifier.fillMaxWidth().clip(shape).background(Look.balloon, shape).border(2.5.dp, Look.ink, shape)) {
+                    Box(Modifier.fillMaxWidth().height(8.dp).background(band))
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Clanker(card.optString("clanker"), colours, 52)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(card.optString("name"), fontFamily = Look.display, fontSize = 20.sp, color = Look.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        card.optString("statusLabel"), fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = badgeInk,
+                                        modifier = Modifier.background(badgeFill, RoundedCornerShape(50)).border(1.5.dp, badgeInk, RoundedCornerShape(50)).padding(horizontal = 8.dp, vertical = 2.dp),
+                                    )
+                                    val term = card.optString("terminal")
+                                    if (term.isNotEmpty()) Text(term, fontFamily = Look.caption, fontSize = 12.sp, color = Color(0xFF6D6A73))
+                                }
+                            }
+                        }
+                        val batText = card.optString("batteryText")
+                        val batAccount = card.optString("batteryAccount")
+                        if (batText.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            BatteryMeter(card.optInt("batteryLevel", -1), card.optString("batteryTone", "unknown"))
+                            Text(
+                                batText + if (batAccount.isNotEmpty()) " · $batAccount" else "",
+                                fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Look.ink, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Box(Modifier.fillMaxWidth().height(1.5.dp).background(Look.ink.copy(alpha = 0.15f)))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            SpecCell("HOST", card.optString("host").ifEmpty { "—" }, Modifier.weight(1f))
+                            SpecCell("HARNESS", card.optString("harness").ifEmpty { "—" }, Modifier.weight(1f))
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            SpecCell("MODEL", card.optString("model").ifEmpty { "default" }, Modifier.weight(1f))
+                            SpecCell("EFFORT", card.optString("effort").ifEmpty { "default" }, Modifier.weight(1f))
+                        }
+                        val avatar = card.optString("avatar")
+                        if (avatar.isNotEmpty()) SpecCell("AVATAR", avatar, Modifier.fillMaxWidth())
+                        val problems = card.optJSONArray("problems")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+                        if (problems.isNotEmpty()) Text(problems.joinToString("; "), fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = palette.accent)
+                    }
+                }
+            }
+            item { SectionTitle("INSTRUCTIONS", palette) }
+            val instr = card.optString("instructions")
+            item {
+                Text(
+                    instr.ifEmpty { "No extra instructions." },
+                    fontFamily = Look.lettering, fontSize = 14.sp, color = if (instr.isNotEmpty()) Look.ink else palette.muted,
+                    modifier = Modifier.fillMaxWidth().background(Look.balloon, RoundedCornerShape(12.dp)).border(2.dp, Look.ink, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+                )
+            }
+        } else {
+            // Live card preview header while editing or creating.
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Clanker(fHarness, colours, 42)
+                    Column(Modifier.weight(1f)) {
+                        Text(fName.trim().ifEmpty { if (creating) "New agent" else (card?.optString("name") ?: "") }, fontFamily = Look.display, fontSize = 18.sp, color = palette.pageInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(listOf(fHost.trim(), fHarness, fModel.trim(), fEffort).filter { it.isNotEmpty() }.joinToString(" · "), fontFamily = Look.caption, fontSize = 12.sp, color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            item { SectionTitle("NAME", palette) }
+            item { OutlinedTextField(fName, { fName = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("e.g. Bolt", fontSize = 14.sp) }) }
+            item { SectionTitle("HOST", palette) }
+            item {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (h in hosts) Choice(h, fHost == h, palette) { fHost = h }
+                }
+            }
+            item { OutlinedTextField(fHost, { fHost = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("host name (kit, cog, …)", fontSize = 14.sp) }) }
+            item { SectionTitle("HARNESS", palette) }
+            item {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (h in colours.harnesses) Choice(h, fHarness == h, palette) { fHarness = h }
+                }
+            }
+            item { SectionTitle("MODEL", palette) }
+            item { OutlinedTextField(fModel, { fModel = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("harness default", fontSize = 14.sp) }) }
+            item { SectionTitle("EFFORT", palette) }
+            item {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (e in colours.efforts) Choice(e.ifEmpty { "default" }, fEffort == e, palette) { fEffort = e }
+                }
+            }
+            item { SectionTitle("AVATAR", palette) }
+            item { OutlinedTextField(fAvatar, { fAvatar = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("optional path beside ROSTER.org", fontSize = 14.sp) }) }
+            item { SectionTitle("INSTRUCTIONS", palette) }
+            item { OutlinedTextField(fInstructions, { fInstructions = it }, Modifier.fillMaxWidth(), minLines = 3, placeholder = { Text("Role, skills, voice…", fontSize = 14.sp) }) }
+            if (link.rosterBusy || link.rosterNotice.isNotEmpty()) item {
+                val text = if (link.rosterBusy) "saving…" else link.rosterNotice
+                Text(text, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (link.rosterBusy || text == "saved") palette.muted else palette.accent)
+            }
+            item {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Choice(if (creating) "Add agent" else "Save", true, palette, enabled = !link.rosterBusy) {
+                        val payload = JSONObject()
+                            .put("action", "save")
+                            .put("name", fName)
+                            .put("host", fHost)
+                            .put("harness", fHarness)
+                            .put("model", fModel)
+                            .put("effort", fEffort)
+                            .put("avatar", fAvatar)
+                            .put("instructions", fInstructions)
+                        if (!creating && card != null) payload.put("original", card.optString("slug"))
+                        link.editRoster(payload)
+                    }
+                    if (!creating && card != null && !confirmingDelete) Choice("Remove", false, palette, danger = true, enabled = !link.rosterBusy) {
+                        confirmingDelete = true
+                    }
+                    if (confirmingDelete && card != null) {
+                        Choice("Confirm remove", true, palette, danger = true, enabled = !link.rosterBusy) {
+                            link.editRoster(JSONObject().put("action", "delete").put("slug", card.optString("slug")))
+                        }
+                        Choice("Keep", false, palette) { confirmingDelete = false }
+                    }
+                }
+            }
+        }
+        item { Spacer(Modifier.height(16.dp)) }
+    }
+}
+
+@Composable
+private fun SpecCell(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Text(label, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 10.sp, letterSpacing = 0.8.sp, color = Color(0xFF6D6A73))
+        Text(value, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Look.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -596,14 +894,18 @@ private fun Heading(title: String, summary: String, palette: Look.Palette, trail
     }
 }
 
-/** A button on a task's page, filled when it is the current choice; at least 44 dp tall to tap. */
+/** A button on a task's or roster card's page, filled when it is the current choice; at least 44 dp tall to tap. */
 @Composable
-private fun Choice(text: String, on: Boolean, palette: Look.Palette, onClick: () -> Unit) {
+private fun Choice(text: String, on: Boolean, palette: Look.Palette, danger: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+    val edge = if (danger) Color(0xFFB3311F) else palette.pageInk
     Text(
         text, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 14.sp,
-        color = if (on) palette.page else palette.pageInk,
-        modifier = Modifier.background(if (on) palette.pageInk else Color.Transparent, RoundedCornerShape(50))
-            .border(2.dp, palette.pageInk, RoundedCornerShape(50)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp),
+        color = if (on) palette.page else edge,
+        modifier = Modifier.alpha(if (enabled) 1f else 0.5f)
+            .background(if (on) edge else Color.Transparent, RoundedCornerShape(50))
+            .border(2.dp, edge, RoundedCornerShape(50))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
     )
 }
 

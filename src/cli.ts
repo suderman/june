@@ -811,28 +811,10 @@ async function quotaCommand(p: ReturnType<typeof paths>, args: string[], json: b
 	return rows.some((q) => q.error) ? 1 : 0;
 }
 
-/** Whether the dispatcher on this host has an active run of task ID, from its receipt in ~/.local/state/org-dispatch. */
-function dispatchActive(id: string): boolean {
-	const state = process.env.XDG_STATE_HOME?.startsWith("/") ? process.env.XDG_STATE_HOME : `${process.env.HOME}/.local/state`;
-	try {
-		const status = JSON.parse(readFileSync(`${state}/org-dispatch/${id}.json`, "utf8")).status;
-		return ["starting", "running", "stopping", "launch-uncertain"].includes(status);
-	} catch {
-		return false;
-	}
-}
-
-type Standing = {
-	card: import("./roster.ts").Card;
-	status: string;
-	terminal?: string;
-	battery?: { account: string; weekly: number; hours: number; rate: number } | { reason: string };
-};
-
 /** Each roster card with whether it is busy (a live terminal carries its june.agent label) and, on this host, its battery:
  * the tightest window left on the account its harness would pick now. */
-async function rosterStanding(p: ReturnType<typeof paths>): Promise<Standing[]> {
-	const { parseRoster, familyOf } = await import("./roster.ts");
+async function rosterStanding(p: ReturnType<typeof paths>): Promise<import("./roster.ts").RosterEntry[]> {
+	const { computeStanding, parseRoster } = await import("./roster.ts");
 	const a = await import("./accounts.ts");
 	const { Herdr } = await import("./tools/herdr.ts");
 	const file = `${p.data}/ROSTER.org`;
@@ -845,23 +827,7 @@ async function rosterStanding(p: ReturnType<typeof paths>): Promise<Standing[]> 
 	const accounts = a.accountsConfig(readConfigFile(p).accounts);
 	const logins = await a.status(accounts, people(p, a.parseAccountsOrg));
 	const quotas = logins.length ? await currentQuotas(a, accounts, p) : [];
-	return cards.map((card): Standing => {
-		if (card.problems.length) return { card, status: "invalid" };
-		const terminals = hosts.get(card.host!);
-		if (!terminals) return { card, status: `${card.host} unreachable` };
-		// A dispatched worker holds its agent only while its run is active; a finished one's terminal stays open for
-		// review or resume without keeping the agent from its next task. A session started by hand holds it while open.
-		const busy = terminals.find((t) => t.rosterAgent === card.slug && (!t.task || card.host !== here || dispatchActive(t.task)));
-		if (busy) return { card, status: `busy (${busy.status})`, terminal: `${card.host}/${busy.terminal}` };
-		if (card.host !== here) return { card, status: "idle", battery: { reason: `quota is read on ${card.host}` } };
-		const mine = logins.filter((r) => r.harness === card.harness && r.loggedIn && !r.problems.length);
-		if (!mine.length) return { card, status: "idle", battery: { reason: `no ${card.harness} login here` } };
-		const ranked = a.rank(mine.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })), Date.now(), familyOf(card));
-		const best = ranked.find((r) => r.usable);
-		if (!best?.budget) return { card, status: "idle", battery: { reason: ranked.map((r) => `${r.slot}: ${r.reason}`).join("; ") } };
-		const { weekly, hours, rate } = best.budget;
-		return { card, status: "idle", battery: { account: best.slot, weekly: weekly!, hours: hours!, rate } };
-	});
+	return computeStanding(cards, hosts, logins, quotas, here);
 }
 
 /** `june agents [NAME]`: the roster with each agent's status and battery, or one agent's card. */
@@ -889,7 +855,7 @@ async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: 
 		console.log(JSON.stringify(args[0] ? rows[0] : rows));
 		return 0;
 	}
-	const battery = (b: Standing["battery"]) =>
+	const battery = (b: import("./roster.ts").RosterEntry["battery"]) =>
 		!b ? "" : "account" in b ? `${b.weekly}% weekly, resets in ${b.hours < 48 ? `${Math.round(b.hours)}h` : `${Math.round(b.hours / 24)}d`}, via ${b.account}` : b.reason;
 	if (args[0]) {
 		const { card, status, terminal, battery: b } = rows[0]!;
@@ -934,8 +900,8 @@ async function agentsPick(p: ReturnType<typeof paths>, args: string[], json: boo
 		return 2;
 	}
 	const rows = await rosterStanding(p);
-	type Option = import("./roster.ts").Option & { row?: Standing; legacy?: string };
-	const option = (row: Standing): Option => {
+	type Option = import("./roster.ts").Option & { row?: import("./roster.ts").RosterEntry; legacy?: string };
+	const option = (row: import("./roster.ts").RosterEntry): Option => {
 		const b = row.battery;
 		const quota = b && "account" in b ? { weekly: b.weekly, hours: b.hours, rate: b.rate } : {};
 		const base = { name: row.card.slug, row, ...quota };

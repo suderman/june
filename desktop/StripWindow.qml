@@ -185,6 +185,8 @@ FloatingWindow {
       view: win.shell.agentsView
     onSeen: key => win.shell.markSeen(key)
     notice: win.shell.taskNotice
+    rosterNotice: win.shell.rosterNotice
+    onRosterEdit: edit => win.shell.editRoster(edit)
     dispatch: win.shell.agentsBoard?.dispatch ?? null
     pending: win.shell.pendingEdits
     onEdit: (key, change) => win.shell.editTask(key, change)
@@ -312,6 +314,8 @@ FloatingWindow {
     view: win.shell.agentsView
     onSeen: key => win.shell.markSeen(key)
     notice: win.shell.taskNotice
+    rosterNotice: win.shell.rosterNotice
+    onRosterEdit: edit => win.shell.editRoster(edit)
     dispatch: win.shell.agentsBoard?.dispatch ?? null
     pending: win.shell.pendingEdits
     onEdit: (key, change) => win.shell.editTask(key, change)

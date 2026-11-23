@@ -4,9 +4,11 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, renameSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { type Config, protectedOf } from "./config.ts";
+import { accountsConfig, cached, parseAccountsOrg, quotas as readQuotas, save as saveQuotas, status as accountStatus, type Quota, type SlotStatus } from "./accounts.ts";
+import { type Config, protectedOf, shortHostname } from "./config.ts";
 import type { Logger } from "./runtime.ts";
 import { type OrgWorker, OrgWorkerDown } from "./org-worker.ts";
+import { computeStanding, parseRoster, type RosterEntry } from "./roster.ts";
 import { type AgentSummary, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { orgTime } from "./tools/org.ts";
 
@@ -107,6 +109,8 @@ export type Agents = {
 	tasks: Record<string, Task>;
 	/** Who a task can be handed to from the boards, and where by default (the dispatch config). */
 	dispatch?: { hosts: string[]; host?: string; agents: string[] };
+	/** Named agents from ROSTER.org, with live busy state and provider battery. */
+	roster?: RosterEntry[];
 };
 
 /** The JSON june-agenda.el prints, before it is shaped for clients. */
@@ -358,6 +362,12 @@ export type BoardsOptions = {
 	agentsMs?: number;
 	/** How often the agenda is recomputed while a client subscribes, beside file changes. */
 	agendaMs?: number;
+	/** Paths for reading ROSTER.org, ACCOUNTS.org, config.json's accounts and cached quota.json. */
+	dataDir?: string;
+	stateDir?: string;
+	configFile?: string;
+	/** Hostname for matching local roster cards; defaults to this host. */
+	here?: string;
 };
 
 type Held<T> = { value: T; revision: string; at: number };
@@ -367,12 +377,21 @@ type Held<T> = { value: T; revision: string; at: number };
  * agenda files and the agents are checked every `agentsMs`, and listeners hear of a new revision.
  */
 export class Boards {
-	readonly #o: Required<Omit<BoardsOptions, "env" | "herdr" | "org">> & { env?: Record<string, string>; herdr: Herdr; org?: OrgWorker };
+	readonly #o: Required<Omit<BoardsOptions, "env" | "herdr" | "org" | "dataDir" | "stateDir" | "configFile" | "here">> & {
+		env?: Record<string, string>;
+		herdr: Herdr;
+		org?: OrgWorker;
+		dataDir?: string;
+		stateDir?: string;
+		configFile?: string;
+		here: string;
+	};
 	readonly #seen: Seen;
 	readonly #listeners = new Set<() => void>();
 	#agenda?: Held<Agenda>;
 	#agents?: Held<Agents>;
 	#workers?: { workers: AgentSummary[]; hosts: Agents["hosts"] };
+	#roster?: { logins: SlotStatus[]; quotas: Quota[] };
 	#agendaRun?: Promise<Held<Agenda>>;
 	#workersRun?: Promise<void>;
 	#subscribers = 0;
@@ -381,12 +400,14 @@ export class Boards {
 	#timers: ReturnType<typeof setInterval>[] = [];
 	#agentTimers: ReturnType<typeof setInterval>[] = [];
 	#watchers: FSWatcher[] = [];
+	#rosterWatch?: FSWatcher;
 	#debounce?: ReturnType<typeof setTimeout>;
+	#rosterDebounce?: ReturnType<typeof setTimeout>;
 	/** When the agenda files were first watched in the current subscription. */
 	#watchedSince?: number;
 
 	constructor(options: BoardsOptions) {
-		this.#o = { run: runProcess, agentsMs: 15_000, agendaMs: 600_000, herdr: new Herdr(options.config.herdr), ...options };
+		this.#o = { run: runProcess, agentsMs: 15_000, agendaMs: 600_000, herdr: new Herdr(options.config.herdr), here: shortHostname(), ...options };
 		this.#seen = new Seen(options.seenFile);
 	}
 
@@ -419,6 +440,15 @@ export class Boards {
 	async refresh(): Promise<void> {
 		await this.#agendaRun?.catch(() => {});
 		await this.#refreshAgenda().catch(() => {});
+	}
+
+	/** Recompute the agents board now after ROSTER.org changed. */
+	async refreshRoster(): Promise<void> {
+		if (!this.#workers) await this.#refreshWorkers().catch(() => {});
+		else {
+			await this.#loadAccountState().catch(() => {});
+			this.#recompute();
+		}
 	}
 
 	/** Mark reviews seen, by task key; answers with the agents board they change. */
@@ -477,11 +507,25 @@ export class Boards {
 
 	#startAgents(): void {
 		this.#agentTimers.push(setInterval(() => void this.#refreshWorkers().catch(() => {}), this.#o.agentsMs));
+		if (this.#o.dataDir && !this.#rosterWatch) {
+			try {
+				this.#rosterWatch = watch(this.#o.dataDir, (_event, name) => {
+					const file = name?.toString() ?? "";
+					if (file === "ROSTER.org" || file === "ACCOUNTS.org") {
+						clearTimeout(this.#rosterDebounce);
+						this.#rosterDebounce = setTimeout(() => void this.refreshRoster().catch(() => {}), 500);
+					}
+				});
+			} catch {}
+		}
 	}
 
 	#stopAgents(): void {
 		for (const timer of this.#agentTimers) clearInterval(timer);
 		this.#agentTimers = [];
+		this.#rosterWatch?.close();
+		this.#rosterWatch = undefined;
+		clearTimeout(this.#rosterDebounce);
 	}
 
 	#stopAgenda(): void {
@@ -558,11 +602,53 @@ export class Boards {
 					workers: results.flatMap((r) => r.workers),
 					hosts: results.map((r) => ({ host: r.host, ok: r.ok, ...(r.error ? { error: r.error } : {}) })),
 				};
+				await this.#loadAccountState().catch(() => {});
 				this.#recompute();
 			} finally {
 				this.#workersRun = undefined;
 			}
 		})());
+	}
+
+	async #loadAccountState(): Promise<void> {
+		if (!this.#o.dataDir) return;
+		try {
+			const rawConfig = this.#o.configFile && existsSync(this.#o.configFile) ? JSON.parse(readFileSync(this.#o.configFile, "utf8")) : {};
+			const accounts = accountsConfig(rawConfig?.accounts);
+			if (!Object.keys(accounts.harnesses).length) {
+				this.#roster = { logins: [], quotas: [] };
+				return;
+			}
+			const accountsOrg = join(this.#o.dataDir, "ACCOUNTS.org");
+			const people = parseAccountsOrg(existsSync(accountsOrg) ? readFileSync(accountsOrg, "utf8") : "");
+			const logins = await accountStatus(accounts, people);
+			const quotaFile = this.#o.stateDir ? join(this.#o.stateDir, "quota.json") : undefined;
+			let quotaRows = quotaFile ? cached(quotaFile, 120) : undefined;
+			if (!quotaRows && logins.length) {
+				try {
+					quotaRows = await readQuotas(accounts, people);
+					if (quotaFile) saveQuotas(quotaFile, quotaRows);
+				} catch {
+					quotaRows = this.#roster?.quotas ?? [];
+				}
+			}
+			this.#roster = { logins, quotas: quotaRows ?? [] };
+		} catch (error) {
+			this.#o.log.warn("roster_accounts_failed", { error: (error as Error).message.slice(0, 200) });
+		}
+	}
+
+	#readRoster(): RosterEntry[] | undefined {
+		if (!this.#o.dataDir || !this.#workers) return undefined;
+		const file = join(this.#o.dataDir, "ROSTER.org");
+		const cards = parseRoster(existsSync(file) ? readFileSync(file, "utf8") : "");
+		const byHost = new Map<string, AgentSummary[] | undefined>();
+		for (const h of this.#workers.hosts) byHost.set(h.host, h.ok ? [] : undefined);
+		for (const w of this.#workers.workers) {
+			const list = byHost.get(w.host);
+			if (list) list.push(w);
+		}
+		return computeStanding(cards, byHost, this.#roster?.logins ?? [], this.#roster?.quotas ?? [], this.#o.here);
 	}
 
 	/** Join the latest agenda and workers into the agents board, and tell listeners when either board changed. */
@@ -575,7 +661,8 @@ export class Boards {
 		if (this.#workers) {
 			const { hosts, host, agent, agents } = this.#o.config.dispatch;
 			const dispatch = { hosts: [...hosts], ...(host ?? hosts[0] ? { host: host ?? hosts[0] } : {}), agents: [...(agents ?? [agent ?? "pi"])] };
-			const value = { ...shapeAgents({ ...this.#workers, agenda, seen: this.#seen.marks(), user: this.#o.config.user.name ?? "" }), dispatch };
+			const roster = this.#readRoster();
+			const value = { ...shapeAgents({ ...this.#workers, agenda, seen: this.#seen.marks(), user: this.#o.config.user.name ?? "" }), dispatch, ...(roster !== undefined ? { roster } : {}) };
 			this.#agents = hold(value, this.#agents);
 		}
 		const after = this.revisions();

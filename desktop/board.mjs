@@ -31,20 +31,28 @@ export const CHIPS = {
 /** The order the state counts come in: work in hand first. */
 export const COUNT_ORDER = ["PROG", "EVAL", "HOLD", "AUTO", "TODO"];
 
-/** A placeholder clanker's colours by harness, until the art lands: Pi teal, Claude orange, any other yellow. */
+/** A placeholder clanker's colours by harness, until the art lands. */
 export const HARNESS = {
 	pi: { eye: "#1fa89a", band: "#2a8f84" },
 	claude: { eye: "#f08a3e", band: "#d9692a" },
+	codex: { eye: "#4a7fd4", band: "#355fa3" },
+	agy: { eye: "#8b63d9", band: "#6a45b3" },
+	opencode: { eye: "#4c9e5b", band: "#367842" },
 	other: { eye: "#e0b419", band: "#b8911a" },
 };
 
+/** Harnesses and effort levels offered by the roster card editor. */
+export const ROSTER_HARNESSES = ["claude", "codex", "pi", "opencode", "agy"];
+export const ROSTER_EFFORTS = ["", "low", "medium", "high", "xhigh", "max"];
+
 /** The chip and clanker colours together, for clients that cannot read the constants directly (the phone). */
 export function colours() {
-	return { chips: CHIPS, harness: HARNESS };
+	return { chips: CHIPS, harness: HARNESS, harnesses: ROSTER_HARNESSES, efforts: ROSTER_EFFORTS };
 }
 
 export function harnessOf(agent) {
-	const name = String(agent ?? "").replace(/-code$/, "");
+	const raw = String(agent ?? "").toLowerCase().replace(/-code$/, "");
+	const name = raw === "antigravity" ? "agy" : raw;
 	return HARNESS[name] ? name : "other";
 }
 
@@ -371,13 +379,77 @@ function lastWord(task, user) {
 }
 
 /**
+ * The roster cards from the agents board, shaped for both clients: status, drawn battery level and label, harness
+ * colours, and the list of known hosts for the editor.
+ */
+export function rosterView(agents) {
+	const list = agents && Array.isArray(agents.roster) ? agents.roster : [];
+	const hostSet = {};
+	const hosts = [];
+	const addHost = (h) => {
+		const name = String(h ?? "").trim();
+		if (name && !hostSet[name]) {
+			hostSet[name] = true;
+			hosts.push(name);
+		}
+	};
+	if (agents && agents.dispatch && Array.isArray(agents.dispatch.hosts)) {
+		for (let i = 0; i < agents.dispatch.hosts.length; i++) addHost(agents.dispatch.hosts[i]);
+	}
+	if (agents && Array.isArray(agents.hosts)) {
+		for (let i = 0; i < agents.hosts.length; i++) addHost(agents.hosts[i].host);
+	}
+	const cards = list.map((entry) => {
+		const c = entry.card || {};
+		addHost(c.host);
+		const st = String(entry.status ?? "idle");
+		const busy = st.indexOf("busy") === 0;
+		const b = entry.battery;
+		const hasLevel = b && typeof b.weekly === "number";
+		const batteryLevel = hasLevel ? Math.max(0, Math.min(100, Math.round(b.weekly))) : -1;
+		const resetWord = hasLevel ? (b.hours < 48 ? `${Math.round(b.hours)}h` : `${Math.round(b.hours / 24)}d`) : "";
+		const batteryText = hasLevel ? `${batteryLevel}% · ${resetWord}` : (b && b.reason ? String(b.reason) : "");
+		const batteryTone = !hasLevel ? "unknown" : batteryLevel >= 50 ? "high" : batteryLevel >= 20 ? "mid" : "low";
+		const remoteQuota = b && typeof b.reason === "string" && b.reason.indexOf("quota is read on") === 0;
+		const available = st === "idle" && (hasLevel || remoteQuota || !b);
+		const statusLabel = st === "idle" ? "IDLE" : st.indexOf("working") >= 0 ? "WORKING" : busy ? "BUSY" : st === "invalid" ? "INVALID" : "OFFLINE";
+		const spec = [c.host ?? "", c.harness ?? "", c.model ?? "", c.effort ?? ""].filter((s) => s !== "").join(" · ");
+		return {
+			slug: c.slug ?? "",
+			name: c.name ?? "",
+			host: c.host ?? "",
+			harness: c.harness ?? "",
+			clanker: harnessOf(c.harness),
+			model: c.model ?? "",
+			effort: c.effort ?? "",
+			avatar: c.avatar ?? "",
+			instructions: c.instructions ?? "",
+			problems: Array.isArray(c.problems) ? c.problems : [],
+			status: st,
+			statusLabel: statusLabel,
+			busy: busy,
+			available: available,
+			terminal: entry.terminal ?? "",
+			batteryLevel: batteryLevel,
+			batteryText: batteryText,
+			batteryAccount: hasLevel && b.account ? String(b.account) : "",
+			batteryTone: batteryTone,
+			specLine: spec,
+		};
+	});
+	if (hosts.length === 0) hosts.push("kit", "cog");
+	return { cards: cards, hosts: hosts };
+}
+
+/**
  * The agents board as the clankers' room: what needs the user (most urgent first), who is working, who is idle, what
- * is queued and under agent review, and what reported today. `today` is YYYY-MM-DD for start times; `user` signs
- * the user's Dialog entries.
+ * is queued and under agent review, what reported today, and the roster cards. `today` is YYYY-MM-DD for start times;
+ * `user` signs the user's Dialog entries.
  */
 export function agentsView(agents, now, today, user, pending) {
-	if (!agents) return { summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [] };
+	if (!agents) return { summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], roster: [], rosterHosts: ["kit", "cog"] };
 	agents = withPending(agents, pending, user);
+	const rv = rosterView(agents);
 	const tasks = agents.tasks;
 	// A review the user just opened is seen before the daemon says so.
 	const seen = pending?.seen ?? [];
@@ -432,7 +504,7 @@ export function agentsView(agents, now, today, user, pending) {
 	const summary = `${working.length} at work${hosts.length ? ` on ${hosts.join(", ")}` : ""}`;
 	const down = agents.hosts.filter((h) => !h.ok).map((h) => h.host);
 	for (const list of [needs, working, idle, queued, reviewing, recent]) uniqueKeys(list);
-	return { summary, needs, working, idle, queued, reviewing, recent, down };
+	return { summary, needs, working, idle, queued, reviewing, recent, down, roster: rv.cards, rosterHosts: rv.hosts };
 }
 
 /** Who wrote a Dialog entry, for how it is drawn: the user, June, the dispatcher, or an agent. */

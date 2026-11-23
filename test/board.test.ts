@@ -277,3 +277,46 @@ test("a change to the agenda alone tells clients, and a refresh after an edit re
 	assert.equal((await boards.agenda()).value.tasks["w.org::*Party"]?.state, "DONE");
 	assert.ok(told >= 1, "a task on no agent's list changed, and listeners heard");
 });
+
+test("the agents board serves ROSTER.org cards and the roster request adds, edits and removes them", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const config = testConfig(tmp.dir);
+	await mkdir(tmp.paths.data, { recursive: true });
+	await writeFile(join(tmp.paths.data, "ROSTER.org"), "#+TITLE: Roster\n\n* Bolt\n:PROPERTIES:\n:HOST: kit\n:HARNESS: claude\n:EFFORT: high\n:END:\nCareful.\n");
+	const herdr = new Herdr(config.herdr, async () => JSON.stringify({ terminals: [] }));
+	const boards = new Boards({
+		config: { ...config, org: { ...config.org, root: "/o" } },
+		herdr,
+		seenFile: join(tmp.dir, "seen.json"),
+		dataDir: tmp.paths.data,
+		stateDir: tmp.paths.state,
+		configFile: tmp.paths.config,
+		here: "kit",
+		log: createLogger({ sink: () => {} }),
+		run: exportRun(() => ({})),
+	});
+	await openTestDaemon({ ...tmp, faux: fauxProvider(), boards });
+	const client = await Client.open(tmp.paths.socket);
+	t.after(() => client.close());
+
+	const first = await client.request({ op: "agents", requestId: randomUUID() });
+	assert.equal(first.type, "agents");
+	assert.deepEqual(first.agents.roster?.map((r) => [r.card.slug, r.card.host, r.card.harness, r.card.effort]), [["bolt", "kit", "claude", "high"]]);
+
+	const added = await client.request({ op: "roster", requestId: randomUUID(), edit: { action: "save", name: "Rivet", host: "kit", harness: "codex", effort: "medium", instructions: "Quick." } });
+	assert.deepEqual([added.type, added.type === "roster" ? added.slug : ""], ["roster", "rivet"]);
+	const second = await client.request({ op: "agents", requestId: randomUUID() });
+	assert.equal(second.type, "agents");
+	assert.notEqual(second.revision, first.revision);
+	assert.deepEqual(second.agents.roster?.map((r) => r.card.slug), ["bolt", "rivet"]);
+
+	const deleted = await client.request({ op: "roster", requestId: randomUUID(), edit: { action: "delete", slug: "rivet" } });
+	assert.equal(deleted.type, "roster");
+	const third = await client.request({ op: "agents", requestId: randomUUID() });
+	assert.equal(third.type, "agents");
+	assert.deepEqual(third.agents.roster?.map((r) => r.card.slug), ["bolt"]);
+
+	const bad = await client.request({ op: "roster", requestId: randomUUID(), edit: { action: "save", name: "", host: "kit", harness: "claude" } });
+	assert.equal(bad.type, "error");
+});

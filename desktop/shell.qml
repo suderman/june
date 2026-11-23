@@ -168,6 +168,20 @@ ShellRoot {
   // last agents board.
   property var taskNotice: ({ key: "", text: "", pending: "", from: "", undo: null })
   property var pendingEdits: ({})
+  property var rosterNotice: ({ text: "", busy: false, seq: 0, saved: "", deleted: false })
+  property string rosterPendingId: ""
+  property bool rosterDeleting: false
+  function editRoster(edit) {
+    const id = rid();
+    if (!send({ op: "roster", requestId: id, edit: edit })) {
+      rosterNotice = { text: "not connected", busy: false, seq: rosterNotice.seq + 1, saved: "", deleted: false };
+      return;
+    }
+    rosterPendingId = id;
+    rosterDeleting = edit.action === "delete";
+    rosterNotice = { text: "", busy: true, seq: rosterNotice.seq + 1, saved: "", deleted: false };
+  }
+  Timer { id: rosterNoticeFade; interval: 4000; onTriggered: if (root.rosterNotice.text === "saved") root.rosterNotice = { text: "", busy: false, seq: root.rosterNotice.seq + 1, saved: "", deleted: false } }
   property bool agentsFetching: false
   function setPending(next) { pendingEdits = next; }
   function editTask(key, change) {
@@ -664,6 +678,11 @@ ShellRoot {
       const unanswered = Object.keys(pendingEdits).filter(k => k !== "seen" && !pendingEdits[k].done);
       if (unanswered.length > 0) taskNotice = { key: unanswered[0], text: "The connection dropped; this is what the board says", pending: "", from: "", undo: null };
       dropPending(unanswered);
+      if (rosterPendingId !== "") {
+        rosterPendingId = "";
+        rosterDeleting = false;
+        rosterNotice = { text: "The connection dropped", busy: false, seq: rosterNotice.seq + 1, saved: "", deleted: false };
+      }
       agentsFetching = false;
       if (boardsWanted) fetchBoards(true, true);
       return;
@@ -692,6 +711,21 @@ ShellRoot {
       setPending(Object.assign({}, next));
       taskNotice = { key: reply.key, from: reply.from ?? "", text: "saved", pending: "", undo: held.undo };
       noticeFade.restart();
+      return;
+    }
+    if (reply.type === "roster" && reply.requestId === rosterPendingId) {
+      rosterPendingId = "";
+      const del = rosterDeleting;
+      rosterDeleting = false;
+      rosterNotice = { text: del ? "" : "saved", busy: false, seq: rosterNotice.seq + 1, saved: reply.slug ?? "", deleted: del };
+      if (!del) rosterNoticeFade.restart();
+      fetchBoards(false, true);
+      return;
+    }
+    if (reply.type === "error" && reply.requestId !== undefined && reply.requestId === rosterPendingId) {
+      rosterPendingId = "";
+      rosterDeleting = false;
+      rosterNotice = { text: reply.message, busy: false, seq: rosterNotice.seq + 1, saved: "", deleted: false };
       return;
     }
     if (reply.type === "error" && reply.requestId !== undefined && pendingById(reply.requestId) !== "") {
@@ -936,6 +970,8 @@ ShellRoot {
             view: root.agentsView
             onSeen: key => root.markSeen(key)
             notice: root.taskNotice
+            rosterNotice: root.rosterNotice
+            onRosterEdit: edit => root.editRoster(edit)
             dispatch: root.agentsBoard?.dispatch ?? null
             pending: root.pendingEdits
             onEdit: (key, change) => root.editTask(key, change)
@@ -1084,6 +1120,8 @@ ShellRoot {
           view: root.agentsView
     onSeen: key => root.markSeen(key)
     notice: root.taskNotice
+    rosterNotice: root.rosterNotice
+    onRosterEdit: edit => root.editRoster(edit)
     dispatch: root.agentsBoard?.dispatch ?? null
     pending: root.pendingEdits
     onEdit: (key, change) => root.editTask(key, change)

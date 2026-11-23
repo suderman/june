@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { test } from "node:test";
-import { choose, familyOf, findCard, launchArgs, parseRoster } from "../src/roster.ts";
+import { applyRosterEdit, choose, computeStanding, editRosterFile, familyOf, findCard, formatCard, launchArgs, parseRoster } from "../src/roster.ts";
+import { tempDir } from "./helpers.ts";
 
 const ROSTER = `#+TITLE: Roster
 
@@ -75,4 +78,58 @@ test("the first available candidate wins unless a later one would otherwise lose
 	const card = { name: "Gyro", slug: "gyro", harness: "agy" as const, model: "gemini-4-neon", instructions: "", problems: [] };
 	assert.match("Gemini Models", familyOf(card)!);
 	assert.equal(familyOf({ ...card, harness: "claude" }), undefined);
+});
+
+test("roster edits add, update, rename and remove cards while preserving preamble and untouched headings", async (t) => {
+	const added = applyRosterEdit(ROSTER, { action: "save", name: "Gyro", host: "cog", harness: "agy", model: "gemini-4", effort: "medium", instructions: "Fast worker.\n\n** Notes\nKeep it short." });
+	assert.equal(added.slug, "gyro");
+	assert.ok(added.text.startsWith("#+TITLE: Roster\n"), "preamble kept");
+	assert.ok(added.text.includes("* Rivet Jr :fast:\n"), "untouched card preserved verbatim");
+	const afterAdd = parseRoster(added.text);
+	assert.equal(afterAdd.length, 4);
+	assert.deepEqual([afterAdd[3]!.name, afterAdd[3]!.host, afterAdd[3]!.harness, afterAdd[3]!.model, afterAdd[3]!.effort], ["Gyro", "cog", "agy", "gemini-4", "medium"]);
+
+	const updated = applyRosterEdit(added.text, { action: "save", original: "rivet-jr", name: "Rivet", host: "kit", harness: "pi", model: "gpt-5", effort: "high", instructions: "Updated." });
+	assert.equal(updated.slug, "rivet");
+	assert.equal(parseRoster(updated.text).map((c) => c.slug).join(","), "bolt,rivet,broken,gyro");
+	assert.equal(findCard(parseRoster(updated.text), "rivet")!.harness, "pi");
+
+	const deleted = applyRosterEdit(updated.text, { action: "delete", slug: "broken" });
+	assert.equal(deleted.slug, undefined);
+	assert.equal(parseRoster(deleted.text).map((c) => c.slug).join(","), "bolt,rivet,gyro");
+
+	assert.throws(() => applyRosterEdit(ROSTER, { action: "save", name: "Bolt", host: "kit", harness: "claude" }), /already called/);
+	assert.throws(() => applyRosterEdit(ROSTER, { action: "save", name: "Bad", host: "kit", harness: "bogus" }), /harness/);
+	assert.throws(() => applyRosterEdit(ROSTER, { action: "save", name: "Bad", host: "kit", harness: "claude", instructions: "* Top heading" }), /top-level/);
+	assert.throws(() => applyRosterEdit(ROSTER, { action: "delete", slug: "nope" }), /no agent/);
+	assert.match(formatCard({ name: "Solo", host: "kit", harness: "claude", effort: "high", instructions: "" }), /^\* Solo\n:PROPERTIES:\n:HOST: kit\n:HARNESS: claude\n:EFFORT: high\n:END:$/);
+
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const file = join(tmp.dir, "ROSTER.org");
+	await writeFile(file, ROSTER);
+	const res = await editRosterFile(file, { action: "save", name: "Spark", host: "kit", harness: "opencode" });
+	assert.equal(res.slug, "spark");
+	assert.equal(findCard(parseRoster(await readFile(file, "utf8")), "spark")!.host, "kit");
+});
+
+test("computeStanding combines roster cards, live workers, and account battery", () => {
+	const [bolt, rivet] = parseRoster(ROSTER);
+	const now = Date.UTC(2026, 10, 23, 12);
+	const hosts = new Map([
+		["kit", [{ host: "kit", terminal: "t3", agent: "claude", status: "working", cwd: "/w", task: "t1", rosterAgent: "bolt" }]],
+	]);
+	const logins = [
+		{ name: "claude1", harness: "claude" as const, provider: "anthropic" as const, number: 1, label: "home", loggedIn: true, problems: [] },
+		{ name: "codex1", harness: "codex" as const, provider: "openai" as const, number: 1, label: "home", loggedIn: true, problems: [] },
+	];
+	const quotas = [
+		{ provider: "anthropic" as const, number: 1, fetched: Math.floor(now / 1000), windows: [{ name: "weekly", remaining: 75, resetAt: Math.floor((now + 7_200_000) / 1000) }] },
+		{ provider: "openai" as const, number: 1, fetched: Math.floor(now / 1000), windows: [{ name: "weekly", remaining: 40, resetAt: Math.floor((now + 36_000_000) / 1000) }] },
+	];
+	const standing = computeStanding([bolt!, rivet!], hosts, logins, quotas, "kit", () => true, now);
+	assert.deepEqual(standing.map((s) => [s.card.slug, s.status, s.terminal, s.battery && "account" in s.battery ? [s.battery.account, s.battery.weekly] : undefined]), [
+		["bolt", "busy (working)", "kit/t3", undefined],
+		["rivet-jr", "idle", undefined, ["codex1", 40]],
+	]);
 });

@@ -2,7 +2,10 @@
 // the harness, model and effort, and an avatar, and whose text is the instructions added to the harness's own. An agent
 // works one task at a time: it is busy while a live herdr terminal carries its june.agent label. Accounts are not on the
 // card; the harness's plain name picks one from quota on the agent's host (src/accounts.ts).
-import { HARNESSES, type HarnessName } from "./accounts.ts";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { HARNESSES, type HarnessName, type Quota, rank, type SlotStatus } from "./accounts.ts";
+import type { AgentSummary } from "./tools/herdr.ts";
 
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
@@ -153,3 +156,139 @@ export function choose(options: readonly Option[]): { chosen?: string; why: stri
 
 /** For an Antigravity card, the model group its quota comes from (Gemini models for gemini-4-neon). */
 export const familyOf = (card: Card) => (card.harness === "agy" && card.model ? new RegExp(/^(gemini|claude|gpt)/i.exec(card.model)?.[1] ?? "^$", "i") : undefined);
+
+export type RosterBattery = { account: string; weekly: number; hours: number; rate: number } | { reason: string };
+
+export type RosterEntry = {
+	card: Card;
+	status: string;
+	terminal?: string;
+	battery?: RosterBattery;
+};
+
+/** An edit of ROSTER.org from a client: save (add or update) one card, or delete one by slug. */
+export type RosterEdit =
+	| { action: "save"; original?: string; name: string; host: string; harness: string; model?: string; effort?: string; avatar?: string; instructions?: string }
+	| { action: "delete"; slug: string };
+
+/** Whether the dispatcher on this host has an active run of task ID, from its receipt in ~/.local/state/org-dispatch. */
+export function dispatchActive(id: string): boolean {
+	const state = process.env.XDG_STATE_HOME?.startsWith("/") ? process.env.XDG_STATE_HOME : `${process.env.HOME}/.local/state`;
+	try {
+		const status = JSON.parse(readFileSync(`${state}/org-dispatch/${id}.json`, "utf8")).status;
+		return ["starting", "running", "stopping", "launch-uncertain"].includes(status);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Each roster card with whether it is busy (a live terminal carries its june.agent label) and, on this host, its
+ * battery: the binding weekly window left on the account its harness would pick now.
+ */
+export function computeStanding(
+	cards: readonly Card[],
+	hosts: ReadonlyMap<string, readonly AgentSummary[] | undefined>,
+	logins: readonly SlotStatus[],
+	quotas: readonly Quota[],
+	here: string,
+	active: (id: string) => boolean = dispatchActive,
+	now = Date.now(),
+): RosterEntry[] {
+	return cards.map((card): RosterEntry => {
+		if (card.problems.length) return { card, status: "invalid" };
+		const terminals = hosts.get(card.host!);
+		if (!terminals) return { card, status: `${card.host} unreachable` };
+		// A dispatched worker holds its agent only while its run is active; a finished one's terminal stays open for
+		// review or resume without keeping the agent from its next task. A session started by hand holds it while open.
+		const busy = terminals.find((t) => t.rosterAgent === card.slug && (!t.task || card.host !== here || active(t.task)));
+		if (busy) return { card, status: `busy (${busy.status})`, terminal: `${card.host}/${busy.terminal}` };
+		if (card.host !== here) return { card, status: "idle", battery: { reason: `quota is read on ${card.host}` } };
+		const mine = logins.filter((r) => r.harness === card.harness && r.loggedIn && !r.problems.length);
+		if (!mine.length) return { card, status: "idle", battery: { reason: `no ${card.harness} login here` } };
+		const ranked = rank(mine.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })), now, familyOf(card));
+		const best = ranked.find((r) => r.usable);
+		if (!best?.budget) return { card, status: "idle", battery: { reason: ranked.map((r) => `${r.slot}: ${r.reason}`).join("; ") } };
+		const { weekly, hours, rate } = best.budget;
+		return { card, status: "idle", battery: { account: best.slot, weekly: weekly!, hours: hours!, rate } };
+	});
+}
+
+const oneLine = (value: unknown, field: string): string => {
+	const s = typeof value === "string" ? value.trim() : "";
+	if (/[\r\n]/.test(s)) throw new Error(`${field} must be a single line`);
+	return s;
+};
+
+/** Format one roster card as an Org first-level heading with a PROPERTIES drawer and instructions body. */
+export function formatCard(fields: { name: string; host: string; harness: string; model?: string; effort?: string; avatar?: string; instructions?: string }): string {
+	const lines = [
+		`* ${fields.name}`,
+		":PROPERTIES:",
+		`:HOST: ${fields.host}`,
+		`:HARNESS: ${fields.harness}`,
+		...(fields.model ? [`:MODEL: ${fields.model}`] : []),
+		...(fields.effort ? [`:EFFORT: ${fields.effort}`] : []),
+		...(fields.avatar ? [`:AVATAR: ${fields.avatar}`] : []),
+		":END:",
+	];
+	if (fields.instructions) lines.push(fields.instructions);
+	return lines.join("\n");
+}
+
+/**
+ * Apply one edit to ROSTER.org text, preserving the file's preamble and every untouched card verbatim. Returns the new
+ * Org text and, for a save, the saved card's slug.
+ */
+export function applyRosterEdit(text: string, edit: RosterEdit): { text: string; slug?: string } {
+	const first = /^\* /m.exec(text);
+	const preamble = (first ? text.slice(0, first.index) : text).trimEnd() || "#+TITLE: Roster";
+	const rawSections = first ? text.slice(first.index).split(/^(?=\* )/m).filter((s) => s.startsWith("* ")).map((s) => s.trimEnd()) : [];
+	const parsed = rawSections.map((raw) => ({ raw, card: parseRoster(raw)[0]! }));
+
+	if (edit.action === "delete") {
+		const target = slugOf(typeof edit.slug === "string" ? edit.slug : "");
+		if (!target) throw new Error("delete needs an agent slug");
+		const idx = parsed.findIndex((p) => p.card.slug === target);
+		if (idx < 0) throw new Error(`no agent called ${edit.slug}`);
+		const kept = parsed.filter((_, i) => i !== idx).map((p) => p.raw);
+		return { text: [preamble, ...kept].join("\n\n") + "\n" };
+	}
+
+	if (edit.action !== "save") throw new Error(`unknown roster action ${String((edit as { action?: unknown }).action)}`);
+	const name = oneLine(edit.name, "name").replace(/\s+:[\w@#%:]+:\s*$/, "").trim();
+	const slug = slugOf(name);
+	if (!slug) throw new Error("name is required");
+	const host = oneLine(edit.host, "host");
+	if (!host) throw new Error("host is required");
+	const harness = oneLine(edit.harness, "harness").toLowerCase();
+	if (!(harness in HARNESSES)) throw new Error(`harness must be one of ${Object.keys(HARNESSES).join(", ")}`);
+	const model = oneLine(edit.model ?? "", "model");
+	const effort = oneLine(edit.effort ?? "", "effort").toLowerCase();
+	if (effort && !(EFFORTS as readonly string[]).includes(effort)) throw new Error(`effort must be one of ${EFFORTS.join(", ")}`);
+	const avatar = oneLine(edit.avatar ?? "", "avatar");
+	const instructions = typeof edit.instructions === "string" ? edit.instructions.replace(/\r\n/g, "\n").trim() : "";
+	if (/^\* /m.test(instructions)) throw new Error("instructions cannot contain top-level '* ' headings (use '** ' instead)");
+
+	const original = typeof edit.original === "string" && edit.original.trim() !== "" ? slugOf(edit.original) : "";
+	const idx = original ? parsed.findIndex((p) => p.card.slug === original) : -1;
+	if (original && idx < 0) throw new Error(`no agent called ${edit.original}`);
+	if (parsed.some((p, i) => i !== idx && p.card.slug === slug)) throw new Error(`another agent is already called ${name}`);
+
+	const formatted = formatCard({ name, host, harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(avatar ? { avatar } : {}), ...(instructions ? { instructions } : {}) });
+	const next = parsed.map((p) => p.raw);
+	if (idx >= 0) next[idx] = formatted;
+	else next.push(formatted);
+	return { text: [preamble, ...next].join("\n\n") + "\n", slug };
+}
+
+/** Read, edit and atomically rewrite ROSTER.org. */
+export function editRosterFile(file: string, edit: RosterEdit): { slug?: string } {
+	const current = existsSync(file) ? readFileSync(file, "utf8") : "";
+	const { text, slug } = applyRosterEdit(current, edit);
+	mkdirSync(dirname(file), { recursive: true });
+	const tmp = `${file}.june-tmp`;
+	writeFileSync(tmp, text, "utf8");
+	renameSync(tmp, file);
+	return { ...(slug ? { slug } : {}) };
+}

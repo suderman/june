@@ -1,7 +1,7 @@
 // The boards as the clients draw them (desktop/board.mjs), shared by the desktop client and the phone.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agendaView, agentsView, boardLayout, dayHeading, dayWord, dialogKind, entryMeta, findTask, harnessOf, monthDays, pendingTask, pickerStart, quickDays, stampOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink } from "../desktop/board.mjs";
+import { agendaView, agentsView, boardLayout, dayHeading, dayWord, dialogKind, entryMeta, findTask, harnessOf, monthDays, pendingTask, pickerStart, quickDays, rosterView, stampOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink } from "../desktop/board.mjs";
 
 test("three columns fit a 1400 px window with the strip a little narrower, and tabs take over below about 1300", () => {
 	assert.deepEqual(boardLayout(1400), { columns: true, side: 268, gap: 20, strip: 784 });
@@ -44,7 +44,32 @@ test("small words: days, links, prefixes, start times and harnesses", () => {
 	assert.equal(entryMeta({ extra: "1 d. ago:", type: "deadline" }, task("x")), "deadline 1 day ago · Demo");
 	assert.equal(startOf("<2026-11-21 Sat 04:30 ++1d>", "2026-11-21"), "today 04:30");
 	assert.equal(startOf("<2026-11-27 Fri>", "2026-11-21"), "Fri");
-	assert.deepEqual([harnessOf("pi"), harnessOf("claude-code"), harnessOf("codex")], ["pi", "claude", "other"]);
+	assert.deepEqual([harnessOf("pi"), harnessOf("claude-code"), harnessOf("codex"), harnessOf("antigravity"), harnessOf("opencode"), harnessOf("custom")], ["pi", "claude", "codex", "agy", "opencode", "other"]);
+});
+
+test("the roster shapes each card with its battery tone, status label, spec line and host list", () => {
+	const agents = {
+		generatedAt: 0,
+		hosts: [{ host: "kit", ok: true }, { host: "cog", ok: true }],
+		workers: [], needs: [], queued: [], reviewing: [], recent: [], tasks: {},
+		roster: [
+			{ card: { slug: "bolt", name: "Bolt", host: "kit", harness: "claude", model: "claude-opus-4-7", effort: "high", instructions: "Careful.", problems: [] }, status: "busy (working)", terminal: "kit/t2", battery: { account: "claude1", weekly: 78, hours: 48, rate: 1.6 } },
+			{ card: { slug: "rivet", name: "Rivet", host: "cog", harness: "codex", effort: "medium", instructions: "", problems: [] }, status: "idle", battery: { account: "codex2", weekly: 40, hours: 10, rate: 4 } },
+			{ card: { slug: "gyro", name: "Gyro", host: "kit", harness: "agy", instructions: "", problems: [] }, status: "idle", battery: { account: "agy1", weekly: 12, hours: 3, rate: 4 } },
+			{ card: { slug: "broken", name: "Broken", host: "", instructions: "", problems: ["no :HOST:"] }, status: "invalid", battery: { reason: "no login" } },
+		],
+	};
+	const rv = rosterView(agents);
+	assert.deepEqual(rv.hosts, ["kit", "cog"]);
+	assert.deepEqual(rv.cards.map((c) => [c.slug, c.statusLabel, c.busy, c.batteryLevel, c.batteryTone, c.batteryText, c.specLine]), [
+		["bolt", "WORKING", true, 78, "high", "78% · 2d", "kit · claude · claude-opus-4-7 · high"],
+		["rivet", "IDLE", false, 40, "mid", "40% · 10h", "cog · codex · medium"],
+		["gyro", "IDLE", false, 12, "low", "12% · 3h", "kit · agy"],
+		["broken", "INVALID", false, -1, "unknown", "no login", ""],
+	]);
+	const av = agentsView(agents, 0, "2026-11-21", "Alex");
+	assert.equal(av.roster.length, 4);
+	assert.deepEqual(av.rosterHosts, ["kit", "cog"]);
 });
 
 test("the agents board puts what needs the user first, in its own words, and links each card where it opens", () => {

@@ -99,6 +99,16 @@ class Link(private val context: Context) {
     var taskUndo: JSONObject? by mutableStateOf(null)
         private set
     private var noticeAt = 0L
+    /** Roster edit state: whether one is in flight, its last message, and (seq, slug) on completion ("" after delete). */
+    var rosterBusy: Boolean by mutableStateOf(false)
+        private set
+    var rosterNotice: String by mutableStateOf("")
+        private set
+    var rosterDone: Pair<Int, String> by mutableStateOf(0 to "")
+        private set
+    private var rosterPendingId = ""
+    private var rosterDeleting = false
+    private var rosterNoticeAt = 0L
     /** A board and task a link asked for (june://task?key=KEY, june://projects): the tab, and the task's key or "". */
     var requested: Pair<String, String>? by mutableStateOf(null)
 
@@ -134,7 +144,7 @@ class Link(private val context: Context) {
     private var ticking = false
     private fun tick() {
         tickPending()
-        if (pending.length() > 0 || taskNotice.second == "saved") main.postDelayed(::tick, 1_000) else ticking = false
+        if (pending.length() > 0 || taskNotice.second == "saved" || rosterNotice == "saved") main.postDelayed(::tick, 1_000) else ticking = false
     }
 
     private fun pendingById(id: String): String =
@@ -205,6 +215,21 @@ class Link(private val context: Context) {
         if (lost.isNotEmpty()) notice(lost.first(), "June didn't answer; this is what the board says")
         if (lost.isNotEmpty() || settled.isNotEmpty()) changePending { p -> (lost + settled).forEach { p.remove(it) } }
         if (taskNotice.second == "saved" && now - noticeAt > 5_000) notice(taskNotice.first, "")
+        if (rosterNotice == "saved" && now - rosterNoticeAt > 4_000) rosterNotice = ""
+    }
+
+    /** Save or remove a card in ROSTER.org through the daemon's `roster` op. */
+    fun editRoster(edit: JSONObject) {
+        val id = requestId()
+        if (!send(JSONObject().put("op", "roster").put("edit", edit), id)) {
+            rosterBusy = false
+            rosterNotice = "not connected"
+            return
+        }
+        rosterPendingId = id
+        rosterDeleting = edit.optString("action") == "delete"
+        rosterBusy = true
+        rosterNotice = ""
     }
 
     private fun settlePending() {
@@ -382,6 +407,12 @@ class Link(private val context: Context) {
                                 notice(unanswered.first(), "The connection dropped; this is what the board says")
                                 changePending { p -> unanswered.forEach { p.remove(it) } }
                             }
+                            if (rosterPendingId.isNotEmpty()) {
+                                rosterPendingId = ""
+                                rosterDeleting = false
+                                rosterBusy = false
+                                rosterNotice = "The connection dropped"
+                            }
                             agentsFetching = false
                             if (boardsWanted) fetchBoards(agenda = true, agents = true)
                         }
@@ -428,6 +459,20 @@ class Link(private val context: Context) {
                             agenda?.let { AgendaStore.save(context, it, agendaRevision) }
                             settlePending()
                         }
+                        "roster" -> if (reply.optString("requestId") == rosterPendingId && rosterPendingId.isNotEmpty()) {
+                            rosterPendingId = ""
+                            val del = rosterDeleting
+                            rosterDeleting = false
+                            rosterBusy = false
+                            rosterNotice = if (del) "" else "saved"
+                            rosterNoticeAt = System.currentTimeMillis()
+                            rosterDone = (rosterDone.first + 1) to (if (del) "" else reply.optString("slug"))
+                            if (!del && !ticking) {
+                                ticking = true
+                                main.postDelayed(::tick, 1_000)
+                            }
+                            fetchBoards(agenda = false, agents = true)
+                        }
                         "agents" -> {
                             agents = reply.optJSONObject("agents")
                             agentsRevision = reply.optString("revision")
@@ -436,11 +481,20 @@ class Link(private val context: Context) {
                             settlePending()
                         }
                         "reply" -> notice = reply.optString("text")
-                        "error" -> pendingById(reply.optString("requestId")).let { key ->
-                            if (reply.optString("requestId").isNotEmpty() && key.isNotEmpty()) {
-                                changePending { it.remove(key) }
-                                notice(key, reply.optString("message"))
-                            } else notice = reply.optString("message")
+                        "error" -> {
+                            val reqId = reply.optString("requestId")
+                            if (reqId.isNotEmpty() && reqId == rosterPendingId) {
+                                rosterPendingId = ""
+                                rosterDeleting = false
+                                rosterBusy = false
+                                rosterNotice = reply.optString("message")
+                            } else {
+                                val key = pendingById(reqId)
+                                if (reqId.isNotEmpty() && key.isNotEmpty()) {
+                                    changePending { it.remove(key) }
+                                    notice(key, reply.optString("message"))
+                                } else notice = reply.optString("message")
+                            }
                         }
                     }
                 }

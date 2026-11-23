@@ -3,6 +3,7 @@
 import type { Act } from "./tools/phone.ts";
 import type { Agenda, Agents } from "./board.ts";
 import type { TaskEdit } from "./board-edit.ts";
+import type { RosterEdit } from "./roster.ts";
 import { connect, type Socket } from "node:net";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { EntryRecord } from "@earendil-works/pi-durable";
@@ -78,6 +79,8 @@ export type Request =
 	| { op: "push"; requestId: string; endpoint: string }
 	/** The user's edit of a task the boards show, by key (see board-edit.ts); answered with what org-edit printed. */
 	| { op: "task"; requestId: string; key: string; edit: TaskEdit }
+	/** The user's edit of ROSTER.org (add, update, or remove a roster agent). */
+	| { op: "roster"; requestId: string; edit: RosterEdit }
 	/** Devices allowed on the WebSocket: Unix socket only. `add` answers with the new token, once. */
 	| { op: "device"; requestId: string; action: "add" | "list" | "revoke"; name?: string }
 	/** A device's offer to act on itself for June's `phone` tool, until the connection closes: WebSocket only. */
@@ -131,6 +134,8 @@ export type Reply =
 	| { type: "agents"; requestId: string; revision: string; agents: Agents }
 	/** An edit made: what org-edit printed, and the task's key afterwards, with `from` when a rename changed it. */
 	| { type: "task"; requestId: string; key: string; from?: string; text: string }
+	/** A roster edit saved to ROSTER.org; `slug` is the saved agent's slug for saves. */
+	| { type: "roster"; requestId: string; slug?: string }
 	| { type: "push"; requestId: string }
 	| { type: "accepted"; requestId: string; submissionId: number }
 	| { type: "settled"; requestId: string; status: "done" | "unanswered"; text?: string; reason?: string }
