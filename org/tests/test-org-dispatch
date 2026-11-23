@@ -819,6 +819,25 @@ cat >"$fixture/launch-tests.el" <<'EOF'
          (org-dispatch--edit (plist-get task :file) (plist-get task :id)
                              (lambda () (should (= 2 (how-many "herdr:kit/claude:" (point-min) (point-max)))))))))))
 
+(ert-deftest closed-claude-sessions-in-the-shared-store-resume-on-any-account ()
+  ;; June's account folders share ~/.claude/projects, so the account-picking
+  ;; launcher resumes a closed session there instead of restarting it.
+  (let ((dir (expand-file-name "~/.claude/projects/x")))
+    (unwind-protect
+        (test-with-hc
+         (let ((test-agent "claude"))
+           (test-with-command "claude" "claude"
+             (make-directory dir t)
+             (write-region "{}\n" nil (expand-file-name (concat test-session ".jsonl") dir))
+             (should (org-dispatch--shared-claude-session-p test-session))
+             (let ((task (test-task test-agent t)))
+               (should (org-dispatch--launch task))
+               (let ((argv (test-argv)))
+                 (should (equal (car argv) "claude"))
+                 (should (equal (cadr (member "--resume" argv)) test-session))
+                 (should-not (string-search "fresh session" (car (last argv)))))))))
+      (delete-directory (expand-file-name "~/.claude") t))))
+
 (ert-deftest closed-claude-sessions-resume-through-their-account-launcher ()
   ;; claude-auto may choose either account; only the session's own launcher can
   ;; resume it. A missing launcher keeps the fresh-restart fallback.

@@ -161,15 +161,17 @@ in {
     };
 
     # `june accounts apply` writes a wrapper per numbered login (claude1, codex2, ...) under ~/.local/state/june/bin and
-    # links it into ~/.local/bin, which is already on PATH. Restore those links here, since ~/.local/bin may not survive
-    # a reboot; a name something else already holds is left alone. Persisting ~/.local/state/june is the host's job.
+    # links it into ~/.local/bin, and one per harness name (claude, codex, ...) that picks an account, linked into ~/bin,
+    # which comes first on PATH. Restore those links here, since home directories may not survive a reboot; a name
+    # something else already holds is left alone. Persisting ~/.local/state/june is the host's job.
     home.activation.juneAccounts = lib.hm.dag.entryAfter ["linkGeneration"] ''
       bin="$HOME/.local/state/june/bin"
       if [[ -d $bin ]]; then
-        run mkdir -p "$HOME/.local/bin"
+        run mkdir -p "$HOME/.local/bin" "$HOME/bin"
         for wrapper in "$bin"/*; do
           [[ -f $wrapper && $wrapper != *.tmp ]] || continue
-          link="$HOME/.local/bin/''${wrapper##*/}"
+          name=''${wrapper##*/}
+          if [[ $name == *[0-9] ]]; then link="$HOME/.local/bin/$name"; else link="$HOME/bin/$name"; fi
           if [[ ! -e $link && ! -L $link ]]; then
             run ln -s "$wrapper" "$link"
           fi

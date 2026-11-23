@@ -41,6 +41,9 @@ const USAGE = `usage:
                           Claude folder its trust, MCP servers and first-run answers (agents apply)
   june accounts login [NAME]
                           sign in each login this host lacks, or NAME, as the person ACCOUNTS.org names
+  june accounts pick HARNESS [--explain]
+                          the login the plain claude, codex or pi runs: the account with quota to spare, five-hour
+                          allowances first; --explain shows every account's standing as JSON
   june quota [NAME] [--refresh] [--json]
                           each provider account's remaining quota, read with a login on this host (NAME: codex2,
                           openai2, ...); reads within two minutes reuse the last one unless --refresh
@@ -547,6 +550,7 @@ async function accountsCommand(p: ReturnType<typeof paths>, args: string[], json
 		return result.problems.length ? 1 : 0;
 	}
 	if (args[0] === "login" && args.length <= 2) return accountsLogin(a, config, p, args[1]);
+	if (args[0] === "pick" && (args.length === 2 || (args.length === 3 && args[2] === "--explain"))) return accountsPick(a, config, p, args[1]!, args[2] === "--explain");
 	if (args.length) {
 		console.error(USAGE);
 		return 2;
@@ -558,7 +562,7 @@ async function accountsCommand(p: ReturnType<typeof paths>, args: string[], json
 	}
 	for (const r of rows) {
 		const who = r.email ?? (r.loggedIn ? "logged in" : "not logged in");
-		console.log(`${r.name.padEnd(8)} ${(r.label ?? "").padEnd(9)} ${who}${r.expected && r.email !== r.expected ? `  (expects ${r.expected})` : ""}`);
+		console.log(`${r.name.padEnd(8)} ${(r.label ?? "").padEnd(Math.max(...rows.map((x) => (x.label ?? "").length)) + 1)} ${who}${r.expected && r.email !== r.expected ? `  (expects ${r.expected})` : ""}`);
 		for (const problem of r.problems) console.log(`         ${problem}`);
 	}
 	return rows.some((r) => r.problems.length) ? 1 : 0;
@@ -614,6 +618,42 @@ async function accountsLogin(a: typeof import("./accounts.ts"), config: import("
 	return failed ? 1 : 0;
 }
 
+/** Every account's quota: the last read when it is under two minutes old, else a fresh one, saved for the next caller. */
+async function currentQuotas(a: typeof import("./accounts.ts"), config: import("./accounts.ts").AccountsConfig, p: ReturnType<typeof paths>, fresh = false) {
+	const file = `${p.state}/quota.json`;
+	const saved = fresh ? undefined : a.cached(file, 120);
+	if (saved) return saved;
+	const rows = await a.quotas(config, people(p, a.parseAccountsOrg));
+	a.save(file, rows);
+	return rows;
+}
+
+/**
+ * `june accounts pick HARNESS [--explain]`: the login the plain-name wrapper runs, printed alone. Without fresh quota
+ * for any account it falls back to the lowest-numbered login, so a session still starts.
+ */
+async function accountsPick(a: typeof import("./accounts.ts"), config: import("./accounts.ts").AccountsConfig, p: ReturnType<typeof paths>, harness: string, explain: boolean): Promise<number> {
+	if (!(harness in a.HARNESSES) || !config.harnesses[harness as keyof typeof a.HARNESSES]) {
+		console.error(`june accounts pick: ${harness} has no accounts here`);
+		return 2;
+	}
+	const rows = (await a.status(config, people(p, a.parseAccountsOrg))).filter((r) => r.harness === harness && r.loggedIn && !r.problems.length);
+	if (!rows.length) {
+		console.error(`june accounts pick: no ${harness} login here is signed in as ACCOUNTS.org expects; run june accounts login`);
+		return 1;
+	}
+	const quotas = await currentQuotas(a, config, p);
+	const ranked = a.rank(rows.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })));
+	const chosen = ranked.find((r) => r.usable)?.slot;
+	const fallback = chosen ? undefined : rows[0]!.name;
+	if (explain) console.log(JSON.stringify({ selected: chosen ?? fallback, fallback: !!fallback, accounts: ranked }));
+	else {
+		if (fallback) console.error(`june accounts pick: no account has fresh quota to spare (${ranked.map((r) => `${r.slot}: ${r.reason}`).join("; ")}); using ${fallback}`);
+		console.log(chosen ?? fallback);
+	}
+	return 0;
+}
+
 /** ACCOUNTS.org beside SOUL.org; empty when it does not exist. */
 function people<T>(p: ReturnType<typeof paths>, parse: (text: string) => T): T {
 	const file = `${p.data}/ACCOUNTS.org`;
@@ -641,12 +681,7 @@ async function quotaCommand(p: ReturnType<typeof paths>, args: string[], json: b
 		}
 		only = (q) => q.provider === provider && q.number === Number(m[2]);
 	}
-	const file = `${p.state}/quota.json`;
-	let rows = refresh ? undefined : a.cached(file, 120);
-	if (!rows) {
-		rows = await a.quotas(config, people(p, a.parseAccountsOrg));
-		a.save(file, rows);
-	}
+	let rows = await currentQuotas(a, config, p, refresh);
 	if (only) rows = rows.filter(only);
 	if (json) {
 		console.log(JSON.stringify(rows));

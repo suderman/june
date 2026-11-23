@@ -23,8 +23,8 @@ type Harness = {
 	own: readonly string[];
 	/** What the wrapper runs: the first of this name on PATH that is not one of June's wrappers. */
 	command: string;
-	/** Settings an account folder writes over a copy of the shared file. */
-	settings?: { file: string; values: Record<string, unknown> };
+	/** A settings file an account folder keeps as an adapted copy of the shared one. */
+	settings?: { file: string; adapt: (shared: Record<string, unknown>) => Record<string, unknown> };
 };
 
 export const HARNESSES: Record<HarnessName, Harness> = {
@@ -38,7 +38,16 @@ export const HARNESSES: Record<HarnessName, Harness> = {
 		base: ".pi/agent",
 		own: ["auth.json", "settings.json"],
 		command: "pi",
-		settings: { file: "settings.json", values: { defaultProvider: "openai-codex" } },
+		settings: {
+			file: "settings.json",
+			adapt: (shared) => ({
+				...shared,
+				defaultProvider: "openai-codex",
+				...(Array.isArray(shared.enabledModels)
+					? { enabledModels: shared.enabledModels.map((m) => (typeof m === "string" ? m.replace(/^[^/:]+\//, "openai-codex/") : m)) }
+					: {}),
+			}),
+		},
 	},
 	// Antigravity keeps its login in the system keyring, one per host, so it has no account folder.
 	agy: { provider: "google", base: ".gemini", own: [], command: "agy" },
@@ -97,10 +106,18 @@ export function parseAccountsOrg(text: string): People {
 	return people;
 }
 
-export type Places = { home: string; root: string; bin: string; links: string };
+/** Account folders (root), June's wrappers (bin), where numbered wrappers are linked (links, ~/.local/bin), and where the
+ * plain-name wrappers are linked (front, ~/bin, which comes before every other directory on PATH). */
+export type Places = { home: string; root: string; bin: string; links: string; front: string };
 
 export function places(home = homedir()): Places {
-	return { home, root: join(home, ".local/state/june/accounts"), bin: join(home, ".local/state/june/bin"), links: join(home, ".local/bin") };
+	return {
+		home,
+		root: join(home, ".local/state/june/accounts"),
+		bin: join(home, ".local/state/june/bin"),
+		links: join(home, ".local/bin"),
+		front: join(home, "bin"),
+	};
 }
 
 export type Slot = { name: string; harness: HarnessName; number: number; provider: Provider; dir?: string };
@@ -193,34 +210,61 @@ export function apply(config: AccountsConfig, p: Places = places()): Applied {
 			if (spec.settings) {
 				const shared = join(base, spec.settings.file);
 				const values = existsSync(shared) ? (JSON.parse(readFileSync(shared, "utf8")) as Record<string, unknown>) : {};
-				const content = JSON.stringify({ ...values, ...spec.settings.values }, null, 2) + "\n";
+				const content = JSON.stringify(spec.settings.adapt(values), null, 2) + "\n";
 				const own = join(slot.dir, spec.settings.file);
 				if (lstatSync(own, { throwIfNoEntry: false })?.isSymbolicLink()) rmSync(own);
 				if (!existsSync(own) || readFileSync(own, "utf8") !== content) writeFileSync(own, content, { mode: 0o600 });
 			}
 		}
-		const script = join(p.bin, slot.name);
-		const content = wrapper(slot, config.commands[slot.harness] ?? spec.command, p);
-		if (!existsSync(script) || readFileSync(script, "utf8") !== content) {
-			writeFileSync(`${script}.tmp`, content, { mode: 0o755 });
-			renameSync(`${script}.tmp`, script);
-			result.wrappers.push(slot.name);
-		}
-		const link = join(p.links, slot.name);
-		if (isLinkTo(link, script)) continue;
-		if (exists(link)) result.problems.push(`${link} exists and is not June's wrapper; left alone`);
-		else symlinkSync(script, link);
+		install(slot.name, wrapper(slot, config.commands[slot.harness] ?? spec.command, p), p.links, p, result);
 	}
+	const harnesses = Object.keys(config.harnesses) as HarnessName[];
+	mkdirSync(p.front, { recursive: true });
+	for (const harness of harnesses) install(harness, autoWrapper(harness, wanted.filter((s) => s.harness === harness), p), p.front, p, result);
 	// Wrappers for accounts no longer configured go, with their links; account folders stay, since they hold logins.
-	const names = new Set(wanted.map((s) => s.name));
+	const names = new Set([...wanted.map((s) => s.name), ...harnesses]);
 	for (const entry of readdirSync(p.bin)) {
 		if (names.has(entry) || entry.endsWith(".tmp")) continue;
 		const script = join(p.bin, entry);
-		if (isLinkTo(join(p.links, entry), script)) rmSync(join(p.links, entry));
+		for (const dir of [p.links, p.front]) if (isLinkTo(join(dir, entry), script)) rmSync(join(dir, entry));
 		rmSync(script);
 		result.removed.push(entry);
 	}
 	return result;
+}
+
+/** Write wrapper NAME when it changed, and link it into DIR unless something else holds that name there. */
+function install(name: string, content: string, dir: string, p: Places, result: Applied): void {
+	const script = join(p.bin, name);
+	if (!existsSync(script) || readFileSync(script, "utf8") !== content) {
+		writeFileSync(`${script}.tmp`, content, { mode: 0o755 });
+		renameSync(`${script}.tmp`, script);
+		result.wrappers.push(name);
+	}
+	const link = join(dir, name);
+	if (isLinkTo(link, script)) return;
+	if (exists(link)) result.problems.push(`${link} exists and is not June's wrapper; left alone`);
+	else symlinkSync(script, link);
+}
+
+/** Subcommands that act on one login, which the plain name must not pick for. */
+const SIGN_IN: Record<HarnessName, readonly string[]> = { claude: ["auth", "login", "logout", "setup-token"], codex: ["login", "logout"], pi: ["auth"], agy: [] };
+
+/** The plain-name wrapper (claude, codex, pi, agy): the account June picks from quota, or the only one. */
+export function autoWrapper(harness: HarnessName, accounts: readonly Slot[], p: Places = places()): string {
+	const rel = (path: string) => `$HOME/${path.slice(p.home.length + 1)}`;
+	const names = accounts.map((s) => s.name).join(", ");
+	const lines = [
+		"#!/bin/sh",
+		`# ${harness}: ${accounts.length > 1 ? `the account June picks from quota and resets (${names})` : `its one account, ${names}`}. Written by \`june accounts apply\`; changes are overwritten.`,
+	];
+	if (SIGN_IN[harness].length)
+		lines.push(
+			`case "\${1-}" in ${SIGN_IN[harness].join("|")}) echo "${harness} $1 acts on one login; use ${names}" >&2; exit 2 ;; esac`,
+		);
+	if (accounts.length > 1) lines.push(`slot=$(june accounts pick ${harness}) || exit 1`, `exec "${rel(p.bin)}/$slot" "$@"`, "");
+	else lines.push(`exec "${rel(p.bin)}/${accounts[0]!.name}" "$@"`, "");
+	return lines.join("\n");
 }
 
 /** The command that signs `slot` in through its own wrapper, by device code where the harness offers one (a browser
@@ -467,7 +511,15 @@ export async function readQuota(provider: Provider, l: Login, fetcher: Fetch = f
 export async function quotas(
 	config: AccountsConfig,
 	people: People,
-	options: { places?: Places; run?: Run; fetcher?: Fetch; now?: number; only?: (q: { provider: Provider; number: number }) => boolean } = {},
+	options: {
+		places?: Places;
+		run?: Run;
+		fetcher?: Fetch;
+		now?: number;
+		only?: (q: { provider: Provider; number: number }) => boolean;
+		/** Whether a login is in use, which stops June renewing its token; /proc by default. */
+		busy?: (slot: Slot) => boolean;
+	} = {},
 ): Promise<Quota[]> {
 	const now = options.now ?? Date.now();
 	const all = slots(config, options.places);
@@ -489,7 +541,12 @@ export async function quotas(
 		const found: Login[] = [];
 		for (const s of candidates) {
 			if (s.dir && !existsSync(s.dir)) continue;
-			const l = await login(s, options.run);
+			let l = await login(s, options.run);
+			// An idle login's token lapses (Claude's after eight hours); renew it as the harness would.
+			if (l?.token && l.expires !== undefined && l.expires <= now + 300_000) {
+				const renewed = await refresh(s, { ...(options.fetcher ? { fetcher: options.fetcher } : {}), now, ...(options.busy ? { busy: options.busy } : {}) });
+				if (renewed === "refreshed") l = await login(s, options.run);
+			}
 			if (l?.token) found.push(l);
 		}
 		const live = found.filter((l) => l.expires === undefined || l.expires > now + 60_000).filter((l) => !email || !l.email || l.email === email);
@@ -520,4 +577,119 @@ export function save(file: string, rows: Quota[], now = Date.now()): void {
 	mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
 	writeFileSync(`${file}.tmp`, JSON.stringify({ at: Math.floor(now / 1000), quotas: rows }) + "\n", { mode: 0o600 });
 	renameSync(`${file}.tmp`, file);
+}
+
+/** Whether a running process uses `slot`: its wrapper's JUNE_ACCOUNT, or the folder in the harness's variable. */
+export function inUse(slot: Slot, proc = "/proc"): boolean {
+	const env = HARNESSES[slot.harness].env;
+	const marks = [`JUNE_ACCOUNT=${slot.name}`, ...(env && slot.dir ? [`${env}=${slot.dir}`] : [])];
+	for (const pid of readdirSync(proc)) {
+		if (!/^\d+$/.test(pid) || Number(pid) === process.pid) continue;
+		let environ: string;
+		try {
+			environ = readFileSync(join(proc, pid, "environ"), "utf8");
+		} catch {
+			continue;
+		}
+		if (environ.split("\0").some((v) => marks.includes(v))) return true;
+	}
+	return false;
+}
+
+// The harnesses' own public OAuth clients. Antigravity's needs a client secret, so June does not refresh it; its quota
+// reads again once agy runs.
+const OAUTH: Partial<Record<Provider, { url: string; clientId: string; scope?: string }>> = {
+	anthropic: { url: "https://platform.claude.com/v1/oauth/token", clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e" },
+	openai: { url: "https://auth.openai.com/oauth/token", clientId: "app_EMoamEEZ73f0CkXaXp7hrann", scope: "openid profile email" },
+};
+
+const writePrivate = (file: string, value: unknown) => {
+	writeFileSync(`${file}.june-tmp`, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
+	renameSync(`${file}.june-tmp`, file);
+};
+
+/**
+ * Renew `slot`'s access token with its refresh token, as the harness would, and save both back in the harness's own
+ * file. Only while no process uses the login, so June never races the harness for a refresh token that changes on use.
+ */
+export async function refresh(
+	slot: Slot,
+	options: { fetcher?: Fetch; now?: number; busy?: (slot: Slot) => boolean } = {},
+): Promise<"refreshed" | "busy" | "unsupported" | "failed"> {
+	const client = OAUTH[slot.provider];
+	if (!client || !slot.dir) return "unsupported";
+	if ((options.busy ?? inUse)(slot)) return "busy";
+	const now = options.now ?? Date.now();
+	const fetcher = options.fetcher ?? (fetch as unknown as Fetch);
+	const lock = join(slot.dir, ".june-refresh.lock");
+	try {
+		writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
+	} catch {
+		// Another june is refreshing it, or one died mid-way; a lock over a minute old is abandoned.
+		if (now - (lstatSync(lock, { throwIfNoEntry: false })?.mtimeMs ?? now) < 60_000) return "busy";
+		rmSync(lock, { force: true });
+		return refresh(slot, options);
+	}
+	try {
+		const file = join(slot.dir, slot.harness === "claude" ? ".credentials.json" : "auth.json");
+		const saved = readJson(file);
+		const current =
+			slot.harness === "claude" ? saved?.claudeAiOauth?.refreshToken : slot.harness === "codex" ? saved?.tokens?.refresh_token : saved?.["openai-codex"]?.refresh;
+		if (typeof current !== "string") return "failed";
+		const response = await fetcher(client.url, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ grant_type: "refresh_token", refresh_token: current, client_id: client.clientId, ...(client.scope ? { scope: client.scope } : {}) }),
+		});
+		if (response.status < 200 || response.status >= 300) return "failed";
+		const t = await response.json();
+		if (typeof t?.access_token !== "string") return "failed";
+		const expires = typeof t.expires_in === "number" ? now + t.expires_in * 1000 : (claims(t.access_token)?.exp ?? 0) * 1000;
+		if (slot.harness === "claude") {
+			Object.assign(saved.claudeAiOauth, { accessToken: t.access_token, refreshToken: t.refresh_token ?? current, expiresAt: expires });
+		} else if (slot.harness === "codex") {
+			Object.assign(saved.tokens, { access_token: t.access_token, refresh_token: t.refresh_token ?? current, ...(t.id_token ? { id_token: t.id_token } : {}) });
+			saved.last_refresh = new Date(now).toISOString();
+		} else {
+			Object.assign(saved["openai-codex"], { access: t.access_token, refresh: t.refresh_token ?? current, expires });
+		}
+		writePrivate(file, saved);
+		return "refreshed";
+	} catch {
+		return "failed";
+	} finally {
+		rmSync(lock, { force: true });
+	}
+}
+
+export type Ranked = { slot: string; usable: boolean; score: number; reason: string };
+
+/**
+ * Rank a harness's logged-in accounts by quota. An account is usable while its five-hour window keeps 10% and every
+ * weekly window 5%, or the window resets within a quarter of its floor. Accounts with a five-hour window come first:
+ * that allowance resets soonest, so it is spent before an account that has only a weekly one. Within a tier, the
+ * higher score wins, as claude-auto weighed it: each window's remaining share against the time left until it resets.
+ */
+export function rank(accounts: readonly { slot: Slot; quota?: Quota }[], now = Date.now()): Ranked[] {
+	const out = accounts.map(({ slot, quota }) => {
+		if (!quota || quota.error || !quota.fetched || now / 1000 - quota.fetched > 600)
+			return { slot: slot.name, usable: false, score: 0, tier: 2, reason: quota?.error ?? "no fresh quota" };
+		const pace = (w: Window, floor: number) => {
+			const left = w.resetAt ? Math.max(0, w.resetAt - now / 1000) : (w.seconds ?? floor);
+			return Math.max(0.01, Math.min(100, (w.remaining * (w.seconds ?? floor)) / Math.max(left, floor)));
+		};
+		const short = (w: Window, minimum: number, grace: number) =>
+			w.remaining < minimum && !(w.resetAt !== undefined && w.resetAt - now / 1000 <= grace && w.remaining >= 1);
+		const five = quota.windows.find((w) => w.name === "5 hour");
+		const weekly = quota.windows.filter((w) => w.seconds === 604800 || /weekly/i.test(w.name));
+		if (five && short(five, 10, 900)) return { slot: slot.name, usable: false, score: 0, tier: 2, reason: `5 hour at ${five.remaining}%` };
+		const low = weekly.find((w) => short(w, 5, 21600));
+		if (low) return { slot: slot.name, usable: false, score: 0, tier: 2, reason: `${low.name} at ${low.remaining}%` };
+		const weeklyPace = weekly.length ? Math.min(...weekly.map((w) => pace(w, 86400))) : 100;
+		const score = five ? 1 / (0.65 / pace(five, 1800) + 0.35 / weeklyPace) : weeklyPace;
+		return { slot: slot.name, usable: true, score, tier: five ? 0 : 1, reason: five ? "five-hour and weekly quota" : "weekly quota only, kept for last" };
+	});
+	return out
+		.sort((a, b) => a.tier - b.tier || b.score - a.score || a.slot.localeCompare(b.slot, undefined, { numeric: true }))
+		.map(({ tier: _, ...r }) => r);
 }

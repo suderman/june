@@ -285,6 +285,11 @@ hidden."
                      (org-dispatch--label (org-dispatch--terminal (alist-get 'address row)) 'herdr.space)))
               (ignore-errors (org-dispatch--get (org-dispatch--hc "ls") 'terminals)))))
 
+(defun org-dispatch--shared-claude-session-p (uuid)
+  "Non-nil when Claude session UUID is in ~/.claude/projects, which June's
+account folders (claude1, claude2, ...) share, so any of them resumes it."
+  (file-expand-wildcards (format "~/.claude/projects/*/%s.jsonl" uuid)))
+
 (defun org-dispatch--claude-launcher (uuid)
   "Account launcher for the Claude config directory holding session UUID.
 A launcher such as claude-work fixes CLAUDE_CONFIG_DIR to ~/.claude-work, so
@@ -1340,9 +1345,13 @@ is accepted as unknown, which the watcher never mistakes for idle."
                           (org-dispatch--claude-launcher resume)))
              (custom (unless (or live native) (org-dispatch--command agent)))
              (command (or native custom agent))
-             ;; A custom launcher may choose another account with a separate
-             ;; session store; then a closed session restarts from the Org record.
-             (fresh (and resume custom))
+             ;; A custom launcher may choose another account. June's account
+             ;; folders share ~/.claude's session store, so a session there
+             ;; resumes on any of them; one only in a separate store restarts
+             ;; from the Org record.
+             (fresh (and resume custom
+                         (not (and (equal agent "claude")
+                                   (org-dispatch--shared-claude-session-p resume)))))
              (name (format "auto-%s-%s" (org-dispatch--id8 id) (format-time-string "%H%M%S")))
              (state (list :id id :file (plist-get task :file) :heading (plist-get task :heading)
                           :dir (plist-get task :dir) :agent agent :status "starting"
@@ -1735,7 +1744,8 @@ only files whose text contains one of those strings."
   "Non-nil when SESSION (AGENT . UUID) can be reopened from its Org link."
   (pcase (car session)
     ("pi" (org-dispatch--session-file (cdr session)))
-    ("claude" (org-dispatch--claude-launcher (cdr session)))))
+    ("claude" (or (org-dispatch--claude-launcher (cdr session))
+                  (org-dispatch--shared-claude-session-p (cdr session))))))
 
 (defun org-dispatch--retire-file ()
   (expand-file-name "retire.json" org-dispatch-state-dir))

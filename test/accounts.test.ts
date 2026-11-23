@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { accountsConfig, anthropicWindows, apply, googleWindows, loginCommand, openaiWindows, parseAccountsOrg, places, quotas, slots, status } from "../src/accounts.ts";
+import { accountsConfig, anthropicWindows, apply, autoWrapper, googleWindows, inUse, loginCommand, openaiWindows, parseAccountsOrg, places, quotas, rank, refresh, slots, status } from "../src/accounts.ts";
 import { tempDir } from "./helpers.ts";
 
 const jwt = (payload: object) => `x.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.y`;
@@ -43,17 +43,18 @@ test("apply makes account folders that keep their own login and share the rest, 
 	writeFileSync(join(home, ".claude/settings.json"), "{}");
 	writeFileSync(join(home, ".claude/.credentials.json"), "{}");
 	mkdirSync(join(home, ".pi/agent"), { recursive: true });
-	writeFileSync(join(home, ".pi/agent/settings.json"), JSON.stringify({ defaultProvider: "cliproxyapi", theme: "x" }));
+	writeFileSync(join(home, ".pi/agent/settings.json"), JSON.stringify({ defaultProvider: "cliproxyapi", theme: "x", enabledModels: ["cliproxyapi/gpt-6.2-sol:high"] }));
 	writeFileSync(join(home, ".pi/agent/auth.json"), "{}");
 	const config = accountsConfig({ claude: 2, pi: 1, agy: 1 });
 	const first = apply(config, p);
 	assert.deepEqual(first.problems, []);
-	assert.deepEqual(first.wrappers.sort(), ["agy1", "claude1", "claude2", "pi1"]);
+	assert.deepEqual(first.wrappers.sort(), ["agy", "agy1", "claude", "claude1", "claude2", "pi", "pi1"]);
+	assert.equal(readlinkSync(join(p.front, "claude")), join(p.bin, "claude"));
 	const claude2 = join(p.root, "claude2");
 	assert.equal(readlinkSync(join(claude2, "projects")), join(home, ".claude/projects"));
 	assert.equal(existsSync(join(claude2, ".credentials.json")), false, "a login is never shared");
 	assert.equal(lstatSync(claude2).mode & 0o777, 0o700);
-	assert.deepEqual(JSON.parse(readFileSync(join(p.root, "pi1/settings.json"), "utf8")), { defaultProvider: "openai-codex", theme: "x" });
+	assert.deepEqual(JSON.parse(readFileSync(join(p.root, "pi1/settings.json"), "utf8")), { defaultProvider: "openai-codex", theme: "x", enabledModels: ["openai-codex/gpt-6.2-sol:high"] });
 	assert.equal(existsSync(join(p.root, "pi1/auth.json")), false);
 	assert.equal(existsSync(join(p.root, "agy1")), false, "agy keeps one login in the keyring");
 	assert.equal(readlinkSync(join(p.links, "claude2")), join(p.bin, "claude2"));
@@ -152,4 +153,96 @@ test("each harness signs in through its own wrapper, by device code where it can
 	assert.deepEqual(loginCommand(codex3!), ["codex3", "login", "--device-auth"]);
 	assert.deepEqual(loginCommand(pi1!), ["pi1", "auth", "login", "openai-codex", "--no-browser"]);
 	assert.deepEqual(loginCommand(agy1!), ["agy1"]);
+});
+
+test("the plain name runs the picked account, or the only one, and refuses sign-in commands", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const home = tmp.dir;
+	const p = places(home);
+	mkdirSync(join(home, ".codex"), { recursive: true });
+	mkdirSync(join(home, "real"));
+	writeFileSync(join(home, "real", "codex"), '#!/bin/sh\necho "$JUNE_ACCOUNT $*"\n');
+	writeFileSync(join(home, "real", "june"), "#!/bin/sh\necho codex2\n");
+	for (const f of ["codex", "june"]) chmodSync(join(home, "real", f), 0o755);
+	apply(accountsConfig({ codex: 2 }), p);
+	const env = { HOME: home, PATH: `${p.front}:${p.links}:${join(home, "real")}:/run/current-system/sw/bin:/usr/bin:/bin` };
+	assert.equal(execFileSync("codex", ["exec", "hi"], { env }).toString().trim(), "codex2 exec hi");
+	assert.throws(() => execFileSync("codex", ["login"], { env, stdio: "pipe" }), /use codex1, codex2/);
+	const one = slots(accountsConfig({ agy: 1 }), p);
+	assert.match(autoWrapper("agy", one, p), /exec "\$HOME\/\.local\/state\/june\/bin\/agy1" "\$@"/);
+});
+
+test("ranking spends five-hour allowances first, skips short accounts, and keeps a weekly-only account for last", () => {
+	const now = Date.parse("2026-11-22T20:00:00Z");
+	const at = (h: number) => now / 1000 + h * 3600;
+	const config = accountsConfig({ codex: 4 });
+	const [c1, c2, c3, c4] = slots(config, places("/h"));
+	const q = (windows: object[]) => ({ provider: "openai" as const, number: 0, windows: windows as any, fetched: now / 1000 });
+	const ranked = rank(
+		[
+			{ slot: c1!, quota: q([{ name: "Weekly", remaining: 100, seconds: 604800, resetAt: at(140) }]) },
+			{ slot: c2!, quota: q([{ name: "5 hour", remaining: 98, seconds: 18000, resetAt: at(4) }, { name: "Weekly", remaining: 74, seconds: 604800, resetAt: at(40) }]) },
+			{ slot: c3!, quota: q([{ name: "5 hour", remaining: 5, seconds: 18000, resetAt: at(3) }, { name: "Weekly", remaining: 90, seconds: 604800, resetAt: at(100) }]) },
+			{ slot: c4!, quota: q([{ name: "5 hour", remaining: 100, seconds: 18000, resetAt: at(5) }, { name: "Weekly", remaining: 89, seconds: 604800, resetAt: at(120) }]) },
+		],
+		now,
+	);
+	assert.deepEqual(ranked.map((r) => [r.slot, r.usable]), [["codex2", true], ["codex4", true], ["codex1", true], ["codex3", false]]);
+	assert.equal(ranked.at(-1)!.reason, "5 hour at 5%");
+	assert.equal(rank([{ slot: c1! }], now)[0]!.usable, false);
+});
+
+test("an idle login's lapsed token is renewed into the harness's own file; a busy one is left alone", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const home = tmp.dir;
+	const p = places(home);
+	mkdirSync(join(home, ".claude"), { recursive: true });
+	mkdirSync(join(home, ".codex"), { recursive: true });
+	const config = accountsConfig({ claude: 1, codex: 1 });
+	apply(config, p);
+	const now = Date.parse("2026-11-22T20:00:00Z");
+	const credentials = join(p.root, "claude1/.credentials.json");
+	writeFileSync(credentials, JSON.stringify({ claudeAiOauth: { accessToken: "old", refreshToken: "r1", expiresAt: now - 1000, scopes: ["user:inference"] } }));
+	writeFileSync(join(p.root, "claude1/.claude.json"), JSON.stringify({ oauthAccount: { emailAddress: "a@x" } }));
+	const posted: any[] = [];
+	const fetcher = async (url: string, init: { body?: string }) => {
+		if (url.includes("oauth/token")) {
+			posted.push({ url, ...JSON.parse(init.body!) });
+			return { status: 200, json: async () => ({ access_token: "new", refresh_token: "r2", expires_in: 28800 }) };
+		}
+		return { status: 200, json: async () => ({ five_hour: { utilization: 20 } }) };
+	};
+	const [claude1, codex1] = slots(config, p);
+	assert.equal(await refresh(claude1!, { fetcher, now, busy: () => true }), "busy");
+	assert.equal(JSON.parse(readFileSync(credentials, "utf8")).claudeAiOauth.refreshToken, "r1");
+	const people = parseAccountsOrg("| Number | Anthropic |\n| 1 | a@x |\n");
+	const rows = await quotas(config, people, { places: p, fetcher, now, busy: () => false });
+	assert.deepEqual(rows.find((r) => r.provider === "anthropic")?.windows.map((w) => w.remaining), [80]);
+	assert.deepEqual(posted[0], { url: "https://platform.claude.com/v1/oauth/token", grant_type: "refresh_token", refresh_token: "r1", client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e" });
+	const saved = JSON.parse(readFileSync(credentials, "utf8")).claudeAiOauth;
+	assert.deepEqual([saved.accessToken, saved.refreshToken, saved.expiresAt, saved.scopes], ["new", "r2", now + 28800_000, ["user:inference"]]);
+	assert.equal(lstatSync(credentials).mode & 0o777, 0o600);
+	assert.equal(existsSync(join(p.root, "claude1/.june-refresh.lock")), false);
+	// A Codex login keeps its id token and records the refresh as Codex does.
+	writeFileSync(join(p.root, "codex1/auth.json"), JSON.stringify({ tokens: { access_token: "a", refresh_token: "c1", id_token: "keep", account_id: "x" }, last_refresh: "then" }));
+	assert.equal(await refresh(codex1!, { fetcher, now, busy: () => false }), "refreshed");
+	const codex = JSON.parse(readFileSync(join(p.root, "codex1/auth.json"), "utf8"));
+	assert.deepEqual([codex.tokens.access_token, codex.tokens.refresh_token, codex.tokens.id_token, codex.last_refresh], ["new", "r2", "keep", new Date(now).toISOString()]);
+	assert.equal(posted[1].client_id, "app_EMoamEEZ73f0CkXaXp7hrann");
+});
+
+test("a login is in use while a process carries its account or folder", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const p = places("/h");
+	const [claude2] = slots(accountsConfig({ claude: 2 }), p).slice(1);
+	const proc = join(tmp.dir, "proc");
+	mkdirSync(join(proc, "41"), { recursive: true });
+	writeFileSync(join(proc, "41", "environ"), "HOME=/h\0PATH=/bin\0");
+	assert.equal(inUse(claude2!, proc), false);
+	mkdirSync(join(proc, "42"));
+	writeFileSync(join(proc, "42", "environ"), `HOME=/h\0CLAUDE_CONFIG_DIR=${join(p.root, "claude2")}\0`);
+	assert.equal(inUse(claude2!, proc), true);
 });
