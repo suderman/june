@@ -30,6 +30,8 @@ self: {
       TZDIR = tzdir;
       ORG_DISPATCH_EL = "${org}/dispatch/org-dispatch.el";
       ORG_DISPATCH_PROMPTS = "${org}/prompts";
+      # June picks the roster agent for each task (june agents pick).
+      ORG_DISPATCH_JUNE = lib.getExe cfg.package;
     };
     text = builtins.readFile "${org}/dispatch/org-dispatch";
   };

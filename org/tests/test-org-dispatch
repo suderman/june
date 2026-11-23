@@ -21,6 +21,8 @@ export ORG_DISPATCH_HOST=kit
 export ORG_DISPATCH_SETTLE=0
 export ORG_DISPATCH_LOG_KEEP=2
 export PATH="$fixture/bin:$PATH"
+# Never Jon's roster: without june, a task runs on the harness it names; roster tests bring their own.
+export ORG_DISPATCH_JUNE="$fixture/bin/no-june"
 # Some checks load org-dispatch.el directly, without the script that finds NixOS zone data.
 if [[ -z ${TZDIR:-} && ! -d /usr/share/zoneinfo && -d /etc/zoneinfo ]]; then export TZDIR=/etc/zoneinfo; fi
 mkdir -p "$HOME" "$ORG_DISPATCH_ROOT" "$fixture/bin"
@@ -818,6 +820,75 @@ cat >"$fixture/launch-tests.el" <<'EOF'
            (should (string-search "fresh session, not a native resume" (car (last argv)))))
          (org-dispatch--edit (plist-get task :file) (plist-get task :id)
                              (lambda () (should (= 2 (how-many "herdr:kit/claude:" (point-min) (point-max)))))))))))
+
+(defun test-roster-task (n agents)
+  "Task N asking for roster AGENTS, in its own directory so tasks do not serialize."
+  (let ((file (expand-file-name (format "roster-%d.org" n) org-dispatch-root))
+        (id (format "00000000-0000-0000-0000-00000000010%d" n))
+        (dir (make-temp-file "roster-dir" t)))
+    (make-directory org-dispatch-root t)
+    (with-temp-file file
+      (insert (format "* AUTO Roster task %d\n:PROPERTIES:\n:ID: %s\n:HOST: kit\n:AGENTS: %s\n:DIR: %s\n:END:\n" n id agents dir)))
+    (org-dispatch--edit file id #'org-dispatch--task)))
+
+(ert-deftest roster-agents-launch-with-their-card-and-become-the-task-agent ()
+  ;; June picks among AGENTS. The card's model, effort and instructions reach the
+  ;; harness, the terminal carries june.agent so June shows it busy, the task
+  ;; names the agent from then on, and a second task in the pass skips it.
+  (let* ((bin (make-temp-file "june-bin" t))
+         (org-dispatch-june (expand-file-name "june" bin))
+         (calls (expand-file-name "calls" bin))
+         (org-dispatch-max-agents 10))
+    (with-temp-file org-dispatch-june
+      (insert "#!/bin/sh\necho \"$*\" >> " calls "\n"
+              "echo '{\"chosen\":\"bolt\",\"why\":\"bolt is the first available\",\"card\":"
+              "{\"name\":\"Bolt\",\"slug\":\"bolt\",\"host\":\"kit\",\"harness\":\"claude\","
+              "\"model\":\"claude-opus-5-5\",\"effort\":\"high\",\"instructions\":\"Be careful.\",\"problems\":[]}}'\n"))
+    (set-file-modes org-dispatch-june #o755)
+    (unwind-protect
+        (test-with-hc
+         (let* ((one (test-roster-task 1 "bolt sprocket"))
+                (two (test-roster-task 2 "bolt sprocket"))
+                (chosen (org-dispatch--eligible (list one two) nil)))
+           (should-not (plist-get one :agent))
+           (should (equal (plist-get one :roster) '("bolt" "sprocket")))
+           (should (equal (mapcar (lambda (task) (plist-get task :agent)) chosen) '("claude" "claude")))
+           (should (equal (split-string (with-temp-buffer (insert-file-contents calls) (buffer-string)) "\n" t)
+                          '("agents pick --json --host kit --harnesses pi,claude bolt sprocket"
+                            "agents pick --json --host kit --harnesses pi,claude --except bolt bolt sprocket")))
+           (should (org-dispatch--launch (car chosen)))
+           (let ((run (test-run-call)) (argv (test-argv)))
+             (should (equal (car argv) "claude"))
+             (should (equal (cadr (member "--model" argv)) "claude-opus-5-5"))
+             (should (equal (cadr (member "--effort" argv)) "high"))
+             (should (equal (cadr (member "--append-system-prompt" argv)) "Be careful."))
+             (should (member "june.agent=bolt" run))
+             (should (member "org.agent=claude" run)))
+           (org-dispatch--edit (plist-get one :file) (plist-get one :id)
+                               (lambda ()
+                                 (should (equal (org-entry-get nil "AGENT") "bolt"))
+                                 (should (equal (org-get-todo-state) "PROG"))))))
+      (delete-directory bin t)
+      (dolist (file (file-expand-wildcards (expand-file-name "roster-*.org" org-dispatch-root)))
+        (delete-file file))
+      (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id))))))
+
+(ert-deftest roster-tasks-wait-with-the-reason-june-gives ()
+  (let* ((bin (make-temp-file "june-bin" t))
+         (org-dispatch-june (expand-file-name "june" bin)))
+    (with-temp-file org-dispatch-june
+      (insert "#!/bin/sh\necho '{\"chosen\":null,\"why\":\"rivet: the dispatcher cannot start codex yet\"}'\nexit 1\n"))
+    (set-file-modes org-dispatch-june #o755)
+    (unwind-protect
+        (test-with-hc
+         (let ((task (test-roster-task 3 "rivet")))
+           (should-not (org-dispatch--eligible (list task) nil))
+           (should (string-search "cannot start codex"
+                                  (plist-get (car (org-dispatch--eligible (list task) nil t)) :dependency)))))
+      (delete-directory bin t)
+      (dolist (file (file-expand-wildcards (expand-file-name "roster-*.org" org-dispatch-root)))
+        (delete-file file))
+      (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id))))))
 
 (ert-deftest closed-claude-sessions-in-the-shared-store-resume-on-any-account ()
   ;; June's account folders share ~/.claude/projects, so the account-picking

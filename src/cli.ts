@@ -24,9 +24,10 @@ const USAGE = `usage:
   june agents [NAME] [--json]
                           the roster (ROSTER.org): each agent's host, harness, model and effort, whether it is busy,
                           and its battery, the quota its harness has to spare there; NAME shows one agent's card
-  june agents pick NAME... [--explain]
+  june agents pick NAME... [--host HOST] [--harnesses H,H] [--except A,A] [--explain]
                           which of these agents, in your order, to give a task: the first available, unless a later
-                          one would lose quota at a reset within hours
+                          one would lose quota at a reset within hours; pi or claude means every agent on it; the
+                          dispatcher passes its host and the harnesses it can start
   june start NAME [PROMPT...]
                           start roster agent NAME here, in this terminal, on the account its harness picks; refuses
                           while NAME is busy or works on another host
@@ -836,25 +837,60 @@ async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: 
  * `june agents pick NAME... [--explain]`: the candidate to give a task, from names in the user's order: the first one
  * available, unless a later one would otherwise lose quota at a reset within hours. Prints the name alone.
  */
-async function agentsPick(p: ReturnType<typeof paths>, names: string[], explain: boolean): Promise<number> {
+async function agentsPick(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {
 	const { choose, findCard } = await import("./roster.ts");
+	const a = await import("./accounts.ts");
+	const flag = (name: string) => {
+		const i = args.indexOf(name);
+		if (i < 0) return undefined;
+		const value = args[i + 1];
+		args.splice(i, 2);
+		return value;
+	};
+	// The dispatcher asks for agents on its own host that it knows how to start.
+	const host = flag("--host");
+	const harnesses = flag("--harnesses")?.split(",");
+	// Agents the dispatcher has given a task earlier in this pass, not yet labelled busy.
+	const taken = new Set(flag("--except")?.split(",") ?? []);
+	const names = args;
 	if (!names.length) {
 		console.error("june agents pick: name the candidates, in order");
 		return 2;
 	}
 	const rows = await rosterStanding(p);
-	const options = names.map((name) => {
-		const row = rows.find((r) => r.card === findCard(rows.map((x) => x.card), name));
-		if (!row) return { name, available: false, reason: "not on the roster" };
+	type Option = import("./roster.ts").Option & { row?: Standing; legacy?: string };
+	const option = (row: Standing): Option => {
 		const b = row.battery;
 		const quota = b && "account" in b ? { weekly: b.weekly, hours: b.hours, rate: b.rate } : {};
+		const base = { name: row.card.slug, row, ...quota };
+		if (taken.has(row.card.slug)) return { ...base, available: false, reason: "given a task this pass" };
+		if (host && row.card.host !== host) return { ...base, available: false, reason: `works on ${row.card.host}` };
+		if (harnesses && !harnesses.includes(row.card.harness ?? "")) return { ...base, available: false, reason: `the dispatcher cannot start ${row.card.harness} yet` };
 		// A card on another host is available while idle; its quota is read there.
 		const spent = b && "reason" in b && !b.reason.startsWith("quota is read on");
-		const available = row.status === "idle" && !spent;
-		return { name: row.card.slug, available, reason: spent ? (b as { reason: string }).reason : row.status, ...quota };
+		return { ...base, available: row.status === "idle" && !spent, reason: spent ? (b as { reason: string }).reason : row.status };
+	};
+	const options: Option[] = names.flatMap((name): Option[] => {
+		const row = rows.find((r) => r.card === findCard(rows.map((x) => x.card), name));
+		if (row) return [option(row)];
+		// A harness name means every agent on it, in roster order; with none, the plain harness as before the roster.
+		if (name in a.HARNESSES) {
+			const cards = rows.filter((r) => r.card.harness === name && (!host || r.card.host === host));
+			return cards.length ? cards.map(option) : [{ name, legacy: name, available: true, reason: `no roster agent on ${name}; the plain harness` }];
+		}
+		return [{ name, available: false, reason: "not on the roster" }];
 	});
 	const result = choose(options);
-	if (explain) console.log(JSON.stringify({ ...result, options }));
+	const picked = options.find((o) => o.name === result.chosen);
+	if (json)
+		console.log(
+			JSON.stringify({
+				...result,
+				...(picked?.row ? { card: picked.row.card } : {}),
+				...(picked?.legacy ? { legacy: picked.legacy } : {}),
+				options: options.map(({ row: _, ...o }) => o),
+			}),
+		);
 	else if (result.chosen) console.log(result.chosen);
 	else console.error(`june agents pick: none is available (${result.why})`);
 	return result.chosen ? 0 : 1;

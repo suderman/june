@@ -61,6 +61,9 @@
   ;; The Nix wrapper pins the prompts; from a checkout, use the ones beside this file.
   (expand-file-name (org-dispatch--env "ORG_DISPATCH_PROMPTS"
                                        (expand-file-name "../prompts" (file-name-directory (or load-file-name buffer-file-name))))))
+(defvar org-dispatch-june (org-dispatch--env "ORG_DISPATCH_JUNE" "june")
+  "The june command, which picks a roster agent for a task (june agents pick).
+Without it a task naming one harness runs on it as before the roster.")
 (defvar org-dispatch-model (getenv "ORG_DISPATCH_MODEL")
   "Model for pi, such as codex-lb/gpt-6.1-sol:high. Nil uses pi's defaults.")
 (defvar org-dispatch-max-agents
@@ -676,8 +679,11 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
   "Describe the entry at point."
   (let* ((host (org-dispatch--resolve "HOST" org-dispatch-hosts
                                       (org-dispatch--default "host" (car org-dispatch-hosts))))
-         (agent (org-dispatch--resolve "AGENT" org-dispatch-agents
-                                       (org-dispatch--default "agent" "pi")))
+         (named (org-dispatch--roster-names))
+         ;; A roster task's harness is known once June picks its agent.
+         (agent (if named (list :value nil)
+                  (org-dispatch--resolve "AGENT" org-dispatch-agents
+                                         (org-dispatch--default "agent" "pi"))))
          (section (org-dispatch--section-bounds "Sessions"))
          (dir (org-entry-get nil "DIR"))
          (live-content (condition-case err (org-dispatch--live-content)
@@ -688,11 +694,11 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
       (save-excursion
         (goto-char (car section))
         (while (re-search-forward
-                (format "herdr:%s/%s:\\([0-9a-f-]+\\)"
+                (format "herdr:%s/\\(%s\\):\\([0-9a-f-]+\\)"
                         (regexp-quote org-dispatch-host)
-                        (regexp-quote (or (plist-get agent :value) "")))
+                        (mapconcat #'regexp-quote org-dispatch-launchable "\\|"))
                 (cdr section) t)
-          (push (match-string 1) sessions))))
+          (push (cons (match-string 1) (match-string 2)) sessions))))
     (list :file buffer-file-name
           :id (org-entry-get nil "ID")
           :heading (org-get-heading t t t t)
@@ -715,15 +721,90 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
           :branch (org-entry-get nil "BRANCH")
           :model (or (org-entry-get nil "MODEL")
                      (when (equal (plist-get agent :value) "pi") org-dispatch-model))
+          :model-set (org-entry-get nil "MODEL")
+          ;; The agents to choose among, in Jon's order: AGENTS, a roster AGENT,
+          ;; June's dispatch.roster, or the plain harness, which means every
+          ;; roster agent on it.
+          :roster (or named (list (plist-get agent :value)))
+          :sessions sessions
+          :stopped (cons (org-entry-get nil "JUNE_STOP_SESSION")
+                         (split-string (or (org-entry-get nil "JUNE_STOP_SESSIONS") "")))
           :dir (if dir (expand-file-name dir) (org-dispatch--project-dir buffer-file-name))
           :repos (org-dispatch--project-repos buffer-file-name)
           ;; An interrupted session stays in history but must never receive work again.
-          :session (unless (member (car sessions)
-                                   (cons (org-entry-get nil "JUNE_STOP_SESSION")
-                                         (split-string (or (org-entry-get nil "JUNE_STOP_SESSIONS") ""))))
-                     (car sessions))
+          :session (org-dispatch--session-for
+                    sessions (plist-get agent :value)
+                    (cons (org-entry-get nil "JUNE_STOP_SESSION")
+                          (split-string (or (org-entry-get nil "JUNE_STOP_SESSIONS") ""))))
           :dialog (org-dispatch--new-dialog)
           :hash (secure-hash 'sha1 (org-dispatch--subtree-text)))))
+
+(defun org-dispatch--session-for (sessions agent stopped)
+  "AGENT's latest session among SESSIONS, (KIND . UUID) pairs newest first,
+unless STOPPED names it."
+  (let ((latest (cdr (assoc agent sessions))))
+    (unless (member latest stopped) latest)))
+
+(defun org-dispatch--roster-names ()
+  "The roster agents the entry at point asks for, in order, or nil.
+AGENTS lists candidates. An AGENT that is not a harness name is one agent.
+A task with no AGENT, AGENTS or agent tag takes June's dispatch.roster."
+  (let ((agents (org-entry-get nil "AGENTS"))
+        (agent (org-entry-get nil "AGENT")))
+    (cond (agents (split-string agents))
+          (agent (unless (member agent org-dispatch-agents) (list agent)))
+          ((or (seq-intersection (org-get-tags nil t) org-dispatch-agents)
+               (seq-intersection org-file-tags org-dispatch-agents))
+           nil)
+          (t (let ((roster (org-dispatch--default "roster" nil)))
+               (when (and (vectorp roster) (> (length roster) 0))
+                 (append roster nil)))))))
+
+(defun org-dispatch--pick (names taken)
+  "June's choice among roster NAMES for this host, skipping TAKEN agents.
+Return the parsed answer of `june agents pick', or nil when june cannot run."
+  (let ((june (executable-find org-dispatch-june)))
+    (when june
+      (with-temp-buffer
+        (apply #'call-process june nil '(t nil) nil "agents" "pick" "--json"
+               "--host" org-dispatch-host
+               "--harnesses" (string-join org-dispatch-launchable ",")
+               (append (when taken (list "--except" (string-join taken ","))) names))
+        (ignore-errors
+          (json-parse-string (buffer-string) :object-type 'alist :null-object nil :false-object nil))))))
+
+(defun org-dispatch--choose (task taken)
+  "TASK with its agent chosen, or (:wait REASON) when none can take it now.
+TAKEN lists the roster agents given tasks earlier in this pass."
+  (let* ((names (or (plist-get task :roster)
+                    (when (plist-get task :agent) (list (plist-get task :agent)))))
+         (single (and (null (cdr names)) (member (car names) org-dispatch-launchable) (car names)))
+         (pick (org-dispatch--pick names taken))
+         (card (alist-get 'card pick))
+         (harness (or (alist-get 'legacy pick) (alist-get 'harness card)
+                      (and (null pick) single))))
+    (cond
+     ((not (member harness org-dispatch-launchable))
+      (list :wait (if pick (or (alist-get 'why pick) "no agent is free")
+                    (format "%s cannot run to pick among %s" org-dispatch-june (string-join names " ")))))
+     ;; The plain harness it already names, with no roster agent: as before the roster.
+     ((and (null card) (equal harness (plist-get task :agent))) task)
+     (t
+      (let ((task (copy-sequence task))
+            (model (or (plist-get task :model-set) (alist-get 'model card))))
+        (setq task (plist-put task :agent harness))
+        (setq task (plist-put task :card card))
+        (setq task (plist-put task :session
+                              (org-dispatch--session-for (plist-get task :sessions) harness
+                                                         (plist-get task :stopped))))
+        (setq task (plist-put task :model
+                              (cond ((and model (equal harness "pi") (not (string-search "/" model)))
+                                     (concat "openai-codex/" model))
+                                    (model)
+                                    ((equal harness "pi") org-dispatch-model))))
+        ;; The task now names its agent, so a resume returns to the same one.
+        (setq task (plist-put task :set (list (cons "AGENT" (or (alist-get 'slug card) harness)))))
+        task)))))
 
 (defun org-dispatch--new-dialog ()
   "Dialog entries written since the agent's last entry."
@@ -1257,6 +1338,8 @@ Without a TERMINAL, as when its launcher could not start, nothing is linked."
        ;; Written once, so tags no longer decide where or how the task runs.
        (pcase-dolist (`(,property . ,value) (plist-get task :fill))
          (unless (org-entry-get nil property) (org-entry-put nil property value)))
+       (pcase-dolist (`(,property . ,value) (plist-get task :set))
+         (org-entry-put nil property value))
        ;; Org resets a repeat to TODO, which is Jon's; keep it AUTO. Also trim
        ;; here: a reviewed repeat is closed in Emacs, not by finish.
        (when (plist-get task :repeat)
@@ -1299,10 +1382,21 @@ RESUME names the session to continue; nil starts SESSION fresh."
        (list "--no-approve"))
      (list "--name" label)
      (when (plist-get task :model) (list "--model" (plist-get task :model)))
+     (org-dispatch--card-flags agent (plist-get task :card))
      (cond ((and resume (equal agent "claude")) (list "--resume" resume))
            (resume (list "--session" (or (org-dispatch--session-file resume) resume)))
            (t (list "--session-id" session)))
      (list prompt))))
+
+(defun org-dispatch--card-flags (agent card)
+  "AGENT's flags for roster CARD's effort and instructions.
+The card's model comes through the task's :model."
+  (let ((effort (alist-get 'effort card))
+        (instructions (alist-get 'instructions card)))
+    (append
+     (when effort (list (if (equal agent "pi") "--thinking" "--effort") effort))
+     (when (and instructions (not (string-empty-p instructions)))
+       (list "--append-system-prompt" instructions)))))
 
 (defun org-dispatch--await-start (address agent)
   "Wait until the worker at ADDRESS reports a status, or fail.
@@ -1377,7 +1471,8 @@ is accepted as unknown, which the watcher never mistakes for idle."
                     (setq address live)
                     (org-dispatch--hc "label" address (concat "org.dispatch=" org-dispatch-host)
                                       (concat "org.task=" id) (concat "org.run=" run)
-                                      (concat "org.agent=" agent) (concat "org.session=" resume))
+                                      (concat "org.agent=" agent) (concat "org.session=" resume)
+                                      (concat "june.agent=" (or (alist-get 'slug (plist-get task :card)) "")))
                     (setq state (plist-put state :terminal address))
                     (org-dispatch--save-state state)
                     (org-dispatch--prompt state prompt))
@@ -1391,6 +1486,9 @@ is accepted as unknown, which the watcher never mistakes for idle."
                                        "--label" (concat "org.session=" (plist-get state :session))
                                        (append
                                         (when space (list "--label" (concat "herdr.space=" space)))
+                                        ;; The roster agent's, so June shows it busy while it works here.
+                                        (let ((slug (alist-get 'slug (plist-get task :card))))
+                                          (when slug (list "--label" (concat "june.agent=" slug))))
                                         (list "--")
                                         (org-dispatch--agent-argv
                                          task command (and (not fresh) resume)
@@ -1943,7 +2041,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
                               states))
          (index (when (seq-some (lambda (task) (plist-get task :depends)) tasks)
                   (org-dispatch--dependency-index)))
-         eligible reports)
+         eligible reports taken)
     (dolist (task tasks)
       (let* ((key (or (plist-get task :id)
                       (concat (plist-get task :file) "::" (plist-get task :heading))))
@@ -1961,7 +2059,7 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
             (org-dispatch--log "skipped %s: %s" (plist-get task :heading) (plist-get task :problem)))
           (puthash key entry new))
          ((not (equal (plist-get task :host) org-dispatch-host)))
-         ((not (member (plist-get task :agent) org-dispatch-launchable))
+         ((and (plist-get task :agent) (not (member (plist-get task :agent) org-dispatch-launchable)))
           (unless same
             (org-dispatch--log "skipped %s: AGENT %s cannot be launched yet"
                                (plist-get task :heading) (plist-get task :agent)))
@@ -1993,7 +2091,19 @@ DRY-RUN marks waiting tasks with :waiting instead of recording progress."
          ((seq-find (lambda (s) (org-dispatch--same-dir-p (plist-get s :dir) (plist-get task :dir)))
                     (append running eligible)))
          ((>= (+ (length running) (length eligible)) org-dispatch-max-agents))
-         (t (push task eligible)))))
+         ;; Last, so June is asked only for a task that would launch now.
+         (t (let ((chosen (org-dispatch--choose task taken)))
+              (if (plist-get chosen :wait)
+                  (let ((reason (plist-get chosen :wait)))
+                    (when dry-run
+                      (push (plist-put (copy-sequence task) :dependency (concat "no agent: " reason)) reports))
+                    (unless (or dry-run (equal (gethash "roster" entry) reason))
+                      (org-dispatch--log "waiting %s: %s" (plist-get task :heading) reason))
+                    (puthash "roster" reason entry))
+                (remhash "roster" entry)
+                (let ((slug (alist-get 'slug (plist-get chosen :card))))
+                  (when slug (push slug taken)))
+                (push chosen eligible)))))))
     (unless dry-run
       (make-directory org-dispatch-state-dir t)
       (org-dispatch--write-json file new))

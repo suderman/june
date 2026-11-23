@@ -73,6 +73,8 @@ export type Config = {
 		readonly commands?: Readonly<Partial<Record<"pi" | "claude", string>>>;
 		readonly settle?: number;
 		readonly improve?: { readonly file: string; readonly agent?: string; readonly host?: string };
+		/** Roster agents (ROSTER.org) a task with no AGENT, AGENTS or agent tag goes to, in order; read by the dispatcher. */
+		readonly roster?: readonly string[];
 	};
 	readonly herdr: {
 		/** This machine's name, as Org host tags and herdr: links use it. */
@@ -329,6 +331,9 @@ function dispatch(given: Partial<Config["dispatch"]> | undefined): Config["dispa
 			throw new Error("dispatch.agents must be a list of plain names");
 		if (given?.agent !== undefined && !agents.includes(given.agent)) throw new Error("dispatch.agent must be one of dispatch.agents");
 	}
+	const roster = given?.roster;
+	if (roster !== undefined && !(Array.isArray(roster) && roster.length > 0 && roster.every((name) => typeof name === "string" && /^[a-z0-9-]+$/.test(name))))
+		throw new Error("dispatch.roster must be a list of roster agent names, such as [\"bolt\", \"sprocket\"]");
 	const commands = given?.commands;
 	if (commands !== undefined && (!commands || typeof commands !== "object" || Array.isArray(commands) ||
 		Object.entries(commands).some(([agent, command]) => !["pi", "claude"].includes(agent) ||
@@ -347,6 +352,7 @@ function dispatch(given: Partial<Config["dispatch"]> | undefined): Config["dispa
 		...(given?.agent ? { agent: given.agent } : {}),
 		...(agents ? { agents } : {}),
 		...(commands ? { commands } : {}),
+		...(roster ? { roster } : {}),
 		...(given?.settle !== undefined ? { settle: given.settle } : {}),
 		...(improve ? { improve } : {}),
 	};
