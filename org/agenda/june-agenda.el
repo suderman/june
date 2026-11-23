@@ -97,9 +97,12 @@
          (host (and auto (org-dispatch--resolve
                           "HOST" org-dispatch-hosts
                           (org-dispatch--default "host" (car org-dispatch-hosts)))))
-         (agent (and auto (org-dispatch--resolve
-                           "AGENT" org-dispatch-agents
-                           (org-dispatch--default "agent" "pi")))))
+         ;; Roster agents, in order, until the dispatcher picks one; else pi or claude.
+         (named (and auto (org-dispatch--roster-names)))
+         (agent (and auto (not named)
+                     (org-dispatch--resolve
+                      "AGENT" org-dispatch-agents
+                      (org-dispatch--default "agent" "pi")))))
     (when (and dialog (> (length dialog) june-agenda-dialog-max))
       (setq dialog (substring dialog (- (length dialog) june-agenda-dialog-max))))
     `((key . ,(june-agenda--key))
@@ -122,7 +125,9 @@
       (closed . ,(org-entry-get nil "CLOSED"))
       (created . ,(org-entry-get nil "CREATED"))
       (host . ,(if auto (plist-get host :value) (org-entry-get nil "HOST")))
-      (agent . ,(if auto (plist-get agent :value) (org-entry-get nil "AGENT")))
+      (agent . ,(cond (named (string-join named " "))
+                      (auto (plist-get agent :value))
+                      (t (org-entry-get nil "AGENT"))))
       (problem . ,(and auto (or (plist-get host :problem) (plist-get agent :problem))))
       (depends . ,(org-entry-get nil "DEPENDS"))
       (dependency . ,(and auto (june-agenda--dependency index)))
