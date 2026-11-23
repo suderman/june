@@ -35,6 +35,12 @@ const USAGE = `usage:
                           by default), with where more art would help
   june transcript --hide ID[-ID] | --unhide ID[-ID] | --hidden
                           leave entries out of the timeline, transcripts, and views (they stay in the database)
+  june accounts [--json]  this host's numbered logins (claude1, codex2, ...): present, as whom, and any problem
+  june accounts apply [--json]
+                          make the account folders and wrappers that config.json's accounts names
+  june quota [NAME] [--refresh] [--json]
+                          each provider account's remaining quota, read with a login on this host (NAME: codex2,
+                          openai2, ...); reads within two minutes reuse the last one unless --refresh
   june device add NAME    allow a device on the WebSocket and print its token, once
   june device list        devices, when each was added, and live connections
   june device revoke NAME remove a device and close its connections
@@ -80,6 +86,10 @@ async function main(argv: string[]): Promise<number> {
 			return usageReport(p, args, json);
 		case "device":
 			return device(p.socket, args, json);
+		case "accounts":
+			return accountsCommand(p, args, json);
+		case "quota":
+			return quotaCommand(p, args, json);
 		case "doctor":
 			return doctor();
 		case "init": {
@@ -507,4 +517,88 @@ async function orgWorkCommand(args: string[], json: boolean): Promise<number> {
 		for (const f of these) console.log(`  ${gb(f.bytes).padStart(6)} GB  ${f.dir}${f.why ? `  (${f.why})` : ""}`);
 	}
 	return 0;
+}
+
+/** `june accounts [apply]`: this host's numbered logins, from config.json's accounts and the private ACCOUNTS.org (src/accounts.ts). */
+async function accountsCommand(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {
+	const a = await import("./accounts.ts");
+	const config = a.accountsConfig(readConfigFile(p).accounts);
+	if (!Object.keys(config.harnesses).length) {
+		console.error("june accounts: config.json names no accounts");
+		return 1;
+	}
+	if (args[0] === "apply" && args.length === 1) {
+		const result = a.apply(config);
+		if (json) console.log(JSON.stringify(result));
+		else {
+			for (const f of result.folders) console.log(`made    ${f}`);
+			if (result.links) console.log(`linked  ${result.links} shared entries`);
+			for (const w of result.wrappers) console.log(`wrote   ${w}`);
+			for (const r of result.removed) console.log(`removed ${r}`);
+			for (const problem of result.problems) console.log(`problem ${problem}`);
+		}
+		return result.problems.length ? 1 : 0;
+	}
+	if (args.length) {
+		console.error(USAGE);
+		return 2;
+	}
+	const rows = await a.status(config, people(p, a.parseAccountsOrg));
+	if (json) {
+		console.log(JSON.stringify(rows));
+		return 0;
+	}
+	for (const r of rows) {
+		const who = r.email ?? (r.loggedIn ? "logged in" : "not logged in");
+		console.log(`${r.name.padEnd(8)} ${(r.label ?? "").padEnd(9)} ${who}${r.expected && r.email !== r.expected ? `  (expects ${r.expected})` : ""}`);
+		for (const problem of r.problems) console.log(`         ${problem}`);
+	}
+	return rows.some((r) => r.problems.length) ? 1 : 0;
+}
+
+/** ACCOUNTS.org beside SOUL.org; empty when it does not exist. */
+function people<T>(p: ReturnType<typeof paths>, parse: (text: string) => T): T {
+	const file = `${p.data}/ACCOUNTS.org`;
+	return parse(existsSync(file) ? readFileSync(file, "utf8") : "");
+}
+
+/** `june quota [NAME] [--refresh]`: remaining quota per provider account, cached for two minutes in the state directory. */
+async function quotaCommand(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {
+	const a = await import("./accounts.ts");
+	const refresh = args.includes("--refresh");
+	const names = args.filter((x) => x !== "--refresh");
+	if (names.length > 1) {
+		console.error(USAGE);
+		return 2;
+	}
+	const config = a.accountsConfig(readConfigFile(p).accounts);
+	const name = names[0];
+	let only: ((q: { provider: string; number: number }) => boolean) | undefined;
+	if (name) {
+		const m = /^([a-z]+)(\d)$/.exec(name);
+		const provider = m && (m[1]! in a.HARNESSES ? a.HARNESSES[m[1] as keyof typeof a.HARNESSES].provider : m[1] in a.PROVIDERS ? m[1] : undefined);
+		if (!m || !provider) {
+			console.error(`june quota: ${name} is not an account such as codex2 or openai2`);
+			return 2;
+		}
+		only = (q) => q.provider === provider && q.number === Number(m[2]);
+	}
+	const file = `${p.state}/quota.json`;
+	let rows = refresh ? undefined : a.cached(file, 120);
+	if (!rows) {
+		rows = await a.quotas(config, people(p, a.parseAccountsOrg));
+		a.save(file, rows);
+	}
+	if (only) rows = rows.filter(only);
+	if (json) {
+		console.log(JSON.stringify(rows));
+		return 0;
+	}
+	const reset = (t?: number) => (t ? new Date(t * 1000).toLocaleString("en-CA", { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }) : "unknown");
+	for (const q of rows) {
+		console.log(`${a.PROVIDERS[q.provider]} ${q.number}${q.label ? ` (${q.label})` : ""}${q.email ? ` ${q.email}` : ""}${q.source ? `, via ${q.source}` : ""}`);
+		if (q.error) console.log(`  ${q.error}`);
+		for (const w of q.windows) console.log(`  ${w.group ? `${w.group}: ` : ""}${w.name}: ${w.remaining}% left, resets ${reset(w.resetAt)}`);
+	}
+	return rows.some((q) => q.error) ? 1 : 0;
 }

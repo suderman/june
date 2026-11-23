@@ -16,7 +16,7 @@ self: {
   # package. A host without the checkout, or JUNE_SOURCE=none, runs the package.
   wrapper = pkgs.writeShellApplication {
     name = "june";
-    runtimeInputs = [pkgs.coreutils pkgs.ripgrep pkgs.openssh pkgs.wl-clipboard pkgs.poppler-utils];
+    runtimeInputs = [pkgs.coreutils pkgs.ripgrep pkgs.openssh pkgs.wl-clipboard pkgs.poppler-utils pkgs.libsecret];
     text = ''
       ${daemonHostLine}
       export ICU_TIMEZONE_FILES_DIR=${june.timezoneData}
@@ -159,5 +159,22 @@ in {
     xdg.dataFile.june = lib.mkIf (cfg.dataDir != null) {
       source = config.lib.file.mkOutOfStoreSymlink cfg.dataDir;
     };
+
+    # `june accounts apply` writes a wrapper per numbered login (claude1, codex2, ...) under ~/.local/state/june/bin and
+    # links it into ~/.local/bin, which is already on PATH. Restore those links here, since ~/.local/bin may not survive
+    # a reboot; a name something else already holds is left alone. Persisting ~/.local/state/june is the host's job.
+    home.activation.juneAccounts = lib.hm.dag.entryAfter ["linkGeneration"] ''
+      bin="$HOME/.local/state/june/bin"
+      if [[ -d $bin ]]; then
+        run mkdir -p "$HOME/.local/bin"
+        for wrapper in "$bin"/*; do
+          [[ -f $wrapper && $wrapper != *.tmp ]] || continue
+          link="$HOME/.local/bin/''${wrapper##*/}"
+          if [[ ! -e $link && ! -L $link ]]; then
+            run ln -s "$wrapper" "$link"
+          fi
+        done
+      fi
+    '';
   };
 }
