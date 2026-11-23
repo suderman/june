@@ -669,11 +669,12 @@ export type Ranked = { slot: string; usable: boolean; score: number; reason: str
  * weekly window 5%, or the window resets within a quarter of its floor. Accounts with a five-hour window come first:
  * that allowance resets soonest, so it is spent before an account that has only a weekly one. Within a tier, the
  * higher score wins, as claude-auto weighed it: each window's remaining share against the time left until it resets.
+ * Scores cap at even pace, so accounts with plenty tie; then the weekly allowance that resets soonest goes first.
  */
 export function rank(accounts: readonly { slot: Slot; quota?: Quota }[], now = Date.now()): Ranked[] {
 	const out = accounts.map(({ slot, quota }) => {
 		if (!quota || quota.error || !quota.fetched || now / 1000 - quota.fetched > 600)
-			return { slot: slot.name, usable: false, score: 0, tier: 2, reason: quota?.error ?? "no fresh quota" };
+			return { slot: slot.name, usable: false, score: 0, tier: 2, resets: Infinity, reason: quota?.error ?? "no fresh quota" };
 		const pace = (w: Window, floor: number) => {
 			const left = w.resetAt ? Math.max(0, w.resetAt - now / 1000) : (w.seconds ?? floor);
 			return Math.max(0.01, Math.min(100, (w.remaining * (w.seconds ?? floor)) / Math.max(left, floor)));
@@ -682,14 +683,15 @@ export function rank(accounts: readonly { slot: Slot; quota?: Quota }[], now = D
 			w.remaining < minimum && !(w.resetAt !== undefined && w.resetAt - now / 1000 <= grace && w.remaining >= 1);
 		const five = quota.windows.find((w) => w.name === "5 hour");
 		const weekly = quota.windows.filter((w) => w.seconds === 604800 || /weekly/i.test(w.name));
-		if (five && short(five, 10, 900)) return { slot: slot.name, usable: false, score: 0, tier: 2, reason: `5 hour at ${five.remaining}%` };
+		if (five && short(five, 10, 900)) return { slot: slot.name, usable: false, score: 0, tier: 2, resets: Infinity, reason: `5 hour at ${five.remaining}%` };
 		const low = weekly.find((w) => short(w, 5, 21600));
-		if (low) return { slot: slot.name, usable: false, score: 0, tier: 2, reason: `${low.name} at ${low.remaining}%` };
+		if (low) return { slot: slot.name, usable: false, score: 0, tier: 2, resets: Infinity, reason: `${low.name} at ${low.remaining}%` };
+		const resets = Math.min(...weekly.map((w) => w.resetAt ?? Infinity));
 		const weeklyPace = weekly.length ? Math.min(...weekly.map((w) => pace(w, 86400))) : 100;
 		const score = five ? 1 / (0.65 / pace(five, 1800) + 0.35 / weeklyPace) : weeklyPace;
-		return { slot: slot.name, usable: true, score, tier: five ? 0 : 1, reason: five ? "five-hour and weekly quota" : "weekly quota only, kept for last" };
+		return { slot: slot.name, usable: true, score, tier: five ? 0 : 1, resets, reason: five ? "five-hour and weekly quota" : "weekly quota only, kept for last" };
 	});
 	return out
-		.sort((a, b) => a.tier - b.tier || b.score - a.score || a.slot.localeCompare(b.slot, undefined, { numeric: true }))
-		.map(({ tier: _, ...r }) => r);
+		.sort((a, b) => a.tier - b.tier || b.score - a.score || a.resets - b.resets || a.slot.localeCompare(b.slot, undefined, { numeric: true }))
+		.map(({ tier: _, resets: __, ...r }) => r);
 }

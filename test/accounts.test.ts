@@ -191,6 +191,9 @@ test("ranking spends five-hour allowances first, skips short accounts, and keeps
 	assert.deepEqual(ranked.map((r) => [r.slot, r.usable]), [["codex2", true], ["codex4", true], ["codex1", true], ["codex3", false]]);
 	assert.equal(ranked.at(-1)!.reason, "5 hour at 5%");
 	assert.equal(rank([{ slot: c1! }], now)[0]!.usable, false);
+	// Both well ahead of pace: the weekly allowance that resets sooner is spent first.
+	const plenty = (h: number) => q([{ name: "5 hour", remaining: 100, seconds: 18000, resetAt: at(5) }, { name: "Weekly", remaining: 90, seconds: 604800, resetAt: at(h) }]);
+	assert.deepEqual(rank([{ slot: c2!, quota: plenty(100) }, { slot: c3!, quota: plenty(30) }], now).map((r) => r.slot), ["codex3", "codex2"]);
 });
 
 test("an idle login's lapsed token is renewed into the harness's own file; a busy one is left alone", async (t) => {
