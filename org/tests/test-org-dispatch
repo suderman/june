@@ -1216,6 +1216,16 @@ cat >"$fixture/launch-tests.el" <<'EOF'
                                                           (buffer-substring-no-properties (point) (point-max)))))))))
       (delete-directory bin t))))
 
+(ert-deftest a-worker-stopped-on-a-provider-error-is-nudged-to-retry ()
+  (test-with-hc
+   (let ((task (test-task "pi")) (org-dispatch-nudge-after 0) (clock 1000))
+     (should (org-dispatch--launch task))
+     (setf (alist-get 'status (cdr (assoc "t-new" test-terminals))) '((state . "error")))
+     (cl-letf (((symbol-function 'float-time) (lambda (&rest _) (setq clock (+ clock 10)))))
+       (setq test-calls nil)
+       (org-dispatch--watch (car (org-dispatch--states)))
+       (should (test-sent "nudge"))))))
+
 (ert-deftest stop-interrupts-then-kills-only-the-exact-worker ()
   (test-with-hc
    (let ((task (test-task "pi")))

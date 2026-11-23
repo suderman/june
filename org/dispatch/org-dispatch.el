@@ -1780,7 +1780,9 @@ The original file may still exist after its heading has been archived."
      ((equal status "blocked")
       ;; herdr-notify's event consumer tells Jon; the dispatcher only waits.
       (org-dispatch--save-state (plist-put state :idle 0)))
-     ((member status '("idle" "done"))
+     ;; A worker stopped on a provider error, such as an overloaded server, waits
+     ;; like an idle one; the nudge asks it to try again.
+     ((member status '("idle" "done" "error"))
       (let* ((idle (plist-get state :idle))
              (since (if (and idle (> idle 0)) idle (float-time))))
         (setq state (plist-put state :idle since))
