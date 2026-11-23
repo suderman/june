@@ -21,7 +21,7 @@ const USAGE = `usage:
   june agenda [--json]    overdue, today and this week from the Org agenda, as June's clients see it
   june org-work [--clean] [--keep PATH]... [--record FILE] [--after-days N] [--json]
                           this host's org-work folders and what the tidy rules make of them; --clean removes those due
-  june agents [--json]    the agents at work, what needs you, what is queued, and what finished today
+  june tasks [--json]     the dispatched tasks: what needs you, what is working, what is queued, and what finished today
   june transcript [--last N] [--since WHEN] [--detail] [--json]
                           the recent conversation as text: the last N entries (200 by default), or those since
                           WHEN (30m, 2h, 1d, 16:20, or a date); --detail adds thinking, tool output, and private looks
@@ -58,7 +58,7 @@ async function main(argv: string[]): Promise<number> {
 	const json = rest.includes("--json");
 	const args = rest.filter((a) => a !== "--json");
 	const p = paths();
-	if (["tui", "ask", "status", "agenda", "agents", "transcript", "device", "usage"].includes(command)) {
+	if (["tui", "ask", "status", "agenda", "tasks", "transcript", "device", "usage"].includes(command)) {
 		const remote = remoteHost(p);
 		if (remote !== undefined) return overSsh(remote, command, argv);
 	}
@@ -79,8 +79,9 @@ async function main(argv: string[]): Promise<number> {
 		case "status":
 			return status(p.socket, json);
 		case "agenda":
-		case "agents":
-			return board(p.socket, command, json);
+			return board(p.socket, "agenda", json);
+		case "tasks":
+			return board(p.socket, "agents", json);
 		case "org-work":
 			return orgWorkCommand(args, json);
 		case "transcript":
