@@ -291,7 +291,7 @@ test("the agents board serves ROSTER.org cards and the roster request adds, edit
 		seenFile: join(tmp.dir, "seen.json"),
 		dataDir: tmp.paths.data,
 		stateDir: tmp.paths.state,
-		configFile: tmp.paths.config,
+		configFile: join(tmp.paths.config, "config.json"),
 		here: "kit",
 		log: createLogger({ sink: () => {} }),
 		run: exportRun(() => ({})),

@@ -325,7 +325,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const follows = pollFollowing(() => harness.commit((tx) => listFollowing(tx), BG), options.followingMs ?? 15_000, log);
 		// One long-running Emacs for the boards' agenda reads and edits; it starts on first use.
 		const orgWorker = new OrgWorker({ log, env: { ORG_EDIT_PROTECTED: protectedOf(config.org).join(":") } });
-		const boards = options.boards ?? new Boards({ config, herdr, seenFile: `${paths.state}/seen.json`, log, org: orgWorker, dataDir: paths.data, stateDir: paths.state, configFile: paths.config });
+		const boards = options.boards ?? new Boards({ config, herdr, seenFile: `${paths.state}/seen.json`, log, org: orgWorker, dataDir: paths.data, stateDir: paths.state, configFile: `${paths.config}/config.json` });
 		const edits = options.edits ?? new TaskEdits(config, undefined, orgWorker);
 		// A phone's push address: the agenda changed, so its widget and reminders refresh at once (src/push.ts).
 		const pushes = new Pushes({ file: `${paths.state}/push.json`, origin: config.ntfy ? new URL(config.ntfy.url).origin : undefined, boards, log, ...(options.pushPost ? { post: options.pushPost } : {}) });
