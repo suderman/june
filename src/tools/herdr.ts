@@ -8,7 +8,7 @@ import type { Config } from "../config.ts";
 
 /** A terminal address (t7), a name, or a session label value; never a path or an option. */
 const TARGET = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
-const AGENTS = /^(pi|claude|claude-code|codex)$/;
+const AGENTS = /^(pi|claude|claude-code|codex|antigravity)$/;
 
 export type Run = (argv: readonly string[], timeoutMs: number) => Promise<string>;
 
@@ -150,6 +150,8 @@ export type AgentSummary = {
 	task?: string;
 	title?: string;
 	herdrLink?: string;
+	/** The roster agent this terminal belongs to (its june.agent label), while it works there. */
+	rosterAgent?: string;
 };
 
 function sameHost(address: string, prefix: string): boolean {
@@ -169,6 +171,7 @@ function summarize(host: string, prefix: string, row: any, full: Terminal | unde
 		cwd: full?.foreground?.cwd ?? row.cwd,
 		...(session ? { session, herdrLink: `herdr:${host}/${agent}:${session}@${terminal}` } : {}),
 		...(labels["org.task"] ? { task: labels["org.task"] } : {}),
+		...(labels["june.agent"] ? { rosterAgent: labels["june.agent"] } : {}),
 		...(full?.title ? { title: String(full.title).slice(0, 120) } : {}),
 	};
 }
@@ -190,7 +193,7 @@ export function createHerdrExtension(config: Config, herdr = new Herdr(config.he
 		defineTool({
 			name: "herdr_list_agents",
 			description:
-				"List the coding agents (Pi, Claude, Codex) running in herdr-core terminals on a machine, with terminal address, status (working, blocked, done, idle, or unknown when the agent reports none), directory, and session link. blocked means the agent waits for a person; idle or done means its terminal settled, not that its task succeeded, so read its output and the task's Org state before reporting success. Unknown is never idle. Inspect agents here to say what they are doing, but leave launching, watching, and nudging them to the dispatcher.",
+				"List the coding agents (Pi, Claude, Codex, Antigravity) running in herdr-core terminals on a machine, with terminal address, status (working, blocked, done, idle, or unknown when the agent reports none), directory, and session link. blocked means the agent waits for a person; idle or done means its terminal settled, not that its task succeeded, so read its output and the task's Org state before reporting success. Unknown is never idle. Inspect agents here to say what they are doing, but leave launching, watching, and nudging them to the dispatcher.",
 			parameters: obj({ host, status: opt(str({ description: "Only agents with this status" })) }),
 			replay: "safe",
 			execute: async (args) => {

@@ -21,6 +21,12 @@ const USAGE = `usage:
   june agenda [--json]    overdue, today and this week from the Org agenda, as June's clients see it
   june org-work [--clean] [--keep PATH]... [--record FILE] [--after-days N] [--json]
                           this host's org-work folders and what the tidy rules make of them; --clean removes those due
+  june agents [NAME] [--json]
+                          the roster (ROSTER.org): each agent's host, harness, model and effort, whether it is busy,
+                          and its battery, the quota its harness has to spare there; NAME shows one agent's card
+  june start NAME [PROMPT...]
+                          start roster agent NAME here, in this terminal, on the account its harness picks; refuses
+                          while NAME is busy or works on another host
   june tasks [--json]     the dispatched tasks: what needs you, what is working, what is queued, and what finished today
   june transcript [--last N] [--since WHEN] [--detail] [--json]
                           the recent conversation as text: the last N entries (200 by default), or those since
@@ -97,6 +103,10 @@ async function main(argv: string[]): Promise<number> {
 			return device(p.socket, args, json);
 		case "accounts":
 			return accountsCommand(p, args, json);
+		case "agents":
+			return agentsCommand(p, args, json);
+		case "start":
+			return startCommand(p, args);
 		case "quota":
 			return quotaCommand(p, args, json);
 		case "doctor":
@@ -732,4 +742,131 @@ async function quotaCommand(p: ReturnType<typeof paths>, args: string[], json: b
 		for (const w of q.windows) console.log(`  ${w.group ? `${w.group}: ` : ""}${w.name}: ${w.remaining}% left, resets ${reset(w.resetAt)}`);
 	}
 	return rows.some((q) => q.error) ? 1 : 0;
+}
+
+type Standing = {
+	card: import("./roster.ts").Card;
+	status: string;
+	terminal?: string;
+	battery?: { percent: number; account: string } | { reason: string };
+};
+
+/** Each roster card with whether it is busy (a live terminal carries its june.agent label) and, on this host, its battery:
+ * the tightest window left on the account its harness would pick now. */
+async function rosterStanding(p: ReturnType<typeof paths>): Promise<Standing[]> {
+	const { parseRoster } = await import("./roster.ts");
+	const a = await import("./accounts.ts");
+	const { Herdr } = await import("./tools/herdr.ts");
+	const file = `${p.data}/ROSTER.org`;
+	const cards = parseRoster(existsSync(file) ? readFileSync(file, "utf8") : "");
+	const config = loadConfig(p);
+	const herdr = new Herdr(config.herdr);
+	const here = shortHostname();
+	const hosts = new Map<string, Awaited<ReturnType<typeof herdr.agents>> | undefined>();
+	for (const host of new Set(cards.flatMap((c) => (c.host ? [c.host] : [])))) hosts.set(host, await herdr.agents(host).catch(() => undefined));
+	const accounts = a.accountsConfig(readConfigFile(p).accounts);
+	const logins = await a.status(accounts, people(p, a.parseAccountsOrg));
+	const quotas = logins.length ? await currentQuotas(a, accounts, p) : [];
+	return cards.map((card): Standing => {
+		if (card.problems.length) return { card, status: "invalid" };
+		const terminals = hosts.get(card.host!);
+		if (!terminals) return { card, status: `${card.host} unreachable` };
+		const busy = terminals.find((t) => t.rosterAgent === card.slug);
+		if (busy) return { card, status: `busy (${busy.status})`, terminal: `${card.host}/${busy.terminal}` };
+		if (card.host !== here) return { card, status: "idle", battery: { reason: `quota is read on ${card.host}` } };
+		const mine = logins.filter((r) => r.harness === card.harness && r.loggedIn && !r.problems.length);
+		if (!mine.length) return { card, status: "idle", battery: { reason: `no ${card.harness} login here` } };
+		const ranked = a.rank(mine.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })));
+		const best = ranked.find((r) => r.usable);
+		if (!best) return { card, status: "idle", battery: { reason: ranked.map((r) => `${r.slot}: ${r.reason}`).join("; ") } };
+		const slot = mine.find((s) => s.name === best.slot)!;
+		const windows = quotas.find((q) => q.provider === slot.provider && q.number === slot.number)?.windows ?? [];
+		return { card, status: "idle", battery: { percent: Math.min(...windows.map((w) => w.remaining)), account: best.slot } };
+	});
+}
+
+/** `june agents [NAME]`: the roster with each agent's status and battery, or one agent's card. */
+async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {
+	if (args.length > 1) {
+		console.error(USAGE);
+		return 2;
+	}
+	const { findCard } = await import("./roster.ts");
+	let rows = await rosterStanding(p);
+	if (!rows.length) {
+		console.error(`june agents: ${p.data}/ROSTER.org names no agents`);
+		return 1;
+	}
+	if (args[0]) {
+		const card = findCard(rows.map((r) => r.card), args[0]);
+		if (!card) {
+			console.error(`june agents: no agent called ${args[0]}; the roster has ${rows.map((r) => r.card.name).join(", ")}`);
+			return 2;
+		}
+		rows = rows.filter((r) => r.card === card);
+	}
+	if (json) {
+		console.log(JSON.stringify(args[0] ? rows[0] : rows));
+		return 0;
+	}
+	const battery = (b: Standing["battery"]) => (!b ? "" : "percent" in b ? `${b.percent}% via ${b.account}` : b.reason);
+	if (args[0]) {
+		const { card, status, terminal, battery: b } = rows[0]!;
+		console.log(`${card.name} (${card.slug})`);
+		for (const [k, v] of [["host", card.host], ["harness", card.harness], ["model", card.model ?? "the harness's default"], ["effort", card.effort ?? "the harness's default"], ["avatar", card.avatar], ["status", terminal ? `${status} in ${terminal}` : status], ["battery", battery(b)]] as const)
+			if (v) console.log(`  ${k.padEnd(8)} ${v}`);
+		for (const problem of card.problems) console.log(`  problem  ${problem}`);
+		if (card.instructions) console.log(`\n${card.instructions}`);
+		return card.problems.length ? 1 : 0;
+	}
+	const width = Math.max(...rows.map((r) => r.card.name.length));
+	for (const { card, status, terminal, battery: b } of rows) {
+		const kit = [card.harness, card.model, card.effort].filter(Boolean).join(" ");
+		console.log(`${card.name.padEnd(width)}  ${(card.host ?? "?").padEnd(4)}  ${kit.padEnd(28)}  ${(terminal ? `${status} ${terminal}` : status).padEnd(16)}  ${battery(b)}`);
+		for (const problem of card.problems) console.log(`${"".padEnd(width)}  ${problem}`);
+	}
+	return 0;
+}
+
+/** `june start NAME [PROMPT...]`: run a roster agent in this terminal, labelled as its while it runs. */
+async function startCommand(p: ReturnType<typeof paths>, args: string[]): Promise<number> {
+	const [name, ...words] = args;
+	if (!name) {
+		console.error(USAGE);
+		return 2;
+	}
+	const { findCard, launchArgs } = await import("./roster.ts");
+	const rows = await rosterStanding(p);
+	const row = rows.find((r) => r.card === findCard(rows.map((x) => x.card), name));
+	if (!row) {
+		console.error(`june start: no agent called ${name}; the roster has ${rows.map((r) => r.card.name).join(", ") || "no one"}`);
+		return 2;
+	}
+	const { card } = row;
+	if (card.problems.length) {
+		console.error(`june start: ${card.name}'s card has problems: ${card.problems.join("; ")}`);
+		return 1;
+	}
+	if (card.host !== shortHostname()) {
+		console.error(`june start: ${card.name} works on ${card.host}; start it there`);
+		return 1;
+	}
+	if (row.terminal) {
+		console.error(`june start: ${card.name} is busy in ${row.terminal}; one task at a time`);
+		return 1;
+	}
+	// Label this terminal as the agent's while it runs, so the roster shows it busy; the label goes when it stops.
+	const terminal = process.env.HC_TERMINAL_ID;
+	const label = (value: string) => terminal && spawnSync("hc", ["label", terminal, `june.agent=${value}`], { stdio: "ignore" });
+	if (!terminal) console.error(`june start: not in a herdr terminal, so the roster cannot show ${card.name} busy`);
+	label(card.slug);
+	// Ctrl+C belongs to the agent; june stays to take the label off when it exits.
+	for (const signal of ["SIGINT", "SIGQUIT"] as const) process.on(signal, () => {});
+	const run = spawnSync(card.harness!, launchArgs(card, words.join(" ") || undefined), { stdio: "inherit" });
+	label("");
+	if (run.error) {
+		console.error(`june start: ${card.harness}: ${run.error.message}`);
+		return 1;
+	}
+	return run.status ?? 1;
 }
