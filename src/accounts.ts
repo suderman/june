@@ -673,38 +673,53 @@ export async function refresh(
 	}
 }
 
-export type Ranked = { slot: string; usable: boolean; score: number; reason: string };
+/** What an account has to spend: the binding weekly window (the one with least left), the hours until it resets, and
+ * the rate, weekly % per hour, at which the account would have to be spent to use it all before then. */
+export type Budget = { weekly?: number; hours?: number; rate: number; five?: number; fiveHours?: number };
 
 /**
- * Rank a harness's logged-in accounts by quota. An account is usable while its five-hour window keeps 10% and every
- * weekly window 5%, or the window resets within a quarter of its floor. Accounts with a five-hour window come first:
- * that allowance resets soonest, so it is spent before an account that has only a weekly one. Within a tier, the
- * higher score wins, as claude-auto weighed it: each window's remaining share against the time left until it resets.
- * Scores cap at even pace, so accounts with plenty tie; then the weekly allowance that resets soonest goes first.
+ * An account's budget from its quota windows. For Antigravity, whose windows come in model groups, FAMILY picks the
+ * group the agent's model draws on (Gemini models for gemini-4-neon). Without a weekly window the five-hour one stands in.
  */
-export function rank(accounts: readonly { slot: Slot; quota?: Quota }[], now = Date.now()): Ranked[] {
-	const out = accounts.map(({ slot, quota }) => {
-		if (!quota || quota.error || !quota.fetched || now / 1000 - quota.fetched > 600)
-			return { slot: slot.name, usable: false, score: 0, tier: 2, resets: Infinity, reason: quota?.error ?? "no fresh quota" };
-		const pace = (w: Window, floor: number) => {
-			const left = w.resetAt ? Math.max(0, w.resetAt - now / 1000) : (w.seconds ?? floor);
-			return Math.max(0.01, Math.min(100, (w.remaining * (w.seconds ?? floor)) / Math.max(left, floor)));
-		};
-		const short = (w: Window, minimum: number, grace: number) =>
-			w.remaining < minimum && !(w.resetAt !== undefined && w.resetAt - now / 1000 <= grace && w.remaining >= 1);
-		const five = quota.windows.find((w) => w.name === "5 hour");
-		const weekly = quota.windows.filter((w) => w.seconds === 604800 || /weekly/i.test(w.name));
-		if (five && short(five, 10, 900)) return { slot: slot.name, usable: false, score: 0, tier: 2, resets: Infinity, reason: `5 hour at ${five.remaining}%` };
-		const low = weekly.find((w) => short(w, 5, 21600));
-		if (low) return { slot: slot.name, usable: false, score: 0, tier: 2, resets: Infinity, reason: `${low.name} at ${low.remaining}%` };
-		const resets = Math.min(...weekly.map((w) => w.resetAt ?? Infinity));
-		const weeklyPace = weekly.length ? Math.min(...weekly.map((w) => pace(w, 86400))) : 100;
-		const score = five ? 1 / (0.65 / pace(five, 1800) + 0.35 / weeklyPace) : weeklyPace;
-		return { slot: slot.name, usable: true, score, tier: five ? 0 : 1, resets, reason: five ? "five-hour and weekly quota" : "weekly quota only, kept for last" };
+export function budget(quota: Quota, now = Date.now(), family?: RegExp): Budget {
+	const grouped = family && quota.windows.some((w) => w.group && family.test(w.group));
+	const windows = grouped ? quota.windows.filter((w) => !w.group || family!.test(w.group)) : quota.windows;
+	const hoursTo = (w: Window) => (w.resetAt ? Math.max(0, (w.resetAt - now / 1000) / 3600) : (w.seconds ?? 604800) / 3600);
+	const least = (ws: Window[]) => (ws.length ? ws.reduce((x, y) => (y.remaining < x.remaining ? y : x)) : undefined);
+	const five = least(windows.filter((w) => w.name === "5 hour" || w.seconds === 18000));
+	const weekly = least(windows.filter((w) => w.seconds === 604800 || /weekly/i.test(w.name))) ?? five;
+	if (!weekly) return { rate: 0 };
+	return {
+		weekly: weekly.remaining,
+		hours: hoursTo(weekly),
+		// A quarter hour floor keeps a reset minutes away from swamping everything else.
+		rate: weekly.remaining / Math.max(hoursTo(weekly), 0.25),
+		...(five ? { five: five.remaining, fiveHours: hoursTo(five) } : {}),
+	};
+}
+
+export type Ranked = { slot: string; usable: boolean; score: number; reason: string; budget?: Budget };
+
+/**
+ * Rank a harness's logged-in accounts so no allowance goes to waste. The score is the budget's rate: weekly quota left
+ * over hours until it resets, the pace needed to spend it all. A little left with the reset hours away outranks a lot
+ * left with days to go, which is rationed. The five-hour window gates rather than scores: under 10% the account waits
+ * for it, unless it resets within a quarter hour. An account with nothing left waits for its reset.
+ */
+export function rank(accounts: readonly { slot: Slot; quota?: Quota }[], now = Date.now(), family?: RegExp): Ranked[] {
+	const out = accounts.map(({ slot, quota }): Ranked & { number: number } => {
+		const base = { slot: slot.name, number: slot.number, usable: false, score: 0 };
+		if (!quota || quota.error || !quota.fetched || now / 1000 - quota.fetched > 600) return { ...base, reason: quota?.error ?? "no fresh quota" };
+		const b = budget(quota, now, family);
+		if (b.weekly === undefined) return { ...base, reason: "no quota windows", budget: b };
+		if (b.five !== undefined && b.five < 10 && (b.fiveHours ?? 1) > 0.25) return { ...base, reason: `5 hour at ${b.five}%`, budget: b };
+		if (b.weekly < 1 && (b.hours ?? 1) > 0.25) return { ...base, reason: `weekly at ${b.weekly}%`, budget: b };
+		const reason = `${b.weekly}% weekly left, resets in ${b.hours! < 48 ? `${Math.round(b.hours!)}h` : `${Math.round(b.hours! / 24)}d`}`;
+		return { ...base, usable: true, score: b.rate, reason, budget: b };
 	});
 	return out
-		.sort((a, b) => a.tier - b.tier || b.score - a.score || a.resets - b.resets || a.slot.localeCompare(b.slot, undefined, { numeric: true }))
-		.map(({ tier: _, resets: __, ...r }) => r);
+		.sort((x, y) => Number(y.usable) - Number(x.usable) || y.score - x.score || x.number - y.number)
+		.map(({ number: _, ...r }) => r);
 }
 
 /**

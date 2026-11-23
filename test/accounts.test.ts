@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { accountsConfig, anthropicWindows, apply, autoWrapper, googleWindows, inUse, loginCommand, openaiWindows, parseAccountsOrg, places, projectRoots, quotas, rank, refresh, slots, status, trust } from "../src/accounts.ts";
+import { accountsConfig, anthropicWindows, apply, autoWrapper, budget, googleWindows, inUse, loginCommand, openaiWindows, parseAccountsOrg, places, projectRoots, quotas, rank, refresh, slots, status, trust } from "../src/accounts.ts";
 import { tempDir } from "./helpers.ts";
 
 const jwt = (payload: object) => `x.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.y`;
@@ -173,27 +173,49 @@ test("the plain name runs the picked account, or the only one, and refuses sign-
 	assert.match(autoWrapper("agy", one, p), /exec "\$HOME\/\.local\/state\/june\/bin\/agy1" "\$@"/);
 });
 
-test("ranking spends five-hour allowances first, skips short accounts, and keeps a weekly-only account for last", () => {
+test("ranking spends first what would otherwise be lost: weekly quota left over hours to its reset", () => {
 	const now = Date.parse("2026-11-22T20:00:00Z");
 	const at = (h: number) => now / 1000 + h * 3600;
 	const config = accountsConfig({ codex: 4 });
 	const [c1, c2, c3, c4] = slots(config, places("/h"));
 	const q = (windows: object[]) => ({ provider: "openai" as const, number: 0, windows: windows as any, fetched: now / 1000 });
+	const week = (remaining: number, h: number) => ({ name: "Weekly", remaining, seconds: 604800, resetAt: at(h) });
+	const five = (remaining: number, h = 4) => ({ name: "5 hour", remaining, seconds: 18000, resetAt: at(h) });
 	const ranked = rank(
 		[
-			{ slot: c1!, quota: q([{ name: "Weekly", remaining: 100, seconds: 604800, resetAt: at(140) }]) },
-			{ slot: c2!, quota: q([{ name: "5 hour", remaining: 98, seconds: 18000, resetAt: at(4) }, { name: "Weekly", remaining: 74, seconds: 604800, resetAt: at(40) }]) },
-			{ slot: c3!, quota: q([{ name: "5 hour", remaining: 5, seconds: 18000, resetAt: at(3) }, { name: "Weekly", remaining: 90, seconds: 604800, resetAt: at(100) }]) },
-			{ slot: c4!, quota: q([{ name: "5 hour", remaining: 100, seconds: 18000, resetAt: at(5) }, { name: "Weekly", remaining: 89, seconds: 604800, resetAt: at(120) }]) },
+			// 80% over five days: about 0.67% an hour; no five-hour window, so nothing gates it.
+			{ slot: c1!, quota: q([week(80, 120)]) },
+			// 10% but resetting in two hours: 5% an hour, the most at risk of being wasted.
+			{ slot: c2!, quota: q([five(90), week(10, 2)]) },
+			// 10% with three days left: rationed.
+			{ slot: c3!, quota: q([five(100), week(10, 72)]) },
+			// Plenty of weekly, but the five-hour window is spent: it waits.
+			{ slot: c4!, quota: q([five(5, 3), week(90, 30)]) },
 		],
 		now,
 	);
-	assert.deepEqual(ranked.map((r) => [r.slot, r.usable]), [["codex2", true], ["codex4", true], ["codex1", true], ["codex3", false]]);
+	assert.deepEqual(ranked.map((r) => [r.slot, r.usable, Math.round(r.score * 100) / 100]), [["codex2", true, 5], ["codex1", true, 0.67], ["codex3", true, 0.14], ["codex4", false, 0]]);
+	assert.equal(ranked[0]!.reason, "10% weekly left, resets in 2h");
 	assert.equal(ranked.at(-1)!.reason, "5 hour at 5%");
+	// A spent five-hour window about to reset, and an empty weekly about to reset, are usable again.
+	assert.equal(rank([{ slot: c4!, quota: q([five(5, 0.1), week(90, 30)]) }], now)[0]!.usable, true);
+	assert.equal(rank([{ slot: c4!, quota: q([five(50), week(0.5, 40)]) }], now)[0]!.reason, "weekly at 0.5%");
 	assert.equal(rank([{ slot: c1! }], now)[0]!.usable, false);
-	// Both well ahead of pace: the weekly allowance that resets sooner is spent first.
-	const plenty = (h: number) => q([{ name: "5 hour", remaining: 100, seconds: 18000, resetAt: at(5) }, { name: "Weekly", remaining: 90, seconds: 604800, resetAt: at(h) }]);
-	assert.deepEqual(rank([{ slot: c2!, quota: plenty(100) }, { slot: c3!, quota: plenty(30) }], now).map((r) => r.slot), ["codex3", "codex2"]);
+});
+
+test("an Antigravity budget reads the model group the agent draws on", () => {
+	const now = Date.parse("2026-11-22T20:00:00Z");
+	const quota = {
+		provider: "google" as const,
+		number: 1,
+		fetched: now / 1000,
+		windows: [
+			{ name: "Weekly", remaining: 66, seconds: 604800, resetAt: now / 1000 + 100 * 3600, group: "Gemini Models" },
+			{ name: "Weekly", remaining: 20, seconds: 604800, resetAt: now / 1000 + 10 * 3600, group: "Claude and GPT models" },
+		],
+	};
+	assert.equal(budget(quota, now, /gemini/i).weekly, 66);
+	assert.equal(budget(quota, now).weekly, 20);
 });
 
 test("an idle login's lapsed token is renewed into the harness's own file; a busy one is left alone", async (t) => {

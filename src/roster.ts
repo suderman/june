@@ -114,3 +114,37 @@ export function launchArgs(card: Card, prompt?: string): string[] {
 			throw new Error(`${card.name} has no harness`);
 	}
 }
+
+/** Hours before a weekly reset within which unspent quota counts as about to be lost, and the least worth chasing. */
+export const EXPIRING_HOURS = 6;
+export const EXPIRING_PERCENT = 5;
+
+export type Option = {
+	name: string;
+	/** Free to take a task now: a valid card, idle, its host reachable, and quota to spend if June can read it. */
+	available: boolean;
+	reason: string;
+	/** Weekly quota left on the account it would use, hours until that resets, and the pace needed to spend it. */
+	weekly?: number;
+	hours?: number;
+	rate?: number;
+};
+
+/** Whether an option's allowance would be lost at a reset within EXPIRING_HOURS. */
+export const expiring = (o: Option) => o.available && o.hours !== undefined && o.hours <= EXPIRING_HOURS && (o.weekly ?? 0) >= EXPIRING_PERCENT;
+
+/**
+ * Pick among candidates given in the user's order. The first available one wins, unless it is not itself about to lose
+ * quota and a later available one is: then the later one whose allowance runs out fastest goes, so tokens are not wasted.
+ */
+export function choose(options: readonly Option[]): { chosen?: string; why: string } {
+	const first = options.find((o) => o.available);
+	if (!first) return { why: options.map((o) => `${o.name}: ${o.reason}`).join("; ") || "no candidates" };
+	if (expiring(first)) return { chosen: first.name, why: `${first.name} is first and would lose ${first.weekly}% at a reset in ${Math.round(first.hours!)}h` };
+	const urgent = options.filter((o) => o !== first && expiring(o)).sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0];
+	if (urgent) return { chosen: urgent.name, why: `${urgent.name} goes ahead of ${first.name}: ${urgent.weekly}% would be lost at its reset in ${Math.round(urgent.hours!)}h` };
+	return { chosen: first.name, why: `${first.name} is the first available` };
+}
+
+/** For an Antigravity card, the model group its quota comes from (Gemini models for gemini-4-neon). */
+export const familyOf = (card: Card) => (card.harness === "agy" && card.model ? new RegExp(/^(gemini|claude|gpt)/i.exec(card.model)?.[1] ?? "^$", "i") : undefined);

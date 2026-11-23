@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findCard, launchArgs, parseRoster } from "../src/roster.ts";
+import { choose, familyOf, findCard, launchArgs, parseRoster } from "../src/roster.ts";
 
 const ROSTER = `#+TITLE: Roster
 
@@ -58,4 +58,20 @@ test("each harness starts with the card's model, effort and instructions in its 
 	assert.deepEqual(launchArgs(card("pi", { model: "cliproxyapi/gpt-6.2-sol", effort: undefined, instructions: "" })), ["--model", "cliproxyapi/gpt-6.2-sol", "--name", "Bolt"]);
 	assert.deepEqual(launchArgs(card("agy"), "go"), ["--model", "m-1", "--effort", "max", "--prompt-interactive", "Be careful.\n\ngo"]);
 	assert.deepEqual(launchArgs(card("agy")), ["--model", "m-1", "--effort", "max"]);
+});
+
+test("the first available candidate wins unless a later one would otherwise lose quota at a reset within hours", () => {
+	const bolt = { name: "bolt", available: true, reason: "idle", weekly: 60, hours: 90, rate: 0.67 };
+	const gyro = { name: "gyro", available: true, reason: "idle", weekly: 40, hours: 3, rate: 13.3 };
+	const rivet = { name: "rivet", available: true, reason: "idle", weekly: 20, hours: 5, rate: 4 };
+	assert.deepEqual(choose([bolt, rivet]), { chosen: "rivet", why: "rivet goes ahead of bolt: 20% would be lost at its reset in 5h" });
+	assert.equal(choose([bolt, rivet, gyro]).chosen, "gyro", "the fastest-expiring later candidate goes");
+	assert.equal(choose([{ ...bolt, hours: 2 }, gyro]).chosen, "bolt", "the first keeps its turn when it is expiring too");
+	assert.equal(choose([bolt, { ...gyro, weekly: 3 }]).chosen, "bolt", "a few percent is not worth jumping the order");
+	assert.equal(choose([bolt, { ...gyro, hours: 8 }]).chosen, "bolt", "eight hours away is not yet expiring");
+	assert.equal(choose([{ ...bolt, available: false, reason: "busy (working)" }, { name: "sprocket", available: true, reason: "idle" }]).chosen, "sprocket");
+	assert.deepEqual(choose([{ name: "x", available: false, reason: "busy (working)" }]), { why: "x: busy (working)" });
+	const card = { name: "Gyro", slug: "gyro", harness: "agy" as const, model: "gemini-4-neon", instructions: "", problems: [] };
+	assert.match("Gemini Models", familyOf(card)!);
+	assert.equal(familyOf({ ...card, harness: "claude" }), undefined);
 });

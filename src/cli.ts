@@ -24,6 +24,9 @@ const USAGE = `usage:
   june agents [NAME] [--json]
                           the roster (ROSTER.org): each agent's host, harness, model and effort, whether it is busy,
                           and its battery, the quota its harness has to spare there; NAME shows one agent's card
+  june agents pick NAME... [--explain]
+                          which of these agents, in your order, to give a task: the first available, unless a later
+                          one would lose quota at a reset within hours
   june start NAME [PROMPT...]
                           start roster agent NAME here, in this terminal, on the account its harness picks; refuses
                           while NAME is busy or works on another host
@@ -748,13 +751,13 @@ type Standing = {
 	card: import("./roster.ts").Card;
 	status: string;
 	terminal?: string;
-	battery?: { percent: number; account: string } | { reason: string };
+	battery?: { account: string; weekly: number; hours: number; rate: number } | { reason: string };
 };
 
 /** Each roster card with whether it is busy (a live terminal carries its june.agent label) and, on this host, its battery:
  * the tightest window left on the account its harness would pick now. */
 async function rosterStanding(p: ReturnType<typeof paths>): Promise<Standing[]> {
-	const { parseRoster } = await import("./roster.ts");
+	const { parseRoster, familyOf } = await import("./roster.ts");
 	const a = await import("./accounts.ts");
 	const { Herdr } = await import("./tools/herdr.ts");
 	const file = `${p.data}/ROSTER.org`;
@@ -776,17 +779,17 @@ async function rosterStanding(p: ReturnType<typeof paths>): Promise<Standing[]> 
 		if (card.host !== here) return { card, status: "idle", battery: { reason: `quota is read on ${card.host}` } };
 		const mine = logins.filter((r) => r.harness === card.harness && r.loggedIn && !r.problems.length);
 		if (!mine.length) return { card, status: "idle", battery: { reason: `no ${card.harness} login here` } };
-		const ranked = a.rank(mine.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })));
+		const ranked = a.rank(mine.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })), Date.now(), familyOf(card));
 		const best = ranked.find((r) => r.usable);
-		if (!best) return { card, status: "idle", battery: { reason: ranked.map((r) => `${r.slot}: ${r.reason}`).join("; ") } };
-		const slot = mine.find((s) => s.name === best.slot)!;
-		const windows = quotas.find((q) => q.provider === slot.provider && q.number === slot.number)?.windows ?? [];
-		return { card, status: "idle", battery: { percent: Math.min(...windows.map((w) => w.remaining)), account: best.slot } };
+		if (!best?.budget) return { card, status: "idle", battery: { reason: ranked.map((r) => `${r.slot}: ${r.reason}`).join("; ") } };
+		const { weekly, hours, rate } = best.budget;
+		return { card, status: "idle", battery: { account: best.slot, weekly: weekly!, hours: hours!, rate } };
 	});
 }
 
 /** `june agents [NAME]`: the roster with each agent's status and battery, or one agent's card. */
 async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {
+	if (args[0] === "pick") return agentsPick(p, args.slice(1).filter((x) => x !== "--explain"), json || args.includes("--explain"));
 	if (args.length > 1) {
 		console.error(USAGE);
 		return 2;
@@ -809,7 +812,8 @@ async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: 
 		console.log(JSON.stringify(args[0] ? rows[0] : rows));
 		return 0;
 	}
-	const battery = (b: Standing["battery"]) => (!b ? "" : "percent" in b ? `${b.percent}% via ${b.account}` : b.reason);
+	const battery = (b: Standing["battery"]) =>
+		!b ? "" : "account" in b ? `${b.weekly}% weekly, resets in ${b.hours < 48 ? `${Math.round(b.hours)}h` : `${Math.round(b.hours / 24)}d`}, via ${b.account}` : b.reason;
 	if (args[0]) {
 		const { card, status, terminal, battery: b } = rows[0]!;
 		console.log(`${card.name} (${card.slug})`);
@@ -826,6 +830,34 @@ async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: 
 		for (const problem of card.problems) console.log(`${"".padEnd(width)}  ${problem}`);
 	}
 	return 0;
+}
+
+/**
+ * `june agents pick NAME... [--explain]`: the candidate to give a task, from names in the user's order: the first one
+ * available, unless a later one would otherwise lose quota at a reset within hours. Prints the name alone.
+ */
+async function agentsPick(p: ReturnType<typeof paths>, names: string[], explain: boolean): Promise<number> {
+	const { choose, findCard } = await import("./roster.ts");
+	if (!names.length) {
+		console.error("june agents pick: name the candidates, in order");
+		return 2;
+	}
+	const rows = await rosterStanding(p);
+	const options = names.map((name) => {
+		const row = rows.find((r) => r.card === findCard(rows.map((x) => x.card), name));
+		if (!row) return { name, available: false, reason: "not on the roster" };
+		const b = row.battery;
+		const quota = b && "account" in b ? { weekly: b.weekly, hours: b.hours, rate: b.rate } : {};
+		// A card on another host is available while idle; its quota is read there.
+		const spent = b && "reason" in b && !b.reason.startsWith("quota is read on");
+		const available = row.status === "idle" && !spent;
+		return { name: row.card.slug, available, reason: spent ? (b as { reason: string }).reason : row.status, ...quota };
+	});
+	const result = choose(options);
+	if (explain) console.log(JSON.stringify({ ...result, options }));
+	else if (result.chosen) console.log(result.chosen);
+	else console.error(`june agents pick: none is available (${result.why})`);
+	return result.chosen ? 0 : 1;
 }
 
 /** `june start NAME [PROMPT...]`: run a roster agent in this terminal, labelled as its while it runs. */
