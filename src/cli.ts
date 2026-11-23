@@ -748,6 +748,17 @@ async function quotaCommand(p: ReturnType<typeof paths>, args: string[], json: b
 	return rows.some((q) => q.error) ? 1 : 0;
 }
 
+/** Whether the dispatcher on this host has an active run of task ID, from its receipt in ~/.local/state/org-dispatch. */
+function dispatchActive(id: string): boolean {
+	const state = process.env.XDG_STATE_HOME?.startsWith("/") ? process.env.XDG_STATE_HOME : `${process.env.HOME}/.local/state`;
+	try {
+		const status = JSON.parse(readFileSync(`${state}/org-dispatch/${id}.json`, "utf8")).status;
+		return ["starting", "running", "stopping", "launch-uncertain"].includes(status);
+	} catch {
+		return false;
+	}
+}
+
 type Standing = {
 	card: import("./roster.ts").Card;
 	status: string;
@@ -775,7 +786,9 @@ async function rosterStanding(p: ReturnType<typeof paths>): Promise<Standing[]> 
 		if (card.problems.length) return { card, status: "invalid" };
 		const terminals = hosts.get(card.host!);
 		if (!terminals) return { card, status: `${card.host} unreachable` };
-		const busy = terminals.find((t) => t.rosterAgent === card.slug);
+		// A dispatched worker holds its agent only while its run is active; a finished one's terminal stays open for
+		// review or resume without keeping the agent from its next task. A session started by hand holds it while open.
+		const busy = terminals.find((t) => t.rosterAgent === card.slug && (!t.task || card.host !== here || dispatchActive(t.task)));
 		if (busy) return { card, status: `busy (${busy.status})`, terminal: `${card.host}/${busy.terminal}` };
 		if (card.host !== here) return { card, status: "idle", battery: { reason: `quota is read on ${card.host}` } };
 		const mine = logins.filter((r) => r.harness === card.harness && r.loggedIn && !r.problems.length);
