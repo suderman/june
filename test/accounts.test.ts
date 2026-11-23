@@ -293,6 +293,10 @@ test("a project's trust root is its checkout, and a worktree's main checkout too
 	assert.deepEqual(await projectRoots(join(tmp.dir, "wt")), [repo, join(tmp.dir, "wt")]);
 	mkdirSync(join(tmp.dir, "plain"));
 	assert.deepEqual(await projectRoots(join(tmp.dir, "plain")), [join(tmp.dir, "plain")]);
+	// Reached through a symlink, the root is also recorded under the path as typed, at the root or inside it.
+	execFileSync("ln", ["-s", repo, join(tmp.dir, "link")]);
+	assert.deepEqual((await projectRoots(join(tmp.dir, "link"))).sort(), [join(tmp.dir, "link"), repo].sort());
+	assert.deepEqual((await projectRoots(join(tmp.dir, "link", "sub"))).sort(), [join(tmp.dir, "link"), repo].sort());
 });
 
 test("trust records a root the way each harness records its own yes, once", async (t) => {

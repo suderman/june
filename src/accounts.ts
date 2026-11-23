@@ -7,7 +7,7 @@
 // as CLIProxyAPI's sampler did; tokens are read, never refreshed or printed.
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { type Run, runProcess } from "./tools/herdr.ts";
 
 export type Provider = "openai" | "anthropic" | "google";
@@ -718,7 +718,11 @@ export async function projectRoots(dir: string, run: Run = runProcess): Promise<
 		if (!top) return [dir];
 		const commonDir = common?.startsWith("/") ? common : join(dir, common ?? ".git");
 		const main = commonDir.endsWith("/.git") ? dirname(commonDir) : top;
-		return [...new Set([main, top])];
+		// Git names the checkout by its resolved path; a harness started through a symlink (~/src/x linking to
+		// ~/.config/x) keys trust on the path as typed, so record the root that way too.
+		const inside = relative(top, realpathSync(dir));
+		const typed = inside === "" ? dir : dir.endsWith(`/${inside}`) ? dir.slice(0, -inside.length - 1) : undefined;
+		return [...new Set([main, top, ...(typed && !inside.startsWith("..") ? [typed] : [])])];
 	} catch {
 		return [dir];
 	}

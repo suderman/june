@@ -1,7 +1,7 @@
 // june: the daemon (`serve`) and its clients (`june`, `ask`, `status`, `doctor`).
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { accessSync, constants, existsSync, readFileSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
 import { createLogger } from "./runtime.ts";
 import { daemonHost, loadConfig, paths, readConfigFile, readEnvFiles, shortHostname } from "./config.ts";
 import { startDaemon } from "./daemon.ts";
@@ -554,7 +554,7 @@ async function accountsCommand(p: ReturnType<typeof paths>, args: string[], json
 	if (args[0] === "login" && args.length <= 2) return accountsLogin(a, config, p, args[1]);
 	if (args[0] === "pick" && args.length >= 2 && args.slice(2).every((x) => x === "--explain" || x === "--trust"))
 		return accountsPick(a, config, p, args[1]!, args.includes("--explain"), args.includes("--trust"));
-	if (args[0] === "trust" && (args.length === 2 || args.length === 3)) return accountsTrust(a, config, args[1]!, args[2] ?? process.cwd());
+	if (args[0] === "trust" && (args.length === 2 || args.length === 3)) return accountsTrust(a, config, args[1]!, args[2] ?? here());
 	if (args.length) {
 		console.error(USAGE);
 		return 2;
@@ -657,13 +657,22 @@ async function accountsPick(
 	const ranked = a.rank(rows.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })));
 	const chosen = ranked.find((r) => r.usable)?.slot;
 	const fallback = chosen ? undefined : rows[0]!.name;
-	if (trustHere) await accountsTrust(a, config, chosen ?? fallback!, process.cwd());
+	if (trustHere) await accountsTrust(a, config, chosen ?? fallback!, here());
 	if (explain) console.log(JSON.stringify({ selected: chosen ?? fallback, fallback: !!fallback, accounts: ranked }));
 	else {
 		if (fallback) console.error(`june accounts pick: no account has fresh quota to spare (${ranked.map((r) => `${r.slot}: ${r.reason}`).join("; ")}); using ${fallback}`);
 		console.log(chosen ?? fallback);
 	}
 	return 0;
+}
+
+/** The working directory as the shell names it: $PWD keeps a symlinked path that process.cwd() resolves. */
+function here(): string {
+	const pwd = process.env.PWD;
+	try {
+		if (pwd?.startsWith("/") && realpathSync(pwd) === realpathSync(process.cwd())) return pwd;
+	} catch {}
+	return process.cwd();
 }
 
 /** `june accounts trust NAME [DIR]`: trust DIR's project root (the working directory's by default) in login NAME's harness,
