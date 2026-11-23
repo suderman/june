@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { accountsConfig, anthropicWindows, apply, googleWindows, openaiWindows, parseAccountsOrg, places, quotas, status } from "../src/accounts.ts";
+import { accountsConfig, anthropicWindows, apply, googleWindows, loginCommand, openaiWindows, parseAccountsOrg, places, quotas, slots, status } from "../src/accounts.ts";
 import { tempDir } from "./helpers.ts";
 
 const jwt = (payload: object) => `x.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.y`;
@@ -144,4 +144,12 @@ test("quota reads each provider account once, through a live login that is the r
 	const st = await status(config, people, p);
 	assert.deepEqual(st.find((s) => s.name === "codex2")?.problems, ["logged in as stranger@x, but ACCOUNTS.org says b@x"]);
 	assert.deepEqual(st.find((s) => s.name === "pi2")?.loggedIn, false);
+});
+
+test("each harness signs in through its own wrapper, by device code where it can", () => {
+	const [claude2, codex3, pi1, agy1] = slots(accountsConfig({ claude: 2, codex: 3, pi: 1, agy: 1 }), places("/h")).filter((s) => ["claude2", "codex3", "pi1", "agy1"].includes(s.name));
+	assert.deepEqual(loginCommand(claude2!, "b@x"), ["claude2", "auth", "login", "--claudeai", "--email", "b@x"]);
+	assert.deepEqual(loginCommand(codex3!), ["codex3", "login", "--device-auth"]);
+	assert.deepEqual(loginCommand(pi1!), ["pi1", "auth", "login", "openai-codex", "--no-browser"]);
+	assert.deepEqual(loginCommand(agy1!), ["agy1"]);
 });

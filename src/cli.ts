@@ -1,5 +1,5 @@
 // june: the daemon (`serve`) and its clients (`june`, `ask`, `status`, `doctor`).
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { createLogger } from "./runtime.ts";
@@ -37,7 +37,10 @@ const USAGE = `usage:
                           leave entries out of the timeline, transcripts, and views (they stay in the database)
   june accounts [--json]  this host's numbered logins (claude1, codex2, ...): present, as whom, and any problem
   june accounts apply [--json]
-                          make the account folders and wrappers that config.json's accounts names
+                          make the account folders and wrappers that config.json's accounts names, and give each
+                          Claude folder its trust, MCP servers and first-run answers (agents apply)
+  june accounts login [NAME]
+                          sign in each login this host lacks, or NAME, as the person ACCOUNTS.org names
   june quota [NAME] [--refresh] [--json]
                           each provider account's remaining quota, read with a login on this host (NAME: codex2,
                           openai2, ...); reads within two minutes reuse the last one unless --refresh
@@ -529,16 +532,20 @@ async function accountsCommand(p: ReturnType<typeof paths>, args: string[], json
 	}
 	if (args[0] === "apply" && args.length === 1) {
 		const result = a.apply(config);
+		const deployed = config.harnesses.claude ? claudeState() : undefined;
+		if (deployed) result.problems.push(deployed);
 		if (json) console.log(JSON.stringify(result));
 		else {
 			for (const f of result.folders) console.log(`made    ${f}`);
 			if (result.links) console.log(`linked  ${result.links} shared entries`);
 			for (const w of result.wrappers) console.log(`wrote   ${w}`);
 			for (const r of result.removed) console.log(`removed ${r}`);
+			if (config.harnesses.claude && !deployed) console.log("agents  Claude trust, MCP servers and onboarding in each Claude account folder");
 			for (const problem of result.problems) console.log(`problem ${problem}`);
 		}
 		return result.problems.length ? 1 : 0;
 	}
+	if (args[0] === "login" && args.length <= 2) return accountsLogin(a, config, p, args[1]);
 	if (args.length) {
 		console.error(USAGE);
 		return 2;
@@ -554,6 +561,56 @@ async function accountsCommand(p: ReturnType<typeof paths>, args: string[], json
 		for (const problem of r.problems) console.log(`         ${problem}`);
 	}
 	return rows.some((r) => r.problems.length) ? 1 : 0;
+}
+
+/**
+ * `agents apply` for Claude alone, which writes workspace trust, MCP servers and the first-run answers into each Claude
+ * account folder's own .claude.json, so a new login opens like the others. A problem line, or undefined when it worked.
+ */
+function claudeState(): string | undefined {
+	const env: NodeJS.ProcessEnv = { ...process.env, AGENTS_HARNESSES: "claude" };
+	// Set, it would limit agents apply to that one folder.
+	delete env.CLAUDE_CONFIG_DIR;
+	const run = spawnSync("agents", ["apply"], { env, encoding: "utf8" });
+	if (run.error) return `agents apply: ${run.error.message}; Claude account folders lack trust, MCP servers and onboarding`;
+	if (run.status !== 0) return `agents apply failed: ${(run.stderr || run.stdout).trim().split("\n").at(-1)}`;
+	return undefined;
+}
+
+/** `june accounts login [NAME]`: sign in each login this host lacks, or NAME, as the person ACCOUNTS.org names. */
+async function accountsLogin(a: typeof import("./accounts.ts"), config: import("./accounts.ts").AccountsConfig, p: ReturnType<typeof paths>, name?: string): Promise<number> {
+	const who = people(p, a.parseAccountsOrg);
+	const rows = await a.status(config, who);
+	const chosen = name ? rows.filter((r) => r.name === name) : rows.filter((r) => !r.loggedIn);
+	if (name && !chosen.length) {
+		console.error(`june accounts login: ${name} is not one of ${rows.map((r) => r.name).join(", ")}`);
+		return 2;
+	}
+	if (!chosen.length) {
+		console.log("Every login on this host is signed in.");
+		return 0;
+	}
+	let failed = 0;
+	for (const slot of chosen) {
+		const person = [slot.expected, slot.label && `(${slot.label})`].filter(Boolean).join(" ") || "the right person";
+		console.log(`\n${slot.name}: sign in to ${a.PROVIDERS[slot.provider]} as ${person}. Use a private browser window, or sign out first.`);
+		if (slot.harness === "agy") console.log("Antigravity starts; sign in there, then quit it.");
+		const command = a.loginCommand(slot, slot.expected);
+		const run = spawnSync(command[0]!, command.slice(1), { stdio: "inherit" });
+		const now = (await a.status(config, who)).find((r) => r.name === slot.name)!;
+		if (run.status !== 0 && !now.loggedIn) {
+			console.log(`${slot.name}: not signed in.`);
+			failed++;
+		} else if (now.problems.length) {
+			for (const problem of now.problems) console.log(`${slot.name}: ${problem}`);
+			failed++;
+		} else console.log(`${slot.name}: signed in as ${now.email ?? "an account June cannot name"}.`);
+	}
+	if (chosen.some((s) => s.harness === "claude")) {
+		const deployed = claudeState();
+		if (deployed) console.log(deployed);
+	}
+	return failed ? 1 : 0;
 }
 
 /** ACCOUNTS.org beside SOUL.org; empty when it does not exist. */

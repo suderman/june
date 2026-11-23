@@ -223,6 +223,21 @@ export function apply(config: AccountsConfig, p: Places = places()): Applied {
 	return result;
 }
 
+/** The command that signs `slot` in through its own wrapper, by device code where the harness offers one (a browser
+ * callback on port 1455 collides with codex-lb). Antigravity signs in when it first starts. */
+export function loginCommand(slot: Slot, expected?: string): string[] {
+	switch (slot.harness) {
+		case "claude":
+			return [slot.name, "auth", "login", "--claudeai", ...(expected ? ["--email", expected] : [])];
+		case "codex":
+			return [slot.name, "login", "--device-auth"];
+		case "pi":
+			return [slot.name, "auth", "login", "openai-codex", "--no-browser"];
+		case "agy":
+			return [slot.name];
+	}
+}
+
 /** The claims of a JWT, unverified; undefined when it is not one. */
 export function claims(token: unknown): Record<string, any> | undefined {
 	if (typeof token !== "string") return undefined;
