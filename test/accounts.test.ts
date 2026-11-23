@@ -148,10 +148,13 @@ test("quota reads each provider account once, through a live login that is the r
 });
 
 test("each harness signs in through its own wrapper, by device code where it can", () => {
-	const [claude2, codex3, pi1, agy1] = slots(accountsConfig({ claude: 2, codex: 3, pi: 1, agy: 1 }), places("/h")).filter((s) => ["claude2", "codex3", "pi1", "agy1"].includes(s.name));
+	const [claude2, codex3, pi1, opencode2, agy1] = slots(accountsConfig({ claude: 2, codex: 3, pi: 1, opencode: 2, agy: 1 }), places("/h")).filter((s) =>
+		["claude2", "codex3", "pi1", "opencode2", "agy1"].includes(s.name),
+	);
 	assert.deepEqual(loginCommand(claude2!, "b@x"), ["claude2", "auth", "login", "--claudeai", "--email", "b@x"]);
 	assert.deepEqual(loginCommand(codex3!), ["codex3", "login", "--device-auth"]);
 	assert.deepEqual(loginCommand(pi1!), ["pi1", "auth", "login", "openai-codex", "--no-browser"]);
+	assert.deepEqual(loginCommand(opencode2!), ["opencode2", "auth", "login", "-p", "openai", "-m", "ChatGPT Pro/Plus (headless)"]);
 	assert.deepEqual(loginCommand(agy1!), ["agy1"]);
 });
 
@@ -393,4 +396,71 @@ test("June's ChatGPT credentials come from a Pi login, written under Pi's lock, 
 	const old = new Date(Date.now() - 60_000);
 	(await import("node:fs")).utimesSync(join(pi2!.dir!, "auth.json.lock"), old, old);
 	assert.equal(await withAuthLock(join(pi2!.dir!, "auth.json"), async () => "ran"), "ran");
+});
+
+test("OpenCode account folders isolate auth.json under XDG_DATA_HOME while sharing the database and sibling XDG dirs", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const home = tmp.dir;
+	const p = places(home);
+	mkdirSync(join(home, ".local/share/opencode/storage"), { recursive: true });
+	mkdirSync(join(home, ".local/share/other-app"), { recursive: true });
+	writeFileSync(join(home, ".local/share/opencode/auth.json"), "{}");
+	writeFileSync(join(home, ".local/share/opencode/opencode.db"), "db");
+	writeFileSync(join(home, ".local/share/opencode/mcp-auth.json"), "{}");
+	const config = accountsConfig({ opencode: 2 });
+	const applied = apply(config, p);
+	assert.deepEqual(applied.problems, []);
+	assert.deepEqual(applied.wrappers.sort(), ["opencode", "opencode1", "opencode2"]);
+	const oc1 = join(p.root, "opencode1");
+	assert.equal(readlinkSync(join(oc1, "other-app")), join(home, ".local/share/other-app"));
+	assert.equal(readlinkSync(join(oc1, "opencode/storage")), join(home, ".local/share/opencode/storage"));
+	assert.equal(readlinkSync(join(oc1, "opencode/mcp-auth.json")), join(home, ".local/share/opencode/mcp-auth.json"));
+	assert.equal(existsSync(join(oc1, "opencode/auth.json")), false, "auth.json is per account");
+	assert.equal(existsSync(join(oc1, "opencode/opencode.db")), false, "database is opened directly via OPENCODE_DB");
+	assert.deepEqual(apply(config, p), { folders: [], links: 0, wrappers: [], removed: [], problems: [] });
+
+	// Wrapper sets XDG_DATA_HOME and OPENCODE_DB, and plain opencode refuses auth/providers subcommands.
+	mkdirSync(join(home, "real"));
+	writeFileSync(join(home, "real", "opencode"), '#!/bin/sh\necho "$XDG_DATA_HOME|$OPENCODE_DB|$JUNE_ACCOUNT|$*"\n');
+	writeFileSync(join(home, "real", "june"), "#!/bin/sh\necho opencode1\n");
+	for (const f of ["opencode", "june"]) chmodSync(join(home, "real", f), 0o755);
+	const env = { HOME: home, PATH: `${p.links}:${join(home, "real")}:/run/current-system/sw/bin:/usr/bin:/bin` };
+	assert.equal(
+		execFileSync("opencode", ["run", "hi"], { env }).toString().trim(),
+		`${oc1}|${join(home, ".local/share/opencode/opencode.db")}|opencode1|run hi`,
+	);
+	assert.throws(() => execFileSync("opencode", ["auth", "login"], { env, stdio: "pipe" }), /use opencode1, opencode2/);
+	assert.throws(() => execFileSync("opencode", ["providers", "login"], { env, stdio: "pipe" }), /use opencode1, opencode2/);
+
+	// OAuth login reads identity and refreshes; an API-key entry does not count as a ChatGPT OAuth login.
+	const now = Date.parse("2026-11-23T12:00:00Z");
+	const [slot1, slot2] = slots(config, p);
+	writeFileSync(
+		join(oc1, "opencode/auth.json"),
+		JSON.stringify({
+			openai: {
+				type: "oauth",
+				access: jwt({ "https://api.openai.com/profile": { email: "a@x" }, "https://api.openai.com/auth": { chatgpt_account_id: "acct-1" } }),
+				refresh: "r1",
+				expires: now - 1000,
+			},
+		}),
+	);
+	writeFileSync(join(p.root, "opencode2/opencode/auth.json"), JSON.stringify({ openai: { type: "api", key: "sk-x" } }));
+	const people = parseAccountsOrg("| Number | OpenAI |\n| 1 | a@x |\n| 2 | b@x |\n");
+	const st = await status(config, people, p);
+	assert.equal(st[0]!.loggedIn, true);
+	assert.equal(st[0]!.email, "a@x");
+	assert.equal(st[1]!.loggedIn, false);
+	assert.deepEqual(trust(slot1!, ["/r"], p), []);
+
+	const fetcher = async (url: string) =>
+		url.includes("oauth/token")
+			? { status: 200, json: async () => ({ access_token: "new-oc", refresh_token: "r2", expires_in: 3600 }) }
+			: { status: 200, json: async () => ({ rate_limit: { primary_window: { used_percent: 20, limit_window_seconds: 604800 } } }) };
+	assert.equal(await refresh(slot1!, { fetcher, now, busy: () => false }), "refreshed");
+	const saved = JSON.parse(readFileSync(join(oc1, "opencode/auth.json"), "utf8")).openai;
+	assert.deepEqual([saved.access, saved.refresh, saved.expires], ["new-oc", "r2", now + 3_600_000]);
+	assert.equal(await refresh(slot2!, { fetcher, now, busy: () => false }), "failed");
 });

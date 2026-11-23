@@ -11,7 +11,7 @@ import { dirname, join, relative } from "node:path";
 import { type Run, runProcess } from "./tools/herdr.ts";
 
 export type Provider = "openai" | "anthropic" | "google";
-export type HarnessName = "claude" | "codex" | "pi" | "agy";
+export type HarnessName = "claude" | "codex" | "pi" | "opencode" | "agy";
 
 type Harness = {
 	provider: Provider;
@@ -19,6 +19,10 @@ type Harness = {
 	env?: string;
 	/** The harness's usual home, relative to $HOME, whose contents the account folders share. */
 	base: string;
+	/** Subdirectory inside the account folder where the harness reads its files (e.g. XDG_DATA_HOME/opencode). */
+	subdir?: string;
+	/** Extra export lines emitted by the wrapper after env. */
+	extraEnv?: () => string[];
 	/** Files each account folder keeps for itself. */
 	own: readonly string[];
 	/** What the wrapper runs: the first of this name on PATH that is not one of June's wrappers. */
@@ -31,7 +35,7 @@ export const HARNESSES: Record<HarnessName, Harness> = {
 	// claude-direct clears proxy settings and keeps the permission default; it honours CLAUDE_CONFIG_DIR.
 	claude: { provider: "anthropic", env: "CLAUDE_CONFIG_DIR", base: ".claude", own: [".credentials.json", ".claude.json"], command: "claude-direct" },
 	codex: { provider: "openai", env: "CODEX_HOME", base: ".codex", own: ["auth.json", "auth.json.lock", "auth.lock", "models_cache.json"], command: "codex" },
-	// Pi's shared settings name the proxy as the default provider; an account folder uses its ChatGPT login instead.
+	// Each Pi account folder uses its own ChatGPT login under openai-codex.
 	pi: {
 		provider: "openai",
 		env: "PI_CODING_AGENT_DIR",
@@ -48,6 +52,17 @@ export const HARNESSES: Record<HarnessName, Harness> = {
 					: {}),
 			}),
 		},
+	},
+	// OpenCode reads auth.json from $XDG_DATA_HOME/opencode and its SQLite store from OPENCODE_DB; pointing OPENCODE_DB
+	// directly at the shared database keeps -wal and -shm beside it instead of split across account folders.
+	opencode: {
+		provider: "openai",
+		env: "XDG_DATA_HOME",
+		base: ".local/share/opencode",
+		subdir: "opencode",
+		own: ["auth.json", "opencode.db", "opencode.db-shm", "opencode.db-wal"],
+		extraEnv: () => ['export OPENCODE_DB="${OPENCODE_DB:-$HOME/.local/share/opencode/opencode.db}"'],
+		command: "opencode",
 	},
 	// Antigravity keeps its login in the system keyring, one per host, so it has no account folder.
 	agy: { provider: "google", base: ".gemini", own: [], command: "agy" },
@@ -148,6 +163,7 @@ export function wrapper(slot: Slot, command: string, p: Places = places(), hando
 		...(spec.env && slot.dir
 			? [`export ${spec.env}="${rel(slot.dir)}"`, `[ -d "$${spec.env}" ] || { echo "${slot.name}: no account folder; run june accounts apply" >&2; exit 1; }`]
 			: []),
+		...(spec.extraEnv ? spec.extraEnv() : []),
 		...(handover ? [`[ -x "${rel(join(p.libexec, slot.harness))}" ] && exec "${rel(join(p.libexec, slot.harness))}" "$@"`] : []),
 		"# Otherwise the first command of this name on PATH that is not one of June's wrappers.",
 		`june_bin="${rel(p.bin)}"`,
@@ -201,23 +217,34 @@ export function apply(config: AccountsConfig, p: Places = places()): Applied {
 				result.folders.push(slot.dir);
 			}
 			chmodSync(slot.dir, 0o700);
-			for (const entry of readdirSync(base)) {
-				if (spec.own.includes(entry)) continue;
-				const target = join(base, entry);
-				const link = join(slot.dir, entry);
-				if (isLinkTo(link, target)) continue;
-				if (exists(link)) {
-					result.problems.push(`${slot.name}: ${entry} is the folder's own copy, not shared; move it aside to share ${target}`);
-					continue;
+			const linkEntries = (srcDir: string, dstDir: string, skip: readonly string[]) => {
+				for (const entry of readdirSync(srcDir)) {
+					if (skip.includes(entry)) continue;
+					const target = join(srcDir, entry);
+					const link = join(dstDir, entry);
+					if (isLinkTo(link, target)) continue;
+					if (exists(link)) {
+						result.problems.push(`${slot.name}: ${entry} is the folder's own copy, not shared; move it aside to share ${target}`);
+						continue;
+					}
+					symlinkSync(target, link);
+					result.links++;
 				}
-				symlinkSync(target, link);
-				result.links++;
+			};
+			let targetDir = slot.dir;
+			if (spec.subdir) {
+				// Share sibling entries of the XDG parent (e.g. ~/.local/share/*) so child tools see their own data.
+				linkEntries(dirname(base), slot.dir, [spec.subdir]);
+				targetDir = join(slot.dir, spec.subdir);
+				if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true, mode: 0o700 });
+				chmodSync(targetDir, 0o700);
 			}
+			linkEntries(base, targetDir, spec.own);
 			if (spec.settings) {
 				const shared = join(base, spec.settings.file);
 				const values = existsSync(shared) ? (JSON.parse(readFileSync(shared, "utf8")) as Record<string, unknown>) : {};
 				const content = JSON.stringify(spec.settings.adapt(values), null, 2) + "\n";
-				const own = join(slot.dir, spec.settings.file);
+				const own = join(targetDir, spec.settings.file);
 				if (lstatSync(own, { throwIfNoEntry: false })?.isSymbolicLink()) rmSync(own);
 				if (!existsSync(own) || readFileSync(own, "utf8") !== content) writeFileSync(own, content, { mode: 0o600 });
 			}
@@ -259,7 +286,7 @@ function install(name: string, content: string, dir: string, p: Places, result: 
 }
 
 /** Subcommands that act on one login, which the plain name must not pick for. */
-const SIGN_IN: Record<HarnessName, readonly string[]> = { claude: ["auth", "login", "logout", "setup-token"], codex: ["login", "logout"], pi: ["auth"], agy: [] };
+const SIGN_IN: Record<HarnessName, readonly string[]> = { claude: ["auth", "login", "logout", "setup-token"], codex: ["login", "logout"], pi: ["auth"], opencode: ["auth", "providers"], agy: [] };
 
 /** The plain-name wrapper (claude, codex, pi, agy): the account June picks from quota, or the only one. */
 export function autoWrapper(harness: HarnessName, accounts: readonly Slot[], p: Places = places()): string {
@@ -288,6 +315,8 @@ export function loginCommand(slot: Slot, expected?: string): string[] {
 			return [slot.name, "login", "--device-auth"];
 		case "pi":
 			return [slot.name, "auth", "login", "openai-codex", "--no-browser"];
+		case "opencode":
+			return [slot.name, "auth", "login", "-p", "openai", "-m", "ChatGPT Pro/Plus (headless)"];
 		case "agy":
 			return [slot.name];
 	}
@@ -345,6 +374,18 @@ export async function login(slot: Slot, run: Run = runProcess): Promise<Login | 
 		case "pi": {
 			const entry = readJson(join(dir!, "auth.json"))?.["openai-codex"];
 			if (!entry?.access) return undefined;
+			const c = claims(entry.access);
+			return {
+				email: emailOf(c),
+				token: entry.access,
+				expires: entry.expires,
+				accountId: entry.accountId ?? c?.["https://api.openai.com/auth"]?.chatgpt_account_id,
+				source: slot.name,
+			};
+		}
+		case "opencode": {
+			const entry = readJson(join(dir!, "opencode/auth.json"))?.openai;
+			if (entry?.type !== "oauth" || !entry?.access) return undefined;
 			const c = claims(entry.access);
 			return {
 				email: emailOf(c),
@@ -535,8 +576,8 @@ export async function quotas(
 	const now = options.now ?? Date.now();
 	const all = slots(config, options.places);
 	const accounts = new Map<string, Slot[]>();
-	// Pi and Codex logins refresh themselves when used; prefer the one most likely to hold a live token.
-	const order: HarnessName[] = ["codex", "pi", "claude", "agy"];
+	// Pi, Codex and OpenCode logins refresh themselves when used; prefer the one most likely to hold a live token.
+	const order: HarnessName[] = ["codex", "pi", "opencode", "claude", "agy"];
 	for (const s of [...all].sort((a, b) => order.indexOf(a.harness) - order.indexOf(b.harness))) {
 		const key = `${s.provider}${s.number}`;
 		if (!accounts.has(key)) accounts.set(key, []);
@@ -656,10 +697,16 @@ async function refreshInside(
 		return refresh(slot, options);
 	}
 	try {
-		const file = join(slot.dir!, slot.harness === "claude" ? ".credentials.json" : "auth.json");
+		const file = join(slot.dir!, slot.harness === "claude" ? ".credentials.json" : slot.harness === "opencode" ? "opencode/auth.json" : "auth.json");
 		const saved = readJson(file);
 		const current =
-			slot.harness === "claude" ? saved?.claudeAiOauth?.refreshToken : slot.harness === "codex" ? saved?.tokens?.refresh_token : saved?.["openai-codex"]?.refresh;
+			slot.harness === "claude"
+				? saved?.claudeAiOauth?.refreshToken
+				: slot.harness === "codex"
+					? saved?.tokens?.refresh_token
+					: slot.harness === "opencode"
+						? saved?.openai?.refresh
+						: saved?.["openai-codex"]?.refresh;
 		if (typeof current !== "string") return "failed";
 		const response = await fetcher(client.url, {
 			method: "POST",
@@ -675,6 +722,8 @@ async function refreshInside(
 		} else if (slot.harness === "codex") {
 			Object.assign(saved.tokens, { access_token: t.access_token, refresh_token: t.refresh_token ?? current, ...(t.id_token ? { id_token: t.id_token } : {}) });
 			saved.last_refresh = new Date(now).toISOString();
+		} else if (slot.harness === "opencode") {
+			Object.assign(saved.openai, { access: t.access_token, refresh: t.refresh_token ?? current, expires });
 		} else {
 			Object.assign(saved["openai-codex"], { access: t.access_token, refresh: t.refresh_token ?? current, expires });
 		}
@@ -789,6 +838,8 @@ export function trust(slot: Slot, roots: readonly string[], p: Places = places()
 			if (added.length) writePrivate(file, state);
 			return added;
 		}
+		case "opencode":
+			return [];
 		case "agy": {
 			const file = target(join(p.home, HARNESSES.agy.base, "antigravity-cli/settings.json"));
 			const state = readJson(file) ?? {};

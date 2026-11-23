@@ -608,10 +608,12 @@ async function accountsCommand(p: ReturnType<typeof paths>, args: string[], json
 		console.log(JSON.stringify(rows));
 		return 0;
 	}
+	const nameWidth = Math.max(8, ...rows.map((x) => x.name.length));
+	const labelWidth = Math.max(...rows.map((x) => (x.label ?? "").length)) + 1;
 	for (const r of rows) {
 		const who = r.email ?? (r.loggedIn ? "logged in" : "not logged in");
-		console.log(`${r.name.padEnd(8)} ${(r.label ?? "").padEnd(Math.max(...rows.map((x) => (x.label ?? "").length)) + 1)} ${who}${r.expected && r.email !== r.expected ? `  (expects ${r.expected})` : ""}`);
-		for (const problem of r.problems) console.log(`         ${problem}`);
+		console.log(`${r.name.padEnd(nameWidth)} ${(r.label ?? "").padEnd(labelWidth)} ${who}${r.expected && r.email !== r.expected ? `  (expects ${r.expected})` : ""}`);
+		for (const problem of r.problems) console.log(`${"".padEnd(nameWidth)} ${problem}`);
 	}
 	return rows.some((r) => r.problems.length) ? 1 : 0;
 }

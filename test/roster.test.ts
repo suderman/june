@@ -46,7 +46,7 @@ test("ROSTER.org cards take their properties, keep child headings as instruction
 		problems: [],
 	});
 	assert.deepEqual([rivet!.name, rivet!.slug, rivet!.harness, rivet!.model, rivet!.problems], ["Rivet Jr", "rivet-jr", "codex", undefined, []]);
-	assert.deepEqual(broken!.problems, [":HARNESS: gemini is not one of claude, codex, pi, agy", "no :HOST:", ":EFFORT: huge is not one of low, medium, high, xhigh, max"]);
+	assert.deepEqual(broken!.problems, [":HARNESS: gemini is not one of claude, codex, pi, opencode, agy", "no :HOST:", ":EFFORT: huge is not one of low, medium, high, xhigh, max"]);
 	assert.equal(findCard(parseRoster(ROSTER), "RIVET JR")?.slug, "rivet-jr");
 });
 
@@ -56,6 +56,7 @@ test("each harness starts with the card's model, effort and instructions in its 
 	assert.deepEqual(launchArgs(card("codex")), ["--model", "m-1", "-c", 'model_reasoning_effort="xhigh"', "-c", 'developer_instructions="Be careful."']);
 	assert.deepEqual(launchArgs(card("pi", { model: "gpt-6.2-sol" })), ["--model", "openai-codex/gpt-6.2-sol", "--thinking", "max", "--append-system-prompt", "Be careful.", "--name", "Bolt"]);
 	assert.deepEqual(launchArgs(card("pi", { model: "cliproxyapi/gpt-6.2-sol", effort: undefined, instructions: "" })), ["--model", "cliproxyapi/gpt-6.2-sol", "--name", "Bolt"]);
+	assert.deepEqual(launchArgs(card("opencode", { model: "gpt-6.2-sol" }), "go"), ["--model", "openai/gpt-6.2-sol", "--prompt", "Be careful.\n\ngo"]);
 	assert.deepEqual(launchArgs(card("agy"), "go"), ["--model", "m-1", "--effort", "max", "--prompt-interactive", "Be careful.\n\ngo"]);
 	assert.deepEqual(launchArgs(card("agy")), ["--model", "m-1", "--effort", "max"]);
 });

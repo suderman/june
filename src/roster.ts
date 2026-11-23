@@ -104,6 +104,11 @@ export function launchArgs(card: Card, prompt?: string): string[] {
 				card.name,
 				...(prompt ? [prompt] : []),
 			];
+		case "opencode":
+			return [
+				...(model ? ["--model", model.includes("/") ? model : `openai/${model}`] : []),
+				...(prompt ? ["--prompt", text ? `${text}\n\n${prompt}` : prompt] : []),
+			];
 		case "agy":
 			return [
 				...(model ? ["--model", model] : []),
