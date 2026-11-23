@@ -54,6 +54,8 @@ const USAGE = `usage:
   june accounts pick HARNESS [--explain] [--trust]
                           the login the plain claude, codex or pi runs: the account with quota to spare, five-hour
                           allowances first; --explain shows every account's standing as JSON; --trust also trusts here
+  june accounts check NAME [--refresh] [--json]
+                          whether login NAME can still work, and which login of its harness would take over
   june accounts trust NAME [DIR]
                           trust DIR's project root (here by default) in login NAME's harness, which each launch does
   june quota [NAME] [--refresh] [--json]
@@ -569,6 +571,7 @@ async function accountsCommand(p: ReturnType<typeof paths>, args: string[], json
 	if (args[0] === "pick" && args.length >= 2 && args.slice(2).every((x) => x === "--explain" || x === "--trust"))
 		return accountsPick(a, config, p, args[1]!, args.includes("--explain"), args.includes("--trust"));
 	if (args[0] === "trust" && (args.length === 2 || args.length === 3)) return accountsTrust(a, config, args[1]!, args[2] ?? here());
+	if (args[0] === "check" && args.length >= 2 && args.slice(2).every((x) => x === "--refresh")) return accountsCheck(a, config, p, args[1]!, args.includes("--refresh"), json);
 	if (args.length) {
 		console.error(USAGE);
 		return 2;
@@ -677,6 +680,37 @@ async function accountsPick(
 		if (fallback) console.error(`june accounts pick: no account has fresh quota to spare (${ranked.map((r) => `${r.slot}: ${r.reason}`).join("; ")}); using ${fallback}`);
 		console.log(chosen ?? fallback);
 	}
+	return 0;
+}
+
+/**
+ * `june accounts check NAME [--refresh] [--json]`: whether login NAME can still work, and if not, the login of the same
+ * harness that would take over. The dispatcher asks this of an idle worker before nudging it, to continue its session
+ * on another account rather than nudge one that has run out.
+ */
+async function accountsCheck(
+	a: typeof import("./accounts.ts"),
+	config: import("./accounts.ts").AccountsConfig,
+	p: ReturnType<typeof paths>,
+	name: string,
+	fresh: boolean,
+	json: boolean,
+): Promise<number> {
+	const rows = await a.status(config, people(p, a.parseAccountsOrg));
+	const slot = rows.find((r) => r.name === name);
+	if (!slot) {
+		console.error(`june accounts check: ${name} is not a login here`);
+		return 2;
+	}
+	const mine = rows.filter((r) => r.harness === slot.harness && r.loggedIn && !r.problems.length);
+	const quotas = await currentQuotas(a, config, p, fresh);
+	const ranked = a.rank(mine.map((s) => ({ slot: s, quota: quotas.find((q) => q.provider === s.provider && q.number === s.number) })));
+	const own = ranked.find((r) => r.slot === name);
+	// Another account of the same provider number shares this one's quota, so it cannot take over.
+	const next = ranked.find((r) => r.usable && r.slot !== name && mine.find((s) => s.name === r.slot)?.number !== slot.number)?.slot;
+	const result = { name, usable: own?.usable ?? false, reason: own?.reason ?? "not signed in here", ...(next ? { next } : {}) };
+	if (json) console.log(JSON.stringify(result));
+	else console.log(`${name}: ${result.usable ? "can work" : `out (${result.reason})`}${next ? `; ${next} would take over` : ""}`);
 	return 0;
 }
 

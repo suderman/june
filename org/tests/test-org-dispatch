@@ -1154,6 +1154,68 @@ cat >"$fixture/launch-tests.el" <<'EOF'
        (should-error (org-dispatch--prompt (car (org-dispatch--states)) "hello"))
        (should-not (seq-find (lambda (args) (equal (car args) "send")) test-calls))))))
 
+(defun test-fake-check (bin answer)
+  "A june in BIN whose accounts check prints ANSWER, a JSON object string."
+  (let ((june (expand-file-name "june" bin)))
+    (with-temp-file june (insert "#!/bin/sh\necho '" answer "'\n"))
+    (set-file-modes june #o755)
+    june))
+
+(ert-deftest an-idle-worker-whose-account-ran-out-continues-on-another ()
+  ;; Instead of nudging, the dispatcher ends the worker and resumes its session
+  ;; through the harness's plain name, which picks an account with quota.
+  (let* ((bin (make-temp-file "june-bin" t))
+         (org-dispatch-june (test-fake-check bin "{\"name\":\"claude1\",\"usable\":false,\"reason\":\"5 hour at 0%\",\"next\":\"claude2\"}")))
+    (unwind-protect
+        (test-with-hc
+         (let* ((task (plist-put (copy-sequence (test-task "claude")) :card '((slug . "bolt") (effort . "high"))))
+                (org-dispatch-nudge-after 0) (clock 1000))
+           (should (org-dispatch--launch task))
+           (cl-letf (((symbol-function 'float-time) (lambda (&rest _) (setq clock (+ clock 10))))
+                     ((symbol-function 'org-dispatch--worker-account) (lambda (_) "claude1")))
+             (setq test-calls nil)
+             (org-dispatch--watch (car (org-dispatch--states)))
+             (let* ((state (car (org-dispatch--states)))
+                    (run (test-run-call))
+                    (argv (test-argv run)))
+               (should-not (test-sent "nudge"))
+               (should (member '("kill" "t-new") test-calls))
+               (should (equal (plist-get state :terminal) "t-new1"))
+               (should (equal (plist-get state :switches) 1))
+               (should (equal (car argv) "claude"))
+               (should (equal (cadr (member "--resume" argv)) (plist-get state :session)))
+               (should (equal (cadr (member "--effort" argv)) "high"))
+               (should (string-search "ran out of quota" (car (last argv))))
+               (should (member "june.agent=bolt" run))
+               (should (member (concat "org.run=" (plist-get state :run)) run))
+               (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                                   (lambda ()
+                                     (should (equal (org-get-todo-state) "PROG"))
+                                     (should (string-search "claude1 ran out of quota (5 hour at 0%)"
+                                                            (buffer-substring-no-properties (point) (point-max))))))))))
+      (delete-directory bin t))))
+
+(ert-deftest a-worker-with-no-account-left-goes-to-jon ()
+  (let* ((bin (make-temp-file "june-bin" t))
+         (org-dispatch-june (test-fake-check bin "{\"name\":\"claude1\",\"usable\":false,\"reason\":\"weekly at 0%\"}")))
+    (unwind-protect
+        (test-with-hc
+         (let ((task (test-task "claude")) (org-dispatch-nudge-after 0) (clock 1000))
+           (should (org-dispatch--launch task))
+           (cl-letf (((symbol-function 'float-time) (lambda (&rest _) (setq clock (+ clock 10))))
+                     ((symbol-function 'org-dispatch--worker-account) (lambda (_) "claude1")))
+             (setq test-calls nil)
+             (org-dispatch--watch (car (org-dispatch--states)))
+             (should-not (test-run-call))
+             (should-not (test-sent "nudge"))
+             (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                                 (lambda ()
+                                   (should (equal (org-get-todo-state) "EVAL"))
+                                   (should (org-entry-get nil "ASKED"))
+                                   (should (string-search "no other account can continue it"
+                                                          (buffer-substring-no-properties (point) (point-max)))))))))
+      (delete-directory bin t))))
+
 (ert-deftest stop-interrupts-then-kills-only-the-exact-worker ()
   (test-with-hc
    (let ((task (test-task "pi")))

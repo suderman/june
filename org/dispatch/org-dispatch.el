@@ -249,6 +249,95 @@ A terminal at STATE's address that carries other labels is not this run's."
            nil)
           ((org-dispatch--live-p terminal) terminal))))
 
+(defun org-dispatch--worker-account (state)
+  "The June account login (claude1, codex2, ...) STATE's worker runs on, or nil.
+June's wrappers export JUNE_ACCOUNT, which the harness process keeps."
+  (let ((pid (alist-get 'pid (org-dispatch--worker state))))
+    (when (integerp pid) (org-dispatch--process-account pid 3))))
+
+(defun org-dispatch--process-account (pid depth)
+  "JUNE_ACCOUNT in process PID's environment, or in its descendants' to DEPTH.
+A terminal started as a shell runs the harness as its child."
+  (or (ignore-errors
+        (with-temp-buffer
+          (insert-file-contents-literally (format "/proc/%d/environ" pid))
+          (when (re-search-forward "\\(?:^\\|\0\\)JUNE_ACCOUNT=\\([a-z]+[0-9]+\\)" nil t)
+            (match-string 1))))
+      (and (> depth 0)
+           (seq-some (lambda (child) (org-dispatch--process-account (string-to-number child) (1- depth)))
+                     (ignore-errors
+                       (with-temp-buffer
+                         (insert-file-contents-literally (format "/proc/%d/task/%d/children" pid pid))
+                         (split-string (buffer-string))))))))
+
+(defun org-dispatch--check-account (slot)
+  "June's answer on whether login SLOT can still work, an alist with usable,
+reason and next, or nil when june cannot say."
+  (let ((june (executable-find org-dispatch-june)))
+    (when june
+      (with-temp-buffer
+        (call-process june nil '(t nil) nil "accounts" "check" slot "--refresh" "--json")
+        (ignore-errors
+          (json-parse-string (buffer-string) :object-type 'alist :null-object nil :false-object nil))))))
+
+(defvar org-dispatch-max-switches 3
+  "Account switches one run may make before its task goes to Jon.")
+
+(defun org-dispatch--out-of-quota (state)
+  "Continue STATE's idle worker on another account when its own has run out.
+Return non-nil when it did, or when no account can continue and the task
+went to Jon; nil leaves the worker to the usual nudges."
+  (let* ((slot (org-dispatch--worker-account state))
+         (check (and slot (org-dispatch--check-account slot))))
+    (when (and check (not (alist-get 'usable check)))
+      (let ((next (alist-get 'next check))
+            (reason (alist-get 'reason check))
+            (switches (or (plist-get state :switches) 0)))
+        (if (or (null next) (>= switches org-dispatch-max-switches) (null (plist-get state :session)))
+            (org-dispatch--park state (format "%s ran out of quota (%s), and %s." slot reason
+                                              (cond ((null (plist-get state :session)) "its session is unknown, so it cannot continue elsewhere")
+                                                    ((null next) "no other account can continue it")
+                                                    (t (format "it already moved %d times" switches)))))
+          (org-dispatch--continue-elsewhere state slot reason))
+        t))))
+
+(defun org-dispatch--continue-elsewhere (state slot reason)
+  "End STATE's worker on spent login SLOT and resume its session in a new
+terminal through the harness's plain name, which picks an account with quota.
+Sessions are shared between a harness's accounts, so the agent carries on."
+  (let* ((agent (plist-get state :agent))
+         (card (and (plist-get state :card)
+                    (json-parse-string (plist-get state :card) :object-type 'alist :null-object nil :false-object nil)))
+         (task (list :agent agent :heading (plist-get state :heading) :model (plist-get state :model) :card card))
+         (command (or (org-dispatch--command agent) agent))
+         (prompt (format "The account you were working on (%s) ran out of quota: %s. This is the same session, resumed on another account. Continue the task from where you stopped." slot reason))
+         (old (plist-get state :terminal))
+         (slug (alist-get 'slug card)))
+    (ignore-errors (org-dispatch--hc "kill" old))
+    (let* ((started (apply #'org-dispatch--hc "run" "--bg" "--no-parent"
+                           "--name" (format "auto-%s-%s" (org-dispatch--id8 (plist-get state :id)) (format-time-string "%H%M%S"))
+                           "--cwd" (plist-get state :dir)
+                           "--label" (concat "org.dispatch=" org-dispatch-host)
+                           "--label" (concat "org.task=" (plist-get state :id))
+                           "--label" (concat "org.run=" (plist-get state :run))
+                           "--label" (concat "org.agent=" agent)
+                           "--label" (concat "org.session=" (plist-get state :session))
+                           (append (when slug (list "--label" (concat "june.agent=" slug)))
+                                   (list "--")
+                                   (org-dispatch--agent-argv task command (plist-get state :session) nil prompt))))
+           (address (alist-get 'address started)))
+      (unless address (error "hc run returned no terminal address"))
+      (setq state (plist-put state :terminal address))
+      (setq state (plist-put state :idle 0))
+      (setq state (plist-put state :switches (1+ (or (plist-get state :switches) 0))))
+      (org-dispatch--save-state state)
+      (org-dispatch--edit (plist-get state :file) (plist-get state :id)
+        (lambda ()
+          (org-dispatch--append "Dialog" (org-dispatch--entry "Dispatcher"
+            (format "%s ran out of quota (%s); the session continues on another account in hc terminal %s." slot reason address))))
+        (plist-get state :heading))
+      (org-dispatch--log "%s: %s ran out of quota; continued in %s" (plist-get state :id) slot address))))
+
 (defun org-dispatch--agent-status (state)
   "STATE's worker status, or nil when its worker is gone."
   (org-dispatch--status (org-dispatch--worker state)))
@@ -1537,6 +1626,10 @@ is accepted as unknown, which the watcher never mistakes for idle."
                           :review-loop (if (plist-get task :review-loop) 1 0)
                           :started (float-time) :nudges 0
                           :repeat (if (plist-get task :repeat) 1 0)))
+             ;; What a later switch to another account needs to start the same agent.
+             (state (append state
+                            (when (plist-get task :model) (list :model (plist-get task :model)))
+                            (when (plist-get task :card) (list :card (json-serialize (plist-get task :card))))))
              (prompt (org-dispatch--render
                       "task" task `(("DIALOG" . ,(concat
                                                  (when fresh
@@ -1694,6 +1787,8 @@ The original file may still exist after its heading has been archived."
         (cond
          ((< (- (float-time) since) org-dispatch-nudge-after)
           (org-dispatch--save-state state))
+         ;; An agent that stopped because its account ran out continues on another.
+         ((org-dispatch--out-of-quota state))
          ((>= nudges org-dispatch-max-nudges)
           (org-dispatch--park state (format "Still idle without a state change after %d nudge%s."
                                             org-dispatch-max-nudges
