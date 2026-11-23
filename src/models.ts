@@ -1,6 +1,7 @@
 // Model access through pi-ai. The provider comes from Pi's own models.json, so codex-lb is configured once.
 import { readFileSync } from "node:fs";
 import { createModels, createProvider, envApiKeyAuth, type MutableModels, type Provider } from "@earendil-works/pi-ai";
+import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 
@@ -48,9 +49,18 @@ export function providerFromPiModels(file: string, id: string): Provider {
 	});
 }
 
-/** Models whose keys come from `secrets` first, then the process environment. */
-export function createJuneModels(secrets: Readonly<Record<string, string>>): MutableModels {
+/** The ChatGPT subscription provider: June signs in through one of Pi's account logins rather than a proxy. */
+export const DIRECT_PROVIDER = "openai-codex";
+
+/** A provider by id: ChatGPT's own for openai-codex, else from Pi's models.json. */
+export function juneProvider(providersFile: string, id: string): Provider {
+	return id === DIRECT_PROVIDER ? (openaiCodexProvider() as unknown as Provider) : providerFromPiModels(providersFile, id);
+}
+
+/** Models whose keys come from `secrets` first, then the process environment, and OAuth sign-ins from `credentials`. */
+export function createJuneModels(secrets: Readonly<Record<string, string>>, credentials?: NonNullable<Parameters<typeof createModels>[0]>["credentials"]): MutableModels {
 	return createModels({
+		...(credentials ? { credentials } : {}),
 		authContext: {
 			env: async (name) => secrets[name] ?? process.env[name],
 			fileExists: async () => false,

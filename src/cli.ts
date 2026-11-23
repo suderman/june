@@ -8,7 +8,7 @@ import { startDaemon } from "./daemon.ts";
 import { parseSince, renderHistory } from "./history.ts";
 import { formatSize } from "./inbox.ts";
 import { KINDS, parseRange, renderTimeline } from "./timeline.ts";
-import { createJuneModels, providerFromPiModels } from "./models.ts";
+import { createJuneModels, DIRECT_PROVIDER, juneProvider } from "./models.ts";
 import { findSkills } from "./prompt.ts";
 import { Client, DaemonUnavailable, parseCommand, type Reply, type Status } from "./protocol.ts";
 import type { Agenda, AgendaEntry, Agents } from "./board.ts";
@@ -157,12 +157,40 @@ function overSsh(host: string, command: string, argv: readonly string[]): Promis
 	});
 }
 
+/**
+ * June's models. With openai-codex she signs in through a Pi account login (pi1, pi2, ...): the one with most quota to
+ * spare, kept while it lasts, so no proxy stands between her and ChatGPT. Other providers come from Pi's models.json.
+ */
+async function juneModels(p: ReturnType<typeof paths>, config: ReturnType<typeof loadConfig>, secrets: Record<string, string>) {
+	const direct = [config.model.chat, config.model.focus, config.model.patter, config.model.expression].some((m) => m?.provider === DIRECT_PROVIDER);
+	let credentials: InstanceType<typeof import("./accounts.ts").AccountCredentials> | undefined;
+	if (direct) {
+		const a = await import("./accounts.ts");
+		credentials = new a.AccountCredentials(async () => {
+			const accounts = a.accountsConfig(readConfigFile(p).accounts);
+			const logins = (await a.status(accounts, people(p, a.parseAccountsOrg))).filter((r) => r.harness === "pi" && r.loggedIn && !r.problems.length);
+			if (!logins.length) return undefined;
+			const file = `${p.state}/quota.json`;
+			let quotas = a.cached(file, 600);
+			if (!quotas) {
+				quotas = await a.quotas(accounts, people(p, a.parseAccountsOrg));
+				a.save(file, quotas);
+			}
+			const ranked = a.rank(logins.map((slot) => ({ slot, quota: quotas!.find((q) => q.provider === slot.provider && q.number === slot.number) })));
+			const best = ranked.find((r) => r.usable)?.slot ?? logins[0]!.name;
+			return logins.find((s) => s.name === best);
+		});
+	}
+	const models = createJuneModels(secrets, credentials as never);
+	for (const id of new Set([config.model.chat.provider])) models.setProvider(juneProvider(config.providersFile, id));
+	return models;
+}
+
 async function serve(): Promise<number> {
 	const p = paths();
 	const config = loadConfig(p);
 	const secrets = readEnvFiles(config.envFiles);
-	const models = createJuneModels(secrets);
-	models.setProvider(providerFromPiModels(config.providersFile, config.model.chat.provider));
+	const models = await juneModels(p, config, secrets);
 	const log = createLogger({ level: (process.env.JUNE_LOG_LEVEL as never) ?? "info" });
 	const daemon = await startDaemon({ config, paths: p, models, secrets, log });
 	await new Promise<void>((resolve) => {
@@ -442,14 +470,13 @@ async function doctor(): Promise<number> {
 	});
 	check("model", async () => {
 		const secrets = readEnvFiles(config!.envFiles);
-		const models = createJuneModels(secrets);
-		models.setProvider(providerFromPiModels(config!.providersFile, config!.model.chat.provider));
+		const models = await juneModels(paths(), config!, secrets);
 		const { provider, modelId } = config!.model.chat;
 		if (models.getModel(provider, modelId) === undefined) throw new Error(`${provider}/${modelId} is not in ${config!.providersFile}`);
 		const { focus, patter, expression } = config!.model;
 		for (const [name, mode] of Object.entries({ focus, patter, expression })) {
 			if (mode === undefined) continue;
-			if (mode.provider !== provider) models.setProvider(providerFromPiModels(config!.providersFile, mode.provider));
+			if (mode.provider !== provider) models.setProvider(juneProvider(config!.providersFile, mode.provider));
 			if (models.getModel(mode.provider, mode.modelId) === undefined) throw new Error(`${name} model ${mode.provider}/${mode.modelId} is not in ${config!.providersFile}`);
 		}
 		const auth = await models.getAuth(provider);

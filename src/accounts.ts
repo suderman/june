@@ -630,9 +630,23 @@ export async function refresh(
 	const client = OAUTH[slot.provider];
 	if (!client || !slot.dir) return "unsupported";
 	if ((options.busy ?? inUse)(slot)) return "busy";
+	if (slot.harness === "pi") return withAuthLock(join(slot.dir, "auth.json"), () => refreshInside(slot, client, options));
+	return refreshInside(slot, client, options);
+}
+
+async function refreshInside(
+	slot: Slot,
+	client: { url: string; clientId: string; scope?: string },
+	options: { fetcher?: Fetch; now?: number; busy?: (slot: Slot) => boolean },
+): Promise<"refreshed" | "busy" | "unsupported" | "failed"> {
 	const now = options.now ?? Date.now();
 	const fetcher = options.fetcher ?? (fetch as unknown as Fetch);
-	const lock = join(slot.dir, ".june-refresh.lock");
+	if (slot.harness === "pi") {
+		// Inside Pi's lock: another process may have refreshed it while this one waited.
+		const entry = readJson(join(slot.dir!, "auth.json"))?.["openai-codex"];
+		if (typeof entry?.expires === "number" && entry.expires > now + 300_000) return "refreshed";
+	}
+	const lock = join(slot.dir!, ".june-refresh.lock");
 	try {
 		writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
 	} catch {
@@ -642,7 +656,7 @@ export async function refresh(
 		return refresh(slot, options);
 	}
 	try {
-		const file = join(slot.dir, slot.harness === "claude" ? ".credentials.json" : "auth.json");
+		const file = join(slot.dir!, slot.harness === "claude" ? ".credentials.json" : "auth.json");
 		const saved = readJson(file);
 		const current =
 			slot.harness === "claude" ? saved?.claudeAiOauth?.refreshToken : slot.harness === "codex" ? saved?.tokens?.refresh_token : saved?.["openai-codex"]?.refresh;
@@ -783,5 +797,82 @@ export function trust(slot: Slot, roots: readonly string[], p: Places = places()
 			if (added.length) writePrivate(file, { ...state, trustedWorkspaces: list });
 			return added;
 		}
+	}
+}
+
+/**
+ * Run FN holding the lock Pi takes on an auth.json (proper-lockfile's convention: a `.lock` directory beside the
+ * resolved file, stale after ten seconds), so June and Pi never refresh one login's token at once.
+ */
+export async function withAuthLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
+	const lock = `${existsSync(file) ? realpathSync(file) : file}.lock`;
+	for (let attempt = 0; ; attempt++) {
+		try {
+			mkdirSync(lock);
+			break;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			const age = Date.now() - (lstatSync(lock, { throwIfNoEntry: false })?.mtimeMs ?? Date.now());
+			if (age > 10_000) rmSync(lock, { recursive: true, force: true });
+			else if (attempt > 100) throw new Error(`${file} stays locked`);
+			else await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+	}
+	try {
+		return await fn();
+	} finally {
+		rmSync(lock, { recursive: true, force: true });
+	}
+}
+
+type Credential = Record<string, unknown> & { type: string };
+
+/**
+ * A pi-ai credential store for June's own ChatGPT requests, served from the auth.json of one Pi account login. It
+ * starts on the login with the most quota to spare (`rank`), stays on it so the provider's prompt cache keeps working,
+ * and moves to the next when `choose` finds it unusable, which June checks at most every ten minutes. Writes, such as
+ * pi-ai's token refresh, go through Pi's own lock.
+ */
+export class AccountCredentials {
+	#slot?: Slot;
+	#checked = 0;
+	readonly #choose: () => Promise<Slot | undefined>;
+	readonly #now: () => number;
+	constructor(choose: () => Promise<Slot | undefined>, now: () => number = Date.now) {
+		this.#choose = choose;
+		this.#now = now;
+	}
+	/** The login June's requests use now, chosen afresh when ten minutes have passed. */
+	async slot(): Promise<Slot> {
+		if (!this.#slot || this.#now() - this.#checked > 600_000) {
+			this.#checked = this.#now();
+			const chosen = await this.#choose();
+			if (chosen) this.#slot = chosen;
+		}
+		if (!this.#slot?.dir) throw new Error("No Pi account login with a ChatGPT sign-in is ready; run june accounts login");
+		return this.#slot;
+	}
+	async #file(): Promise<string> {
+		return join((await this.slot()).dir!, "auth.json");
+	}
+	async read(providerId: string): Promise<any> {
+		return readJson(await this.#file())?.[providerId];
+	}
+	async list(): Promise<{ providerId: string; type: any }[]> {
+		const saved = readJson(await this.#file()) ?? {};
+		return Object.entries(saved).map(([providerId, c]) => ({ providerId, type: (c as Credential).type }));
+	}
+	async modify(providerId: string, fn: (current: any) => Promise<any>): Promise<any> {
+		const file = await this.#file();
+		return withAuthLock(file, async () => {
+			const saved = readJson(file) ?? {};
+			const next = await fn(saved[providerId]);
+			if (next === undefined) return saved[providerId];
+			writePrivate(file, { ...saved, [providerId]: next });
+			return next;
+		});
+	}
+	async delete(): Promise<void> {
+		throw new Error("June does not sign out of Pi's account logins");
 	}
 }

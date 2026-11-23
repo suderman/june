@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { accountsConfig, anthropicWindows, apply, autoWrapper, budget, googleWindows, inUse, loginCommand, openaiWindows, parseAccountsOrg, places, projectRoots, quotas, rank, refresh, slots, status, trust } from "../src/accounts.ts";
+import { AccountCredentials, accountsConfig, anthropicWindows, apply, withAuthLock, autoWrapper, budget, googleWindows, inUse, loginCommand, openaiWindows, parseAccountsOrg, places, projectRoots, quotas, rank, refresh, slots, status, trust } from "../src/accounts.ts";
 import { tempDir } from "./helpers.ts";
 
 const jwt = (payload: object) => `x.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.y`;
@@ -363,4 +363,34 @@ test("wrappers trust the folder they start in: the plain name through pick, a nu
 	execFileSync("codex", [], { env });
 	execFileSync("codex1", [], { env });
 	assert.deepEqual(readFileSync(calls, "utf8").trim().split("\n"), ["accounts pick codex --trust", "accounts trust codex1"]);
+});
+
+test("June's ChatGPT credentials come from a Pi login, written under Pi's lock, and move when that login is spent", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const p = places(tmp.dir);
+	mkdirSync(join(tmp.dir, ".pi/agent"), { recursive: true });
+	const config = accountsConfig({ pi: 2 });
+	apply(config, p);
+	const [pi1, pi2] = slots(config, p);
+	for (const [slot, token] of [[pi1!, "a1"], [pi2!, "a2"]] as const)
+		writeFileSync(join(slot.dir!, "auth.json"), JSON.stringify({ "openai-codex": { type: "oauth", access: token, refresh: "r", expires: 1 } }));
+	let now = 0;
+	let choice = pi1!;
+	const store = new AccountCredentials(async () => choice, () => now);
+	assert.equal((await store.read("openai-codex")).access, "a1");
+	// A refresh writes back to the same login, and the lock is gone afterwards.
+	await store.modify("openai-codex", async (current) => ({ ...current, access: "a1-new" }));
+	assert.equal(JSON.parse(readFileSync(join(pi1!.dir!, "auth.json"), "utf8"))["openai-codex"].access, "a1-new");
+	assert.equal(existsSync(join(pi1!.dir!, "auth.json.lock")), false);
+	// It stays on its login until ten minutes pass, then takes the new choice.
+	choice = pi2!;
+	assert.equal((await store.read("openai-codex")).access, "a1-new");
+	now = 600_001;
+	assert.equal((await store.read("openai-codex")).access, "a2");
+	// A stale lock left by a dead process is cleared; a fresh one is waited for.
+	mkdirSync(join(pi2!.dir!, "auth.json.lock"));
+	const old = new Date(Date.now() - 60_000);
+	(await import("node:fs")).utimesSync(join(pi2!.dir!, "auth.json.lock"), old, old);
+	assert.equal(await withAuthLock(join(pi2!.dir!, "auth.json"), async () => "ran"), "ran");
 });
