@@ -33,6 +33,10 @@ in {
   options.programs.june = {
     enable = lib.mkEnableOption "the june client";
     daemon.enable = lib.mkEnableOption "June's daemon on this host";
+    accounts.enable = lib.mkEnableOption ''
+      June's numbered harness logins on this host (june accounts). June's wrappers hold the harness names (claude,
+      codex, pi, agy) in ~/.local/bin, so the host's harness modules hand June their own launchers at
+      ~/.local/libexec/june/<harness> instead of linking those names there, and check this option to decide'';
     dispatch.enable = lib.mkEnableOption "the Org dispatcher, which runs AUTO headings for this host";
     orgWork = {
       enable = lib.mkEnableOption "the weekly tidy of this host's ~/.local/state/org-work runtime folders (june org-work --clean), on each host where agents work, as each runs its own dispatcher";
@@ -160,23 +164,22 @@ in {
       source = config.lib.file.mkOutOfStoreSymlink cfg.dataDir;
     };
 
-    # `june accounts apply` writes a wrapper per numbered login (claude1, codex2, ...) under ~/.local/state/june/bin and
-    # links it into ~/.local/bin, and one per harness name (claude, codex, ...) that picks an account, linked into ~/bin,
-    # which comes first on PATH. Restore those links here, since home directories may not survive a reboot; a name
-    # something else already holds is left alone. Persisting ~/.local/state/june is the host's job.
-    home.activation.juneAccounts = lib.hm.dag.entryAfter ["linkGeneration"] ''
+    # `june accounts apply` writes a wrapper per numbered login (claude1, codex2, ...) and one per harness name (claude,
+    # codex, ...) that picks an account, under ~/.local/state/june/bin, and links them into ~/.local/bin. Restore those
+    # links here, since home directories may not survive a reboot; a name something else already holds is left alone.
+    # Persisting ~/.local/state/june is the host's job.
+    home.activation.juneAccounts = lib.mkIf cfg.accounts.enable (lib.hm.dag.entryAfter ["linkGeneration"] ''
       bin="$HOME/.local/state/june/bin"
       if [[ -d $bin ]]; then
-        run mkdir -p "$HOME/.local/bin" "$HOME/bin"
+        run mkdir -p "$HOME/.local/bin"
         for wrapper in "$bin"/*; do
           [[ -f $wrapper && $wrapper != *.tmp ]] || continue
-          name=''${wrapper##*/}
-          if [[ $name == *[0-9] ]]; then link="$HOME/.local/bin/$name"; else link="$HOME/bin/$name"; fi
+          link="$HOME/.local/bin/''${wrapper##*/}"
           if [[ ! -e $link && ! -L $link ]]; then
             run ln -s "$wrapper" "$link"
           fi
         done
       fi
-    '';
+    '');
   };
 }

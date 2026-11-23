@@ -49,7 +49,7 @@ test("apply makes account folders that keep their own login and share the rest, 
 	const first = apply(config, p);
 	assert.deepEqual(first.problems, []);
 	assert.deepEqual(first.wrappers.sort(), ["agy", "agy1", "claude", "claude1", "claude2", "pi", "pi1"]);
-	assert.equal(readlinkSync(join(p.front, "claude")), join(p.bin, "claude"));
+	assert.equal(readlinkSync(join(p.links, "claude")), join(p.bin, "claude"));
 	const claude2 = join(p.root, "claude2");
 	assert.equal(readlinkSync(join(claude2, "projects")), join(home, ".claude/projects"));
 	assert.equal(existsSync(join(claude2, ".credentials.json")), false, "a login is never shared");
@@ -166,7 +166,7 @@ test("the plain name runs the picked account, or the only one, and refuses sign-
 	writeFileSync(join(home, "real", "june"), "#!/bin/sh\necho codex2\n");
 	for (const f of ["codex", "june"]) chmodSync(join(home, "real", f), 0o755);
 	apply(accountsConfig({ codex: 2 }), p);
-	const env = { HOME: home, PATH: `${p.front}:${p.links}:${join(home, "real")}:/run/current-system/sw/bin:/usr/bin:/bin` };
+	const env = { HOME: home, PATH: `${p.links}:${join(home, "real")}:/run/current-system/sw/bin:/usr/bin:/bin` };
 	assert.equal(execFileSync("codex", ["exec", "hi"], { env }).toString().trim(), "codex2 exec hi");
 	assert.throws(() => execFileSync("codex", ["login"], { env, stdio: "pipe" }), /use codex1, codex2/);
 	const one = slots(accountsConfig({ agy: 1 }), p);
@@ -248,4 +248,34 @@ test("a login is in use while a process carries its account or folder", async (t
 	mkdirSync(join(proc, "42"));
 	writeFileSync(join(proc, "42", "environ"), `HOME=/h\0CLAUDE_CONFIG_DIR=${join(p.root, "claude2")}\0`);
 	assert.equal(inUse(claude2!, proc), true);
+});
+
+test("a numbered wrapper runs the launcher the host hands over in libexec, and plain names leave ~/bin", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const home = tmp.dir;
+	const p = places(home);
+	mkdirSync(join(home, ".pi/agent"), { recursive: true });
+	mkdirSync(p.libexec, { recursive: true });
+	writeFileSync(join(p.libexec, "pi"), '#!/bin/sh\necho "handed $PI_CODING_AGENT_DIR $*"\n');
+	chmodSync(join(p.libexec, "pi"), 0o755);
+	// A plain-name link June left in ~/bin before is taken back; the user's own script there stays.
+	mkdirSync(p.bin, { recursive: true });
+	writeFileSync(join(p.bin, "pi"), "old");
+	mkdirSync(join(home, "bin"));
+	execFileSync("ln", ["-s", join(p.bin, "pi"), join(home, "bin", "pi")]);
+	writeFileSync(join(home, "bin", "mine"), "#!/bin/sh\n");
+	// Something else holding a name in ~/.local/bin is reported and left alone.
+	mkdirSync(p.links, { recursive: true });
+	writeFileSync(join(p.links, "agy"), "#!/bin/sh\n");
+	const result = apply(accountsConfig({ pi: 1, agy: 1 }), p);
+	assert.deepEqual(result.problems, [`${join(p.links, "agy")} exists and is not June's wrapper; left alone`]);
+	assert.equal(existsSync(join(home, "bin", "pi")), false);
+	assert.equal(existsSync(join(home, "bin", "mine")), true);
+	const env = { HOME: home, PATH: "/run/current-system/sw/bin:/usr/bin:/bin" };
+	assert.equal(execFileSync(join(p.links, "pi"), ["-p", "hi"], { env }).toString().trim(), `handed ${join(p.root, "pi1")} -p hi`);
+	// A configured command skips the handover.
+	const configured = apply(accountsConfig({ pi: 1, commands: { pi: "pi-other" } }), p);
+	assert.ok(configured.wrappers.includes("pi1"));
+	assert.doesNotMatch(readFileSync(join(p.bin, "pi1"), "utf8"), /libexec/);
 });

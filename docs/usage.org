@@ -14,6 +14,10 @@ june tasks [--json]  # dispatched tasks: what needs you, what is working, what i
 june transcript --since 16:20 --detail  # the conversation as text; see below
 june usage [--since WHEN] [--json]      # what June uses, and her art picks
 june device add NAME # allow a device on the WebSocket; also list, revoke
+june accounts        # this host's numbered logins (claude1, codex2, ...) and who each is
+june accounts apply  # make the account folders and wrappers; see Harness accounts below
+june accounts login  # sign in what this host lacks, as ACCOUNTS.org says
+june quota [NAME]    # remaining quota per provider account
 june doctor          # configuration and dependency checks
 june init [NAME]     # copy the starting files into place
 june serve           # the daemon
@@ -21,6 +25,13 @@ june telegram        # the Telegram bridge, a client of the daemon
 #+end_src
 
 Exit codes: 0 answered, 1 unanswered or failed, 2 usage, 3 daemon not running. In the client, Enter sends (as a steer while June is working), Shift+Enter queues a follow-up, Alt+Enter starts a new line, Up and Down recall earlier prompts, Esc runs =/stop=, Ctrl+D detaches.
+
+* Harness accounts
+Several subscriptions per provider become numbered logins on each host: =claude1=, =claude2=, =codex1= to =codex4=, =pi1= to =pi4=, =agy1=. The counts are =accounts= in config.json, such as ={"claude": 2, "codex": 4, "pi": 4, "agy": 1}=. Who each number is lives in the private =ACCOUNTS.org= beside SOUL.org, a table with Number, Label and one column per provider (OpenAI, Anthropic, Google) holding the address each login must be.
+
+Each login has a folder under =~/.local/state/june/accounts= that keeps only its own sign-in files and links the rest, sessions included, to the harness's usual home. A session started on one account therefore resumes on another. =june accounts apply= makes the folders and writes the wrappers into =~/.local/bin=: a numbered one per login, and one per harness name that asks =june accounts pick= for the account with quota to spare. A numbered wrapper runs the launcher the host hands June at =~/.local/libexec/june/<harness>=, or else the first command of that name on PATH. Set =programs.june.accounts.enable= in Home Manager on hosts that use this, so harness modules hand their launchers over instead of holding the names in =~/.local/bin=, and so the links come back after a reboot; persist =~/.local/state/june=.
+
+On a new host: =agents apply=, =june accounts apply=, =june accounts login=. Sign in to each account in a private browser window. =june quota= reads each account's usage through one of its logins, renewing a lapsed Claude or ChatGPT token only while no process uses that login.
 
 * Attach images
 To attach a screenshot in the terminal client, press Ctrl+V or Shift+Insert on a Wayland desktop. June inserts an =[image N]= marker; add a message or send the image alone. Delete the marker to leave it out. Text on the clipboard still pastes as text. Clipboard access uses =wl-paste= from =wl-clipboard=, included in the Nix package. If the terminal handles Shift+Insert itself, configure that key to send Ctrl+V to June.

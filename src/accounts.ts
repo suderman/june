@@ -106,9 +106,10 @@ export function parseAccountsOrg(text: string): People {
 	return people;
 }
 
-/** Account folders (root), June's wrappers (bin), where numbered wrappers are linked (links, ~/.local/bin), and where the
- * plain-name wrappers are linked (front, ~/bin, which comes before every other directory on PATH). */
-export type Places = { home: string; root: string; bin: string; links: string; front: string };
+/** Account folders (root), June's wrappers (bin), where all of them are linked onto PATH (links, ~/.local/bin), and where
+ * each harness's own launcher is handed to June (libexec): the host's configuration links ~/.local/libexec/june/pi to
+ * its pi wrapper, and so on, off PATH, so June's plain names can hold ~/.local/bin. */
+export type Places = { home: string; root: string; bin: string; links: string; libexec: string };
 
 export function places(home = homedir()): Places {
 	return {
@@ -116,7 +117,7 @@ export function places(home = homedir()): Places {
 		root: join(home, ".local/state/june/accounts"),
 		bin: join(home, ".local/state/june/bin"),
 		links: join(home, ".local/bin"),
-		front: join(home, "bin"),
+		libexec: join(home, ".local/libexec/june"),
 	};
 }
 
@@ -132,8 +133,9 @@ export function slots(config: AccountsConfig, p: Places = places()): Slot[] {
 	);
 }
 
-/** The wrapper script for `slot`. */
-export function wrapper(slot: Slot, command: string, p: Places = places()): string {
+/** The wrapper script for `slot`: the harness launcher handed over in libexec, else `command` from PATH. A configured
+ * `command` skips the handover. */
+export function wrapper(slot: Slot, command: string, p: Places = places(), handover = true): string {
 	const spec = HARNESSES[slot.harness];
 	const rel = (path: string) => `$HOME/${path.slice(p.home.length + 1)}`;
 	return [
@@ -143,7 +145,8 @@ export function wrapper(slot: Slot, command: string, p: Places = places()): stri
 		...(spec.env && slot.dir
 			? [`export ${spec.env}="${rel(slot.dir)}"`, `[ -d "$${spec.env}" ] || { echo "${slot.name}: no account folder; run june accounts apply" >&2; exit 1; }`]
 			: []),
-		"# The first command of this name on PATH that is not one of June's wrappers.",
+		...(handover ? [`[ -x "${rel(join(p.libexec, slot.harness))}" ] && exec "${rel(join(p.libexec, slot.harness))}" "$@"`] : []),
+		"# Otherwise the first command of this name on PATH that is not one of June's wrappers.",
 		`june_bin="${rel(p.bin)}"`,
 		"IFS=:",
 		"for dir in $PATH; do",
@@ -216,17 +219,22 @@ export function apply(config: AccountsConfig, p: Places = places()): Applied {
 				if (!existsSync(own) || readFileSync(own, "utf8") !== content) writeFileSync(own, content, { mode: 0o600 });
 			}
 		}
-		install(slot.name, wrapper(slot, config.commands[slot.harness] ?? spec.command, p), p.links, p, result);
+		const configured = config.commands[slot.harness];
+		install(slot.name, wrapper(slot, configured ?? spec.command, p, !configured), p.links, p, result);
 	}
 	const harnesses = Object.keys(config.harnesses) as HarnessName[];
-	mkdirSync(p.front, { recursive: true });
-	for (const harness of harnesses) install(harness, autoWrapper(harness, wanted.filter((s) => s.harness === harness), p), p.front, p, result);
+	for (const harness of harnesses) {
+		// Plain names once lived in ~/bin, which holds the user's own scripts; take June's links back out.
+		const old = join(p.home, "bin", harness);
+		if (isLinkTo(old, join(p.bin, harness))) rmSync(old);
+		install(harness, autoWrapper(harness, wanted.filter((s) => s.harness === harness), p), p.links, p, result);
+	}
 	// Wrappers for accounts no longer configured go, with their links; account folders stay, since they hold logins.
 	const names = new Set([...wanted.map((s) => s.name), ...harnesses]);
 	for (const entry of readdirSync(p.bin)) {
 		if (names.has(entry) || entry.endsWith(".tmp")) continue;
 		const script = join(p.bin, entry);
-		for (const dir of [p.links, p.front]) if (isLinkTo(join(dir, entry), script)) rmSync(join(dir, entry));
+		if (isLinkTo(join(p.links, entry), script)) rmSync(join(p.links, entry));
 		rmSync(script);
 		result.removed.push(entry);
 	}
