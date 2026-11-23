@@ -26,8 +26,8 @@ const USAGE = `usage:
                           and its battery, the quota its harness has to spare there; NAME shows one agent's card
   june agents pick NAME... [--host HOST] [--harnesses H,H] [--except A,A] [--explain]
                           which of these agents, in your order, to give a task: the first available, unless a later
-                          one would lose quota at a reset within hours; pi or claude means every agent on it; the
-                          dispatcher passes its host and the harnesses it can start
+                          one would lose quota at a reset within hours; a harness name (pi, claude, codex, agy) is
+                          an unnamed worker on it; the dispatcher passes its host and the harnesses it can start
   june start NAME [PROMPT...]
                           start roster agent NAME here, in this terminal, on the account its harness picks; refuses
                           while NAME is busy or works on another host
@@ -886,10 +886,10 @@ async function agentsPick(p: ReturnType<typeof paths>, args: string[], json: boo
 	const options: Option[] = names.flatMap((name): Option[] => {
 		const row = rows.find((r) => r.card === findCard(rows.map((x) => x.card), name));
 		if (row) return [option(row)];
-		// A harness name means every agent on it, in roster order; with none, the plain harness as before the roster.
+		// A harness name means an unnamed worker on it, as before the roster: always free, any number at once.
 		if (name in a.HARNESSES) {
-			const cards = rows.filter((r) => r.card.harness === name && (!host || r.card.host === host));
-			return cards.length ? cards.map(option) : [{ name, legacy: name, available: true, reason: `no roster agent on ${name}; the plain harness` }];
+			if (harnesses && !harnesses.includes(name)) return [{ name, available: false, reason: `the dispatcher cannot start ${name} yet` }];
+			return [{ name, legacy: name, available: true, reason: `an unnamed ${name} worker` }];
 		}
 		return [{ name, available: false, reason: "not on the roster" }];
 	});

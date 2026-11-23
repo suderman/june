@@ -873,6 +873,34 @@ cat >"$fixture/launch-tests.el" <<'EOF'
         (delete-file file))
       (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id))))))
 
+(ert-deftest a-harness-name-is-an-unnamed-worker-and-mixes-with-agents ()
+  ;; AGENT: pi runs a plain pi worker without asking June; in AGENTS, a harness
+  ;; name is the fallback June answers with when the agents before it are busy.
+  (let* ((bin (make-temp-file "june-bin" t))
+         (org-dispatch-june (expand-file-name "june" bin))
+         (calls (expand-file-name "calls" bin)))
+    (with-temp-file org-dispatch-june
+      (insert "#!/bin/sh\necho \"$*\" >> " calls "\n"
+              "echo '{\"chosen\":\"pi\",\"legacy\":\"pi\",\"why\":\"pi is the first available\"}'\n"))
+    (set-file-modes org-dispatch-june #o755)
+    (unwind-protect
+        (test-with-hc
+         (let ((plain (test-task "pi")))
+           (should (equal (org-dispatch--eligible (list plain) nil) (list plain)))
+           (should-not (file-exists-p calls)))
+         (let* ((mixed (test-roster-task 4 "bolt pi"))
+                (chosen (car (org-dispatch--eligible (list mixed) nil))))
+           (should (equal (plist-get chosen :agent) "pi"))
+           (should-not (plist-get chosen :card))
+           (should (org-dispatch--launch chosen))
+           (should-not (seq-find (lambda (arg) (string-prefix-p "june.agent=" arg)) (test-run-call)))
+           (org-dispatch--edit (plist-get mixed :file) (plist-get mixed :id)
+                               (lambda () (should (equal (org-entry-get nil "AGENT") "pi"))))))
+      (delete-directory bin t)
+      (dolist (file (file-expand-wildcards (expand-file-name "roster-*.org" org-dispatch-root)))
+        (delete-file file))
+      (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id))))))
+
 (ert-deftest roster-tasks-wait-with-the-reason-june-gives ()
   (let* ((bin (make-temp-file "june-bin" t))
          (org-dispatch-june (expand-file-name "june" bin)))

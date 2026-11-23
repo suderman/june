@@ -722,10 +722,10 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
           :model (or (org-entry-get nil "MODEL")
                      (when (equal (plist-get agent :value) "pi") org-dispatch-model))
           :model-set (org-entry-get nil "MODEL")
-          ;; The agents to choose among, in Jon's order: AGENTS, a roster AGENT,
-          ;; June's dispatch.roster, or the plain harness, which means every
-          ;; roster agent on it.
-          :roster (or named (list (plist-get agent :value)))
+          ;; Roster agents to choose among, in Jon's order: AGENTS, a roster
+          ;; AGENT, or June's dispatch.roster. A harness name among them is an
+          ;; unnamed worker on it; a task naming only its harness has none.
+          :roster named
           :sessions sessions
           :stopped (cons (org-entry-get nil "JUNE_STOP_SESSION")
                          (split-string (or (org-entry-get nil "JUNE_STOP_SESSIONS") "")))
@@ -779,7 +779,8 @@ TAKEN lists the roster agents given tasks earlier in this pass."
   (let* ((names (or (plist-get task :roster)
                     (when (plist-get task :agent) (list (plist-get task :agent)))))
          (single (and (null (cdr names)) (member (car names) org-dispatch-launchable) (car names)))
-         (pick (org-dispatch--pick names taken))
+         ;; A task naming only a harness runs an unnamed worker on it, as before the roster.
+         (pick (unless single (org-dispatch--pick names taken)))
          (card (alist-get 'card pick))
          (harness (or (alist-get 'legacy pick) (alist-get 'harness card)
                       (and (null pick) single))))
