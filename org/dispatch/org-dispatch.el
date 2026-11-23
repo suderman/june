@@ -999,6 +999,8 @@ replaying the same key and spec; missing prerequisites block partial plans."
              (body (alist-get 'body task))
              (host (or (alist-get 'host task) (org-dispatch--default "host" (car org-dispatch-hosts))))
              (agent (or (alist-get 'agent task) (org-dispatch--default "agent" "pi")))
+             ;; Roster agents to choose among, in order, written as AGENTS instead.
+             (agents (alist-get 'agents task))
              (dir (alist-get 'dir task))
              (review (alist-get 'review task 'yes))
              (refs (alist-get 'depends task))
@@ -1008,8 +1010,12 @@ replaying the same key and spec; missing prerequisites block partial plans."
                      (not (string-match-p "^\\*[ \t]\\|^[ \t]*:\\(?:PROPERTIES\\|END\\):" body)))
           (error "Task body is Org text without top-level headings or property drawers"))
         (unless (member host org-dispatch-hosts) (error "Unknown host %s" host))
-        (unless (and (member agent org-dispatch-agents) (member agent org-dispatch-launchable))
-          (error "Unknown agent %s" agent))
+        (if agents
+            (unless (and (listp agents) agents
+                         (seq-every-p (lambda (name) (and (stringp name) (string-match-p "\\`[a-z0-9-]+\\'" name))) agents))
+              (error "agents must be a list of roster agent or harness names"))
+          (unless (and (member agent org-dispatch-agents) (member agent org-dispatch-launchable))
+            (error "Unknown agent %s" agent)))
         (unless (or (memq review '(yes t :false)) (equal review "agent"))
           (error "review must be a boolean or \"agent\""))
         (when dir
@@ -1029,8 +1035,10 @@ replaying the same key and spec; missing prerequisites block partial plans."
           (puthash id (list :id id :file file :heading heading :todo "AUTO" :depends depends) index))
         (push (list :id id :file (if existing (plist-get existing :file) file)
                     :heading heading :depends depends :existing existing
-                    :text (format "* AUTO %s\n:PROPERTIES:\n:ID: %s\n:HOST: %s\n:AGENT: %s\n:PLAN_REQUEST: %s\n:PLAN_HASH: %s\n%s%s%s:END:\n%s\n"
-                                  heading id host agent key hash
+                    :text (format "* AUTO %s\n:PROPERTIES:\n:ID: %s\n:HOST: %s\n%s\n:PLAN_REQUEST: %s\n:PLAN_HASH: %s\n%s%s%s:END:\n%s\n"
+                                  heading id host
+                                  (if agents (concat ":AGENTS: " (string-join (append agents nil) " ")) (concat ":AGENT: " agent))
+                                  key hash
                                   (if dir (concat ":DIR: " dir "\n") "")
                                   (cond ((eq review :false) ":REVIEW: no\n")
                                         ((equal review "agent") ":REVIEW: agent\n")

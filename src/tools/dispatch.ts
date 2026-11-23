@@ -8,6 +8,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { arr, bool, lit, num, obj, opt, str, union } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import { type Config, expandHome } from "../config.ts";
+import { type Card, parseRoster } from "../roster.ts";
 import { type Run, runProcess } from "./herdr.ts";
 import { createFollowTask, FOLLOW_DEFAULTS, type FollowInput, type FollowOptions, follow, listFollowing } from "./follow.ts";
 import type { Herdr } from "./herdr.ts";
@@ -41,6 +42,9 @@ export type QueueRequest = {
 	host: string;
 	/** The agent the dispatcher starts; June's config default, pi without one. */
 	agent?: string;
+	/** Roster agents (or harness names, an unnamed worker) to choose among, in order, written as :AGENTS: in place of
+	 * :AGENT:; the dispatcher gives the task to the first free one, unless a later one would lose quota soon. */
+	agents?: readonly string[];
 	dir?: string;
 	/** true: the user reviews at EVAL; false: waived; "agent": a standing independent agent review (REVIEW agent). */
 	review: boolean | "agent";
@@ -55,7 +59,8 @@ export type QueueRequest = {
  * the agent and host, then the body. `stamp` is the Org timestamp org-edit made from `request.scheduled`.
  */
 export function renderTask(request: QueueRequest, id: string, stamp?: string): string {
-	const properties = [`:ID: ${id}`, `:AGENT: ${request.agent ?? "pi"}`, `:HOST: ${request.host}`, `:JUNE_REQUEST: ${request.key}`];
+	const agent = request.agents?.length ? `:AGENTS: ${request.agents.join(" ")}` : `:AGENT: ${request.agent ?? "pi"}`;
+	const properties = [`:ID: ${id}`, agent, `:HOST: ${request.host}`, `:JUNE_REQUEST: ${request.key}`];
 	if (request.dir) properties.push(`:DIR: ${request.dir}`);
 	if (request.review === false) properties.push(":REVIEW: no");
 	if (request.review === "agent") properties.push(":REVIEW: agent");
@@ -69,7 +74,30 @@ export function dispatchAgents(dispatch: Config["dispatch"]): readonly string[] 
 }
 
 /** The agents org-dispatch can start, as its `org-dispatch-launchable` lists them. */
-export const LAUNCHABLE = ["pi", "claude"] as const;
+export const LAUNCHABLE = ["pi", "claude", "codex", "agy"] as const;
+
+/** ROSTER.org beside SOUL.org: June's named agents. */
+export function rosterCards(config: Pick<Config, "soulFile">): Card[] {
+	if (!config.soulFile) return [];
+	try {
+		return parseRoster(readFileSync(join(dirname(config.soulFile), "ROSTER.org"), "utf8"));
+	} catch {
+		return [];
+	}
+}
+
+/** Names June may list in AGENTS: roster agents with usable cards, and the harnesses she may choose. */
+function checkAgents(names: readonly string[] | undefined, agents: readonly string[], roster: readonly Card[]): void {
+	if (!names) return;
+	if (names.length === 0) throw new Error("agents lists at least one roster agent or harness");
+	for (const name of names) {
+		if (agents.includes(name)) continue;
+		const card = roster.find((c) => c.slug === name);
+		if (!card) throw new Error(`${name} is neither on the roster (${roster.map((c) => c.slug).join(", ") || "empty"}) nor one of ${agents.join(", ")}; use the roster's lowercase names`);
+		if (card.problems.length) throw new Error(`${card.name}'s card has problems: ${card.problems.join("; ")}`);
+	}
+	if (new Set(names).size !== names.length) throw new Error("agents names each agent once");
+}
 
 /** Agents the dispatcher could start that June's config does not let her choose. */
 export function disabledAgents(dispatch: Config["dispatch"]): string[] {
@@ -87,10 +115,11 @@ function checkAgent(agent: string | undefined, agents: readonly string[]): void 
 /** One date and an optional start time, without a range, repeater, or warning, which a one-off queued task has no use for. */
 const START = /^<\d{4}-\d{2}-\d{2} [A-Za-z]{2,3}(?: \d{2}:\d{2})?>$/;
 
-export function checkRequest(request: QueueRequest, dispatch: Config["dispatch"]): void {
+export function checkRequest(request: QueueRequest, dispatch: Config["dispatch"], roster: readonly Card[] = []): void {
 	const { hosts } = dispatch;
 	if (!hosts.includes(request.host)) throw new Error(`June may queue only for ${hosts.join(", ")}; ${request.host} has no dispatcher she may use`);
 	checkAgent(request.agent, dispatchAgents(dispatch));
+	checkAgents(request.agents, dispatchAgents(dispatch), roster);
 	if (/[\n\r]/.test(request.title) || request.title.trim() !== request.title || request.title === "")
 		throw new Error("The title is one line without surrounding spaces");
 	if (/^(TODO|AUTO|PROG|EVAL|HOLD|DONE)\b/.test(request.title) || /\s:[\w@#%:]+:$/.test(request.title))
@@ -200,6 +229,7 @@ export type PlanTask = {
 	depends?: readonly string[];
 	host?: string;
 	agent?: string;
+	agents?: readonly string[];
 	dir?: string;
 	review?: boolean | "agent";
 };
@@ -340,7 +370,7 @@ export class Dispatch {
 	async queue(request: QueueRequest) {
 		// Some model calls send empty strings for omitted optional fields.
 		if (request.scheduled === "") request = { ...request, scheduled: undefined };
-		checkRequest(request, this.#config.dispatch);
+		checkRequest(request, this.#config.dispatch, rosterCards(this.#config));
 		if (request.dir !== undefined) {
 			const dir = await stat(expandHome(request.dir)).catch(() => undefined);
 			if (!dir?.isDirectory()) throw new Error(`dir ${request.dir} is not a directory; use one of the project's repository links`);
@@ -386,7 +416,11 @@ export class Dispatch {
 		const tasks = [];
 		for (const task of request.tasks) {
 			const host = task.host ?? defaultHost;
-			checkRequest({ file: task.file, title: task.title, body: task.body, host, agent: task.agent, dir: task.dir, review: task.review ?? true, key: request.key }, this.#config.dispatch);
+			checkRequest(
+				{ file: task.file, title: task.title, body: task.body, host, agent: task.agent, ...(task.agents ? { agents: task.agents } : {}), dir: task.dir, review: task.review ?? true, key: request.key },
+				this.#config.dispatch,
+				rosterCards(this.#config),
+			);
 			if (task.dir !== undefined && !(await stat(expandHome(task.dir)).catch(() => undefined))?.isDirectory())
 				throw new Error(`dir ${task.dir} is not a directory`);
 			for (const ref of task.depends ?? []) {
@@ -399,7 +433,7 @@ export class Dispatch {
 				title: task.title,
 				body: task.body.trim(),
 				host,
-				agent: task.agent ?? defaultAgent,
+				...(task.agents?.length ? { agents: [...task.agents] } : { agent: task.agent ?? defaultAgent }),
 				...(task.depends?.length ? { depends: [...task.depends] } : {}),
 				...(task.dir ? { dir: task.dir } : {}),
 				...(task.review === false || task.review === "agent" ? { review: task.review } : {}),
@@ -667,6 +701,13 @@ export function createDispatchExtension(
 	const defaultAgent = config.dispatch.agent ?? "pi";
 	const agents = dispatchAgents(config.dispatch);
 	const agentParameter = (description: string) => opt(union(agents.map((agent) => lit(agent)), { description }));
+	// The roster as it stood when June started; the check at queueing reads it fresh.
+	const roster = rosterCards(config).filter((c) => !c.problems.length);
+	const rosterList = roster.map((c) => `${c.slug} (${[c.harness, c.model, c.effort].filter(Boolean).join(" ")} on ${c.host})`).join(", ");
+	const agentsParameter = opt(arr(str(), {
+		minItems: 1,
+		description: `Instead of agent, the roster agents to choose among, in ${user()}'s order of preference, written as :AGENTS:. The dispatcher gives the task to the first one free when it launches, unless a later one would lose quota at a reset within hours; each works one task at a time. A harness name (${agents.join(", ")}) in the list means an unnamed worker on it, always free, such as ["bolt", "pi"]. Use it when ${user()} names agents or asks for one of them${roster.length ? `. The roster: ${rosterList}; run june agents for who is free now and their quota` : ""}`,
+	}));
 	// Say what the dispatcher could run but June may not choose, so she gives one accurate answer instead of a workaround.
 	const disabled = disabledAgents(config.dispatch);
 	const agentNote = disabled.length === 0
@@ -720,6 +761,7 @@ export function createDispatchExtension(
 					checklist: arr(str(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
 					host: str({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` }),
 					agent: agentParameter(`Coding agent the dispatcher starts: ${agents.join(" or ")}; default ${defaultAgent}. Choose one when ${user()} names it. It is written as :AGENT: in the drawer, which the dispatcher reads before any agent tag, so no tag is needed`),
+					agents: agentsParameter,
 					dir: opt(str({ description: "Existing working directory override, usually one of the project's local repository links. Omit for one-offs without a checkout: the dispatcher uses the project directory" })),
 review: opt(union([bool(), lit("agent")], { description: `Default true: the worker stops at EVAL for ${user()}'s review, including read-only lookups you will review yourself. "agent" only when ${user()} asks for agent review: when the worker finishes at EVAL, the dispatcher starts an independent agent review of its exact commit, sends in-scope fixes back to the same worker, and brings the task to ${user()} only for named human checks or a decision; it needs a Git repository. Set false only when ${user()} explicitly waives review` })),
 					scheduled: opt(str({ description: `Only when ${user()} wants it to start later: the earliest start, in Calgary time as the dispatcher reads it, as a date (2026-11-07, today, tomorrow, fri, +2d; a weekday name is the next one, never today) and optional time (09:30). Omit to start now. It goes into the heading before the file is saved, so the task cannot launch early; a time already past is refused` })),
@@ -749,6 +791,7 @@ review: opt(union([bool(), lit("agent")], { description: `Default true: the work
 						depends: opt(arr(str(), { description: "Keys of tasks in this plan that must be DONE first, or id:UUID of existing Org tasks" })),
 						host: opt(str({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` })),
 						agent: agentParameter(`Coding agent: ${agents.join(" or ")}; default ${defaultAgent}`),
+						agents: agentsParameter,
 						dir: opt(str({ description: "Existing working directory, usually one of the project's local repository links; omit to use the project directory" })),
 						review: opt(union([bool(), lit("agent")], { description: `Default true: the worker stops at EVAL for review. "agent" only when ${user()} asks for agent review of this task (see org_queue_task). Set false only when ${user()} explicitly waives review for this task` })),
 					}), { minItems: 1 }),
