@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -287,18 +288,17 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
             val needsYou = detail != null && (0 until detail.length()).any { detail.getJSONObject(it).optBoolean("needsYou") }
             Text(
                 (said?.optString("text") ?: statusLine(link)).let { if (detail != null && detail.length() > 0) it + if (showFollows) "  ▴" else "  ▾" else it },
-                color = if (needsYou) palette.accent else palette.muted, fontSize = 13.sp, fontFamily = if (LookChoice.console) FontFamily.Monospace else null,
+                style = palette.type.meta.copy(color = if (needsYou) palette.accent else palette.muted),
                 maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).clickable(enabled = detail != null && detail.length() > 0) { showFollows = !showFollows },
             )
-            // The look, toggled as the desktop's window toggles it: outlined when off, filled when on.
+            // The look, toggled as the desktop's window toggles it: a quiet word beside settings, checked when on.
             val on = LookChoice.console
             Text(
-                "console", fontSize = 12.sp, color = if (on) palette.page else palette.pageInk,
-                modifier = Modifier.padding(start = 12.dp).background(if (on) palette.pageInk else Color.Transparent, RoundedCornerShape(50))
-                    .border(1.5.dp, palette.pageInk, RoundedCornerShape(50)).clickable { LookChoice.set(context, !on) }.padding(horizontal = 10.dp, vertical = 3.dp),
+                if (on) "✓ console" else "console", style = palette.type.meta.copy(color = if (on) palette.pageInk else palette.muted),
+                modifier = Modifier.heightIn(min = 40.dp).clickable { LookChoice.set(context, !on) }.padding(start = 12.dp, top = 11.dp, bottom = 11.dp),
             )
-            if (settings != null) Text("settings", color = palette.muted, fontSize = 13.sp, modifier = Modifier.clickable(onClick = settings).padding(start = 12.dp))
+            if (settings != null) Text("settings", style = palette.type.meta.copy(color = palette.muted), modifier = Modifier.heightIn(min = 40.dp).clickable(onClick = settings).padding(start = 14.dp, top = 11.dp, bottom = 11.dp))
         }
         }
         // The tasks she follows, each with where it stands, under the status line while it is open.

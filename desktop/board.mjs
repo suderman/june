@@ -116,15 +116,16 @@ export function agendaView(agenda, pending, user) {
 	if (agenda.overdue.length > 0)
 		sections.push({ id: "overdue", title: `OVERDUE · ${agenda.overdue.length}`, alert: true, rows: agenda.overdue.map((e) => row(e, agenda, { overdue: true })) });
 	const first = agenda.days[0];
-	sections.push({ id: "today", title: `TODAY · ${dayHeading(agenda.today)}`, alert: false, rows: (first?.entries ?? []).map((e) => row(e, agenda, {})) });
-	// The rest of the week; the phone's widget shows the agenda's later days too.
-	const week = [];
+	sections.push({ id: "today", title: `TODAY · ${dayHeading(agenda.today)}`, alert: false, rows: dayRows(first?.entries ?? [], agenda) });
+	// The rest of the week, a section a day named as the agents board names a start ("tomorrow", "Thu"); the
+	// phone's widget shows the agenda's later days too.
 	for (let i = 1; i < Math.min(agenda.days.length, 7); i++) {
 		const day = agenda.days[i];
-		const label = calendar(day.date).weekday;
-		day.entries.forEach((e, j) => week.push(row(e, agenda, { day: j === 0 ? label : "" })));
+		if (day.entries.length === 0) continue;
+		const word = dayWord(day.date, agenda.today);
+		const title = word === "tomorrow" ? `TOMORROW · ${dayHeading(day.date)}` : dayHeading(day.date);
+		sections.push({ id: `day|${day.date}`, title, alert: false, rows: dayRows(day.entries, agenda) });
 	}
-	if (week.length > 0) sections.push({ id: "week", title: "THIS WEEK", alert: false, rows: week });
 	// A repeating task shows on every day with the same timestamp.
 	for (const section of sections) uniqueKeys(section.rows);
 	const counts = COUNT_ORDER.filter((s) => (agenda.counts[s] ?? 0) > 0).map((s) => ({ state: s, n: agenda.counts[s] }));
@@ -134,13 +135,23 @@ export function agendaView(agenda, pending, user) {
 		return { state, title, n: rows.length, rows: rows.slice(0, PREVIEW), more: Math.max(0, rows.length - PREVIEW) };
 	}).filter((l) => l.n > 0);
 	const queued = Object.keys(agenda.tasks).filter((k) => agenda.tasks[k].state === "AUTO").length;
+	// Two projects with one title are told apart by where their files are.
+	const titled = {};
+	for (const p of agenda.projects) titled[p.title] = (titled[p.title] ?? 0) + 1;
 	const projects = agenda.projects.map((p) => ({
 		file: p.file,
 		title: p.title,
+		where: titled[p.title] > 1 ? p.file : "",
 		counts: COUNT_ORDER.filter((s) => (p.counts[s] ?? 0) > 0).map((s) => ({ state: s, n: p.counts[s] })),
 		link: `file:~/org/${p.file}`,
 	}));
 	return { sections, counts, lists, queued, projects, today: agenda.today };
+}
+
+/** A day's rows, its all-day entries first (they have no time to sort by), each marked as such. */
+function dayRows(entries, agenda) {
+	const allDay = entries.filter((e) => !e.time).map((e) => row(e, agenda, { allDay: true }));
+	return allDay.concat(entries.filter((e) => e.time).map((e) => row(e, agenda, {})));
 }
 
 /** The phone's lists stop on a repeated key, so a repeat gets #2, #3. */
@@ -390,6 +401,80 @@ export function formatDuration(ms) {
 	return m ? `${h}h ${m}m` : `${h}h`;
 }
 
+/** How long until a quota resets: minutes under an hour, hours under two days, else days. */
+export function resetIn(hours) {
+	if (typeof hours !== "number" || hours < 0) return "";
+	if (hours < 1) return `${Math.max(1, Math.round(hours * 60))}m`;
+	return hours < 48 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)}d`;
+}
+
+/** A short, steady hash of TEXT, for docket and service numbers that do not move when the list does. */
+function hash(text) {
+	let h = 0x811c9dc5;
+	const s = String(text ?? "");
+	for (let i = 0; i < s.length; i++) {
+		h ^= s.charCodeAt(i);
+		h = Math.imul(h, 0x01000193) >>> 0;
+	}
+	return h;
+}
+
+/** A clanker's service number: its unit (host) and three digits from its slug, "KIT-042". */
+export function serviceNo(host, slug) {
+	const unit = String(host ?? "").trim().toUpperCase() || "RES";
+	return `${unit}-${String(hash(slug) % 1000).padStart(3, "0")}`;
+}
+
+/** A clanker's loadout: its model, less a leading harness name the class already shows, and its effort. */
+export function loadout(harness, model, effort) {
+	const h = String(harness ?? "").toLowerCase();
+	let m = String(model ?? "");
+	if (h && m.toLowerCase().indexOf(h + "-") === 0) m = m.slice(h.length + 1);
+	return [m, effort ?? ""].filter((s) => s !== "").join(" · ");
+}
+
+/** A task's docket number: the first four digits of its ID, or four from a hash of its key. */
+export function docketNo(key) {
+	const m = /^id:([0-9a-f]{4})/i.exec(String(key ?? ""));
+	if (m) return m[1].toUpperCase();
+	return (hash(key) & 0xffff).toString(16).toUpperCase().padStart(4, "0");
+}
+
+/**
+ * A Dialog entry's text as blocks to draw: paragraphs, and list items where it numbers its points ("1. … 2. …"),
+ * even run together on one line, or starts lines with "- ".
+ */
+export function dialogBlocks(text) {
+	const blocks = [];
+	const lines = String(text ?? "").split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i].trim();
+		if (line === "") continue;
+		const bullet = /^[-*•]\s+(.*)$/.exec(line);
+		if (bullet) { blocks.push({ kind: "item", mark: "•", text: bullet[1] }); continue; }
+		// Numbered points, found in order from 1 so "version 2. of" mid-sentence is not taken for one.
+		const marks = [];
+		let from = 0;
+		for (let n = 1; ; n++) {
+			const re = new RegExp(`(^|\\s)${n}[.)]\\s`, "g");
+			re.lastIndex = from;
+			const found = re.exec(line);
+			if (!found) break;
+			const at = found.index + found[1].length;
+			marks.push({ n, at, body: at + found[0].length - found[1].length });
+			from = at + 1;
+		}
+		if (marks.length < 2) { blocks.push({ kind: "para", mark: "", text: line }); continue; }
+		const lead = line.slice(0, marks[0].at).trim();
+		if (lead) blocks.push({ kind: "para", mark: "", text: lead });
+		for (let k = 0; k < marks.length; k++) {
+			const end = k + 1 < marks.length ? marks[k + 1].at : line.length;
+			blocks.push({ kind: "item", mark: `${marks[k].n}.`, text: line.slice(marks[k].body, end).trim() });
+		}
+	}
+	return blocks;
+}
+
 /**
  * The roster cards from the agents board, shaped for both clients: status, drawn battery level and label, harness
  * colours, leaderboard stats and recent runs, and the list of known hosts for the editor.
@@ -420,13 +505,14 @@ export function rosterView(agents) {
 		const b = entry.battery;
 		const hasLevel = b && typeof b.weekly === "number";
 		const batteryLevel = hasLevel ? Math.max(0, Math.min(100, Math.round(b.weekly))) : -1;
-		const resetWord = hasLevel ? (b.hours < 48 ? `${Math.round(b.hours)}h` : `${Math.round(b.hours / 24)}d`) : "";
+		const resetWord = hasLevel ? resetIn(b.hours) : "";
 		const batteryText = hasLevel ? `${batteryLevel}% · ${resetWord}` : (b && b.reason ? String(b.reason) : "");
 		const batteryTone = !hasLevel ? "unknown" : batteryLevel >= 50 ? "high" : batteryLevel >= 20 ? "mid" : "low";
 		const remoteQuota = b && typeof b.reason === "string" && b.reason.indexOf("quota is read on") === 0;
 		const available = st === "idle" && (hasLevel || remoteQuota || !b);
 		const statusLabel = st === "idle" ? "IDLE" : st.indexOf("working") >= 0 ? "WORKING" : busy ? "BUSY" : st === "invalid" ? "INVALID" : "OFFLINE";
 		const spec = [c.host ?? "", c.harness ?? "", c.model ?? "", c.effort ?? ""].filter((s) => s !== "").join(" · ");
+		const cells = hasLevel ? Math.round(batteryLevel / 10) : 0;
 		const s = entry.stats;
 		const runs = s && typeof s.runs === "number" ? s.runs : 0;
 		const rank = s && typeof s.rank === "number" && runs > 0 ? s.rank : 0;
@@ -470,6 +556,14 @@ export function rosterView(agents) {
 			batteryAccount: hasLevel && b.account ? String(b.account) : "",
 			batteryTone: batteryTone,
 			specLine: spec,
+			// The enlistment card's words: service number and unit (its host), loadout without the harness the
+			// model already names, the status stamp (none when idle), energy with its reset, and a text gauge.
+			serviceNo: serviceNo(c.host, c.slug ?? String(idx)),
+			unit: c.host ?? "",
+			loadout: loadout(c.harness, c.model, c.effort),
+			stamp: st === "idle" ? "" : statusLabel === "WORKING" || busy ? "ON DUTY" : statusLabel,
+			energyText: hasLevel ? `${batteryLevel}% · resets ${resetWord}` : batteryText,
+			gauge: hasLevel ? `[${"#".repeat(cells)}${"-".repeat(10 - cells)}]` : "",
 			rank: rank,
 			runs: runs,
 			completed: completed,
@@ -525,13 +619,17 @@ export function agentsView(agents, now, today, user, pending) {
 		};
 	});
 	const blocked = new Set(needs.filter((n) => n.kind === "blocked").map((n) => n.key));
+	// A worker in a roster clanker's terminal is that clanker, by name.
+	const clankerAt = (w) => rv.cards.find((c) => c.terminal !== "" && c.terminal === `${w.host}/${w.terminal}`);
 	const worker = (w) => {
 		const task = w.taskKey ? tasks[w.taskKey] : undefined;
 		const place = String(w.cwd ?? "").split("/").filter((s) => s !== "");
+		const card = clankerAt(w);
 		return {
 			key: `${w.host}|${w.terminal}`, task: w.taskKey ?? "", harness: harnessOf(w.agent), status: w.status,
 			title: task?.title ?? w.title ?? (place.length ? place[place.length - 1] : w.terminal),
-			where: `${w.agent} · ${w.host}/${w.terminal}`, link: w.herdrLink ?? null,
+			name: card ? card.name : "",
+			where: `${card ? card.name + " · " : ""}${w.agent} · ${w.host}/${w.terminal}`, link: w.herdrLink ?? null,
 		};
 	};
 	const working = agents.workers.filter((w) => w.status === "working").map(worker);
@@ -550,7 +648,7 @@ export function agentsView(agents, now, today, user, pending) {
 		return { key, task: key, title: t.title, state: t.state, harness: harnessOf(taskAgent(t)), line: t.headline?.text ?? "", when: t.headline?.at ? since(t.headline.at, now) : "", link: taskLink(t) };
 	});
 	const hosts = agents.hosts.filter((h) => h.ok).map((h) => h.host);
-	const summary = `${working.length} at work${hosts.length ? ` on ${hosts.join(", ")}` : ""}`;
+	const summary = `${working.length} at work${hosts.length ? ` · ${hosts.join(", ")} online` : ""}`;
 	const down = agents.hosts.filter((h) => !h.ok).map((h) => h.host);
 	for (const list of [needs, working, idle, queued, reviewing, recent]) uniqueKeys(list);
 	return { summary, needs, working, idle, queued, reviewing, recent, down, roster: rv.cards, rosterLeaderboard: rv.leaderboard, rosterHasStats: rv.hasStats, rosterHosts: rv.hosts };
@@ -602,6 +700,12 @@ export function startsAt(task, today, now) {
 	return at > localStamp(now ?? Date.now()) ? startOf(task.scheduled, today) : "now";
 }
 
+/** The key of the newest agent entry in DIALOG, or "". */
+function lastAgentEntry(dialog, user) {
+	for (let i = dialog.length - 1; i >= 0; i--) if (dialogKind(dialog[i].who, user) === "agent") return String(i);
+	return "";
+}
+
 export function taskDetail(task, user, today, now, pending) {
 	if (!task) return null;
 	task = applyEntry(task, pending, user);
@@ -627,6 +731,9 @@ export function taskDetail(task, user, today, now, pending) {
 		path: (task.path ?? []).join(" / "), facts: facts.join(" · "), headline: task.headline?.text ?? "",
 		asked: task.asked !== undefined, harness: harnessOf(agent), emacs: taskLink(task),
 		herdr: sessions.length ? sessions[sessions.length - 1] : null,
-		dialog: (task.dialog ?? []).map((e, i) => ({ key: String(i), who: e.who || "note", kind: dialogKind(e.who, user), at: e.sending ? "sending…" : stampShort(e.at), text: e.text })),
+		docket: docketNo(task.key),
+		dialog: (task.dialog ?? []).map((e, i) => ({ key: String(i), who: e.who || "note", kind: dialogKind(e.who, user), at: e.sending ? "sending…" : stampShort(e.at), text: e.text, blocks: dialogBlocks(e.text) })),
+		// The entry to lead with when the task asks the user: the agent's latest.
+		ask: task.asked !== undefined ? lastAgentEntry(task.dialog ?? [], user) : "",
 	};
 }

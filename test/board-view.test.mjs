@@ -1,7 +1,7 @@
 // The boards as the clients draw them (desktop/board.mjs), shared by the desktop client and the phone.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agendaView, agentsView, boardLayout, dayHeading, dayWord, dialogKind, entryMeta, findTask, harnessOf, monthDays, pendingTask, pickerStart, quickDays, rosterView, stampOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink } from "../desktop/board.mjs";
+import { agendaView, agentsView, boardLayout, dayHeading, dayWord, dialogBlocks, dialogKind, docketNo, entryMeta, findTask, harnessOf, loadout, monthDays, pendingTask, pickerStart, quickDays, resetIn, rosterView, serviceNo, stampOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink } from "../desktop/board.mjs";
 
 test("three columns fit a 1400 px window with the strip a little narrower, and tabs take over below about 1300", () => {
 	assert.deepEqual(boardLayout(1400), { columns: true, side: 268, gap: 20, strip: 784 });
@@ -13,7 +13,7 @@ test("three columns fit a 1400 px window with the strip a little narrower, and t
 
 const task = (key, extra = {}) => ({ key, file: "work/demo/demo.org", line: 7, level: 1, title: key, tags: [], path: [], project: "Demo", sessions: [], ...extra });
 
-test("the agenda reads as overdue, today, and the week with each day named once, in plain words", () => {
+test("the agenda reads as overdue, today, and a section for each later day of the week, in plain words", () => {
 	const agenda = {
 		generatedAt: 0, today: "2026-11-21",
 		overdue: [{ task: "a", type: "past-scheduled", extra: "Sched. 3x:", date: "2026-11-18" }],
@@ -26,15 +26,20 @@ test("the agenda reads as overdue, today, and the week with each day named once,
 		counts: { TODO: 2, AUTO: 1, PROG: 0 }, projects: [{ file: "work/demo/demo.org", title: "Demo", counts: { TODO: 2, AUTO: 1 } }],
 	};
 	const v = agendaView(agenda);
-	assert.deepEqual(v.sections.map((s) => [s.id, s.title, s.rows.length]), [["overdue", "OVERDUE · 1", 1], ["today", "TODAY · SAT NOV 21", 2], ["week", "THIS WEEK", 2]]);
+	assert.deepEqual(v.sections.map((s) => [s.id, s.title, s.rows.length]), [["overdue", "OVERDUE · 1", 1], ["today", "TODAY · SAT NOV 21", 2], ["day|2026-11-22", "TOMORROW · SUN NOV 22", 2]]);
 	assert.equal(v.sections[0].rows[0].meta, "scheduled 3 days ago · Demo");
 	assert.equal(v.sections[1].rows[0].meta, "scheduled · pi on kit · Demo", "an AUTO task says who runs it and where");
-	assert.deepEqual(v.sections[2].rows.map((r) => [r.day, r.meta]), [["Sun", "due · Demo"], ["", "day 2 of 5 · Demo"]]);
+	assert.deepEqual(v.sections[2].rows.map((r) => [r.allDay, r.meta]), [[true, "due · Demo"], [true, "day 2 of 5 · Demo"]]);
+	assert.deepEqual(v.sections[1].rows.map((r) => [r.allDay, r.time]), [[undefined, "04:30"], [undefined, "10:00"]]);
+	const mixed = agendaView({ ...agenda, days: [{ date: "2026-11-21", entries: [{ task: "c", type: "timestamp", time: "10:30" }, { task: "e", type: "block", extra: "(2/5):" }] }] });
+	assert.deepEqual(mixed.sections[1].rows.map((r) => [r.title, r.allDay === true]), [["e", true], ["c", false]], "an all-day entry comes first in its day");
 	assert.equal(v.sections[1].rows[0].link, "file:~/org/work/demo/demo.org::7");
 	assert.deepEqual(v.counts, [{ state: "AUTO", n: 1 }, { state: "TODO", n: 2 }]);
 	assert.deepEqual(v.projects[0].counts, [{ state: "AUTO", n: 1 }, { state: "TODO", n: 2 }]);
 	assert.deepEqual(stateRows(agenda, "TODO").map((r) => r.title), ["a", "d"]);
 	assert.deepEqual(agendaView(null).sections, []);
+	const twins = agendaView({ ...agenda, projects: [{ file: "life/finance.org", title: "Finance", counts: {} }, { file: "work/suderman/finance/finance.org", title: "Finance", counts: {} }, { file: "work/demo/demo.org", title: "Demo", counts: {} }] });
+	assert.deepEqual(twins.projects.map((p) => p.where), ["life/finance.org", "work/suderman/finance/finance.org", ""], "two projects with one title say where they are");
 });
 
 test("small words: days, links, prefixes, start times and harnesses", () => {
@@ -71,6 +76,15 @@ test("the roster shapes each card with its battery tone, status label, spec line
 		["gyro", "IDLE", false, 12, "low", "12% · 3h", "kit · agy"],
 		["broken", "INVALID", false, -1, "unknown", "no login", ""],
 	]);
+	assert.deepEqual(rv.cards.map((c) => [c.stamp, c.loadout, c.energyText, c.gauge]), [
+		["ON DUTY", "opus-4-7 · high", "78% · resets 2d", "[########--]"],
+		["", "medium", "40% · resets 10h", "[####------]"],
+		["", "", "12% · resets 3h", "[#---------]"],
+		["INVALID", "", "no login", ""],
+	]);
+	assert.match(rv.cards[0].serviceNo, /^KIT-\d{3}$/);
+	assert.equal(rv.cards[0].serviceNo, serviceNo("kit", "bolt"), "a service number is steady for its slug");
+	assert.match(rv.cards[3].serviceNo, /^RES-\d{3}$/, "a clanker with no host is in reserve");
 	const av = agentsView(agents, 0, "2026-11-21", "Alex");
 	assert.equal(av.roster.length, 4);
 	assert.equal(av.rosterHasStats, true);
@@ -113,7 +127,7 @@ test("the agents board puts what needs the user first, in its own words, and lin
 	assert.deepEqual(v.idle.map((w) => [w.title, w.link]), [["org", null]], "a blocked worker is a need, not idle; a bare terminal names its directory");
 	assert.deepEqual(v.queued.map((q) => [q.title, q.who, q.when]), [["Steady", "pi on kit", "today 23:30"]]);
 	assert.deepEqual(v.recent.map((r) => [r.title, r.when]), [["Report", "2 h"]]);
-	assert.equal(v.summary, "1 at work on kit");
+	assert.equal(v.summary, "1 at work · kit online");
 	assert.deepEqual(v.down, ["cog"]);
 });
 
@@ -218,9 +232,9 @@ test("a task repeating every day has a row on each day, each with its own key", 
 	const entry = { task: "id:mail", type: "scheduled", time: "04:30", date: "2026-11-22" };
 	const agenda = { generatedAt: 0, today: "2026-11-21", overdue: [], tasks: { "id:mail": daily }, counts: {}, projects: [],
 		days: [{ date: "2026-11-21", entries: [] }, { date: "2026-11-22", entries: [entry] }, { date: "2026-11-23", entries: [entry] }, { date: "2026-11-24", entries: [entry] }] };
-	const week = agendaView(agenda).sections.find((s) => s.id === "week");
-	assert.equal(week.rows.length, 3);
-	assert.equal(new Set(week.rows.map((r) => r.key)).size, 3);
+	const days = agendaView(agenda).sections.filter((s) => s.id.indexOf("day|") === 0);
+	assert.deepEqual(days.map((s) => s.title), ["TOMORROW · SUN NOV 22", "MON NOV 23", "TUE NOV 24"]);
+	assert.equal(new Set(days.map((s) => s.id + s.rows[0].key)).size, 3);
 });
 
 test("taps while an edit is on its way queue behind it, the same kind settling on the last", async () => {
@@ -242,8 +256,8 @@ test("the boards show the week of an agenda that carries a fortnight, for the ph
 	const days = [];
 	for (let i = 0; i < 14; i++) days.push({ date: `2026-11-${String(21 + i).padStart(2, "0")}`.replace("2026-11-31", "2026-12-01").replace("2026-11-32", "2026-12-02").replace("2026-11-33", "2026-12-03").replace("2026-11-34", "2026-12-04"), entries: [{ task: "id:e", type: "timestamp", date: "x" }] });
 	const agenda = { generatedAt: 0, today: "2026-11-21", overdue: [], days, tasks: { "id:e": task("id:e", { title: "Every day" }) }, counts: {}, projects: [] };
-	const week = agendaView(agenda).sections.find((s) => s.id === "week");
-	assert.equal(week.rows.length, 6, "tomorrow through six days on");
+	const week = agendaView(agenda).sections.filter((s) => s.id.indexOf("day|") === 0);
+	assert.equal(week.length, 6, "tomorrow through six days on");
 });
 
 test("a task's page offers the states its state flows to, and a protected file's only TODO and DONE", async () => {
@@ -256,4 +270,36 @@ test("a task's page offers the states its state flows to, and a protected file's
 	assert.deepEqual(nextStates("DONE"), ["TODO"]);
 	assert.deepEqual([nextStates("TODO", true), nextStates("DONE", true), nextStates("")], [["DONE"], ["TODO"], []]);
 	assert.deepEqual(taskDetail(task("id:x", { state: "HOLD" }), "Alex", "2026-11-21").next, ["TODO", "PROG", "AUTO", "DONE"]);
+});
+
+test("enlistment words: resets, loadouts, docket numbers", () => {
+	assert.deepEqual([resetIn(0.4), resetIn(0.001), resetIn(1), resetIn(47), resetIn(72), resetIn(undefined)], ["24m", "1m", "1h", "47h", "3d", ""]);
+	assert.equal(loadout("claude", "claude-opus-5-5", "high"), "opus-5-5 · high");
+	assert.equal(loadout("pi", "gpt-6.2-sol", ""), "gpt-6.2-sol");
+	assert.equal(docketNo("id:4f2a9c00-1111"), "4F2A");
+	assert.match(docketNo("work/demo.org::*A/B"), /^[0-9A-F]{4}$/);
+	assert.equal(docketNo("work/demo.org::*A/B"), docketNo("work/demo.org::*A/B"));
+});
+
+test("a Dialog entry's numbered points become list items, even run together on one line", () => {
+	assert.deepEqual(dialogBlocks("Three things. 1. Which numbers? 2. Menu first (1 Jen, 2 Cori), or not? 3. May I edit it?").map((b) => [b.kind, b.mark, b.text]), [
+		["para", "", "Three things."],
+		["item", "1.", "Which numbers?"],
+		["item", "2.", "Menu first (1 Jen, 2 Cori), or not?"],
+		["item", "3.", "May I edit it?"],
+	]);
+	assert.deepEqual(dialogBlocks("Version 2. of this is fine.\n- one\n* two").map((b) => [b.kind, b.mark, b.text]), [
+		["para", "", "Version 2. of this is fine."],
+		["item", "•", "one"],
+		["item", "•", "two"],
+	]);
+	assert.deepEqual(dialogBlocks(""), []);
+});
+
+test("a task's page leads with the agent's latest entry when it asks", () => {
+	const t = task("id:ab12", { state: "EVAL", asked: "[2026-11-21 Sat 01:00]", dialog: [{ who: "Agent", text: "First?" }, { who: "Alex", text: "Yes." }, { who: "Pi", text: "Second?" }, { who: "June", text: "Noted." }] });
+	const d = taskDetail(t, "Alex", "2026-11-21");
+	assert.equal(d.ask, "2");
+	assert.equal(d.docket, "AB12");
+	assert.equal(taskDetail(task("id:x", { dialog: [{ who: "Agent", text: "Done." }] }), "Alex", "2026-11-21").ask, "", "only a task that asks leads with a question");
 });
