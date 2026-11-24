@@ -222,7 +222,8 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
     LaunchedEffect(view) { view.onTap = { focus.clearFocus(true) } }
     // A pointer target over its whole area, so no tap falls through to the board beneath.
-    Column(modifier.background(Color(0xFF1E1E2E)).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
+    Box(modifier) {
+    Column(Modifier.fillMaxSize().background(Color(0xFF1E1E2E)).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
         Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).background(statusColour(here?.status ?: "", state), CircleShape))
             Text(
@@ -343,22 +344,23 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
             }
         }
     }
-    // Only once the keyboard has finished going down, so the sheet's window is laid out on the whole screen.
-    val keyboardGone = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) == 0
-    if (keyboardGone) copying?.let { text ->
+    // Over the page itself rather than in a window of its own, so it grows with the page as the keyboard goes down.
+    copying?.let { text ->
+        androidx.activity.compose.BackHandler { copying = null }
         CopySheet(
-            text, view, close = { copying = null }, paste = { view.paste(it); copying = null },
+            text, view, Modifier.matchParentSize(), close = { copying = null }, paste = { view.paste(it); copying = null },
             pasteFile = { uri -> take { Drops.read(context, listOf(uri)) }; copying = null },
         )
+    }
     }
 }
 
 /**
- * The terminal's text with its history, to select with Android's own handles: full screen, in the terminal's face at
+ * The terminal's text with its history, to select with Android's own handles: over the whole page, in the terminal's face at
  * its size, cell width and line height, so each line sits as it did on the terminal.
  */
 @Composable
-private fun CopySheet(text: String, view: TerminalView, close: () -> Unit, paste: (String) -> Unit, pasteFile: (android.net.Uri) -> Unit) {
+private fun CopySheet(text: String, view: TerminalView, modifier: Modifier, close: () -> Unit, paste: (String) -> Unit, pasteFile: (android.net.Uri) -> Unit) {
     val context = LocalContext.current
     val density = androidx.compose.ui.platform.LocalDensity.current
     val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
@@ -380,8 +382,8 @@ private fun CopySheet(text: String, view: TerminalView, close: () -> Unit, paste
     }
     // Half a cell spare, so rounding never wraps a line that filled the terminal.
     val width = with(density) { (view.cols.coerceAtLeast(1) * view.cellWidth + view.cellWidth / 2).toDp() }
-    androidx.compose.ui.window.Dialog(onDismissRequest = close, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().background(Color(0xFF1E1E2E))) {
+    run {
+        Column(modifier.background(Color(0xFF1E1E2E)).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
             Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Select to copy", Modifier.weight(1f), color = Color(0xFF9399B2), fontSize = 13.sp)
                 val item = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
