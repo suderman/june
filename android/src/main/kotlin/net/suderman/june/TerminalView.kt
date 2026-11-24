@@ -73,6 +73,10 @@ class TerminalView(context: Context) : View(context) {
         private set
     var rows = 0
         private set
+    private var offsetX = 0
+    /** The text's measure, for showing it elsewhere exactly as drawn here. */
+    val textSize get() = paint.textSize
+    val face: Typeface get() = faces.regular
 
     init {
         isFocusable = true
@@ -115,6 +119,8 @@ class TerminalView(context: Context) : View(context) {
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         val c = maxOf(1, (w - paddingLeft - paddingRight) / cellWidth)
         val r = maxOf(1, (h - paddingTop - paddingBottom) / cellHeight)
+        // The grid centred: what is left over after whole cells splits evenly between the sides.
+        offsetX = ((w - paddingLeft - paddingRight - c * cellWidth) / 2).coerceAtLeast(0)
         if (c == cols && r == rows) return
         cols = c
         rows = r
@@ -141,7 +147,7 @@ class TerminalView(context: Context) : View(context) {
         val defaultBg = b.int
         val cursorArgb = b.int
         canvas.drawColor(defaultBg)
-        val left = paddingLeft.toFloat()
+        val left = (paddingLeft + offsetX).toFloat()
         val top = paddingTop.toFloat()
         for (y in 0 until rs) {
             for (x in 0 until cs) {
@@ -203,42 +209,79 @@ class TerminalView(context: Context) : View(context) {
         }
     }
 
-    // Touch: a tap shows the keyboard; a vertical drag scrolls the history.
+    // Touch: a tap shows the keyboard; a vertical drag scrolls the history, and a fling keeps it going, slowing to a stop.
     private var downY = 0f
     private var lastY = 0f
+    private var lastX = 0f
     private var dragging = false
     private var scrollRemainder = 0f
     private var pressed = false
     private val longPress = Runnable { pressed = true; performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); onLongPress() }
+    private val flinger = android.widget.OverScroller(context)
+    private var flingY = 0
+    private var velocity: android.view.VelocityTracker? = null
+
+    /** Scroll by DY pixels of finger travel at X, Y: whole rows go to the program or the history, the rest waits. */
+    private fun scrollBy(dy: Float, x: Float, y: Float) {
+        scrollRemainder += dy / cellHeight
+        val rowsMoved = floor(abs(scrollRemainder)).toInt() * if (scrollRemainder < 0) -1 else 1
+        if (rowsMoved == 0) return
+        scrollRemainder -= rowsMoved
+        // A finger moving down shows older lines, as a wheel turned up does.
+        val col = ((x - paddingLeft - offsetX) / cellWidth).toInt().coerceIn(0, maxOf(cols - 1, 0))
+        val row = ((y - paddingTop) / cellHeight).toInt().coerceIn(0, maxOf(rows - 1, 0))
+        val bytes = synchronized(lock) { if (handle == 0L) ByteArray(0) else TerminalBridge.nativeWheel(handle, -rowsMoved, col, row) }
+        if (bytes.isNotEmpty()) onInput(bytes, false)
+        postInvalidateOnAnimation()
+    }
+
+    override fun computeScroll() {
+        if (!flinger.computeScrollOffset()) return
+        val y = flinger.currY
+        scrollBy((y - flingY).toFloat(), lastX, lastY)
+        flingY = y
+        postInvalidateOnAnimation()
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        val tracker = velocity ?: android.view.VelocityTracker.obtain().also { velocity = it }
+        tracker.addMovement(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                downY = event.y; lastY = event.y; dragging = false; scrollRemainder = 0f; pressed = false
+                flinger.forceFinished(true)
+                downY = event.y; lastY = event.y; lastX = event.x; dragging = false; scrollRemainder = 0f; pressed = false
                 postDelayed(longPress, android.view.ViewConfiguration.getLongPressTimeout().toLong())
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!dragging && abs(event.y - downY) > cellHeight / 2) { dragging = true; removeCallbacks(longPress) }
                 if (dragging) {
-                    scrollRemainder += (event.y - lastY) / cellHeight
-                    val rowsMoved = floor(abs(scrollRemainder)).toInt() * if (scrollRemainder < 0) -1 else 1
-                    if (rowsMoved != 0) {
-                        scrollRemainder -= rowsMoved
-                        // A finger moving down shows older lines, as a wheel turned up does.
-                        val col = ((event.x - paddingLeft) / cellWidth).toInt().coerceIn(0, maxOf(cols - 1, 0))
-                        val row = ((event.y - paddingTop) / cellHeight).toInt().coerceIn(0, maxOf(rows - 1, 0))
-                        val bytes = synchronized(lock) { if (handle == 0L) ByteArray(0) else TerminalBridge.nativeWheel(handle, -rowsMoved, col, row) }
-                        if (bytes.isNotEmpty()) onInput(bytes, false)
-                        postInvalidateOnAnimation()
-                    }
+                    scrollBy(event.y - lastY, event.x, event.y)
                     lastY = event.y
+                    lastX = event.x
                 }
             }
-            MotionEvent.ACTION_UP -> { removeCallbacks(longPress); if (!dragging && !pressed) showKeyboard() }
-            MotionEvent.ACTION_CANCEL -> removeCallbacks(longPress)
+            MotionEvent.ACTION_UP -> {
+                removeCallbacks(longPress)
+                if (dragging) {
+                    val config = android.view.ViewConfiguration.get(context)
+                    tracker.computeCurrentVelocity(1000, config.scaledMaximumFlingVelocity.toFloat())
+                    val vy = tracker.yVelocity.toInt()
+                    if (abs(vy) > config.scaledMinimumFlingVelocity) {
+                        flingY = 0
+                        flinger.fling(0, 0, 0, vy, 0, 0, Int.MIN_VALUE / 2, Int.MAX_VALUE / 2)
+                        postInvalidateOnAnimation()
+                    }
+                } else if (!pressed) showKeyboard()
+                tracker.recycle(); velocity = null
+            }
+            MotionEvent.ACTION_CANCEL -> { removeCallbacks(longPress); tracker.recycle(); velocity = null }
         }
         return true
     }
+
+    // The keyboard rising would otherwise have Android pan the whole window to keep this view in sight, pushing the
+    // page's top line off the screen. The page makes room for the keyboard itself, so nothing here needs revealing.
+    override fun getFocusedRect(r: android.graphics.Rect) = r.set(0, 0, 0, 0)
 
     fun showKeyboard() {
         requestFocus()

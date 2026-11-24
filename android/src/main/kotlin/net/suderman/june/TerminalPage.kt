@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -187,7 +188,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            AndroidView({ view }, Modifier.fillMaxSize().padding(horizontal = 4.dp))
+            AndroidView({ view }, Modifier.fillMaxSize())
             val s = state
             if (s !is TerminalStream.State.Attached) Column(
                 Modifier.align(Alignment.Center).padding(24.dp).background(Color(0xEE181825), RoundedCornerShape(10.dp)).padding(16.dp),
@@ -211,26 +212,50 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
         }
         if (Terminals.keyRow(context) && WindowInsets.isImeVisible) KeyRow(view)
     }
-    copying?.let { text -> CopySheet(text, close = { copying = null }, paste = { view.paste(it); copying = null }) }
+    copying?.let { text -> CopySheet(text, view, close = { copying = null }, paste = { view.paste(it); copying = null }) }
 }
 
+/**
+ * The terminal's text with its history, to select with Android's own handles: full screen, in the terminal's face at
+ * its size, cell width and line height, so each line sits as it did on the terminal.
+ */
 @Composable
-private fun CopySheet(text: String, close: () -> Unit, paste: (String) -> Unit) {
+private fun CopySheet(text: String, view: TerminalView, close: () -> Unit, paste: (String) -> Unit) {
     val context = LocalContext.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
     val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
     val scroll = androidx.compose.foundation.rememberScrollState()
     LaunchedEffect(text) { scroll.scrollTo(scroll.maxValue) }
+    val style = remember(view) {
+        val advance = android.graphics.Paint().apply { typeface = view.face; textSize = view.textSize }.measureText("M")
+        with(density) {
+            androidx.compose.ui.text.TextStyle(
+                color = Color(0xFFCDD6F4),
+                fontFamily = FontFamily(androidx.compose.ui.text.font.Typeface(view.face)),
+                fontSize = view.textSize.toSp(),
+                lineHeight = view.cellHeight.toFloat().toSp(),
+                letterSpacing = (view.cellWidth - advance).toSp(),
+                lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                    androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center, androidx.compose.ui.text.style.LineHeightStyle.Trim.None,
+                ),
+            )
+        }
+    }
+    // Half a cell spare, so rounding never wraps a line that filled the terminal.
+    val width = with(density) { (view.cols.coerceAtLeast(1) * view.cellWidth + view.cellWidth / 2).toDp() }
     androidx.compose.ui.window.Dialog(onDismissRequest = close, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().padding(12.dp).background(Color(0xFF181825), RoundedCornerShape(10.dp))) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.fillMaxSize().background(Color(0xFF1E1E2E))) {
+            Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Select to copy", Modifier.weight(1f), color = Color(0xFF9399B2), fontSize = 13.sp)
                 val clip = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
-                if (!clip.isNullOrEmpty()) Text("paste", Modifier.clickable { paste(clip) }.padding(4.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
-                Text("copy all", Modifier.clickable { clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text)); close() }.padding(4.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
-                Text("close", Modifier.clickable(onClick = close).padding(4.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
+                if (!clip.isNullOrEmpty()) Text("paste", Modifier.clickable { paste(clip) }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
+                Text("copy all", Modifier.clickable { clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text)); close() }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
+                Text("close", Modifier.clickable(onClick = close).padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
             }
-            androidx.compose.foundation.text.selection.SelectionContainer(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll).padding(horizontal = 10.dp)) {
-                Text(text, color = Color(0xFFCDD6F4), fontSize = 12.sp, fontFamily = FontFamily.Monospace, lineHeight = 15.sp)
+            Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll), contentAlignment = Alignment.TopCenter) {
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Text(text, Modifier.width(width), style = style)
+                }
             }
         }
     }

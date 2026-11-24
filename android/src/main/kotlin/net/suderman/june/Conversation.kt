@@ -284,7 +284,9 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                 layout(placeable.width, placeable.height) { placeable.place(0, 0) }
             },
         ) {
-        Column(Modifier.fillMaxWidth().then(header ?: Modifier)) {
+        // An agent's terminal takes the whole screen, its own line naming it in place of June's status line.
+        val terminalShown = boards && link.terminal != null
+        if (!terminalShown) Column(Modifier.fillMaxWidth().then(header ?: Modifier)) {
         if (header != null) Box(
             Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp).size(width = 36.dp, height = 4.dp)
                 .background(palette.muted.copy(alpha = 0.5f), RoundedCornerShape(50)),
@@ -313,7 +315,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
         }
         // The tasks she follows, each with where it stands, under the status line while it is open.
         val followed = detail
-        if (showFollows && followed != null && followed.length() > 0) {
+        if (!terminalShown && showFollows && followed != null && followed.length() > 0) {
             Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).background(palette.field, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (i in 0 until followed.length()) {
                     val f = followed.getJSONObject(i)
@@ -372,7 +374,15 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                 if (shownTerminal != null) {
                     androidx.activity.compose.BackHandler { link.terminal = null }
                     // One page per terminal: its view and stream belong to that target.
-                    androidx.compose.runtime.key(shownTerminal) { TerminalPage(link, shownTerminal, palette, Modifier.fillMaxSize()) }
+                    androidx.compose.runtime.key(shownTerminal) {
+                        // Edge to edge: out past the conversation's side margins, so every column the screen holds is the terminal's.
+                        TerminalPage(link, shownTerminal, palette, Modifier.fillMaxSize().layout { measurable, constraints ->
+                            val margin = 16.dp.roundToPx()
+                            val w = constraints.maxWidth + 2 * margin
+                            val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
+                            layout(constraints.maxWidth, placeable.height) { placeable.place(-margin, 0) }
+                        })
+                    }
                 }
             }
         } else stripPage(Modifier.weight(1f).fillMaxWidth())
