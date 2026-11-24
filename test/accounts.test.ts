@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { AccountCredentials, accountsConfig, anthropicWindows, apply, withAuthLock, autoWrapper, budget, googleWindows, inUse, loginCommand, openaiWindows, parseAccountsOrg, places, projectRoots, quotas, rank, refresh, slots, status, trust } from "../src/accounts.ts";
+import { AccountCredentials, accountsConfig, anthropicWindows, apply, withAuthLock, autoWrapper, budget, googleWindows, inUse, loginCommand, mergeQuotas, openaiWindows, parseAccountsOrg, places, projectRoots, quotas, rank, readQuota, refresh, resolveGroup, slots, status, trust } from "../src/accounts.ts";
 import { tempDir } from "./helpers.ts";
 
 const jwt = (payload: object) => `x.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.y`;
@@ -98,13 +98,51 @@ test("usage payloads become quota windows", () => {
 		}),
 		{ plan: "plus", windows: [{ name: "5 hour", remaining: 75, resetAt: 1800000000, seconds: 18000 }, { name: "Weekly", remaining: 10, seconds: 604800 }] },
 	);
-	assert.deepEqual(anthropicWindows({ five_hour: { utilization: 7, resets_at: "2026-11-23T04:30:00Z" }, seven_day: null }).windows, [
-		{ name: "5 hour", remaining: 93, resetAt: Date.parse("2026-11-23T04:30:00Z") / 1000, seconds: 18000 },
-	]);
-	assert.deepEqual(googleWindows({ groups: [{ displayName: "Gemini models", buckets: [{ remainingFraction: 0.4, window: "weekly" }, { remainingFraction: "80%", displayName: "Flash" }] }] }).windows, [
-		{ name: "Weekly", remaining: 40, seconds: 604800, group: "Gemini models" },
-		{ name: "Flash", remaining: 80, group: "Gemini models" },
-	]);
+	assert.deepEqual(
+		anthropicWindows({
+			five_hour: { utilization: 7, resets_at: "2026-11-23T04:30:00Z" },
+			seven_day: null,
+			seven_day_sonnet: { utilization: 40, resets_at: "2026-11-30T00:00:00Z" },
+			seven_day_fable: { utilization: 25 },
+			seven_day_oauth_apps: null,
+			extra_usage: { is_enabled: false, utilization: 0 },
+		}).windows,
+		[
+			{ name: "5 hour", remaining: 93, resetAt: Date.parse("2026-11-23T04:30:00Z") / 1000, seconds: 18000 },
+			{ name: "Sonnet weekly", remaining: 60, resetAt: Date.parse("2026-11-30T00:00:00Z") / 1000, seconds: 604800, group: "Sonnet" },
+			{ name: "Fable weekly", remaining: 75, seconds: 604800, group: "Fable" },
+		],
+	);
+	assert.deepEqual(
+		anthropicWindows({
+			limits: [
+				{ kind: "session", group: "session", percent: 12, resets_at: "2026-11-23T04:30:00Z", scope: null },
+				{ kind: "weekly_all", group: "weekly", percent: 5, resets_at: "2026-11-30T00:00:00Z", scope: null },
+			],
+		}).windows,
+		[
+			{ name: "5 hour", remaining: 88, resetAt: Date.parse("2026-11-23T04:30:00Z") / 1000, seconds: 18000 },
+			{ name: "Weekly", remaining: 95, resetAt: Date.parse("2026-11-30T00:00:00Z") / 1000, seconds: 604800 },
+		],
+	);
+	assert.deepEqual(
+		googleWindows({
+			groups: [
+				{
+					displayName: "Gemini models",
+					description: "Models within this group: Gemini 4 Neon, Gemini 4 Argon",
+					buckets: [{ remainingFraction: 0.4, window: "weekly" }, { remainingFraction: "80%", displayName: "Flash" }],
+				},
+			],
+		}),
+		{
+			windows: [
+				{ name: "Weekly", remaining: 40, seconds: 604800, group: "Gemini models" },
+				{ name: "Flash", remaining: 80, group: "Gemini models" },
+			],
+			groups: [{ name: "Gemini models", models: ["Gemini 4 Neon", "Gemini 4 Argon"] }],
+		},
+	);
 });
 
 test("quota reads each provider account once, through a live login that is the right person", async (t) => {
@@ -206,19 +244,101 @@ test("ranking spends first what would otherwise be lost: weekly quota left over 
 	assert.equal(rank([{ slot: c1! }], now)[0]!.usable, false);
 });
 
-test("an Antigravity budget reads the model group the agent draws on", () => {
+test("provider-reported quota groups share pools across models, fail closed on unknown groups, and never mix windows", async () => {
 	const now = Date.parse("2026-11-22T20:00:00Z");
+	const [agy1] = slots(accountsConfig({ agy: 1 }), places("/h"));
+	const [claude1] = slots(accountsConfig({ claude: 1 }), places("/h"));
 	const quota = {
 		provider: "google" as const,
 		number: 1,
 		fetched: now / 1000,
+		groups: [
+			{ name: "Gemini Models", models: ["Gemini 4 Neon", "Gemini 4 Carbon", "Gemini 4 Argon", "Gemini 4 Hydrogen", "Gemini 3.8 Flash"] },
+			{ name: "Claude and GPT models", models: ["Claude Opus 5.5", "Claude Sonnet 5.5", "GPT-OSS 120B"] },
+		],
 		windows: [
 			{ name: "Weekly", remaining: 66, seconds: 604800, resetAt: now / 1000 + 100 * 3600, group: "Gemini Models" },
+			{ name: "5 hour", remaining: 48, seconds: 18000, resetAt: now / 1000 + 2 * 3600, group: "Gemini Models" },
 			{ name: "Weekly", remaining: 20, seconds: 604800, resetAt: now / 1000 + 10 * 3600, group: "Claude and GPT models" },
+			{ name: "5 hour", remaining: 100, seconds: 18000, group: "Claude and GPT models" },
 		],
 	};
+	// Every Gemini model — including Argon, Hydrogen, Carbon, orchestrators and short aliases — maps to the same pool.
+	for (const model of ["gemini-4-neon", "gemini-4-carbon-high", "gemini-4-argon-medium", "gemini-4-hydrogen-xhigh", "gemini-pro-orchestrator-argon", "argon", "neon"]) {
+		assert.equal(resolveGroup(quota, model), "Gemini Models", model);
+		assert.equal(budget(quota, now, model).weekly, 66, model);
+		assert.equal(budget(quota, now, model).five, 48, model);
+	}
+	for (const model of ["claude-opus-5-5", "claude-sonnet-5-5-high", "opus-5-5", "gpt-oss-120b-medium"]) {
+		assert.equal(resolveGroup(quota, model), "Claude and GPT models", model);
+		assert.equal(budget(quota, now, model).weekly, 20, model);
+		assert.equal(budget(quota, now, model).five, 100, model);
+	}
 	assert.equal(budget(quota, now, /gemini/i).weekly, 66);
-	assert.equal(budget(quota, now).weekly, 20);
+	// Without a model, picks the highest-rate usable group without mixing Gemini's 5h into Claude/GPT's weekly.
+	assert.deepEqual([budget(quota, now).group, budget(quota, now).weekly, budget(quota, now).five], ["Claude and GPT models", 20, 100]);
+	// If one pool is spent, unmodelled checks still see the healthy sibling pool instead of marking the provider dead.
+	const oneSpent = {
+		...quota,
+		windows: quota.windows.map((w) => (w.group === "Claude and GPT models" && w.name === "Weekly" ? { ...w, remaining: 0 } : w)),
+	};
+	assert.deepEqual([budget(oneSpent, now).group, budget(oneSpent, now).weekly], ["Gemini Models", 66]);
+	assert.equal(rank([{ slot: agy1!, quota: oneSpent }], now, "claude-opus-5-5")[0]!.usable, false);
+	assert.equal(rank([{ slot: agy1!, quota: oneSpent }], now, "gemini-4-argon")[0]!.usable, true);
+	// A model whose group is missing or unfamiliar fails closed instead of inventing capacity from another pool.
+	const missing = rank([{ slot: agy1!, quota }], now, "unknown-promo-model")[0]!;
+	assert.equal(missing.usable, false);
+	assert.equal(missing.reason, "no quota group for unknown-promo-model");
+
+	// Anthropic: an exhausted model sub-bucket blocks only that model, not models using the shared account-wide pool.
+	const claudeQuota = {
+		provider: "anthropic" as const,
+		number: 1,
+		fetched: now / 1000,
+		windows: [
+			{ name: "5 hour", remaining: 90, seconds: 18000, resetAt: now / 1000 + 3 * 3600 },
+			{ name: "Weekly", remaining: 80, seconds: 604800, resetAt: now / 1000 + 72 * 3600 },
+			{ name: "Sonnet weekly", remaining: 0, seconds: 604800, resetAt: now / 1000 + 72 * 3600, group: "Sonnet" },
+		],
+	};
+	assert.equal(rank([{ slot: claude1!, quota: claudeQuota }], now, "claude-opus-5-5")[0]!.usable, true);
+	assert.equal(rank([{ slot: claude1!, quota: claudeQuota }], now, "claude-sonnet-5-5")[0]!.usable, false);
+	assert.equal(rank([{ slot: claude1!, quota: claudeQuota }], now)[0]!.usable, true);
+
+	// readQuota("google") does not fall back to cloudcode-pa's placeholder 100% when daily-cloudcode-pa fails.
+	const seen: string[] = [];
+	const failingDaily = async (url: string) => {
+		seen.push(url);
+		if (url.includes("loadCodeAssist")) return { status: 200, json: async () => ({ cloudaicompanionProject: "p1" }) };
+		if (url.includes("daily-cloudcode-pa")) return { status: 503, json: async () => ({}) };
+		return { status: 200, json: async () => ({ groups: [{ displayName: "Gemini Models", buckets: [{ remainingFraction: 1, window: "weekly" }] }] }) };
+	};
+	await assert.rejects(() => readQuota("google", { token: "t", source: "agy1" }, failingDaily), /HTTP 503/);
+	assert.equal(seen.some((u) => u.startsWith("https://cloudcode-pa.googleapis.com")), false);
+
+	// Worker-host fallback fills lapsed local accounts from the daemon host when provider, number and email match.
+	const merged = mergeQuotas(
+		[
+			{ provider: "google", number: 1, label: "home", email: "a@x", windows: [], error: "expired" },
+			{ provider: "anthropic", number: 1, label: "home", email: "a@x", windows: [], error: "expired" },
+			{ provider: "openai", number: 2, label: "work", email: "b@x", source: "codex2", fetched: now / 1000, windows: [{ name: "Weekly", remaining: 73 }] },
+		],
+		[
+			{ provider: "google", number: 1, email: "a@x", source: "agy1", fetched: now / 1000, windows: [{ name: "Weekly", remaining: 87, group: "Gemini Models" }], groups: [{ name: "Gemini Models", models: ["Gemini 4 Neon"] }] },
+			{ provider: "anthropic", number: 1, email: "other@x", source: "claude1", fetched: now / 1000, windows: [{ name: "Weekly", remaining: 99 }] },
+			{ provider: "openai", number: 2, email: "b@x", source: "codex2", fetched: now / 1000, windows: [{ name: "Weekly", remaining: 50 }] },
+		],
+		"kit",
+	);
+	assert.equal(merged[0]!.source, "kit/agy1");
+	assert.equal(merged[0]!.error, undefined);
+	assert.equal(merged[0]!.windows[0]!.remaining, 87);
+	assert.equal(merged[0]!.label, "home");
+	// Mismatched email is never merged across accounts.
+	assert.equal(merged[1]!.error, "expired");
+	// Healthy local readings stay local.
+	assert.equal(merged[2]!.source, "codex2");
+	assert.equal(merged[2]!.windows[0]!.remaining, 73);
 });
 
 test("an idle login's lapsed token is renewed into the harness's own file; a busy one is left alone", async (t) => {

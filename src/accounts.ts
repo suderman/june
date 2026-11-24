@@ -429,6 +429,7 @@ export async function status(config: AccountsConfig, people: People, p: Places =
 	return out;
 }
 
+export type QuotaGroup = { name: string; models: string[] };
 export type Window = { name: string; remaining: number; resetAt?: number; seconds?: number; group?: string };
 export type Quota = {
 	provider: Provider;
@@ -438,6 +439,8 @@ export type Quota = {
 	/** The login whose token was used. */
 	source?: string;
 	windows: Window[];
+	/** Provider-reported model names or families belonging to each quota group, when the provider names them. */
+	groups?: QuotaGroup[];
 	plan?: string;
 	/** Epoch seconds of the last successful read. */
 	fetched?: number;
@@ -473,24 +476,80 @@ export function openaiWindows(payload: any): { windows: Window[]; plan?: string 
 	return { windows, ...(payload?.plan_type ? { plan: String(payload.plan_type) } : {}) };
 }
 
-/** Anthropic's oauth/usage: utilization per named window. */
+const titleCase = (slug: string) =>
+	slug
+		.split(/[_-]+/)
+		.filter(Boolean)
+		.map((part) => (part.toLowerCase() === "oauth" ? "OAuth" : part[0]!.toUpperCase() + part.slice(1).toLowerCase()))
+		.join(" ");
+
+/** Anthropic's oauth/usage: account-wide five_hour/seven_day plus any active scoped or promotional buckets. */
 export function anthropicWindows(payload: any): { windows: Window[] } {
-	const keys: [string, string, number][] = [
-		["five_hour", "5 hour", 18000],
-		["seven_day", "Weekly", 604800],
-		["seven_day_opus", "Opus weekly", 604800],
-		["seven_day_sonnet", "Sonnet weekly", 604800],
-		["seven_day_oauth_apps", "OAuth apps weekly", 604800],
-	];
-	return { windows: keys.flatMap(([key, name, seconds]) => window(name, payload?.[key]?.utilization, payload?.[key]?.resets_at, seconds) ?? []) };
+	const windows: Window[] = [];
+	const push = (w: Window | undefined, group?: string) => {
+		if (w) windows.push(group ? { ...w, group } : w);
+	};
+	push(window("5 hour", payload?.five_hour?.utilization, payload?.five_hour?.resets_at, 18000));
+	push(window("Weekly", payload?.seven_day?.utilization, payload?.seven_day?.resets_at, 604800));
+	const skip = new Set(["five_hour", "seven_day", "extra_usage"]);
+	if (payload && typeof payload === "object") {
+		for (const [key, value] of Object.entries(payload)) {
+			if (skip.has(key) || !value || typeof value !== "object" || Array.isArray(value)) continue;
+			const raw = value as Record<string, unknown>;
+			if (num(raw.utilization) === undefined) continue;
+			if (key.startsWith("seven_day_")) {
+				const scope = titleCase(key.slice("seven_day_".length));
+				push(window(`${scope} weekly`, raw.utilization, raw.resets_at, 604800), scope);
+			} else if (key.startsWith("five_hour_")) {
+				const scope = titleCase(key.slice("five_hour_".length));
+				push(window(`${scope} 5 hour`, raw.utilization, raw.resets_at, 18000), scope);
+			} else {
+				const scope = titleCase(key);
+				push(window(scope, raw.utilization, raw.resets_at), scope);
+			}
+		}
+	}
+	// Fallback to the newer limits[] array if top-level legacy keys are absent.
+	if (!windows.length && Array.isArray(payload?.limits)) {
+		for (const entry of payload.limits) {
+			if (!entry || typeof entry !== "object") continue;
+			const kind = String(entry.kind ?? "").toLowerCase();
+			const group = typeof entry.scope === "string" && entry.scope ? titleCase(entry.scope) : undefined;
+			const [name, seconds] =
+				kind === "session" ? ["5 hour", 18000] : kind === "weekly_all" ? ["Weekly", 604800] : [group ? `${group} ${entry.group ?? kind}`.trim() : titleCase(kind || "Quota"), entry.group === "weekly" ? 604800 : entry.group === "session" ? 18000 : undefined];
+			push(window(name, entry.percent ?? entry.utilization, entry.resets_at, seconds), group);
+		}
+	}
+	return { windows };
+}
+
+function parseGroupModels(group: any): string[] {
+	const direct = group?.models ?? group?.modelIds ?? group?.model_ids;
+	if (Array.isArray(direct)) {
+		return direct
+			.map((m) => (typeof m === "string" ? m : typeof m?.displayName === "string" ? m.displayName : typeof m?.id === "string" ? m.id : ""))
+			.map((s) => s.trim())
+			.filter(Boolean);
+	}
+	const desc = typeof group?.description === "string" ? group.description : "";
+	const colon = desc.indexOf(":");
+	if (colon < 0) return [];
+	return desc
+		.slice(colon + 1)
+		.split(",")
+		.map((s: string) => s.trim().replace(/\.$/, ""))
+		.filter(Boolean);
 }
 
 /** Antigravity's quota summary: buckets in groups such as Gemini models, each with a remaining fraction. */
-export function googleWindows(payload: any): { windows: Window[] } {
+export function googleWindows(payload: any): { windows: Window[]; groups?: QuotaGroup[] } {
 	const windows: Window[] = [];
+	const groups: QuotaGroup[] = [];
 	for (const group of payload?.groups ?? []) {
 		const title = group.displayName ?? group.display_name;
 		if (!title) continue;
+		const models = parseGroupModels(group);
+		if (models.length) groups.push({ name: title, models });
 		for (const bucket of group.buckets ?? []) {
 			const raw = bucket.remainingFraction ?? bucket.remaining_fraction;
 			const percent = typeof raw === "string" && raw.trim().endsWith("%");
@@ -506,7 +565,7 @@ export function googleWindows(payload: any): { windows: Window[] } {
 			if (w) windows.push({ ...w, group: title });
 		}
 	}
-	return { windows };
+	return { windows, ...(groups.length ? { groups } : {}) };
 }
 
 export type Fetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<{ status: number; json(): Promise<any> }>;
@@ -519,7 +578,7 @@ async function getJson(fetcher: Fetch, url: string, headers: Record<string, stri
 }
 
 /** Read one login's quota windows from its provider. */
-export async function readQuota(provider: Provider, l: Login, fetcher: Fetch = fetch as unknown as Fetch): Promise<{ windows: Window[]; plan?: string }> {
+export async function readQuota(provider: Provider, l: Login, fetcher: Fetch = fetch as unknown as Fetch): Promise<{ windows: Window[]; groups?: QuotaGroup[]; plan?: string }> {
 	const auth = { Authorization: `Bearer ${l.token}`, "Content-Type": "application/json" };
 	switch (provider) {
 		case "openai":
@@ -536,25 +595,18 @@ export async function readQuota(provider: Provider, l: Login, fetcher: Fetch = f
 			);
 		case "google": {
 			const headers = { ...auth, "User-Agent": "antigravity/hub/2.23.0 linux/amd64" };
-			const assist = await getJson(fetcher, "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist", headers, {
+			const assist = await getJson(fetcher, "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist", headers, {
 				metadata: { ideType: "ANTIGRAVITY", platform: "PLATFORM_UNSPECIFIED", pluginType: "GEMINI" },
 			});
 			const project = typeof assist?.cloudaicompanionProject === "string" ? assist.cloudaicompanionProject : assist?.cloudaicompanionProject?.id;
 			if (!project) throw new Error("Antigravity reported no project for this login");
-			let last: Error = new Error("usage response has no quota windows");
-			// Some endpoints omit the Gemini buckets; prefer the first that has them.
-			let found: Window[] = [];
-			for (const host of ["daily-cloudcode-pa.googleapis.com", "cloudcode-pa.googleapis.com"]) {
-				try {
-					const { windows } = googleWindows(await getJson(fetcher, `https://${host}/v1internal:retrieveUserQuotaSummary`, headers, { project }));
-					if (windows.length && !found.length) found = windows;
-					if (windows.some((w) => /gemini/i.test(w.group ?? ""))) return { windows };
-				} catch (error) {
-					last = error as Error;
-				}
-			}
-			if (found.length) return { windows: found };
-			throw last;
+			// daily-cloudcode-pa carries Antigravity's live usage; cloudcode-pa returns placeholder 100% buckets,
+			// so only fall back if daily succeeds with no windows (never on an error, which would mask depletion).
+			const primary = googleWindows(await getJson(fetcher, "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary", headers, { project }));
+			if (primary.windows.length) return primary;
+			const fallback = googleWindows(await getJson(fetcher, "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary", headers, { project }));
+			if (fallback.windows.length) return fallback;
+			throw new Error("usage response has no quota windows");
 		}
 	}
 }
@@ -616,6 +668,27 @@ export async function quotas(
 		out.push(row);
 	}
 	return out.sort((a, b) => a.provider.localeCompare(b.provider) || a.number - b.number);
+}
+
+/**
+ * Fill any locally failed or empty quota rows (for instance, a worker host whose idle token lapsed) from a daemon
+ * host's fresher read of the same provider account, checking email equality when both carry one.
+ */
+export function mergeQuotas(local: readonly Quota[], remote: readonly Quota[], host: string): Quota[] {
+	return local.map((row) => {
+		if (!row.error && row.fetched && row.windows.length) return row;
+		const peer = remote.find(
+			(r) =>
+				r.provider === row.provider &&
+				r.number === row.number &&
+				!r.error &&
+				r.fetched &&
+				r.windows.length &&
+				(!row.email || !r.email || row.email === r.email),
+		);
+		if (!peer) return row;
+		return { ...peer, ...(row.label ? { label: row.label } : {}), source: `${host}/${peer.source ?? host}` };
+	});
 }
 
 /** The last quota read, kept in ~/.local/state/june/quota.json so repeated calls do not poll the providers. */
@@ -738,27 +811,125 @@ async function refreshInside(
 
 /** What an account has to spend: the binding weekly window (the one with least left), the hours until it resets, and
  * the rate, weekly % per hour, at which the account would have to be spent to use it all before then. */
-export type Budget = { weekly?: number; hours?: number; rate: number; five?: number; fiveHours?: number };
+export type Budget = { weekly?: number; hours?: number; rate: number; five?: number; fiveHours?: number; group?: string; missingGroup?: boolean };
+export type BudgetTarget = string | RegExp;
+
+const EFFORT_SUFFIX = new Set(["low", "medium", "high", "xhigh", "max"]);
+const GROUP_STOP = new Set(["and", "for", "the", "model", "models", "weekly", "hour", "limit", "quota", "pro", "preview", "tiered", "orchestrator"]);
+
+function modelTokens(raw: string): string[] {
+	const bare = raw.includes("/") ? raw.slice(raw.lastIndexOf("/") + 1) : raw;
+	const tokens = bare
+		.toLowerCase()
+		.split(/[^a-z0-9]+/)
+		.filter(Boolean);
+	while (tokens.length > 1 && EFFORT_SUFFIX.has(tokens.at(-1)!)) tokens.pop();
+	return tokens;
+}
 
 /**
- * An account's budget from its quota windows. For Antigravity, whose windows come in model groups, FAMILY picks the
- * group the agent's model draws on (Gemini models for gemini-4-neon). Without a weekly window the five-hour one stands in.
+ * Resolve which provider quota group a model (or RegExp) draws on. Prefers provider-reported group model lists
+ * (`quota.groups`) over group display names so consolidations and codenames do not depend on hardcoded prefix maps.
  */
-export function budget(quota: Quota, now = Date.now(), family?: RegExp): Budget {
-	const grouped = family && quota.windows.some((w) => w.group && family.test(w.group));
-	const windows = grouped ? quota.windows.filter((w) => !w.group || family!.test(w.group)) : quota.windows;
+export function resolveGroup(quota: Quota, target: BudgetTarget): string | undefined {
+	const groupNames = [...new Set(quota.windows.flatMap((w) => (w.group ? [w.group] : [])))];
+	if (!groupNames.length) return undefined;
+	if (target instanceof RegExp) return groupNames.find((g) => target.test(g));
+	const qTokens = modelTokens(target);
+	if (!qTokens.length) return undefined;
+	const qNorm = qTokens.join(" ");
+	const qSet = new Set(qTokens);
+	const qDistinct = qTokens.filter((t) => /[a-z]/.test(t) && t.length >= 2 && !GROUP_STOP.has(t));
+
+	const pickBest = (scored: [string, number][]): string | undefined => {
+		const positive = scored.filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]);
+		if (!positive.length) return undefined;
+		if (positive.length > 1 && positive[0]![1] === positive[1]![1]) return undefined;
+		return positive[0]![0];
+	};
+
+	if (quota.groups?.length) {
+		const allowed = new Set(groupNames);
+		const byListed: [string, number][] = [];
+		for (const g of quota.groups) {
+			if (!allowed.has(g.name)) continue;
+			let best = 0;
+			for (const listed of g.models) {
+				const mTokens = modelTokens(listed);
+				if (!mTokens.length) continue;
+				const mNorm = mTokens.join(" ");
+				const mSet = new Set(mTokens);
+				const mDistinct = mTokens.filter((t) => /[a-z]/.test(t) && t.length >= 2 && !GROUP_STOP.has(t));
+				let score = 0;
+				if (qNorm === mNorm) score = 1000;
+				else if (mTokens.every((t) => qSet.has(t))) score = 500 + mTokens.length * 10;
+				else if (qTokens.every((t) => mSet.has(t))) score = 400 + qTokens.length * 10;
+				else if (qDistinct.length && qDistinct.every((t) => mSet.has(t))) score = 300 + qDistinct.length * 10;
+				else {
+					const overlap = qDistinct.filter((t) => mDistinct.includes(t)).length;
+					if (overlap > 0) score = 100 + overlap * 10;
+				}
+				if (score > best) best = score;
+			}
+			byListed.push([g.name, best]);
+		}
+		const matched = pickBest(byListed);
+		if (matched) return matched;
+	}
+
+	const byName: [string, number][] = groupNames.map((name) => {
+		const words = modelTokens(name).filter((t) => t.length >= 3 && !GROUP_STOP.has(t));
+		const hits = words.filter((w) => qSet.has(w)).length;
+		return [name, hits];
+	});
+	return pickBest(byName);
+}
+
+const budgetUsable = (b: Budget) =>
+	b.weekly !== undefined && !(b.five !== undefined && b.five < 10 && (b.fiveHours ?? 1) > 0.25) && !(b.weekly < 1 && (b.hours ?? 1) > 0.25);
+
+/**
+ * An account's budget from its quota windows. When TARGET names a model (or RegExp), selects that model's quota group
+ * plus any account-wide ungrouped windows. Never falls back to an unrelated group when a disjoint-group provider lacks
+ * a match; without TARGET on a multi-group provider, picks the best independent group without mixing windows across groups.
+ */
+export function budget(quota: Quota, now = Date.now(), target?: BudgetTarget): Budget {
 	const hoursTo = (w: Window) => (w.resetAt ? Math.max(0, (w.resetAt - now / 1000) / 3600) : (w.seconds ?? 604800) / 3600);
 	const least = (ws: Window[]) => (ws.length ? ws.reduce((x, y) => (y.remaining < x.remaining ? y : x)) : undefined);
-	const five = least(windows.filter((w) => w.name === "5 hour" || w.seconds === 18000));
-	const weekly = least(windows.filter((w) => w.seconds === 604800 || /weekly/i.test(w.name))) ?? five;
-	if (!weekly) return { rate: 0 };
-	return {
-		weekly: weekly.remaining,
-		hours: hoursTo(weekly),
-		// A quarter hour floor keeps a reset minutes away from swamping everything else.
-		rate: weekly.remaining / Math.max(hoursTo(weekly), 0.25),
-		...(five ? { five: five.remaining, fiveHours: hoursTo(five) } : {}),
+	const compute = (windows: Window[], group?: string): Budget => {
+		const five = least(windows.filter((w) => w.name === "5 hour" || w.seconds === 18000));
+		const weekly = least(windows.filter((w) => w.seconds === 604800 || /weekly/i.test(w.name))) ?? five;
+		if (!weekly) return { rate: 0, ...(group ? { group } : {}) };
+		return {
+			weekly: weekly.remaining,
+			hours: hoursTo(weekly),
+			// A quarter hour floor keeps a reset minutes away from swamping everything else.
+			rate: weekly.remaining / Math.max(hoursTo(weekly), 0.25),
+			...(five ? { five: five.remaining, fiveHours: hoursTo(five) } : {}),
+			...(group ? { group } : {}),
+		};
 	};
+
+	const ungrouped = quota.windows.filter((w) => !w.group);
+	const groupNames = [...new Set(quota.windows.flatMap((w) => (w.group ? [w.group] : [])))];
+	if (!groupNames.length) return compute(ungrouped);
+
+	if (target !== undefined) {
+		const matched = resolveGroup(quota, target);
+		if (matched) return compute([...ungrouped, ...quota.windows.filter((w) => w.group === matched)], matched);
+		// Account-wide pools still cover models without their own sub-bucket (e.g. Anthropic seven_day without seven_day_opus).
+		if (ungrouped.length) return compute(ungrouped);
+		// Disjoint-group provider (e.g. Antigravity) with no matching group: fail closed instead of inventing capacity.
+		return { rate: 0, missingGroup: true };
+	}
+
+	// No model specified: prefer account-wide windows when present; otherwise evaluate each group independently so
+	// windows from unrelated pools are never mixed and one depleted pool does not hide a healthy sibling pool.
+	if (ungrouped.length) return compute(ungrouped);
+	const perGroup = groupNames.map((g) => compute(quota.windows.filter((w) => w.group === g), g));
+	const usable = perGroup.filter(budgetUsable).sort((a, b) => b.rate - a.rate || (b.weekly ?? 0) - (a.weekly ?? 0));
+	if (usable.length) return usable[0]!;
+	return perGroup.sort((a, b) => (b.weekly ?? -1) - (a.weekly ?? -1))[0] ?? { rate: 0 };
 }
 
 export type Ranked = { slot: string; usable: boolean; score: number; reason: string; budget?: Budget };
@@ -769,11 +940,12 @@ export type Ranked = { slot: string; usable: boolean; score: number; reason: str
  * left with days to go, which is rationed. The five-hour window gates rather than scores: under 10% the account waits
  * for it, unless it resets within a quarter hour. An account with nothing left waits for its reset.
  */
-export function rank(accounts: readonly { slot: Slot; quota?: Quota }[], now = Date.now(), family?: RegExp): Ranked[] {
+export function rank(accounts: readonly { slot: Slot; quota?: Quota }[], now = Date.now(), target?: BudgetTarget): Ranked[] {
 	const out = accounts.map(({ slot, quota }): Ranked & { number: number } => {
 		const base = { slot: slot.name, number: slot.number, usable: false, score: 0 };
 		if (!quota || quota.error || !quota.fetched || now / 1000 - quota.fetched > 600) return { ...base, reason: quota?.error ?? "no fresh quota" };
-		const b = budget(quota, now, family);
+		const b = budget(quota, now, target);
+		if (b.missingGroup) return { ...base, reason: typeof target === "string" ? `no quota group for ${target}` : "no matching quota group", budget: b };
 		if (b.weekly === undefined) return { ...base, reason: "no quota windows", budget: b };
 		if (b.five !== undefined && b.five < 10 && (b.fiveHours ?? 1) > 0.25) return { ...base, reason: `5 hour at ${b.five}%`, budget: b };
 		if (b.weekly < 1 && (b.hours ?? 1) > 0.25) return { ...base, reason: `weekly at ${b.weekly}%`, budget: b };

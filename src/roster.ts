@@ -226,7 +226,7 @@ export function computeStanding(
 		if (card.host !== here) return { card, status: "idle", battery: { reason: `quota is read on ${card.host}` } };
 		const mine = logins.filter((r) => r.harness === card.harness && r.loggedIn && !r.problems.length);
 		if (!mine.length) return { card, status: "idle", battery: { reason: `no ${card.harness} login here` } };
-		const ranked = rank(mine.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })), now, familyOf(card));
+		const ranked = rank(mine.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })), now, card.model);
 		const best = ranked.find((r) => r.usable);
 		if (!best?.budget) return { card, status: "idle", battery: { reason: ranked.map((r) => `${r.slot}: ${r.reason}`).join("; ") } };
 		const { weekly, hours, rate } = best.budget;

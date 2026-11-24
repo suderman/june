@@ -55,11 +55,12 @@ const USAGE = `usage:
                           Claude folder its trust, MCP servers and first-run answers (agents apply)
   june accounts login [NAME]
                           sign in each login this host lacks, or NAME, as the person ACCOUNTS.org names
-  june accounts pick HARNESS [--explain] [--trust]
+  june accounts pick HARNESS [--model MODEL] [--explain] [--trust]
                           the login the plain claude, codex or pi runs: the account with quota to spare, five-hour
                           allowances first; --explain shows every account's standing as JSON; --trust also trusts here
-  june accounts check NAME [--refresh] [--json]
-                          whether login NAME can still work, and which login of its harness would take over
+  june accounts check NAME [--model MODEL] [--refresh] [--json]
+                          whether login NAME can still work (for MODEL's quota group when given), and which login of
+                          its harness would take over
   june accounts trust NAME [DIR]
                           trust DIR's project root (here by default) in login NAME's harness, which each launch does
   june quota [NAME] [--refresh] [--json]
@@ -602,10 +603,37 @@ async function accountsCommand(p: ReturnType<typeof paths>, args: string[], json
 		return result.problems.length ? 1 : 0;
 	}
 	if (args[0] === "login" && args.length <= 2) return accountsLogin(a, config, p, args[1]);
-	if (args[0] === "pick" && args.length >= 2 && args.slice(2).every((x) => x === "--explain" || x === "--trust"))
-		return accountsPick(a, config, p, args[1]!, args.includes("--explain"), args.includes("--trust"));
+	if (args[0] === "pick" && args.length >= 2) {
+		const rest = args.slice(2);
+		let model: string | undefined;
+		let explain = false;
+		let trust = false;
+		for (let i = 0; i < rest.length; i++) {
+			if (rest[i] === "--explain") explain = true;
+			else if (rest[i] === "--trust") trust = true;
+			else if (rest[i] === "--model" && rest[i + 1]) model = rest[++i];
+			else {
+				console.error(USAGE);
+				return 2;
+			}
+		}
+		return accountsPick(a, config, p, args[1]!, explain, trust, model);
+	}
 	if (args[0] === "trust" && (args.length === 2 || args.length === 3)) return accountsTrust(a, config, args[1]!, args[2] ?? here());
-	if (args[0] === "check" && args.length >= 2 && args.slice(2).every((x) => x === "--refresh")) return accountsCheck(a, config, p, args[1]!, args.includes("--refresh"), json);
+	if (args[0] === "check" && args.length >= 2) {
+		const rest = args.slice(2);
+		let model: string | undefined;
+		let fresh = false;
+		for (let i = 0; i < rest.length; i++) {
+			if (rest[i] === "--refresh") fresh = true;
+			else if (rest[i] === "--model" && rest[i + 1]) model = rest[++i];
+			else {
+				console.error(USAGE);
+				return 2;
+			}
+		}
+		return accountsCheck(a, config, p, args[1]!, fresh, json, model);
+	}
 	if (args.length) {
 		console.error(USAGE);
 		return 2;
@@ -675,12 +703,33 @@ async function accountsLogin(a: typeof import("./accounts.ts"), config: import("
 	return failed ? 1 : 0;
 }
 
-/** Every account's quota: the last read when it is under two minutes old, else a fresh one, saved for the next caller. */
+/** Ask the daemon host for its quota snapshot over SSH (never recursive, short timeout) when a local read failed. */
+function fetchRemoteQuotas(host: string, fresh: boolean): import("./accounts.ts").Quota[] | undefined {
+	const run = spawnSync("ssh", ["-o", "ConnectTimeout=5", "-o", "BatchMode=yes", host, "JUNE_LOCAL=1", "june", "quota", "--json", ...(fresh ? ["--refresh"] : [])], {
+		encoding: "utf8",
+		timeout: 15_000,
+	});
+	if (!run.stdout) return undefined;
+	try {
+		const parsed = JSON.parse(run.stdout);
+		return Array.isArray(parsed) ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Every account's quota: the last read when it is under two minutes old, else a fresh one, saved for the next caller.
+ * On a worker host, any account whose local token lapsed falls back to the daemon host's read of that same account. */
 async function currentQuotas(a: typeof import("./accounts.ts"), config: import("./accounts.ts").AccountsConfig, p: ReturnType<typeof paths>, fresh = false) {
 	const file = `${p.state}/quota.json`;
 	const saved = fresh ? undefined : a.cached(file, 120);
 	if (saved) return saved;
-	const rows = await a.quotas(config, people(p, a.parseAccountsOrg));
+	let rows = await a.quotas(config, people(p, a.parseAccountsOrg));
+	const host = remoteHost(p);
+	if (host && rows.some((r) => r.error || !r.windows.length)) {
+		const remote = fetchRemoteQuotas(host, fresh);
+		if (remote) rows = a.mergeQuotas(rows, remote, host);
+	}
 	a.save(file, rows);
 	return rows;
 }
@@ -696,6 +745,7 @@ async function accountsPick(
 	harness: string,
 	explain: boolean,
 	trustHere = false,
+	model?: string,
 ): Promise<number> {
 	if (!(harness in a.HARNESSES) || !config.harnesses[harness as keyof typeof a.HARNESSES]) {
 		console.error(`june accounts pick: ${harness} has no accounts here`);
@@ -707,7 +757,11 @@ async function accountsPick(
 		return 1;
 	}
 	const quotas = await currentQuotas(a, config, p);
-	const ranked = a.rank(rows.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })));
+	const ranked = a.rank(
+		rows.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })),
+		undefined,
+		model,
+	);
 	const chosen = ranked.find((r) => r.usable)?.slot;
 	const fallback = chosen ? undefined : rows[0]!.name;
 	if (trustHere) await accountsTrust(a, config, chosen ?? fallback!, here());
@@ -720,9 +774,9 @@ async function accountsPick(
 }
 
 /**
- * `june accounts check NAME [--refresh] [--json]`: whether login NAME can still work, and if not, the login of the same
- * harness that would take over. The dispatcher asks this of an idle worker before nudging it, to continue its session
- * on another account rather than nudge one that has run out.
+ * `june accounts check NAME [--model MODEL] [--refresh] [--json]`: whether login NAME can still work, and if not, the
+ * login of the same harness that would take over. The dispatcher asks this of an idle worker before nudging it, to
+ * continue its session on another account rather than nudge one that has run out.
  */
 async function accountsCheck(
 	a: typeof import("./accounts.ts"),
@@ -731,6 +785,7 @@ async function accountsCheck(
 	name: string,
 	fresh: boolean,
 	json: boolean,
+	model?: string,
 ): Promise<number> {
 	const rows = await a.status(config, people(p, a.parseAccountsOrg));
 	const slot = rows.find((r) => r.name === name);
@@ -740,7 +795,11 @@ async function accountsCheck(
 	}
 	const mine = rows.filter((r) => r.harness === slot.harness && r.loggedIn && !r.problems.length);
 	const quotas = await currentQuotas(a, config, p, fresh);
-	const ranked = a.rank(mine.map((s) => ({ slot: s, quota: quotas.find((q) => q.provider === s.provider && q.number === s.number) })));
+	const ranked = a.rank(
+		mine.map((s) => ({ slot: s, quota: quotas.find((q) => q.provider === s.provider && q.number === s.number) })),
+		undefined,
+		model,
+	);
 	const own = ranked.find((r) => r.slot === name);
 	// Another account of the same provider number shares this one's quota, so it cannot take over.
 	const next = ranked.find((r) => r.usable && r.slot !== name && mine.find((s) => s.name === r.slot)?.number !== slot.number)?.slot;

@@ -1154,10 +1154,14 @@ cat >"$fixture/launch-tests.el" <<'EOF'
        (should-error (org-dispatch--prompt (car (org-dispatch--states)) "hello"))
        (should-not (seq-find (lambda (args) (equal (car args) "send")) test-calls))))))
 
-(defun test-fake-check (bin answer)
-  "A june in BIN whose accounts check prints ANSWER, a JSON object string."
+(defun test-fake-check (bin answer &optional log)
+  "A june in BIN whose accounts check prints ANSWER, a JSON object string.
+When LOG is given, each invocation's arguments are appended there."
   (let ((june (expand-file-name "june" bin)))
-    (with-temp-file june (insert "#!/bin/sh\necho '" answer "'\n"))
+    (with-temp-file june
+      (insert "#!/bin/sh\n")
+      (when log (insert (format "printf '%%s\\n' \"$*\" >> %s\n" (shell-quote-argument log))))
+      (insert "echo '" answer "'\n"))
     (set-file-modes june #o755)
     june))
 
@@ -1165,10 +1169,12 @@ cat >"$fixture/launch-tests.el" <<'EOF'
   ;; Instead of nudging, the dispatcher ends the worker and resumes its session
   ;; through the harness's plain name, which picks an account with quota.
   (let* ((bin (make-temp-file "june-bin" t))
-         (org-dispatch-june (test-fake-check bin "{\"name\":\"claude1\",\"usable\":false,\"reason\":\"5 hour at 0%\",\"next\":\"claude2\"}")))
+         (check-log (expand-file-name "check.log" bin))
+         (org-dispatch-june (test-fake-check bin "{\"name\":\"claude1\",\"usable\":false,\"reason\":\"5 hour at 0%\",\"next\":\"claude2\"}" check-log)))
     (unwind-protect
         (test-with-hc
-         (let* ((task (plist-put (copy-sequence (test-task "claude")) :card '((slug . "bolt") (effort . "high"))))
+         (let* ((task (plist-put (plist-put (copy-sequence (test-task "claude")) :model "claude-opus-5-5")
+                                 :card '((slug . "bolt") (model . "claude-opus-5-5") (effort . "high"))))
                 (org-dispatch-nudge-after 0) (clock 1000))
            (should (org-dispatch--launch task))
            (cl-letf (((symbol-function 'float-time) (lambda (&rest _) (setq clock (+ clock 10))))
@@ -1177,7 +1183,9 @@ cat >"$fixture/launch-tests.el" <<'EOF'
              (org-dispatch--watch (car (org-dispatch--states)))
              (let* ((state (car (org-dispatch--states)))
                     (run (test-run-call))
-                    (argv (test-argv run)))
+                    (argv (test-argv run))
+                    (checked (with-temp-buffer (insert-file-contents check-log) (buffer-string))))
+               (should (string-search "accounts check claude1 --refresh --json --model claude-opus-5-5" checked))
                (should-not (test-sent "nudge"))
                (should (member '("kill" "t-new") test-calls))
                (should (equal (plist-get state :terminal) "t-new1"))

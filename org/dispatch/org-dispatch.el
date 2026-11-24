@@ -270,13 +270,16 @@ A terminal started as a shell runs the harness as its child."
                          (insert-file-contents-literally (format "/proc/%d/task/%d/children" pid pid))
                          (split-string (buffer-string))))))))
 
-(defun org-dispatch--check-account (slot)
-  "June's answer on whether login SLOT can still work, an alist with usable,
-reason and next, or nil when june cannot say."
+(defun org-dispatch--check-account (slot &optional model)
+  "June's answer on whether login SLOT can still work for MODEL, an alist with
+usable, reason and next, or nil when june cannot say."
   (let ((june (executable-find org-dispatch-june)))
     (when june
       (with-temp-buffer
-        (call-process june nil '(t nil) nil "accounts" "check" slot "--refresh" "--json")
+        (apply #'call-process june nil '(t nil) nil
+               "accounts" "check" slot "--refresh" "--json"
+               (when (and (stringp model) (not (string-empty-p model)))
+                 (list "--model" model)))
         (ignore-errors
           (json-parse-string (buffer-string) :object-type 'alist :null-object nil :false-object nil))))))
 
@@ -451,7 +454,11 @@ re-queue the task AUTO for that host. Returns non-nil if handed off."
 or hand off to another candidate in :AGENTS: if no account of its harness can.
 Return non-nil when handled; nil leaves the worker to the usual nudges."
   (let* ((slot (org-dispatch--worker-account state))
-         (check (and slot (org-dispatch--check-account slot))))
+         (card (and (plist-get state :card)
+                    (ignore-errors
+                      (json-parse-string (plist-get state :card) :object-type 'alist :null-object nil :false-object nil))))
+         (model (or (plist-get state :model) (alist-get 'model card)))
+         (check (and slot (org-dispatch--check-account slot model))))
     (when (and check (not (alist-get 'usable check)))
       (let ((next (alist-get 'next check))
             (reason (alist-get 'reason check))

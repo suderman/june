@@ -135,6 +135,82 @@ test("computeStanding combines roster cards, live workers, and account battery",
 	]);
 });
 
+test("computeStanding shares Antigravity pools across same-group specialists and isolates Antigravity Claude from native Claude", () => {
+	const now = Date.UTC(2026, 10, 23, 12);
+	const cards = parseRoster(`
+* NativeClaude
+:PROPERTIES:
+:HOST: kit
+:HARNESS: claude
+:MODEL: claude-opus-5-5
+:END:
+
+* Neon
+:PROPERTIES:
+:HOST: kit
+:HARNESS: agy
+:MODEL: gemini-4-neon
+:END:
+
+* Argon
+:PROPERTIES:
+:HOST: kit
+:HARNESS: agy
+:MODEL: argon
+:END:
+
+* AgyClaude
+:PROPERTIES:
+:HOST: kit
+:HARNESS: agy
+:MODEL: claude-opus-5-5
+:END:
+
+* VanishedPool
+:PROPERTIES:
+:HOST: kit
+:HARNESS: agy
+:MODEL: mystery-promo
+:END:
+`);
+	const hosts = new Map([["kit", []]]);
+	const logins = [
+		{ name: "claude1", harness: "claude" as const, provider: "anthropic" as const, number: 1, loggedIn: true, problems: [] },
+		{ name: "agy1", harness: "agy" as const, provider: "google" as const, number: 1, loggedIn: true, problems: [] },
+	];
+	const quotas = [
+		{
+			provider: "anthropic" as const,
+			number: 1,
+			fetched: Math.floor(now / 1000),
+			windows: [{ name: "Weekly", remaining: 0, seconds: 604800, resetAt: Math.floor((now + 48 * 3600_000) / 1000) }],
+		},
+		{
+			provider: "google" as const,
+			number: 1,
+			fetched: Math.floor(now / 1000),
+			groups: [
+				{ name: "Gemini Models", models: ["Gemini 4 Neon", "Gemini 4 Argon"] },
+				{ name: "Claude and GPT models", models: ["Claude Opus 5.5", "GPT-OSS 120B"] },
+			],
+			windows: [
+				{ name: "Weekly", remaining: 0, seconds: 604800, resetAt: Math.floor((now + 48 * 3600_000) / 1000), group: "Gemini Models" },
+				{ name: "Weekly", remaining: 58, seconds: 604800, resetAt: Math.floor((now + 48 * 3600_000) / 1000), group: "Claude and GPT models" },
+			],
+		},
+	];
+	const standing = computeStanding(cards, hosts, logins, quotas, "kit", () => false, now);
+	const bySlug = new Map(standing.map((s) => [s.card.slug, s.battery]));
+	// Native Claude spent does not affect Antigravity Claude.
+	assert.deepEqual(bySlug.get("nativeclaude"), { reason: "claude1: weekly at 0%" });
+	assert.equal((bySlug.get("agyclaude") as { account: string; weekly: number }).weekly, 58);
+	// Neon and Argon share the exhausted Gemini Models pool.
+	assert.deepEqual(bySlug.get("neon"), { reason: "agy1: weekly at 0%" });
+	assert.deepEqual(bySlug.get("argon"), { reason: "agy1: weekly at 0%" });
+	// Unknown model fails closed rather than borrowing Antigravity Claude's 58%.
+	assert.deepEqual(bySlug.get("vanishedpool"), { reason: "agy1: no quota group for mystery-promo" });
+});
+
 test("run history records starts and endings in june.sqlite and ranks agents on the leaderboard", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
