@@ -15,6 +15,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import java.nio.ByteBuffer
+import android.content.res.AssetManager
 import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -37,16 +38,28 @@ class TerminalView(context: Context) : View(context) {
     var alt = false
     var onModifiersUsed: () -> Unit = {}
 
-    val foreground = Color.parseColor("#D8DEE9")
-    val background = Color.parseColor("#1B1E26")
-    val cursorColor = Color.parseColor("#F0A35E")
+    // The desktop terminal's colours (kitty's theme on kit), so agents look as they do there.
+    val foreground = Color.parseColor("#CDD6F4")
+    val background = Color.parseColor("#1E1E2E")
+    val cursorColor = Color.parseColor("#CDD6F4")
+    private val palette = intArrayOf(
+        0x1E1E2E, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xCBA6F7, 0x94E2D5, 0xCDD6F4,
+        0x45475A, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xCBA6F7, 0x94E2D5, 0xB4BEFE,
+    ).map { it or 0xFF000000.toInt() }.toIntArray()
 
+    private val faces = Faces.load(context)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.MONOSPACE
+        typeface = faces.regular
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12.5f, context.resources.displayMetrics)
     }
     private val fill = Paint()
-    private val bold = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+
+    /** What the keyboard is composing (a swiped or spoken word), drawn at the cursor until it is committed. */
+    var composing = ""
+        set(value) {
+            field = value
+            postInvalidateOnAnimation()
+        }
     var cellWidth = ceil(paint.measureText("M")).toInt()
         private set
     var cellHeight = ceil(paint.fontMetrics.let { it.descent - it.ascent }).toInt()
@@ -68,7 +81,7 @@ class TerminalView(context: Context) : View(context) {
     /** Start over with an empty emulator, as each attach sends a full first paint. */
     fun reset() = synchronized(lock) {
         if (handle != 0L) TerminalBridge.nativeDestroy(handle)
-        handle = if (cols > 0) TerminalBridge.nativeCreate(cols, rows, cellWidth, cellHeight, foreground, background, cursorColor) else 0L
+        handle = if (cols > 0) TerminalBridge.nativeCreate(cols, rows, cellWidth, cellHeight, foreground, background, cursorColor, palette) else 0L
         postInvalidateOnAnimation()
     }
 
@@ -91,7 +104,7 @@ class TerminalView(context: Context) : View(context) {
         cols = c
         rows = r
         synchronized(lock) {
-            if (handle == 0L) handle = TerminalBridge.nativeCreate(cols, rows, cellWidth, cellHeight, foreground, background, cursorColor)
+            if (handle == 0L) handle = TerminalBridge.nativeCreate(cols, rows, cellWidth, cellHeight, foreground, background, cursorColor, palette)
             else TerminalBridge.nativeResize(handle, cols, rows, cellWidth, cellHeight)
         }
         onGrid(cols, rows, cellWidth, cellHeight)
@@ -134,13 +147,27 @@ class TerminalView(context: Context) : View(context) {
                     b.position(b.position() + len)
                     if (flags and (1 shl 4) != 0 || text == " ") continue
                     paint.color = fg
-                    paint.typeface = if (flags and 1 != 0) bold else Typeface.MONOSPACE
-                    paint.textSkewX = if (flags and 2 != 0) -0.2f else 0f
+                    paint.typeface = faces.of(flags and 1 != 0, flags and 2 != 0)
                     paint.isUnderlineText = flags and (1 shl 7) != 0
                     paint.isStrikeThruText = flags and (1 shl 5) != 0
                     canvas.drawText(text, px, py + baseline, paint)
                 }
             }
+        }
+        if (composing.isNotEmpty() && cx < cs && cy < rs) {
+            // The word the keyboard is still composing, over the cursor, underlined as keyboards mark it.
+            val px = left + cx * cellWidth
+            val py = top + cy * cellHeight
+            paint.typeface = faces.regular
+            paint.isUnderlineText = true
+            paint.isStrikeThruText = false
+            val w = paint.measureText(composing)
+            fill.color = defaultBg
+            canvas.drawRect(px, py, px + w, py + cellHeight, fill)
+            paint.color = cursorArgb
+            canvas.drawText(composing, px, py + baseline, paint)
+            paint.isUnderlineText = false
+            return
         }
         if (cursorShown && cx < cs && cy < rs) {
             val px = left + cx * cellWidth
@@ -174,7 +201,11 @@ class TerminalView(context: Context) : View(context) {
                     val rowsMoved = floor(abs(scrollRemainder)).toInt() * if (scrollRemainder < 0) -1 else 1
                     if (rowsMoved != 0) {
                         scrollRemainder -= rowsMoved
-                        synchronized(lock) { if (handle != 0L) TerminalBridge.nativeScroll(handle, -rowsMoved) }
+                        // A finger moving down shows older lines, as a wheel turned up does.
+                        val col = ((event.x - paddingLeft) / cellWidth).toInt().coerceIn(0, maxOf(cols - 1, 0))
+                        val row = ((event.y - paddingTop) / cellHeight).toInt().coerceIn(0, maxOf(rows - 1, 0))
+                        val bytes = synchronized(lock) { if (handle == 0L) ByteArray(0) else TerminalBridge.nativeWheel(handle, -rowsMoved, col, row) }
+                        if (bytes.isNotEmpty()) onInput(bytes, false)
                         postInvalidateOnAnimation()
                     }
                     lastY = event.y
@@ -275,11 +306,18 @@ class TerminalView(context: Context) : View(context) {
     override fun onCheckIsTextEditor() = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
-        // As Termux and T3: a visible-password field, so keyboards neither suggest nor correct, nor keep what was typed.
-        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        // Plain text without suggestions, so keyboards neither suggest nor correct. Not the visible-password type Termux
+        // and T3 use: HeliBoard (GestureEnabler) turns swipe typing off for any password field.
+        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or EditorInfo.IME_ACTION_NONE
         return object : BaseInputConnection(this, true) {
             // Composing text (a swiped or voiced word) waits in the editable until the keyboard commits it.
+            override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean {
+                super.setComposingText(text, newCursorPosition)
+                composing = editable?.toString() ?: ""
+                return true
+            }
+
             override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
                 super.commitText(text, newCursorPosition)
                 flush()
@@ -314,8 +352,30 @@ class TerminalView(context: Context) : View(context) {
                 if (e.isEmpty()) return
                 val s = e.toString()
                 e.clear()
+                composing = ""
                 type(s)
             }
+        }
+    }
+}
+
+/** The terminal's faces: CommitMono Nerd Font Mono from the APK's assets (android/default.nix), else the system's monospace. */
+private class Faces(val regular: Typeface, val bold: Typeface, val italic: Typeface, val boldItalic: Typeface) {
+    fun of(bold: Boolean, italic: Boolean) = when {
+        bold && italic -> boldItalic
+        bold -> this.bold
+        italic -> this.italic
+        else -> regular
+    }
+
+    companion object {
+        private var loaded: Faces? = null
+
+        fun load(context: Context): Faces = loaded ?: run {
+            val assets: AssetManager = context.assets
+            fun face(name: String, style: Int) =
+                runCatching { Typeface.createFromAsset(assets, "terminal/$name.otf") }.getOrElse { Typeface.create(Typeface.MONOSPACE, style) }
+            Faces(face("Regular", Typeface.NORMAL), face("Bold", Typeface.BOLD), face("Italic", Typeface.ITALIC), face("BoldItalic", Typeface.BOLD_ITALIC)).also { loaded = it }
         }
     }
 }

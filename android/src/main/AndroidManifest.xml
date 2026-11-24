@@ -64,6 +64,7 @@
                 <data android:scheme="june" android:host="agents" />
                 <data android:scheme="june" android:host="chat" />
                 <data android:scheme="june" android:host="projects" />
+                <data android:scheme="june" android:host="terminal" />
             </intent-filter>
             <!-- A moment in June's history from another app, such as a link in Org: june://at/ID opens its day there. -->
             <intent-filter>
@@ -139,14 +140,6 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
-
-        <!-- The embedded terminal spike (TerminalSpikeActivity.kt), started over ADB only: like PairActivity, only the shell and the
-             system hold the permission it asks for. -->
-        <activity android:name=".TerminalSpikeActivity" android:exported="true"
-            android:permission="android.permission.WRITE_SECURE_SETTINGS"
-            android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard"
-            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
         <!-- Lends the camera the one file it writes a photo into, under the cache. -->
         <provider android:name="androidx.core.content.FileProvider"

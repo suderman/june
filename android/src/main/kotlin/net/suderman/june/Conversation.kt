@@ -245,6 +245,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     // A link asked for a view (the agenda widget, a reminder): jump there; a plain tab jump clears itself so tapping it again works.
     LaunchedEffect(link.requested) {
         val r = link.requested ?: return@LaunchedEffect
+        link.terminal = null
         pager.scrollToPage(when (r.first) { "agents" -> 0; "chat" -> 1; else -> 2 })
         if (r.second.isEmpty()) link.requested = null
     }
@@ -263,7 +264,16 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
         if (boards) {
             val needs = link.agents?.optJSONArray("needs")?.length() ?: 0
             Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
-                Tabs(pager.currentPage, needs, palette) { page -> pages.launch { pager.animateScrollToPage(page) } }
+                Tabs(
+                    pager.currentPage, needs, palette, terminal = link.terminal != null,
+                    // The Terminal tab, when terminals open in June: the last one shown, or the first agent listed.
+                    onTerminal = {
+                        if (link.terminal == null) {
+                            val t = Terminals.last(context) ?: firstTerminal(link)
+                            if (t != null) link.openTerminal(t) else android.widget.Toast.makeText(context, "No agent terminals listed yet", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                ) { page -> link.terminal = null; pages.launch { pager.animateScrollToPage(page) } }
             }
         }
         Column(
@@ -340,7 +350,8 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
             }
         }
         // The words to send belong to the chat alone. Leaving it, or putting the keyboard away, lets go of the field.
-        val chat = !boards || pager.currentPage == 1
+        val shownTerminal = link.terminal.takeIf { boards }
+        val chat = (!boards || pager.currentPage == 1) && shownTerminal == null
         val focus = androidx.compose.ui.platform.LocalFocusManager.current
         val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
         val typing = androidx.compose.foundation.layout.WindowInsets.isImeVisible
@@ -348,11 +359,20 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
         LaunchedEffect(chat) { if (!chat) { focus.clearFocus(); keyboard?.hide() } }
         if (boards) {
             LaunchedEffect(Unit) { link.wantBoards() }
-            androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1, pageSpacing = 16.dp) { page ->
-                when (page) {
-                    0 -> AgentsBoard(link, ready!!, palette, Modifier.fillMaxSize())
-                    2 -> ProjectsBoard(link, ready!!, palette, Modifier.fillMaxSize())
-                    else -> stripPage(Modifier.fillMaxSize())
+            // An agent's terminal lies over the boards rather than being a page of its own, so Back returns to the same
+            // board, task and place (see "Navigation" under "Embedded terminal" in docs/interfaces.org).
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, pageSpacing = 16.dp, userScrollEnabled = shownTerminal == null) { page ->
+                    when (page) {
+                        0 -> AgentsBoard(link, ready!!, palette, Modifier.fillMaxSize())
+                        2 -> ProjectsBoard(link, ready!!, palette, Modifier.fillMaxSize())
+                        else -> stripPage(Modifier.fillMaxSize())
+                    }
+                }
+                if (shownTerminal != null) {
+                    androidx.activity.compose.BackHandler { link.terminal = null }
+                    // One page per terminal: its view and stream belong to that target.
+                    androidx.compose.runtime.key(shownTerminal) { TerminalPage(link, shownTerminal, palette, Modifier.fillMaxSize()) }
                 }
             }
         } else stripPage(Modifier.weight(1f).fillMaxWidth())

@@ -138,6 +138,17 @@ private fun SwipeSettings() {
             Text(name, color = MaterialTheme.colorScheme.primary)
         }
     }
+    // Where agent terminals open: inside June (TerminalPage.kt), or the Terminal app above and Termux for session links.
+    val embedded = remember(changed) { Terminals.embedded(context) }
+    Row(Modifier.fillMaxWidth().clickable { Terminals.setEmbedded(context, !embedded); changed++ }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("Agent terminals", Modifier.weight(1f))
+        Text(if (embedded) "In June" else "Terminal app and Termux", color = MaterialTheme.colorScheme.primary)
+    }
+    val keyRow = remember(changed) { Terminals.keyRow(context) }
+    if (embedded) Row(Modifier.fillMaxWidth().clickable { Terminals.setKeyRow(context, !keyRow); changed++ }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("Terminal key row", Modifier.weight(1f))
+        Text(if (keyRow) "Shown with the keyboard" else "Off", color = MaterialTheme.colorScheme.primary)
+    }
     Text("Swipes on June's header", style = MaterialTheme.typography.titleMedium)
     for (direction in Swipes.Direction.entries) {
         val name = remember(changed) { Swipes.settingLabel(context, Swipes.get(context, direction)) }

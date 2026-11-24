@@ -134,7 +134,15 @@ object Swipes {
     }
 
     /** Open the app chosen for Terminal or Editor; returns why it could not be, or null. */
-    fun openSlot(context: Context, slot: AppSlot): String? = open(context, app(context, slot))
+    fun openSlot(context: Context, slot: AppSlot): String? =
+        // With terminals in June, Terminal is June's own page on the last terminal shown (june://terminal).
+        if (slot == AppSlot.Terminal && Terminals.embedded(context)) runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, android.net.Uri.parse("june://terminal")).setClass(context, ConversationActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            )
+        }.exceptionOrNull()?.let { "June could not open it" }
+        else open(context, app(context, slot))
 
     /** Open an app at its launcher entry; returns why it could not be, or null. */
     fun open(context: Context, pkg: String): String? {

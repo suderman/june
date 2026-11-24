@@ -141,6 +141,13 @@ class ConversationActivity : ComponentActivity() {
         if (data.scheme != "june") return
         when (data.host) {
             "task" -> data.getQueryParameter("key")?.takeIf { it.isNotEmpty() }?.let(link::openTask)
+            // An agent's terminal inside June: june://terminal?link=herdr:... or ?host=kit&terminal=t7; bare, the last one.
+            "terminal" -> {
+                val target = data.getQueryParameter("link")?.let(TerminalTarget::of)
+                    ?: data.getQueryParameter("host")?.let { h -> data.getQueryParameter("terminal")?.takeIf { Regex("^t[0-9a-z]{1,8}$").matches(it) }?.let { TerminalTarget(h, it) } }
+                    ?: Terminals.last(this)
+                if (target != null) link.openTerminal(target)
+            }
             "agents" -> { link.requested = "agents" to ""; link.wantBoards() }
             "chat", "conversation" -> link.requested = "chat" to ""
             "projects" -> { link.requested = "projects" to ""; link.wantBoards() }

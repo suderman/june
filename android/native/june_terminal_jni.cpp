@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <vector>
@@ -35,6 +36,9 @@ struct Session {
   GhosttyRenderStateRowCells cells = nullptr;
   GhosttyKeyEncoder encoder = nullptr;
   GhosttyKeyEvent key = nullptr;
+  GhosttyMouseEncoder mouse = nullptr;
+  GhosttyMouseEvent wheel = nullptr;
+  uint32_t cell_w = 1, cell_h = 1;
   std::vector<uint8_t> replies;
   std::mutex mutex;
 };
@@ -97,6 +101,8 @@ struct Writer {
 
 void Free(Session* s) {
   if (s == nullptr) return;
+  ghostty_mouse_event_free(s->wheel);
+  ghostty_mouse_encoder_free(s->mouse);
   ghostty_key_event_free(s->key);
   ghostty_key_encoder_free(s->encoder);
   ghostty_render_state_row_cells_free(s->cells);
@@ -109,14 +115,16 @@ void Free(Session* s) {
 }  // namespace
 
 extern "C" JNIEXPORT jlong JNICALL Java_net_suderman_june_TerminalBridge_nativeCreate(
-    JNIEnv*, jclass, jint cols, jint rows, jint cell_w, jint cell_h, jint fg, jint bg, jint cursor) {
+    JNIEnv* env, jclass, jint cols, jint rows, jint cell_w, jint cell_h, jint fg, jint bg, jint cursor, jintArray palette) {
   auto* s = new Session();
   if (ghostty_terminal_new(nullptr, &s->terminal, uint16_t(std::clamp(cols, 1, 1000)), uint16_t(std::clamp(rows, 1, 1000))) != GHOSTTY_SUCCESS ||
       ghostty_render_state_new(nullptr, &s->render) != GHOSTTY_SUCCESS ||
       ghostty_render_state_row_iterator_new(nullptr, &s->rows) != GHOSTTY_SUCCESS ||
       ghostty_render_state_row_cells_new(nullptr, &s->cells) != GHOSTTY_SUCCESS ||
       ghostty_key_encoder_new(nullptr, &s->encoder) != GHOSTTY_SUCCESS ||
-      ghostty_key_event_new(nullptr, &s->key) != GHOSTTY_SUCCESS) {
+      ghostty_key_event_new(nullptr, &s->key) != GHOSTTY_SUCCESS ||
+      ghostty_mouse_encoder_new(nullptr, &s->mouse) != GHOSTTY_SUCCESS ||
+      ghostty_mouse_event_new(nullptr, &s->wheel) != GHOSTTY_SUCCESS) {
     Free(s);
     return 0;
   }
@@ -128,7 +136,18 @@ extern "C" JNIEXPORT jlong JNICALL Java_net_suderman_june_TerminalBridge_nativeC
   ghostty_terminal_set(s->terminal, GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND, &f);
   ghostty_terminal_set(s->terminal, GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND, &b);
   ghostty_terminal_set(s->terminal, GHOSTTY_TERMINAL_OPT_COLOR_CURSOR, &c);
-  ghostty_terminal_resize(s->terminal, uint16_t(std::clamp(cols, 1, 1000)), uint16_t(std::clamp(rows, 1, 1000)), uint32_t(std::max(cell_w, 1)), uint32_t(std::max(cell_h, 1)));
+  // The first colours of the 256 from PALETTE (the desktop terminal's 16), the rest Ghostty's defaults.
+  GhosttyColorRgb colors[256];
+  if (palette != nullptr && ghostty_terminal_get(s->terminal, GHOSTTY_TERMINAL_DATA_COLOR_PALETTE_DEFAULT, colors) == GHOSTTY_SUCCESS) {
+    jsize n = std::min<jsize>(env->GetArrayLength(palette), 256);
+    std::vector<jint> given(static_cast<size_t>(n));
+    env->GetIntArrayRegion(palette, 0, n, given.data());
+    for (jsize i = 0; i < n; i++) colors[i] = Rgb(given[static_cast<size_t>(i)]);
+    ghostty_terminal_set(s->terminal, GHOSTTY_TERMINAL_OPT_COLOR_PALETTE, colors);
+  }
+  s->cell_w = uint32_t(std::max(cell_w, 1));
+  s->cell_h = uint32_t(std::max(cell_h, 1));
+  ghostty_terminal_resize(s->terminal, uint16_t(std::clamp(cols, 1, 1000)), uint16_t(std::clamp(rows, 1, 1000)), s->cell_w, s->cell_h);
   return static_cast<jlong>(reinterpret_cast<intptr_t>(s));
 }
 
@@ -149,6 +168,8 @@ extern "C" JNIEXPORT void JNICALL Java_net_suderman_june_TerminalBridge_nativeRe
   auto* s = From(h);
   if (s == nullptr) return;
   std::lock_guard<std::mutex> lock(s->mutex);
+  s->cell_w = uint32_t(std::max(cell_w, 1));
+  s->cell_h = uint32_t(std::max(cell_h, 1));
   ghostty_terminal_resize(s->terminal, uint16_t(std::clamp(cols, 1, 1000)), uint16_t(std::clamp(rows, 1, 1000)), uint32_t(std::max(cell_w, 1)), uint32_t(std::max(cell_h, 1)));
 }
 
@@ -164,6 +185,58 @@ extern "C" JNIEXPORT void JNICALL Java_net_suderman_june_TerminalBridge_nativeSc
     sv.value.delta = delta;
   }
   ghostty_terminal_scroll_viewport(s->terminal, sv);
+}
+
+// A drag of ROWS rows at cell (COL, ROW), negative toward older lines, as a terminal's scroll wheel: wheel events when
+// the program asked for the mouse, arrow keys in the alternate screen (which has no history), else the local history.
+// Returns the bytes to send the program, empty when the history moved here.
+extern "C" JNIEXPORT jbyteArray JNICALL Java_net_suderman_june_TerminalBridge_nativeWheel(JNIEnv* env, jclass, jlong h, jint rows, jint col, jint row) {
+  auto* s = From(h);
+  if (s == nullptr || rows == 0) return env->NewByteArray(0);
+  std::lock_guard<std::mutex> lock(s->mutex);
+  std::vector<uint8_t> out;
+  uint8_t buf[64];
+  size_t written = 0;
+  const int count = std::min(std::abs(rows), 50);
+  bool tracking = false;
+  ghostty_terminal_get(s->terminal, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &tracking);
+  if (tracking) {
+    uint16_t cols = 0, height = 0;
+    ghostty_terminal_get(s->terminal, GHOSTTY_TERMINAL_DATA_COLS, &cols);
+    ghostty_terminal_get(s->terminal, GHOSTTY_TERMINAL_DATA_ROWS, &height);
+    ghostty_mouse_encoder_set_from_terminal(s->mouse, s->terminal);
+    GhosttyMouseEncoderSize size = GHOSTTY_INIT_SIZED(GhosttyMouseEncoderSize);
+    size.screen_width = uint32_t(cols) * s->cell_w;
+    size.screen_height = uint32_t(height) * s->cell_h;
+    size.cell_width = s->cell_w;
+    size.cell_height = s->cell_h;
+    ghostty_mouse_encoder_set(s->mouse, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &size);
+    ghostty_mouse_event_set_action(s->wheel, GHOSTTY_MOUSE_ACTION_PRESS);
+    ghostty_mouse_event_set_button(s->wheel, rows < 0 ? GHOSTTY_MOUSE_BUTTON_FOUR : GHOSTTY_MOUSE_BUTTON_FIVE);
+    ghostty_mouse_event_set_mods(s->wheel, 0);
+    ghostty_mouse_event_set_position(s->wheel, GhosttyMousePosition{float(col) * s->cell_w + 1.0f, float(row) * s->cell_h + 1.0f});
+    for (int i = 0; i < count; i++)
+      if (ghostty_mouse_encoder_encode(s->mouse, s->wheel, buf, sizeof(buf), &written) == GHOSTTY_SUCCESS) out.insert(out.end(), buf, buf + written);
+    return Bytes(env, out.data(), out.size());
+  }
+  GhosttyTerminalScreen screen = GHOSTTY_TERMINAL_SCREEN_PRIMARY;
+  ghostty_terminal_get(s->terminal, GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN, &screen);
+  if (screen == GHOSTTY_TERMINAL_SCREEN_ALTERNATE) {
+    ghostty_key_encoder_set_from_terminal(s->encoder, s->terminal);
+    ghostty_key_event_set_action(s->key, GHOSTTY_KEY_ACTION_PRESS);
+    ghostty_key_event_set_key(s->key, rows < 0 ? GHOSTTY_KEY_ARROW_UP : GHOSTTY_KEY_ARROW_DOWN);
+    ghostty_key_event_set_mods(s->key, 0);
+    ghostty_key_event_set_utf8(s->key, GhosttyString{reinterpret_cast<const uint8_t*>(""), 0});
+    ghostty_key_event_set_unshifted_codepoint(s->key, 0);
+    for (int i = 0; i < count; i++)
+      if (ghostty_key_encoder_encode(s->encoder, s->key, buf, sizeof(buf), &written) == GHOSTTY_SUCCESS) out.insert(out.end(), buf, buf + written);
+    return Bytes(env, out.data(), out.size());
+  }
+  GhosttyTerminalScrollViewport sv{};
+  sv.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA;
+  sv.value.delta = rows;
+  ghostty_terminal_scroll_viewport(s->terminal, sv);
+  return env->NewByteArray(0);
 }
 
 // A key for the program's current modes: KEY is a GhosttyKey, MODS GhosttyMods, TEXT what it types (may be empty).

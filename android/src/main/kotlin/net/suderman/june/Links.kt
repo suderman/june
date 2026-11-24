@@ -25,7 +25,7 @@ object Links {
 
     /** Open `url`; returns why it could not be, or null. */
     fun open(context: Context, url: String): String? = when {
-        HERDR.matches(url) -> herdr(context, url.removePrefix("herdr:"))
+        HERDR.matches(url) -> if (Terminals.embedded(context)) embedded(context, url) else termux(context, url)
         FILE.matches(url) -> emacs(context, url.removePrefix("file:"))
         url.startsWith("https://") || url.startsWith("http://") -> runCatching {
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -38,7 +38,16 @@ object Links {
      * a fingerprint, then herdr-link attach finds the terminal by its session or resumes the session. Needs Termux's RUN_COMMAND, which
      * the install app grants, and allow-external-apps in ~/.termux/termux.properties.
      */
-    private fun herdr(context: Context, path: String): String? {
+    /** The agent's terminal inside June (TerminalPage.kt), through the full screen's june://terminal, which takes it in place when it shows. */
+    private fun embedded(context: Context, url: String): String? = runCatching {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse("june://terminal?link=${Uri.encode(url)}")).setClass(context, ConversationActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+        )
+    }.exceptionOrNull()?.let { "June could not open it: ${it.message}" }
+
+    fun termux(context: Context, url: String): String? {
+        val path = url.removePrefix("herdr:")
         val host = path.substringBefore('/')
         val intent = Intent("com.termux.RUN_COMMAND").setClassName("com.termux", "com.termux.app.RunCommandService")
             .putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/home/bin/ssh-unlock")

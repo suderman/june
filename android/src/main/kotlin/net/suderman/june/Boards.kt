@@ -90,11 +90,11 @@ private enum class Tab(val label: String, val page: Int?, val slot: Swipes.AppSl
 val TabsHeight = 58.dp
 
 @Composable
-fun Tabs(page: Int, needs: Int, palette: Look.Palette, onPage: (Int) -> Unit) {
+fun Tabs(page: Int, needs: Int, palette: Look.Palette, terminal: Boolean = false, onTerminal: (() -> Unit)? = null, onPage: (Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     Row(Modifier.fillMaxWidth().height(TabsHeight).padding(top = 2.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         for (tab in Tab.entries) {
-            val on = tab.page == page
+            val on = if (terminal) tab == Tab.Terminal else tab.page == page
             Box(
                 Modifier.weight(1f).height(52.dp)
                     .clickable(
@@ -102,12 +102,14 @@ fun Tabs(page: Int, needs: Int, palette: Look.Palette, onPage: (Int) -> Unit) {
                         indication = androidx.compose.material3.ripple(bounded = false, radius = 26.dp),
                     ) {
                         tab.page?.let(onPage)
-                        tab.slot?.let { slot -> Swipes.openSlot(context, slot)?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() } }
+                        // Terminal opens June's own terminal page when terminals open in June (Terminals.embedded), else its app.
+                        if (tab == Tab.Terminal && onTerminal != null && Terminals.embedded(context)) onTerminal()
+                        else tab.slot?.let { slot -> Swipes.openSlot(context, slot)?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() } }
                     }
                     .semantics {
                         contentDescription = tab.label
-                        role = if (tab.page != null) Role.Tab else Role.Button
-                        if (tab.page != null) selected = on
+                        role = if (tab.page != null || tab == Tab.Terminal) Role.Tab else Role.Button
+                        if (tab.page != null || tab == Tab.Terminal) selected = on
                     },
                 contentAlignment = Alignment.Center,
             ) {

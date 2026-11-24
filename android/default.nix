@@ -12,10 +12,10 @@
   runCommand,
   imagemagick,
   google-fonts,
+  nerd-fonts,
   writeShellApplication,
   android-tools,
-  # The terminal's JNI library with libghostty-vt inside (android/native), for the embedded terminal; none without it.
-  juneterm ? null,
+  callPackage,
 }: let
   platform = "37.0";
   buildTools = "37.0.0";
@@ -26,6 +26,8 @@
     includeSystemImages = false;
   };
   home = "${sdk.androidsdk}/libexec/android-sdk";
+  # The embedded terminal's native library: libghostty-vt inside June's JNI bridge (terminal.nix).
+  juneterm = callPackage ./terminal.nix {};
   tools = "${home}/build-tools/${buildTools}";
   jdk = "${jdk17_headless}/lib/openjdk";
 
@@ -54,6 +56,8 @@
 
   # The strip's lettering, display, and caption faces, as the desktop client uses them.
   fonts = "${google-fonts.override {fonts = ["ShantellSans" "DelaGothicOne" "ZenKakuGothicNew"];}}/share/fonts/truetype";
+  # The embedded terminal's face, as the desktop's terminal has it, with Nerd Font icons (OFL).
+  terminalFont = "${nerd-fonts.commit-mono}/share/fonts/opentype/NerdFonts/CommitMono";
 
   apk = stdenv.mkDerivation (finalAttrs: {
     pname = "june-android";
@@ -90,7 +94,8 @@
       install -Dm644 ${fonts}/DelaGothicOne-Regular.ttf src/main/res/font/dela_gothic_one.ttf
       install -Dm644 ${fonts}/ZenKakuGothicNew-Medium.ttf src/main/res/font/zen_kaku_gothic_new_medium.ttf
       install -Dm644 ${fonts}/ZenKakuGothicNew-Bold.ttf src/main/res/font/zen_kaku_gothic_new_bold.ttf
-      ${lib.optionalString (juneterm != null) "install -Dm644 ${juneterm} src/main/jniLibs/arm64-v8a/libjuneterm.so"}
+      install -Dm644 ${juneterm}/arm64-v8a/libjuneterm.so src/main/jniLibs/arm64-v8a/libjuneterm.so
+      for face in Regular Bold Italic BoldItalic; do install -Dm644 "${terminalFont}/CommitMonoNerdFontMono-$face.otf" "src/main/assets/terminal/$face.otf"; done
     '';
 
     installPhase = ''
@@ -161,4 +166,4 @@
     '';
   };
 in
-  apk // {inherit install sdk decisions avatar;}
+  apk // {inherit install sdk decisions avatar juneterm;}
