@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -151,7 +152,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
     // A long press: the terminal's text in a sheet, to select and copy with Android's own handles, or paste.
     var copying by remember(target) { mutableStateOf<String?>(null) }
     // The keyboard goes first, so the sheet has the whole screen for the history.
-    LaunchedEffect(view) { view.onLongPress = { view.hideKeyboard(); copying = view.text() } }
+    LaunchedEffect(view) { view.onLongPress = { view.hideKeyboard(); copying = view.text().trimEnd() } }
     val ink = Color(0xFFCDD6F4)
     val muted = Color(0xFF9399B2)
     // A pointer target over its whole area, so no tap falls through to the board beneath.
@@ -214,7 +215,9 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
         }
         if (Terminals.keyRow(context) && WindowInsets.isImeVisible) KeyRow(view)
     }
-    if (!WindowInsets.isImeVisible) copying?.let { text -> CopySheet(text, view, close = { copying = null }, paste = { view.paste(it); copying = null }) }
+    // Only once the keyboard has finished going down, so the sheet's window is laid out on the whole screen.
+    val keyboardGone = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) == 0
+    if (keyboardGone) copying?.let { text -> CopySheet(text, view, close = { copying = null }, paste = { view.paste(it); copying = null }) }
 }
 
 /**
@@ -227,7 +230,6 @@ private fun CopySheet(text: String, view: TerminalView, close: () -> Unit, paste
     val density = androidx.compose.ui.platform.LocalDensity.current
     val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
     val scroll = androidx.compose.foundation.rememberScrollState()
-    LaunchedEffect(text) { scroll.scrollTo(scroll.maxValue) }
     val style = remember(view) {
         val advance = android.graphics.Paint().apply { typeface = view.face; textSize = view.textSize }.measureText("M")
         with(density) {
@@ -254,7 +256,8 @@ private fun CopySheet(text: String, view: TerminalView, close: () -> Unit, paste
                 Text("copy all", Modifier.clickable { clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text)); close() }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
                 Text("close", Modifier.clickable(onClick = close).padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
             }
-            Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll), contentAlignment = Alignment.TopCenter) {
+            // Scrolled from the bottom, so the latest lines stay in view whatever the sheet's height.
+            Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll, reverseScrolling = true), contentAlignment = Alignment.TopCenter) {
                 androidx.compose.foundation.text.selection.SelectionContainer {
                     Text(text, Modifier.width(width), style = style)
                 }
