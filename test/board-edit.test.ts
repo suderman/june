@@ -127,7 +127,10 @@ test("through this checkout's org-edit, a board edits a task, refuses a stale st
 	await edits.apply(exported, { action: "title", title: "Renamed" }, "board:r5");
 	text = await readFile(file, "utf8");
 	assert.match(text, /^\* TODO Renamed$/m);
-	await assert.rejects(edits.apply(agenda.tasks["id:5b0c6c4e-1111-4222-8333-444455556666"]!, { action: "title", title: "No" }, "board:r7"), /never queued or running/);
+	await edits.apply(agenda.tasks["id:5b0c6c4e-1111-4222-8333-444455556666"]!, { action: "title", title: "Handed off" }, "board:r7");
+	assert.match(await readFile(file, "utf8"), /^\* AUTO Handed off$/m, "a queued task can be renamed");
+	const running = Object.values(agenda.tasks).find((t) => t.title === "Plain")!;
+	await assert.rejects(edits.apply(running, { action: "title", title: "No" }, "board:r8"), /never running work/);
 	await assert.rejects(edits.apply(exported, { action: "title", title: "Again" }, "board:r6"), /revision changed/, "a stale revision is refused");
 	// A protected file takes the user's TODO or DONE and nothing else; org-edit refuses any other write to it.
 	const asana = join(root, "asana.org");

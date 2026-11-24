@@ -117,7 +117,8 @@ export class TaskEdits {
 					const title = String(edit.title ?? "").trim();
 					if (title === "" || /[\n\r]/.test(title)) throw new Error("A title is one line of words");
 					if (!task.revision) throw new Error("The board has no revision for that task yet; wait for it to refresh");
-					if (!["TODO", "EVAL", "HOLD", undefined].includes(task.state)) throw new Error("Only a plain, TODO, EVAL or HOLD task can be renamed, never queued or running work");
+					// A queued task is renamed under the dispatcher's lock (org-edit update-task), never running work.
+					if (!["TODO", "EVAL", "HOLD", "AUTO", undefined].includes(task.state)) throw new Error("Only a plain, TODO, EVAL, HOLD or queued AUTO task can be renamed, never running work");
 					const out = await this.#edit("update-task", file, heading, JSON.stringify({ revision: task.revision, request, note: `${user} renamed it from June's board.`, title }));
 					if (!task.id) key = outlineKey(task.file, task.path, title);
 					return out;

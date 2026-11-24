@@ -376,3 +376,36 @@ fun MemoField(value: String, onValueChange: (String) -> Unit, placeholder: Strin
         },
     )
 }
+
+/** The two app icons the tab bar and a docket's band share: Herdr's terminal and Emacs's pen over paper. */
+enum class Glyph { Terminal, Editor }
+
+/** Draw GLYPH on a 24-unit grid in INK, PAGE behind the pen so it cuts the sheet's edge. */
+fun androidx.compose.ui.graphics.drawscope.DrawScope.glyph(glyph: Glyph, ink: Color, page: Color) {
+    val line = Stroke(1.8f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+    fun box(l: Float, t: Float, r: Float, b: Float, radius: Float) = drawRoundRect(ink, Offset(l, t), Size(r - l, b - t), CornerRadius(radius), style = line)
+    fun stroke(vararg xy: Float) = drawPath(androidx.compose.ui.graphics.Path().apply { moveTo(xy[0], xy[1]); for (i in 2 until xy.size step 2) lineTo(xy[i], xy[i + 1]) }, ink, style = line)
+    when (glyph) {
+        // A command prompt: a window with a chevron and a cursor.
+        Glyph.Terminal -> {
+            box(2.5f, 4.5f, 21.5f, 19.5f, 2.5f)
+            stroke(6.5f, 9f, 9.5f, 12f, 6.5f, 15f)
+            stroke(11.5f, 15f, 16.5f, 15f)
+        }
+        // A pen over a square sheet of paper, matching the boxy weight of the other icons.
+        Glyph.Editor -> {
+            box(3.5f, 4.5f, 19f, 20f, 3.5f)
+            stroke(6.8f, 8.8f, 11.2f, 8.8f)
+            stroke(6.8f, 12.4f, 9.5f, 12.4f)
+            stroke(6.8f, 16f, 15.7f, 16f)
+            val pen = androidx.compose.ui.graphics.Path().apply {
+                moveTo(19.14f, 4.04f); lineTo(21.26f, 6.16f)
+                lineTo(15.46f, 11.96f); lineTo(12.3f, 13f); lineTo(13.34f, 9.84f); close()
+            }
+            drawPath(pen, page)
+            drawPath(pen, page, style = Stroke(3.6f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            drawPath(pen, ink, style = line)
+            stroke(17.94f, 5.24f, 20.06f, 7.36f)
+        }
+    }
+}

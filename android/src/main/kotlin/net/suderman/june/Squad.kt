@@ -361,13 +361,13 @@ internal fun EnlistForm(card: JSONObject?, hosts: List<String>, colours: Colours
     }
 }
 
-/** The squad list itself: the count of enlisted clankers, enlist, the service record order, and each card. */
+/** The roster list itself (ROSTER.org's cards): the count of enlisted clankers, enlist, the service record order, and each card. */
 @Composable
 internal fun SquadList(cards: List<JSONObject>, ranked: Boolean, canRank: Boolean, colours: Colours, onRank: () -> Unit, onEnlist: () -> Unit, onOpen: (JSONObject) -> Unit) {
     val p = LocalPalette.current
-    SectionRule((if (ranked) "SERVICE RECORD" else "SQUAD") + " · ${cards.size}") {
+    SectionRule((if (ranked) "SERVICE RECORD" else "ROSTER") + " · ${cards.size}") {
         // The console's brackets make the words wider, so its labels are shorter.
-        if (canRank) PressTab(if (ranked) (if (p.console) "order" else "squad order") else (if (p.console) "record" else "service record"), onRank, kind = Press.Quiet, small = true)
+        if (canRank) PressTab(if (ranked) (if (p.console) "order" else "roster order") else (if (p.console) "record" else "service record"), onRank, kind = Press.Quiet, small = true)
         PressTab("+ enlist", onEnlist, small = true)
     }
     if (cards.isEmpty()) Text("No clankers enlisted in ROSTER.org yet.", style = p.type.lettering.copy(color = p.muted))

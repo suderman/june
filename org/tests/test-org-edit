@@ -365,6 +365,13 @@ out=$(run update-task "$content" "Old title" "$spec")
 check "content wrapper replays after rename" has "$out" '"written":false'
 check "content replay leaves all bytes alone" cmp -s "$content" "$fixture/content-edited"
 check "content edit releases its lock" flock -n "$XDG_RUNTIME_DIR/org-dispatch.lock" true
+queued="$HOME/org/queued.org"
+printf '* AUTO Queued title\nWork.\n\n* AUTO Queued scope\nWork.\n' >"$queued"
+printf -v spec '{"revision":"%s","request":"fixture:queued","note":"Jon renamed it.","title":"Queued renamed"}' "$(printf '* AUTO Queued title\nWork.' | sha256sum | cut -d' ' -f1)"
+check "a queued AUTO task takes a new title" has "$(run update-task "$queued" "Queued title" "$spec")" '"written":true'
+check "a renamed queued task stays AUTO" line "$queued" '^\* AUTO Queued renamed$'
+printf -v spec '{"revision":"%s","request":"fixture:queued-scope","note":"Jon rescoped it.","scope":"Other work."}' "$(printf '* AUTO Queued scope\nWork.' | sha256sum | cut -d' ' -f1)"
+check "a queued AUTO task keeps its Scope" has "$(run update-task "$queued" "Queued scope" "$spec")" 'queued AUTO tasks only renamed'
 # Replies: the user's Dialog entry from June's boards, and nothing else.
 reply_file="$HOME/org/reply.org"
 cat >"$reply_file" <<'EOF'

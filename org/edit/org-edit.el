@@ -663,8 +663,11 @@ The wrapper holds the launch lock. Replays find the receipt even after a rename.
            (unless (equal revision (secure-hash 'sha256 (encode-coding-string
                     (replace-regexp-in-string "\n+\\'" "" (org-dispatch--subtree-text)) 'utf-8)))
              (error "task revision changed; read the whole task and Dialog again"))
-           (unless (member (org-get-todo-state) '(nil "TODO" "HOLD" "EVAL"))
-             (error "only plain, TODO, HOLD or EVAL tasks can be updated; never active or queued work"))
+           ;; A queued AUTO task may take a new title under this lock (its start moves through
+           ;; reschedule-task), but not new Scope, which would change the work it was queued for.
+           (unless (or (member (org-get-todo-state) '(nil "TODO" "HOLD" "EVAL"))
+                       (and (equal (org-get-todo-state) "AUTO") (not (plist-member spec :scope))))
+             (error "only plain, TODO, HOLD or EVAL tasks can be updated, and queued AUTO tasks only renamed; never active work"))
            (when (org-dispatch--in-loop-p)
              (error "task has a review contract; ask Jon before changing scope"))
            (when-let* ((host (org-entry-get nil "HOST")))

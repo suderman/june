@@ -38,6 +38,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -54,8 +55,12 @@ import org.json.JSONObject
  * "Restyle the phone boards as task dockets" in the June project notes for why the question comes first.
  */
 
-/** A handoff the user has yet to confirm: who, where, and when it starts ("" for now or its schedule). */
-internal data class Handoff(val agent: String, val host: String, val start: String)
+/** A handoff the user has yet to confirm: who (its NAME to show), where, and when it starts ("" for now or its
+ * schedule). A roster clanker's host is its own (FIXED); a bare harness needs one picked. */
+internal data class Handoff(val agent: String, val host: String, val start: String, val name: String = agent, val fixed: Boolean = false)
+
+/** A clanker on the roster that can take a task: its slug (the task's AGENT), name, host and harness. */
+internal data class Recruit(val slug: String, val name: String, val host: String, val harness: String)
 
 /** What the docket can do: edit the task (with the change that puts it back), take back the last edit, open a link. */
 internal class DocketActions(val edit: (String, JSONObject, JSONObject?) -> Unit, val undo: () -> Unit, val open: (String) -> Unit)
@@ -69,15 +74,15 @@ internal fun BackLink(text: String, onClick: () -> Unit, modifier: Modifier = Mo
     }
 }
 
-/** A small link on a docket's band, such as Emacs or Herdr: its glyph in a square tab, its name read aloud. */
+/** A small link on a docket's band, Emacs or Herdr, drawn as the tab bar draws them; the console names it. */
 @Composable
-private fun BandLink(glyph: String, name: String, onClick: () -> Unit) {
+private fun BandLink(glyph: Glyph, name: String, onClick: () -> Unit) {
     val p = LocalPalette.current
     Box(Modifier.size(44.dp).semantics { role = Role.Button; contentDescription = "Open in $name" }.clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Text(
-            if (p.console) "[$glyph]" else glyph, style = p.type.number.copy(color = p.surfaceInk),
-            modifier = if (p.console) Modifier else Modifier.inked(p.corner(4.dp), lift = 1.5.dp, width = 1.5.dp).padding(horizontal = 6.dp, vertical = 3.dp),
-        )
+        if (p.console) Text("[${name.lowercase()}]", style = p.type.number.copy(color = p.surfaceInk))
+        else Canvas(Modifier.size(24.dp)) {
+            scale(size.width / 24f, pivot = Offset.Zero) { glyph(glyph, p.surfaceInk, p.surface) }
+        }
     }
 }
 
@@ -85,7 +90,7 @@ private fun BandLink(glyph: String, name: String, onClick: () -> Unit) {
 @Composable
 internal fun TaskDocket(
     d: JSONObject?, gone: Boolean, colours: Colours, back: String, onBack: () -> Unit,
-    agents: List<String>, hosts: List<String>, defaultHost: String, notice: String, canUndo: Boolean,
+    agents: List<String>, clankers: List<Recruit>, hosts: List<String>, defaultHost: String, notice: String, canUndo: Boolean,
     actions: DocketActions, modifier: Modifier = Modifier,
 ) {
     val p = LocalPalette.current
@@ -120,7 +125,11 @@ internal fun TaskDocket(
         val next = d.optJSONArray("next").strings()
         val assignable = !locked && "AUTO" in next
         val editable = !locked && state.isNotEmpty()
-        val renamable = !locked && state in listOf("", "TODO", "EVAL", "HOLD")
+        // A queued task can be renamed too: the daemon renames it under the dispatcher's lock.
+        val renamable = !locked && state in listOf("", "TODO", "EVAL", "HOLD", "AUTO")
+        val agent = d.optString("agent")
+        val host = d.optString("host")
+        val agentName = clankers.firstOrNull { it.slug == agent }?.name ?: agent
         val busy = d.optBoolean("busy")
 
         // The slip: band, title and stamp, then its stub of who and when below the tear.
@@ -129,8 +138,8 @@ internal fun TaskDocket(
                 Band(d.optString("project").ifEmpty { "Task" }, d.optString("docket")) {
                     val emacs = d.optString("emacs")
                     val herdr = d.optString("herdr")
-                    if (emacs.isNotEmpty() && emacs != "null") BandLink("E", "Emacs") { actions.open(emacs) }
-                    if (herdr.isNotEmpty() && herdr != "null") BandLink(">_", "Herdr") { actions.open(herdr) }
+                    if (emacs.isNotEmpty() && emacs != "null") BandLink(Glyph.Editor, "Emacs") { actions.open(emacs) }
+                    if (herdr.isNotEmpty() && herdr != "null") BandLink(Glyph.Terminal, "Herdr") { actions.open(herdr) }
                 }
                 Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 10.dp, top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.Top) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -155,9 +164,8 @@ internal fun TaskDocket(
                 if (headline.isNotEmpty()) Text("“$headline”", Modifier.padding(horizontal = 14.dp, vertical = 4.dp), style = t.lettering.copy(color = p.surfaceInk.copy(alpha = 0.85f)))
                 Perforation(Modifier.padding(top = 6.dp))
                 Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    val agent = d.optString("agent")
                     for ((label, value) in listOf(
-                        "Assigned" to (if (agent.isEmpty()) "—" else if (d.optString("host").isNotEmpty()) "$agent · ${d.optString("host")}" else agent),
+                        "Assigned" to (if (agent.isEmpty()) "—" else if (host.isNotEmpty()) "$agentName · $host" else agentName),
                         "Scheduled" to d.optString("scheduledLabel").ifEmpty { "—" },
                         "Due" to d.optString("deadlineLabel").ifEmpty { "—" },
                     )) Column(Modifier.weight(1f)) {
@@ -218,26 +226,35 @@ internal fun TaskDocket(
                 val held = handoff
                 Column(Modifier.fillMaxWidth().inked(lift = 2.dp)) {
                     val moves = if (locked) next else next.filter { it != "AUTO" }
+                    // Back to AUTO is a handoff to the clanker it already names, keeping its schedule.
+                    val requeue = if (agent.isNotEmpty() && host.isNotEmpty()) JSONObject().put("action", "assign").put("agent", agent).put("host", host) else null
                     FieldRow("Move to", last = !editable && !assignable) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            // A state change shows at once and can be put back while "saved" shows.
+                            // A state change shows at once and can be put back while "saved" shows; leaving AUTO
+                            // for TODO or HOLD is put back by handing it to its clanker again.
                             for (s in moves) Stamp(s, p.tone(s), on = false, tilt = 0f) {
-                                actions.edit(key, JSONObject().put("action", "state").put("state", s), if (state == "AUTO") null else JSONObject().put("action", "state").put("state", state).put("undo", true))
+                                val undo = if (state == "AUTO") requeue?.takeIf { s == "TODO" || s == "HOLD" } else JSONObject().put("action", "state").put("state", state).put("undo", true)
+                                actions.edit(key, JSONObject().put("action", "state").put("state", s), undo)
+                            }
+                            if (assignable && requeue != null) Stamp("AUTO", p.tone("AUTO"), on = false, tilt = 0f) {
+                                actions.edit(key, requeue, JSONObject().put("action", "state").put("state", state).put("undo", true))
                             }
                         }
                     }
                     if (locked) Text("${d.optString("file")} is rebuilt by another program, so only TODO and DONE are set here; DONE may sync back.", Modifier.padding(12.dp), style = t.meta.copy(color = p.surfaceMuted))
+                    // The roster's clankers first, each on its own host; then a bare harness, which needs one.
                     if (assignable && held == null) FieldRow("Hand to") {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            for (a in agents) Stamp(a, p.tone("AUTO"), on = false, tilt = 0f) { handoff = Handoff(a, d.optString("host").ifEmpty { defaultHost }, "") }
+                            for (c in clankers) Stamp(c.name, p.harness(c.harness), on = false, tilt = 0f) { handoff = Handoff(c.slug, c.host, "", c.name, fixed = true) }
+                            for (a in agents) Stamp(a, p.tone("AUTO"), on = false, tilt = 0f) { handoff = Handoff(a, host.ifEmpty { defaultHost }, "") }
                         }
                     }
                     // Nothing is queued until the user confirms who, where and when.
                     if (assignable && held != null) Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         val starts = d.optString("starts")
                         val start = if (held.start.isNotEmpty()) held.start.replace("T", " ") else if (starts == "now") "now" else "at its schedule, $starts"
-                        Text("Hand to ${held.agent}, starting $start.", style = t.row.copy(color = p.surfaceInk))
-                        if (hosts.size > 1) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.Center) {
+                        Text("Hand to ${held.name}${if (held.fixed) " on ${held.host}" else ""}, starting $start.", style = t.row.copy(color = p.surfaceInk))
+                        if (!held.fixed && hosts.size > 1) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.Center) {
                             Text("on", Modifier.padding(top = 14.dp, end = 4.dp), style = t.label.copy(color = p.surfaceMuted))
                             for (h in hosts) Stamp(h, p.line, on = h == held.host, tilt = 0f) { handoff = held.copy(host = h) }
                         }

@@ -130,12 +130,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.tabIcon(tab: Tab, o
         drawRoundRect(color, Offset(l, t), Size(r - l, b - t), androidx.compose.ui.geometry.CornerRadius(radius), style = if (fill) androidx.compose.ui.graphics.drawscope.Fill else line)
     fun stroke(color: Color, vararg xy: Float) = drawPath(Path().apply { moveTo(xy[0], xy[1]); for (i in 2 until xy.size step 2) lineTo(xy[i], xy[i + 1]) }, color, style = line)
     when (tab) {
-        // A command prompt: a window with a chevron and a cursor.
-        Tab.Terminal -> {
-            box(2.5f, 4.5f, 21.5f, 19.5f, 2.5f, ink, false)
-            stroke(ink, 6.5f, 9f, 9.5f, 12f, 6.5f, 15f)
-            stroke(ink, 11.5f, 15f, 16.5f, 15f)
-        }
+        Tab.Terminal -> glyph(Glyph.Terminal, ink, page)
         // A robot's head: antenna, ears, two eyes and a mouth.
         Tab.Agents -> {
             stroke(ink, 12f, 6f, 12f, 4f)
@@ -164,21 +159,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.tabIcon(tab: Tab, o
             box(4f, 4f, 20f, 20f, 4f, ink, on)
             stroke(if (on) page else ink, 8f, 12.3f, 10.9f, 15.2f, 16.2f, 9.2f)
         }
-        // A pen over a square sheet of paper, matching the boxy weight of the other four icons.
-        Tab.Editor -> {
-            box(3.5f, 4.5f, 19f, 20f, 3.5f, ink, false)
-            stroke(ink, 6.8f, 8.8f, 11.2f, 8.8f)
-            stroke(ink, 6.8f, 12.4f, 9.5f, 12.4f)
-            stroke(ink, 6.8f, 16f, 15.7f, 16f)
-            val pen = Path().apply {
-                moveTo(19.14f, 4.04f); lineTo(21.26f, 6.16f)
-                lineTo(15.46f, 11.96f); lineTo(12.3f, 13f); lineTo(13.34f, 9.84f); close()
-            }
-            drawPath(pen, page)
-            drawPath(pen, page, style = Stroke(3.6f, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
-            drawPath(pen, ink, style = line)
-            stroke(ink, 17.94f, 5.24f, 20.06f, 7.36f)
-        }
+        Tab.Editor -> glyph(Glyph.Editor, ink, page)
     }
 }
 
@@ -211,6 +192,15 @@ private fun Link.movedTask(key: String): JSONObject? {
     return null
 }
 
+/** The roster's clankers a task can be handed to: valid cards on a host the dispatcher launches on (HOSTS, or any). */
+private fun recruits(agents: JSONObject?, hosts: List<String>): List<Recruit> =
+    agents?.optJSONArray("roster").objects().mapNotNull { e ->
+        val c = e.optJSONObject("card") ?: return@mapNotNull null
+        val host = c.optString("host")
+        val ok = (c.optJSONArray("problems")?.length() ?: 0) == 0 && host.isNotEmpty() && (hosts.isEmpty() || host in hosts)
+        if (ok) Recruit(c.optString("slug"), c.optString("name").ifEmpty { c.optString("slug") }, host, c.optString("harness")) else null
+    }
+
 /** One task's page (board.mjs taskDetail) as a docket, in place of the board until its back link or system back. */
 @Composable
 private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, key: String, back: String, close: () -> Unit, modifier: Modifier) {
@@ -231,6 +221,7 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, key: St
     TaskDocket(
         d = d, gone = link.task(key) == null, colours = colours, back = back, onBack = close,
         agents = dispatch?.optJSONArray("agents").strings().ifEmpty { listOf("pi", "claude") },
+        clankers = recruits(link.agents, dispatch?.optJSONArray("hosts").strings() ?: emptyList()),
         hosts = dispatch?.optJSONArray("hosts").strings(), defaultHost = dispatch?.optString("host") ?: "",
         notice = if (noticeKey == key || noticeKey == k) noticeText else "", canUndo = link.taskUndo != null,
         actions = DocketActions(
@@ -300,7 +291,7 @@ private fun AgentsBoardPage(link: Link, decisions: Decisions, modifier: Modifier
         LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    BackLink(if (amend) "card" else "squad", back, Modifier.weight(1f))
+                    BackLink(if (amend) "card" else "roster", back, Modifier.weight(1f))
                     if (!rosterEditing && card != null) PressTab("amend card", { rosterEditing = true }, small = true)
                 }
             }
@@ -325,7 +316,7 @@ private fun AgentsBoardPage(link: Link, decisions: Decisions, modifier: Modifier
     }
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Masthead("agents", v?.optString("summary") ?: "asking hc…", listOf("activity" to "activity", "squad" to "squad" + if (roster.isNotEmpty()) " · ${roster.size}" else ""), mode) { mode = it }
+            Masthead("agents", v?.optString("summary") ?: "asking hc…", listOf("activity" to "activity", "squad" to "roster" + if (roster.isNotEmpty()) " · ${roster.size}" else ""), mode) { mode = it }
         }
         if (v != null && colours != null && mode == "squad") {
             val canRank = v.optBoolean("rosterHasStats")
