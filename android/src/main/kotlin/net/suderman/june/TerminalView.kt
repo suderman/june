@@ -37,6 +37,8 @@ class TerminalView(context: Context) : View(context) {
     var ctrl = false
     var alt = false
     var onModifiersUsed: () -> Unit = {}
+    /** A long press: the page offers copying and pasting. */
+    var onLongPress: () -> Unit = {}
 
     // The desktop terminal's colours (kitty's theme on kit), so agents look as they do there.
     val foreground = Color.parseColor("#CDD6F4")
@@ -90,6 +92,19 @@ class TerminalView(context: Context) : View(context) {
         val replies = synchronized(lock) { if (handle == 0L) ByteArray(0) else TerminalBridge.nativeFeed(handle, data, data.size) }
         postInvalidateOnAnimation()
         return replies
+    }
+
+    /** The screen and its history as text. */
+    fun text(): String = synchronized(lock) { if (handle == 0L) "" else String(TerminalBridge.nativeText(handle), Charsets.UTF_8) }
+
+    /** Paste TEXT as the program expects a paste, never as typed Enters. */
+    fun paste(text: String) {
+        val bytes = synchronized(lock) {
+            if (handle == 0L) return
+            TerminalBridge.nativeScroll(handle, 0)
+            TerminalBridge.nativePaste(handle, text.toByteArray(Charsets.UTF_8))
+        }
+        if (bytes.isNotEmpty()) onInput(bytes, false)
     }
 
     fun release() = synchronized(lock) {
@@ -190,12 +205,17 @@ class TerminalView(context: Context) : View(context) {
     private var lastY = 0f
     private var dragging = false
     private var scrollRemainder = 0f
+    private var pressed = false
+    private val longPress = Runnable { pressed = true; performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); onLongPress() }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { downY = event.y; lastY = event.y; dragging = false; scrollRemainder = 0f }
+            MotionEvent.ACTION_DOWN -> {
+                downY = event.y; lastY = event.y; dragging = false; scrollRemainder = 0f; pressed = false
+                postDelayed(longPress, android.view.ViewConfiguration.getLongPressTimeout().toLong())
+            }
             MotionEvent.ACTION_MOVE -> {
-                if (!dragging && abs(event.y - downY) > cellHeight / 2) dragging = true
+                if (!dragging && abs(event.y - downY) > cellHeight / 2) { dragging = true; removeCallbacks(longPress) }
                 if (dragging) {
                     scrollRemainder += (event.y - lastY) / cellHeight
                     val rowsMoved = floor(abs(scrollRemainder)).toInt() * if (scrollRemainder < 0) -1 else 1
@@ -211,7 +231,8 @@ class TerminalView(context: Context) : View(context) {
                     lastY = event.y
                 }
             }
-            MotionEvent.ACTION_UP -> if (!dragging) showKeyboard()
+            MotionEvent.ACTION_UP -> { removeCallbacks(longPress); if (!dragging && !pressed) showKeyboard() }
+            MotionEvent.ACTION_CANCEL -> removeCallbacks(longPress)
         }
         return true
     }
@@ -266,6 +287,8 @@ class TerminalView(context: Context) : View(context) {
     /** Text from the keyboard, character by character so sticky modifiers and newlines encode as keys. */
     fun type(text: CharSequence) {
         if (text.isEmpty()) return
+        // Several lines at once (the keyboard's clipboard, a dictated paragraph) are a paste, not Enter after each line.
+        if (text.length > 1 && '\n' in text) return paste(text.toString())
         if (!ctrl && !alt && '\n' !in text) {
             synchronized(lock) { if (handle != 0L) TerminalBridge.nativeScroll(handle, 0) }
             onInput(text.toString().toByteArray(Charsets.UTF_8), false)

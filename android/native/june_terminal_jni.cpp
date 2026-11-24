@@ -239,6 +239,45 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_net_suderman_june_TerminalBridge_na
   return env->NewByteArray(0);
 }
 
+// The screen and its history as plain text, soft-wrapped lines joined, for copying.
+extern "C" JNIEXPORT jbyteArray JNICALL Java_net_suderman_june_TerminalBridge_nativeText(JNIEnv* env, jclass, jlong h) {
+  auto* s = From(h);
+  if (s == nullptr) return env->NewByteArray(0);
+  std::lock_guard<std::mutex> lock(s->mutex);
+  GhosttyFormatter f = nullptr;
+  if (ghostty_formatter_terminal_new(nullptr, &f, s->terminal) != GHOSTTY_SUCCESS) return env->NewByteArray(0);
+  bool yes = true;
+  ghostty_formatter_set(f, GHOSTTY_FORMATTER_OPT_UNWRAP, &yes);
+  ghostty_formatter_set(f, GHOSTTY_FORMATTER_OPT_TRIM, &yes);
+  uint8_t* buf = nullptr;
+  size_t len = 0;
+  jbyteArray out = env->NewByteArray(0);
+  if (ghostty_formatter_format_alloc(f, nullptr, &buf, &len) == GHOSTTY_SUCCESS && buf != nullptr) {
+    out = Bytes(env, buf, len);
+    ghostty_free(nullptr, buf, len);
+  }
+  ghostty_formatter_free(f);
+  return out;
+}
+
+// TEXT pasted: control bytes made safe, and bracketed when the program asked for bracketed paste.
+extern "C" JNIEXPORT jbyteArray JNICALL Java_net_suderman_june_TerminalBridge_nativePaste(JNIEnv* env, jclass, jlong h, jbyteArray text) {
+  auto* s = From(h);
+  if (s == nullptr || text == nullptr) return env->NewByteArray(0);
+  std::lock_guard<std::mutex> lock(s->mutex);
+  jsize n = env->GetArrayLength(text);
+  std::vector<char> data(static_cast<size_t>(n));
+  env->GetByteArrayRegion(text, 0, n, reinterpret_cast<jbyte*>(data.data()));
+  GhosttyTerminalModeConfig mode{GHOSTTY_MODE_BRACKETED_PASTE, false};
+  ghostty_terminal_get(s->terminal, GHOSTTY_TERMINAL_DATA_MODE, &mode);
+  size_t needed = 0;
+  ghostty_paste_encode(data.data(), data.size(), mode.value, nullptr, 0, &needed);
+  std::vector<uint8_t> out(needed);
+  size_t written = 0;
+  if (ghostty_paste_encode(data.data(), data.size(), mode.value, out.data(), out.size(), &written) != GHOSTTY_SUCCESS) return env->NewByteArray(0);
+  return Bytes(env, out.data(), written);
+}
+
 // A key for the program's current modes: KEY is a GhosttyKey, MODS GhosttyMods, TEXT what it types (may be empty).
 extern "C" JNIEXPORT jbyteArray JNICALL Java_net_suderman_june_TerminalBridge_nativeKey(
     JNIEnv* env, jclass, jlong h, jint key, jint mods, jstring text, jint unshifted) {

@@ -22,4 +22,8 @@ internal object TerminalBridge {
     /** Encode a key for the program's current modes: KEY a GhosttyKey, MODS GhosttyMods, TEXT what it types. */
     @JvmStatic external fun nativeKey(handle: Long, key: Int, mods: Int, text: String?, unshifted: Int): ByteArray
     @JvmStatic external fun nativeSnapshot(handle: Long): ByteArray
+    /** The screen and its history as plain UTF-8 text, for copying. */
+    @JvmStatic external fun nativeText(handle: Long): ByteArray
+    /** TEXT (UTF-8) encoded as a paste: made safe, and bracketed when the program asked for it. */
+    @JvmStatic external fun nativePaste(handle: Long, text: ByteArray): ByteArray
 }
