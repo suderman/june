@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -61,6 +62,9 @@ object Terminals {
     /** A row of Esc, Ctrl, Alt, Tab and arrows over the keyboard, for keyboards that lack them. */
     fun keyRow(context: Context): Boolean = prefs(context).getBoolean("keyRow", false)
     fun setKeyRow(context: Context, on: Boolean) = prefs(context).edit().putBoolean("keyRow", on).apply()
+
+    /** What is written in each terminal's compose box and not yet sent, while the app runs. */
+    val drafts = HashMap<String, String>()
 
     fun last(context: Context): TerminalTarget? {
         val p = prefs(context)
@@ -205,6 +209,10 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
     val muted = Color(0xFF9399B2)
     val action = Color(0xFF89B4FA)
     var attaching by remember { mutableStateOf(false) }
+    // Whether the compose box has the keyboard; a tap on the terminal takes it back.
+    var composing by remember { mutableStateOf(false) }
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    LaunchedEffect(view) { view.onTap = { focus.clearFocus(true) } }
     // A pointer target over its whole area, so no tap falls through to the board beneath.
     Column(modifier.background(Color(0xFF1E1E2E)).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
         Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -218,16 +226,6 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
                 Modifier.weight(1f).padding(start = 8.dp), color = ink, fontSize = 13.sp, fontFamily = FontFamily.Monospace,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
-            Box {
-                Text("attach ▾", Modifier.clickable { attaching = true }.padding(start = 10.dp, top = 4.dp, bottom = 4.dp), color = muted, fontSize = 13.sp)
-                DropdownMenu(attaching, onDismissRequest = { attaching = false }) {
-                    DropdownMenuItem(text = { Text("Photos and screenshots") }, onClick = {
-                        attaching = false
-                        photos.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    })
-                    DropdownMenuItem(text = { Text("Files") }, onClick = { attaching = false; files.launch(arrayOf("*/*")) })
-                }
-            }
             Box {
                 Text("switch ▾", Modifier.clickable { picking = true }.padding(start = 10.dp, top = 4.dp, bottom = 4.dp), color = muted, fontSize = 13.sp)
                 DropdownMenu(picking, onDismissRequest = { picking = false }) {
@@ -289,7 +287,45 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
                 if (s is TerminalStream.State.Closed) Text("try again", Modifier.clickable { stream.start() }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
             }
         }
-        if (Terminals.keyRow(context) && WindowInsets.isImeVisible) KeyRow(view)
+        if (Terminals.keyRow(context) && WindowInsets.isImeVisible && !composing) KeyRow(view)
+        // The compose bar, by the keyboard: + attaches, and the box writes a message with the keyboard's full help
+        // (autocorrect, moving the cursor, selecting), sent as one paste and then Enter. Tapping the terminal types
+        // into it directly, for keys and shortcuts.
+        Row(
+            Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Box {
+                Text("+", Modifier.clickable { attaching = true }.padding(horizontal = 12.dp, vertical = 6.dp), color = ink, fontSize = 22.sp)
+                DropdownMenu(attaching, onDismissRequest = { attaching = false }) {
+                    DropdownMenuItem(text = { Text("Photos and screenshots") }, onClick = {
+                        attaching = false
+                        photos.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    })
+                    DropdownMenuItem(text = { Text("Files") }, onClick = { attaching = false; files.launch(arrayOf("*/*")) })
+                }
+            }
+            var draft by remember(target) { mutableStateOf(Terminals.drafts[target.key] ?: "") }
+            androidx.compose.foundation.text.BasicTextField(
+                draft, { draft = it; Terminals.drafts[target.key] = it },
+                Modifier.weight(1f).padding(vertical = 4.dp).background(Color(0xFF1E1E2E), RoundedCornerShape(18.dp))
+                    .padding(horizontal = 14.dp, vertical = 9.dp).onFocusChanged { composing = it.isFocused },
+                textStyle = androidx.compose.ui.text.TextStyle(color = ink, fontSize = 15.sp),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(ink),
+                maxLines = 6,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
+                decorationBox = { field -> Box { if (draft.isEmpty()) Text("Message the agent", color = muted, fontSize = 15.sp); field() } },
+            )
+            val ready = draft.isNotBlank() && attached
+            Text(
+                "↵", Modifier.clickable(enabled = ready) {
+                    view.send(draft.trimEnd())
+                    draft = ""
+                    Terminals.drafts.remove(target.key)
+                }.padding(horizontal = 12.dp, vertical = 4.dp),
+                color = if (ready) action else muted, fontSize = 24.sp,
+            )
+        }
     }
     // Only once the keyboard has finished going down, so the sheet's window is laid out on the whole screen.
     val keyboardGone = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) == 0

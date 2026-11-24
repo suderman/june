@@ -37,6 +37,8 @@ class TerminalView(context: Context) : View(context) {
     var ctrl = false
     var alt = false
     var onModifiersUsed: () -> Unit = {}
+    /** A tap, before the view takes the keyboard: the page lets go of its compose box. */
+    var onTap: () -> Unit = {}
     /** A long press: the page offers copying and pasting. */
     var onLongPress: () -> Unit = {}
     /** An image from the keyboard (its clipboard, a screenshot, a sticker): the page sends it to the agent. */
@@ -111,6 +113,13 @@ class TerminalView(context: Context) : View(context) {
             TerminalBridge.nativePaste(handle, text.toByteArray(Charsets.UTF_8))
         }
         if (bytes.isNotEmpty()) onInput(bytes, false)
+    }
+
+    /** A message from the compose box: one paste, then Enter a moment later, so the program has taken the paste first. */
+    fun send(message: String) {
+        if (message.isEmpty()) return
+        paste(message)
+        postDelayed({ press(58, 0) }, 60)
     }
 
     /** A file's PATH on the agent's machine, pasted as dropping a file on a desktop terminal pastes it, then a space. */
@@ -282,7 +291,7 @@ class TerminalView(context: Context) : View(context) {
                         flinger.fling(0, 0, 0, vy, 0, 0, Int.MIN_VALUE / 2, Int.MAX_VALUE / 2)
                         postInvalidateOnAnimation()
                     }
-                } else if (!pressed) showKeyboard()
+                } else if (!pressed) { onTap(); showKeyboard() }
                 tracker.recycle(); velocity = null
             }
             MotionEvent.ACTION_CANCEL -> { removeCallbacks(longPress); tracker.recycle(); velocity = null }
