@@ -304,7 +304,11 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
             verticalAlignment = Alignment.Bottom,
         ) {
             Box {
-                Text("+", Modifier.clickable { attaching = true }.padding(horizontal = 12.dp, vertical = 6.dp), color = ink, fontSize = 22.sp)
+                Box(
+                    Modifier.padding(start = 2.dp, end = 6.dp, bottom = 4.dp).size(40.dp).background(Color(0xFF313244), CircleShape)
+                        .clickable { attaching = true },
+                    contentAlignment = Alignment.Center,
+                ) { androidx.compose.material3.Icon(AttachIcon, "Attach", Modifier.size(20.dp), tint = ink) }
                 DropdownMenu(attaching, onDismissRequest = { attaching = false }) {
                     DropdownMenuItem(text = { Text("Photos and screenshots") }, onClick = {
                         attaching = false
@@ -326,7 +330,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
             )
             val ready = draft.isNotBlank() && attached
             Box(
-                Modifier.padding(start = 6.dp, end = 2.dp, bottom = 2.dp).size(40.dp)
+                Modifier.padding(start = 6.dp, end = 2.dp, bottom = 4.dp).size(40.dp)
                     .background(if (ready) action else Color(0xFF313244), CircleShape)
                     .clickable(enabled = ready) {
                         view.send(draft.trimEnd())
@@ -432,6 +436,17 @@ private fun statusColour(status: String, state: TerminalStream.State?): Color = 
     status == "done" -> Color(0xFFA6E3A1)
     status == "idle" -> Color(0xFF9399B2)
     else -> Color(0xFF6C7086)
+}
+
+/** A paperclip, as Material's Attach File icon draws it. */
+private val AttachIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder("Attach", 24.dp, 24.dp, 24f, 24f)
+        .addPath(
+            androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+                "M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z",
+            ).toNodes(),
+            fill = androidx.compose.ui.graphics.SolidColor(Color.White),
+        ).build()
 }
 
 /** A paper plane, as Material's Send icon draws it. */
