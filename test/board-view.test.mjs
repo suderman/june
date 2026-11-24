@@ -1,7 +1,7 @@
 // The boards as the clients draw them (desktop/board.mjs), shared by the desktop client and the phone.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agendaView, agentsView, boardLayout, dayHeading, dayWord, dialogBlocks, dialogKind, docketNo, entryMeta, findTask, harnessOf, loadout, monthDays, pendingTask, pickerStart, quickDays, resetIn, rosterView, serviceNo, stampOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink } from "../desktop/board.mjs";
+import { agendaView, agentsView, boardLayout, dayHeading, dayWord, dialogBlocks, dialogKind, docketNo, entryMeta, findTask, harnessOf, loadout, monthDays, pendingTask, pickerStart, quickDays, resetIn, rosterView, serviceNo, stampOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink, undoOf } from "../desktop/board.mjs";
 
 test("three columns fit a 1400 px window with the strip a little narrower, and tabs take over below about 1300", () => {
 	assert.deepEqual(boardLayout(1400), { columns: true, side: 268, gap: 20, strip: 784 });
@@ -302,4 +302,13 @@ test("a task's page leads with the agent's latest entry when it asks", () => {
 	assert.equal(d.ask, "2");
 	assert.equal(d.docket, "AB12");
 	assert.equal(taskDetail(task("id:x", { dialog: [{ who: "Agent", text: "Done." }] }), "Alex", "2026-11-21").ask, "", "only a task that asks leads with a question");
+});
+
+test("an edit's undo returns the task to how the board showed it, a queued task to its clanker", () => {
+	assert.deepEqual(undoOf({ action: "state", state: "DONE" }, task("x", { state: "PROG" })), { action: "state", state: "PROG", undo: true });
+	assert.deepEqual(undoOf({ action: "state", state: "TODO" }, task("x", { state: "AUTO", agent: "pi", host: "kit" })), { action: "assign", agent: "pi", host: "kit" });
+	assert.equal(undoOf({ action: "state", state: "DONE" }, task("x", { state: "AUTO", agent: "pi", host: "kit" })), null, "done is not put back to the queue");
+	assert.equal(undoOf({ action: "state", state: "TODO" }, task("x", { state: "AUTO" })), null, "a queued task with no clanker named has none to return to");
+	assert.deepEqual(undoOf({ action: "assign", agent: "bolt", host: "kit" }, task("x", { state: "TODO" })), { action: "state", state: "TODO", undo: true });
+	assert.equal(undoOf({ action: "reply", text: "x" }, task("x", { state: "TODO" })), null);
 });

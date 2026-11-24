@@ -1,6 +1,6 @@
-// The projects board (board.mjs agendaView): Org's agenda, overdue, today and the rest of the week, then the counts
-// by state, each opening the tasks in that state; or the projects with open work. Every row opens its task in Emacs.
-// See "Agents and projects" in docs/interfaces.org.
+// The projects board (board.mjs agendaView), drawn as the phone draws it: Org's agenda (overdue, today, then a section
+// a day) as pads of docket stubs; every open task by state; one state's tasks; or the projects with open work, by
+// project. A row opens its task's page, a project its file in Emacs. See "Agents and projects" in docs/interfaces.org.
 import QtQuick
 import "board.mjs" as Board
 
@@ -22,8 +22,9 @@ Item {
   // An edit from a task's page, and what the last one said for the task on show.
   signal edit(string key, var change)
   property var notice: ({ key: "", text: "" })
-  // Who a task can be handed to, and where by default (the agents board's dispatch).
+  // Who a task can be handed to, and where by default (the agents board's dispatch), and the roster's clankers.
   property var dispatch: null
+  property var roster: []
   // The user's edits on their way (shell.qml pendingEdits), shown as made.
   property var pending: ({})
   // A rename moves a task without an ID to a new key; its page follows.
@@ -39,16 +40,23 @@ Item {
   TaskDetail {
     anchors.fill: parent
     visible: board.detailKey !== ""
-    backLabel: board.mode === "state" ? (Board.LISTS.find(l => l[0] === board.drill)?.[1] ?? board.drill).toLowerCase() : board.mode
+    backLabel: board.mode === "state" ? (Board.LISTS.find(l => l[0] === board.drill)?.[1] ?? board.drill).toLowerCase() : board.mode === "projects" ? "by project" : board.mode
     id: detailPage
     detail: board.detailKey !== "" ? Board.taskPage(board.agenda?.tasks, board.detailKey, board.pending, board.user, board.agenda?.today ?? "", Date.now()) : null
     today: board.agenda?.today ?? ""
     undo: board.notice.key === board.detailKey || board.notice.key === (detailPage.detail?.key ?? "") ? (board.notice.undo ?? null) : null
     dispatch: board.dispatch
+    roster: board.roster
     onBack: board.detailKey = ""
     onOpen: link => board.open(link)
     notice: board.notice.key === board.detailKey || board.notice.key === (detailPage.detail?.key ?? "") ? board.notice.text : ""
     onEdit: change => board.edit(detailPage.detail?.key ?? board.detailKey, change)
+  }
+
+  // A row with a task opens its page; one without opens where it can.
+  function show(entry) {
+    if ((entry.task ?? "") !== "" && Board.findTask(board.agenda?.tasks, entry.task) !== null) board.detailKey = entry.task;
+    else if ((entry.link ?? "") !== "") board.open(entry.link);
   }
 
   Flickable {
@@ -60,29 +68,21 @@ Item {
 
     Column {
       id: column
-      width: parent.width
-      spacing: 9
+      width: parent.width - 4
+      spacing: 10
 
+      // The masthead: the board's name, its summary, and its pages as folder tabs on the rule.
       Item {
         width: parent.width
-        height: 52
-        Text {
-          anchors.left: parent.left
-          anchors.bottom: parent.bottom
-          anchors.bottomMargin: 26
-          text: "projects"
-          font.family: Theme.display; font.pixelSize: 22
-          color: Theme.pageInk
-        }
-        Text {
-          anchors.left: parent.left
-          anchors.right: editorLaunch.visible ? editorLaunch.left : parent.right
-          anchors.rightMargin: editorLaunch.visible ? 8 : 0
-          anchors.bottom: parent.bottom
-          anchors.bottomMargin: 8
+        height: mastheadText.implicitHeight + summary.implicitHeight + 2
+        Words { id: mastheadText; role: "masthead"; text: (Theme.consoleLook ? "$ " : "") + "projects"; color: Theme.pageInk }
+        Words {
+          id: summary
+          anchors.top: mastheadText.bottom
+          width: parent.width - (editorLaunch.visible ? editorLaunch.width + 8 : 0)
+          role: "meta"
           elide: Text.ElideRight
-          text: board.loaded ? board.openCount + " open in " + board.view.projects.length + " projects" : ""
-          font.family: Theme.caption; font.pixelSize: 13
+          text: board.loaded ? board.openCount + " open in " + board.view.projects.length + " projects" : "asking Emacs…"
           color: Theme.muted
         }
         Item {
@@ -92,201 +92,147 @@ Item {
           anchors.top: parent.top
           anchors.topMargin: 2
           width: 30; height: 30
-          Rectangle {
-            anchors.fill: parent; radius: 7; color: Theme.pageInk
-            opacity: editorHover.containsMouse ? 0.1 : 0
-          }
-          TabIcon {
-            anchors.centerIn: parent; width: 20; height: 20
-            kind: "editor"; on: false
-            ink: editorHover.containsMouse ? Theme.pageInk : Theme.muted
-            paper: Theme.paper
-          }
-          MouseArea {
-            id: editorHover
-            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-            onClicked: board.launchEditor()
-          }
+          Rectangle { anchors.fill: parent; radius: 7; color: Theme.pageInk; opacity: editorHover.containsMouse ? 0.1 : 0 }
+          TabIcon { anchors.centerIn: parent; width: 20; height: 20; kind: "editor"; on: false; ink: editorHover.containsMouse ? Theme.pageInk : Theme.muted; paper: Theme.paper }
+          MouseArea { id: editorHover; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: board.launchEditor() }
         }
-        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 2.5; color: Theme.pageInk }
       }
-      // What's dated, every open task by state, or the projects.
-      Row {
-        spacing: 6
-        Segment { text: "agenda"; on: board.mode === "agenda"; onClicked: { board.mode = "agenda"; board.drill = ""; } }
-        Segment { text: "tasks"; on: board.mode === "tasks" || board.mode === "state"; onClicked: { board.mode = "tasks"; board.drill = ""; } }
-        Segment { text: "projects"; on: board.mode === "projects"; onClicked: board.mode = "projects" }
+      FolderTabs {
+        tabs: [{ id: "agenda", label: "agenda" }, { id: "tasks", label: "tasks" }, { id: "projects", label: "by project" }]
+        current: board.mode === "state" ? "tasks" : board.mode
+        onPicked: id => { board.mode = id; board.drill = ""; }
       }
 
-      Text {
-        visible: !board.loaded
-        text: "asking Emacs…"
-        font.family: Theme.caption; font.pixelSize: 13
-        color: Theme.muted
-      }
-
-      // The agenda: its sections, then the counts by state.
+      // The agenda: overdue, today, then a section a day.
       Repeater {
         model: board.mode === "agenda" ? board.view.sections : []
         delegate: Column {
+          id: section
           required property var modelData
           width: column.width
-          spacing: 7
-          SectionTitle { text: modelData.title; alert: modelData.alert }
-          Repeater {
-            model: modelData.rows
-            delegate: AgendaRow { required property var modelData; width: column.width; entry: modelData }
-          }
-          Text {
-            visible: modelData.rows.length === 0
-            text: "Nothing on the agenda."
-            font.family: Theme.lettering; font.pixelSize: 13
-            color: Theme.muted
+          spacing: 8
+          SectionRule { text: section.modelData.title; alert: section.modelData.alert }
+          Words { visible: section.modelData.rows.length === 0; role: "lettering"; text: "Nothing on the agenda."; color: Theme.muted }
+          Pad {
+            visible: section.modelData.rows.length > 0
+            Repeater {
+              model: section.modelData.rows
+              delegate: StubRow {
+                required property var modelData
+                required property int index
+                first: index === 0
+                title: modelData.title; meta: modelData.meta; stamp: modelData.state ?? ""
+                lead: modelData.allDay ? "all day" : (modelData.time ?? ""); leadWidth: 46
+                overdue: modelData.overdue ?? false
+                opens: (modelData.task ?? "") !== "" || (modelData.link ?? "") !== ""
+                onClicked: board.show(modelData)
+              }
+            }
           }
         }
       }
-      // Every open task by state, dated or not: a few rows each, the rest a tap away.
+
+      // Every open task by state, dated or not: a few rows each, the rest a click away.
       Repeater {
         model: board.mode === "tasks" ? (board.view.lists ?? []) : []
         delegate: Column {
           id: list
           required property var modelData
           width: column.width
-          spacing: 7
+          spacing: 6
+          SectionRule { text: list.modelData.title + " · " + list.modelData.n; clickable: true; onClicked: { board.drill = list.modelData.state; board.mode = "state"; } }
+          Pad {
+            Repeater {
+              model: list.modelData.rows
+              delegate: StubRow {
+                required property var modelData
+                required property int index
+                first: index === 0
+                title: modelData.title; meta: modelData.meta; overdue: modelData.overdue ?? false
+                onClicked: board.show(modelData)
+              }
+            }
+          }
           Item {
-            width: parent.width
-            height: listTitle.implicitHeight
-            SectionTitle { id: listTitle; text: list.modelData.title + " · " + list.modelData.n }
-            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { board.drill = list.modelData.state; board.mode = "state"; } }
-          }
-          Repeater {
-            model: list.modelData.rows
-            delegate: AgendaRow { required property var modelData; width: column.width; entry: modelData }
-          }
-          Text {
             visible: list.modelData.more > 0
-            text: "all " + list.modelData.n + " ›"
-            font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
-            color: Theme.pageInk
-            MouseArea { anchors.fill: parent; anchors.margins: -6; cursorShape: Qt.PointingHandCursor; onClicked: { board.drill = list.modelData.state; board.mode = "state"; } }
+            width: parent.width
+            height: allRows.height
+            PressTab { id: allRows; anchors.right: parent.right; text: "all " + list.modelData.n + " ›"; kind: "quiet"; small: true; onClicked: { board.drill = list.modelData.state; board.mode = "state"; } }
           }
         }
       }
-      Text {
+      Words {
         visible: board.mode === "tasks" && (board.view.queued ?? 0) > 0
         width: parent.width
         wrapMode: Text.Wrap
+        role: "meta"
         text: board.view.queued + " queued for agents, on the agents board"
-        font.family: Theme.caption; font.pixelSize: 12
         color: Theme.muted
       }
 
       // One state's tasks.
-      Text {
-        visible: board.mode === "state"
-        text: "‹ tasks"
-        font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
-        color: Theme.pageInk
-        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { board.mode = "tasks"; board.drill = ""; } }
-      }
-      SectionTitle {
-        visible: board.mode === "state"
-        text: (Board.LISTS.find(l => l[0] === board.drill)?.[1] ?? board.drill) + " · " + board.drillRows.length
-      }
-      Repeater {
-        model: board.drillRows
-        delegate: AgendaRow { required property var modelData; width: column.width; entry: modelData }
-      }
-
-      // The projects with open work.
-      Repeater {
-        model: board.mode === "projects" ? board.view.projects : []
-        delegate: Item {
-          id: project
-          required property var modelData
-          width: column.width
-          height: projectLines.implicitHeight + 6
-          Column {
-            id: projectLines
-            width: parent.width
-            spacing: 4
-            Text { width: parent.width; wrapMode: Text.Wrap; text: project.modelData.title; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 14; color: Theme.pageInk }
-            Flow {
-              width: parent.width
-              spacing: 4
-              Repeater { model: project.modelData.counts; delegate: StateChip { required property var modelData; orgState: modelData.state; count: modelData.n } }
-            }
+      PressTab { visible: board.mode === "state"; text: (Theme.consoleLook ? "< " : "‹  ") + "tasks"; kind: "quiet"; small: true; onClicked: { board.mode = "tasks"; board.drill = ""; } }
+      SectionRule { visible: board.mode === "state"; text: (Board.LISTS.find(l => l[0] === board.drill)?.[1] ?? board.drill) + " · " + board.drillRows.length }
+      Pad {
+        visible: board.mode === "state" && board.drillRows.length > 0
+        Repeater {
+          model: board.drillRows
+          delegate: StubRow {
+            required property var modelData
+            required property int index
+            first: index === 0
+            title: modelData.title; meta: modelData.meta; overdue: modelData.overdue ?? false
+            onClicked: board.show(modelData)
           }
-          MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: board.open(project.modelData.link) }
         }
       }
 
-      Text {
+      // Each project a binder divider: its title, where it lives when two share a name, its counts as stamps; it
+      // opens in Emacs (↗), where the project file is.
+      Pad {
+        visible: board.mode === "projects"
+        Repeater {
+          model: board.mode === "projects" ? board.view.projects : []
+          delegate: Item {
+            id: project
+            required property var modelData
+            required property int index
+            width: parent ? parent.width : 0
+            height: projectLines.implicitHeight + 16
+            Rectangle { visible: project.index > 0; x: 10; width: parent.width - 20; height: 1; color: Theme.rule }
+            Rectangle { anchors.fill: parent; anchors.margins: 2; radius: 3; visible: projectHover.containsMouse; color: Qt.alpha(Theme.surfaceInk, 0.05) }
+            Column {
+              id: projectLines
+              x: 10; y: 8
+              width: parent.width - 20
+              spacing: 4
+              Item {
+                width: parent.width
+                height: projectTitle.implicitHeight
+                Words { id: projectTitle; width: parent.width - 18; role: "row"; wrapMode: Text.Wrap; text: project.modelData.title }
+                Words { anchors.right: parent.right; role: "row"; text: "↗"; color: Theme.surfaceMuted }
+              }
+              Words { visible: (project.modelData.where ?? "") !== ""; width: parent.width; role: "number"; elide: Text.ElideMiddle; text: project.modelData.where ?? ""; color: Theme.surfaceMuted }
+              Flow {
+                width: parent.width
+                spacing: 6
+                Repeater { model: project.modelData.counts; delegate: Stamp { required property var modelData; text: modelData.state + " " + modelData.n; tone: Theme.tone(modelData.state); tilt: 0 } }
+              }
+            }
+            MouseArea { id: projectHover; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: board.open(project.modelData.link) }
+          }
+        }
+      }
+
+      Words {
         visible: board.loaded
         width: parent.width
         wrapMode: Text.Wrap
         topPadding: 6
-        text: "From Emacs on " + board.host + (board.generatedAt > 0 ? ", " + Qt.formatTime(new Date(board.generatedAt), "hh:mm") : "") + " · a row opens Emacs"
-        font.family: Theme.caption; font.pixelSize: 11
+        role: "meta"
+        text: "From Emacs on " + board.host + (board.generatedAt > 0 ? ", " + Qt.formatTime(new Date(board.generatedAt), "hh:mm") : "")
         color: Theme.muted
       }
-    }
-  }
-
-  component SectionTitle: Text {
-    property bool alert: false
-    width: parent ? parent.width : 0
-    topPadding: 4
-    font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; font.letterSpacing: 1
-    color: alert ? Theme.accent : Theme.pageInk
-  }
-
-  // A segment of the agenda/projects switch, filled when chosen.
-  component Segment: Rectangle {
-    id: seg
-    property string text: ""
-    property bool on: false
-    signal clicked()
-    width: segLabel.implicitWidth + 22
-    height: 24
-    radius: 12
-    color: on ? Theme.pageInk : "transparent"
-    border.color: Theme.pageInk
-    border.width: 2
-    Text { id: segLabel; anchors.centerIn: parent; text: seg.text; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: seg.on ? Theme.paper : Theme.pageInk }
-    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: seg.clicked() }
-  }
-
-  // An agenda line: its day or time, state, title and what it is; a click opens it in Emacs.
-  component AgendaRow: Item {
-    id: r
-    property var entry
-    height: Math.max(rowLines.implicitHeight, 20)
-    Text {
-      id: when
-      // A list row has no day or time column, nor a chip: its list names the state.
-      width: r.entry.plain ? 0 : 40
-      text: r.entry.day ? r.entry.day : (r.entry.time ?? "")
-      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
-      color: Theme.muted
-      y: 2
-    }
-    StateChip { id: badge; anchors.left: when.right; orgState: r.entry.plain ? "" : r.entry.state; width: r.entry.plain ? 0 : implicitWidth; y: 1 }
-    Column {
-      id: rowLines
-      anchors.left: badge.right
-      anchors.leftMargin: r.entry.plain ? 0 : 8
-      anchors.right: parent.right
-      spacing: 1
-      Text { width: parent.width; wrapMode: Text.Wrap; text: (r.entry.day && r.entry.time ? r.entry.time + "  " : "") + r.entry.title; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13; color: Theme.pageInk }
-      Text { visible: r.entry.meta !== ""; width: parent.width; elide: Text.ElideRight; text: r.entry.meta; font.family: Theme.caption; font.pixelSize: 12; color: r.entry.overdue ? Theme.accent : Theme.muted }
-    }
-    MouseArea {
-      anchors.fill: parent
-      enabled: (r.entry.task ?? "") !== "" || (r.entry.link ?? "") !== ""
-      cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-      // A task opens its page, where Emacs is a button away.
-      onClicked: (r.entry.task ?? "") !== "" && Board.findTask(board.agenda?.tasks, r.entry.task) !== null ? board.detailKey = r.entry.task : board.open(r.entry.link)
     }
   }
 }

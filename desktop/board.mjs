@@ -700,6 +700,23 @@ export function startsAt(task, today, now) {
 	return at > localStamp(now ?? Date.now()) ? startOf(task.scheduled, today) : "now";
 }
 
+/**
+ * The edit that puts CHANGE back on TASK as the board shows it, or null: a state change returns to the state it left;
+ * leaving AUTO for TODO or HOLD hands it to its clanker again, keeping its schedule; a handoff returns to the state it
+ * came from. Leaving AUTO otherwise has no way back but a new handoff.
+ */
+export function undoOf(change, task) {
+	const state = task?.state ?? "";
+	if (state === "" || !change) return null;
+	if (change.action === "state") {
+		if (state !== "AUTO") return { action: "state", state, undo: true };
+		if ((change.state === "TODO" || change.state === "HOLD") && task.agent && task.host) return { action: "assign", agent: task.agent, host: task.host };
+		return null;
+	}
+	if (change.action === "assign" && state !== "AUTO") return { action: "state", state, undo: true };
+	return null;
+}
+
 /** The key of the newest agent entry in DIALOG, or "". */
 function lastAgentEntry(dialog, user) {
 	for (let i = dialog.length - 1; i >= 0; i--) if (dialogKind(dialog[i].who, user) === "agent") return String(i);

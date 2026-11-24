@@ -1,6 +1,7 @@
-// The agents board as the clankers' room (board.mjs agentsView): what needs the user, as cards, most urgent first;
-// then who is working, what is queued and under agent review, who is idle, and what reported today. A card or row
-// opens where it can: an agent's session in Herdr, a task in Emacs. See "Agents and projects" in docs/interfaces.org.
+// The agents board as the clankers' room (board.mjs agentsView), drawn as the phone draws it: what needs the user, as
+// dockets, most urgent first; then who is working, what is queued (slips on a spike) and under agent review, who is
+// idle, and what reported today, each list a pad of docket stubs; or the roster's enlisted clankers. A docket or row
+// opens where it can: its task's page, an agent's session in Herdr. See "Agents and projects" in docs/interfaces.org.
 import QtQuick
 import "board.mjs" as Board
 
@@ -11,6 +12,7 @@ Item {
   property var view: ({ summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], roster: [], rosterLeaderboard: [], rosterHasStats: false, rosterHosts: ["kit", "cog"] })
   property bool loaded: false
   property bool idleOpen: false
+  property bool queueOpen: false
   // activity (needs, workers, queued, recent) or roster (clanker cards and editor).
   property string mode: "activity"
   property string rosterSort: "roster"
@@ -73,6 +75,7 @@ Item {
     today: board.today
     undo: board.notice.key === board.detailKey || board.notice.key === (detailPage.detail?.key ?? "") ? (board.notice.undo ?? null) : null
     dispatch: board.dispatch
+    roster: board.view.roster ?? []
     onBack: board.detailKey = ""
     onOpen: link => board.open(link)
     notice: board.notice.key === board.detailKey || board.notice.key === (detailPage.detail?.key ?? "") ? board.notice.text : ""
@@ -100,30 +103,21 @@ Item {
 
     Column {
       id: column
-      width: parent.width
+      width: parent.width - 4
       spacing: 10
 
+      // The masthead: the board's name, its summary, and its pages as folder tabs on the rule.
       Item {
         width: parent.width
-        height: 52
-        Text {
-          id: heading
-          anchors.left: parent.left
-          anchors.bottom: parent.bottom
-          anchors.bottomMargin: 26
-          text: "agents"
-          font.family: Theme.display; font.pixelSize: 22
-          color: Theme.pageInk
-        }
-        Text {
-          anchors.left: parent.left
-          anchors.right: termLaunch.visible ? termLaunch.left : parent.right
-          anchors.rightMargin: termLaunch.visible ? 8 : 0
-          anchors.bottom: parent.bottom
-          anchors.bottomMargin: 8
+        height: mastheadText.implicitHeight + summary.implicitHeight + 2
+        Words { id: mastheadText; role: "masthead"; text: (Theme.consoleLook ? "$ " : "") + "agents"; color: Theme.pageInk }
+        Words {
+          id: summary
+          anchors.top: mastheadText.bottom
+          width: parent.width - (termLaunch.visible ? termLaunch.width + 8 : 0)
+          role: "meta"
           elide: Text.ElideRight
           text: board.loaded ? board.view.summary : "asking hc…"
-          font.family: Theme.caption; font.pixelSize: 13
           color: Theme.muted
         }
         Item {
@@ -133,391 +127,252 @@ Item {
           anchors.top: parent.top
           anchors.topMargin: 2
           width: 30; height: 30
-          Rectangle {
-            anchors.fill: parent; radius: 7; color: Theme.pageInk
-            opacity: termHover.containsMouse ? 0.1 : 0
-          }
-          TabIcon {
-            anchors.centerIn: parent; width: 20; height: 20
-            kind: "terminal"; on: false
-            ink: termHover.containsMouse ? Theme.pageInk : Theme.muted
-            paper: Theme.paper
-          }
-          MouseArea {
-            id: termHover
-            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-            onClicked: board.launchTerminal()
-          }
-        }
-        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 2.5; color: Theme.pageInk }
-      }
-
-      // Live room activity, or the roster of named clanker cards.
-      Row {
-        spacing: 6
-        Segment { text: "activity"; on: board.mode === "activity"; onClicked: board.mode = "activity" }
-        Segment {
-          text: (board.view.roster ?? []).length > 0 ? "roster · " + board.view.roster.length : "roster"
-          on: board.mode === "roster"
-          onClicked: board.mode = "roster"
+          Rectangle { anchors.fill: parent; radius: 7; color: Theme.pageInk; opacity: termHover.containsMouse ? 0.1 : 0 }
+          TabIcon { anchors.centerIn: parent; width: 20; height: 20; kind: "terminal"; on: false; ink: termHover.containsMouse ? Theme.pageInk : Theme.muted; paper: Theme.paper }
+          MouseArea { id: termHover; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: board.launchTerminal() }
         }
       }
+      FolderTabs {
+        tabs: [{ id: "activity", label: "activity" }, { id: "roster", label: (board.view.roster ?? []).length > 0 ? "roster · " + board.view.roster.length : "roster" }]
+        current: board.mode
+        onPicked: id => board.mode = id
+      }
 
-      // ---- ROSTER PAGE ----
+      // ---- ROSTER: ROSTER.org's enlisted clankers ----
       Column {
         visible: board.mode === "roster"
         width: parent.width
-        spacing: 9
-
+        spacing: 10
+        SectionRule {
+          text: (board.rosterSort === "leaderboard" ? "SERVICE RECORD · " : "ROSTER · ") + (board.view.roster ?? []).length
+          PressTab { text: "+ enlist"; small: true; onClicked: { board.rosterSlug = ""; board.rosterNew = true; } }
+        }
+        // The order, under the rule so the column's narrow header keeps its title.
         Item {
+          visible: board.view.rosterHasStats === true
           width: parent.width
-          height: 26
-          SectionTitle {
-            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-            text: (board.rosterSort === "leaderboard" ? "LEADERBOARD · " : "CLANKERS · ") + (board.view.roster ?? []).length
-          }
-          Row {
-            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-            spacing: 5
-            Segment {
-              visible: board.view.rosterHasStats === true
-              text: "ranked"
-              on: board.rosterSort === "leaderboard"
-              onClicked: board.rosterSort = board.rosterSort === "leaderboard" ? "roster" : "leaderboard"
-            }
-            Segment {
-              text: "+ new"
-              on: false
-              onClicked: { board.rosterSlug = ""; board.rosterNew = true; }
-            }
+          height: sortLink.height
+          PressTab {
+            id: sortLink
+            anchors.right: parent.right
+            text: board.rosterSort === "leaderboard" ? "in roster order" : "by service record"
+            kind: "quiet"; small: true
+            onClicked: board.rosterSort = board.rosterSort === "leaderboard" ? "roster" : "leaderboard"
           }
         }
-        Text {
+        Words {
           visible: board.loaded && (board.view.roster ?? []).length === 0
           width: parent.width
           wrapMode: Text.Wrap
-          text: "No agents in ROSTER.org yet."
-          font.family: Theme.lettering; font.pixelSize: 13
+          role: "lettering"
+          text: "No clankers enlisted in ROSTER.org yet."
           color: Theme.muted
         }
         Repeater {
           model: board.mode === "roster" ? (board.rosterSort === "leaderboard" ? (board.view.rosterLeaderboard ?? []) : (board.view.roster ?? [])) : []
-          delegate: RosterCard { required property var modelData; entry: modelData; width: column.width }
+          delegate: EnlistCard {
+            required property var modelData
+            entry: modelData
+            width: column.width
+            onClicked: { board.rosterNew = false; board.rosterSlug = modelData.slug; }
+          }
         }
       }
 
-      // ---- ACTIVITY PAGE ----
+      // ---- ACTIVITY ----
       Column {
         visible: board.mode === "activity"
         width: parent.width
         spacing: 10
 
-      SectionTitle { text: "NEEDS YOU · " + board.view.needs.length; alert: true; visible: board.view.needs.length > 0 }
-      Repeater {
-        model: board.view.needs
-        delegate: NeedCard { required property var modelData; need: modelData; width: column.width }
-      }
-      Text {
-        visible: board.loaded && board.view.needs.length === 0
-        width: parent.width
-        text: "Nothing needs you."
-        font.family: Theme.lettering; font.pixelSize: 14
-        color: Theme.muted
-      }
-
-      SectionTitle { text: "WORKING · " + board.view.working.length; visible: board.view.working.length > 0 }
-      Repeater {
-        model: board.view.working
-        delegate: WorkerRow { required property var modelData; worker: modelData; width: column.width }
-      }
-
-      SectionTitle { text: "QUEUED · " + board.view.queued.length; visible: board.view.queued.length > 0 }
-      Repeater {
-        model: board.view.queued
-        delegate: TaskRow { required property var modelData; width: column.width; chip: "AUTO"; title: modelData.title; meta: modelData.who + " · " + modelData.when; link: modelData.link ?? ""; task: modelData.task }
-      }
-
-      SectionTitle { text: "IN AGENT REVIEW · " + board.view.reviewing.length; visible: board.view.reviewing.length > 0 }
-      Repeater {
-        model: board.view.reviewing
-        delegate: TaskRow { required property var modelData; width: column.width; chip: "EVAL"; title: modelData.title; meta: modelData.who; link: modelData.link ?? ""; task: modelData.task }
-      }
-
-      SectionTitle {
-        text: "IDLE · " + board.view.idle.length + (board.idleOpen ? "  ▾" : "  ▸")
-        visible: board.view.idle.length > 0
-        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: board.idleOpen = !board.idleOpen }
-      }
-      Repeater {
-        model: board.idleOpen ? board.view.idle : []
-        delegate: WorkerRow { required property var modelData; worker: modelData; width: column.width; small: true }
-      }
-
-      SectionTitle { text: "REPORTED TODAY · " + board.view.recent.length; visible: board.view.recent.length > 0 }
-      Repeater {
-        model: board.view.recent.slice(0, 6)
-        delegate: TaskRow {
-          required property var modelData
-          width: column.width
-          chip: modelData.state
-          title: modelData.title
-          quote: modelData.line
-          meta: modelData.when ? modelData.when + " ago" : ""
-          link: modelData.link ?? ""
-          task: modelData.task
+        SectionRule { text: "NEEDS YOU · " + board.view.needs.length; alert: true; visible: board.view.needs.length > 0 }
+        Repeater {
+          model: board.view.needs
+          delegate: NeedDocket { required property var modelData; need: modelData; width: column.width }
         }
-      }
+        Words {
+          visible: board.loaded && board.view.needs.length === 0
+          width: parent.width
+          topPadding: 4
+          role: "lettering"
+          text: "Nothing needs you."
+          color: Theme.muted
+        }
 
-      Text {
-        visible: board.view.down.length > 0
-        width: parent.width
-        wrapMode: Text.Wrap
-        text: "Out of reach: " + board.view.down.join(", ")
-        font.family: Theme.caption; font.pixelSize: 12
-        color: Theme.muted
-      }
-      }
-    }
-  }
-
-  component Segment: Rectangle {
-    id: seg
-    property string text: ""
-    property bool on: false
-    signal clicked()
-    width: segLabel.implicitWidth + 20
-    height: 24
-    radius: 12
-    color: on ? Theme.pageInk : "transparent"
-    border.color: Theme.pageInk
-    border.width: 2
-    Text { id: segLabel; anchors.centerIn: parent; text: seg.text; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: seg.on ? Theme.paper : Theme.pageInk }
-    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: seg.clicked() }
-  }
-
-  // One roster agent as a Pokemon-style clanker card: harness band, clanker, status, spec and battery gauge.
-  component RosterCard: Rectangle {
-    id: rc
-    property var entry
-    readonly property var colours: Board.HARNESS[entry.clanker] ?? Board.HARNESS.other
-    readonly property color batFill: entry.batteryTone === "high" ? "#2f8a4e" : entry.batteryTone === "mid" ? "#c88a12" : entry.batteryTone === "low" ? "#b3311f" : "#8b8892"
-    height: rcInner.implicitHeight + 22
-    radius: 14
-    color: Theme.balloon
-    border.color: Theme.ink
-    border.width: 2
-    clip: true
-    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { board.rosterNew = false; board.rosterSlug = rc.entry.slug; } }
-
-    Rectangle { width: parent.width; height: 5; color: rc.colours.band }
-
-    Column {
-      id: rcInner
-      x: 10; y: 12
-      width: parent.width - 20
-      spacing: 6
-      Row {
-        width: parent.width
-        spacing: 9
-        Clanker { size: 38; harness: rc.entry.clanker; claws: rc.entry.available || rc.entry.busy }
-        Column {
-          width: parent.width - 47
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: 2
-          Row {
-            width: parent.width
-            spacing: 6
-            Text {
-              width: Math.min(implicitWidth, parent.width - badge.width - 6)
-              elide: Text.ElideRight
-              text: rc.entry.name
-              font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 15
-              color: Theme.ink
+        SectionRule { text: "WORKING · " + board.view.working.length; visible: board.view.working.length > 0 }
+        Pad {
+          visible: board.view.working.length > 0
+          Repeater {
+            model: board.view.working
+            delegate: StubRow {
+              required property var modelData
+              required property int index
+              first: index === 0
+              title: modelData.title; meta: modelData.where; harness: modelData.harness; artSize: 30
+              opens: (modelData.link ?? "") !== "" || (modelData.task ?? "") !== ""
+              onClicked: board.show(modelData.task ?? "", modelData.link ?? "")
             }
-            Rectangle {
-              id: badge
-              anchors.verticalCenter: parent.verticalCenter
-              height: 17
-              width: badgeLabel.implicitWidth + 10
-              radius: 8.5
-              color: rc.entry.busy ? "#d7e4f2" : rc.entry.status === "idle" ? "#dfead6" : "#ffd6cf"
-              border.color: rc.entry.busy ? "#1c3a66" : rc.entry.status === "idle" ? "#2f5a22" : "#8a1f12"
-              border.width: 1.5
-              Text {
-                id: badgeLabel
-                anchors.centerIn: parent
-                text: rc.entry.statusLabel
-                font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 9
-                color: rc.entry.busy ? "#1c3a66" : rc.entry.status === "idle" ? "#2f5a22" : "#8a1f12"
+          }
+        }
+
+        SectionRule { text: "QUEUED · " + board.view.queued.length; visible: board.view.queued.length > 0 }
+        // Slips on a spike: the queue's next few on top, the rest stacked under them.
+        Item {
+          visible: board.view.queued.length > 0
+          width: parent.width
+          height: queuePad.height + (spike.visible ? 6 : 0)
+          Item {
+            id: spike
+            visible: !board.queueOpen && board.view.queued.length > 3 && !Theme.consoleLook
+            Inked { x: 6; y: 6; width: queuePad.width; height: queuePad.height; lift: 0; lineWidth: 1.5 }
+            Inked { x: 3; y: 3; width: queuePad.width; height: queuePad.height; lift: 0; lineWidth: 1.5 }
+          }
+          Pad {
+            id: queuePad
+            width: parent.width - (spike.visible ? 6 : 0)
+            Repeater {
+              model: board.queueOpen ? board.view.queued : board.view.queued.slice(0, 3)
+              delegate: StubRow {
+                required property var modelData
+                required property int index
+                first: index === 0
+                title: modelData.title; meta: modelData.who
+                lead: board.whenLead(modelData.when); leadWidth: 58
+                onClicked: board.show(modelData.task, modelData.link ?? "")
               }
             }
           }
-          Text {
-            width: parent.width
-            elide: Text.ElideRight
-            text: rc.entry.specLine
-            font.family: Theme.caption; font.pixelSize: 11
-            color: "#6d6a73"
+        }
+        Item {
+          visible: board.view.queued.length > 3
+          width: parent.width
+          height: moreQueued.height
+          PressTab {
+            id: moreQueued
+            anchors.right: parent.right
+            text: board.queueOpen ? "fewer" : "all " + board.view.queued.length + " ›"
+            kind: "quiet"; small: true
+            onClicked: board.queueOpen = !board.queueOpen
           }
         }
-      }
-      // Battery gauge row (or active terminal when busy).
-      Row {
-        visible: rc.entry.batteryText !== "" || rc.entry.terminal !== ""
-        width: parent.width
-        spacing: 7
-        Item {
-          visible: rc.entry.batteryLevel >= 0
-          anchors.verticalCenter: parent.verticalCenter
-          width: 28; height: 13
-          Rectangle {
-            x: 0; y: 0; width: 25; height: 13; radius: 3.5
-            color: "transparent"; border.color: Theme.ink; border.width: 1.8
-            Rectangle {
-              x: 2.5; y: 2.5
-              width: Math.max(rc.entry.batteryLevel > 0 ? 2.5 : 0, Math.round((parent.width - 5) * rc.entry.batteryLevel / 100))
-              height: parent.height - 5; radius: 1; color: rc.batFill
+
+        SectionRule { text: "IN AGENT REVIEW · " + board.view.reviewing.length; visible: board.view.reviewing.length > 0 }
+        Pad {
+          visible: board.view.reviewing.length > 0
+          Repeater {
+            model: board.view.reviewing
+            delegate: StubRow {
+              required property var modelData
+              required property int index
+              first: index === 0
+              title: modelData.title; meta: modelData.who; stamp: "EVAL"
+              onClicked: board.show(modelData.task, modelData.link ?? "")
             }
           }
-          Rectangle { x: 26; y: 3.5; width: 2; height: 6; radius: 1; color: Theme.ink }
         }
-        Text {
-          width: parent.width - (rc.entry.batteryLevel >= 0 ? 35 : 0)
-          anchors.verticalCenter: parent.verticalCenter
-          elide: Text.ElideRight
-          text: rc.entry.terminal !== "" ? rc.entry.terminal : rc.entry.batteryText
-          font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 11
-          color: rc.entry.batteryLevel >= 0 ? Theme.ink : "#6d6a73"
+
+        SectionRule {
+          visible: board.view.idle.length > 0
+          text: "IDLE · " + board.view.idle.length + (board.idleOpen ? "  ▾" : "")
+          clickable: true
+          onClicked: board.idleOpen = !board.idleOpen
         }
-      }
-      Text {
-        visible: (rc.entry.statsLine ?? "") !== ""
-        width: parent.width
-        elide: Text.ElideRight
-        text: rc.entry.statsLine ?? ""
-        font.family: Theme.caption; font.pixelSize: 11
-        color: "#6d6a73"
+        Pad {
+          visible: board.idleOpen && board.view.idle.length > 0
+          Repeater {
+            model: board.idleOpen ? board.view.idle : []
+            delegate: StubRow {
+              required property var modelData
+              required property int index
+              first: index === 0
+              title: modelData.title; meta: modelData.where + " · " + modelData.status; harness: modelData.harness; artSize: 24
+              opens: (modelData.link ?? "") !== "" || (modelData.task ?? "") !== ""
+              onClicked: board.show(modelData.task ?? "", modelData.link ?? "")
+            }
+          }
+        }
+
+        SectionRule { text: "REPORTED TODAY · " + board.view.recent.length; visible: board.view.recent.length > 0 }
+        Pad {
+          visible: board.view.recent.length > 0
+          Repeater {
+            model: board.view.recent.slice(0, 6)
+            delegate: StubRow {
+              required property var modelData
+              required property int index
+              first: index === 0
+              title: modelData.title; stamp: modelData.state; quote: modelData.line
+              meta: modelData.when ? modelData.when + " ago" : ""
+              onClicked: board.show(modelData.task, modelData.link ?? "")
+            }
+          }
+        }
+
+        Words {
+          visible: board.view.down.length > 0
+          width: parent.width
+          wrapMode: Text.Wrap
+          role: "meta"
+          text: "Out of reach: " + board.view.down.join(", ")
+          color: Theme.muted
+        }
       }
     }
   }
 
-  component SectionTitle: Text {
-    property bool alert: false
-    width: parent ? parent.width : 0
-    topPadding: 4
-    font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; font.letterSpacing: 1
-    color: alert ? Theme.accent : Theme.muted
+  // A start ("tomorrow 04:30", "Thu 18:00", "now") as a day over a time, for a stub's left column.
+  function whenLead(at) {
+    const m = /^(.*)\s(\d{1,2}:\d{2})$/.exec(String(at ?? ""));
+    if (!m) return String(at ?? "").indexOf("waits") === 0 ? "waits" : String(at ?? "");
+    return m[1] + "\n" + m[2];
   }
 
-  // One thing that needs the user: its clanker and mark, what kind of need, the task, its words, and where it opens.
-  component NeedCard: Rectangle {
+  // A docket for what needs the user: its kind on the band, the clanker and title, its last word, and where it opens.
+  component NeedDocket: Item {
     id: card
     property var need
     readonly property bool urgent: need.level === 1
-    height: inner.implicitHeight + 20
-    radius: 14
-    // The card opens the task's page; its button opens Herdr or Emacs straight away.
-    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: board.show(card.need.task ?? "", "") }
-    color: urgent ? "#fff0ec" : Theme.balloon
-    border.color: urgent ? "#b3311f" : Theme.ink
-    border.width: urgent ? 3 : 2
-
+    height: inner.implicitHeight
+    Inked { anchors.fill: parent; edge: card.urgent ? Theme.tone("TODO") : card.need.kind === "asks" ? Theme.accent : Theme.edge; lift: 3; lineWidth: card.urgent ? 2.5 : 2 }
+    Rectangle { anchors.fill: parent; anchors.margins: 2; radius: 4; visible: hover.containsMouse; color: Qt.alpha(Theme.surfaceInk, 0.04) }
+    // The docket opens the task's page; its button opens Herdr or Emacs straight away.
+    MouseArea { id: hover; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: board.show(card.need.task ?? "", "") }
     Column {
       id: inner
-      x: 10; y: 10
-      width: parent.width - 20
-      spacing: 8
+      width: parent.width
+      spacing: 6
+      bottomPadding: 8
+      Band { label: card.need.label; Words { role: "number"; text: card.need.where; color: Theme.surfaceMuted; rightPadding: 4 } }
       Row {
-        width: parent.width
-        spacing: 10
+        x: 10
+        width: parent.width - 20
+        spacing: 9
         Clanker {
-          size: 42
+          size: 34
           harness: card.need.harness
-          mark: card.need.kind === "blocked" ? "!" : card.need.kind === "asks" ? "?" : "new"
-          markColor: card.need.kind === "blocked" ? "#b3311f" : card.need.kind === "asks" ? "#1b1a1f" : "#3d3466"
+          mark: card.need.kind === "blocked" ? "!" : card.need.kind === "asks" ? "?" : ""
+          markColor: card.need.kind === "blocked" ? Theme.tone("TODO") : Theme.accent
         }
-        Column {
-          width: parent.width - 52
-          spacing: 2
-          Text { text: card.need.label; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 11; font.letterSpacing: 0.5; color: card.urgent ? "#b3311f" : card.need.kind === "review" ? "#3d3466" : Theme.ink }
-          Text { width: parent.width; wrapMode: Text.Wrap; text: card.need.title; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 14; color: Theme.ink }
-          Text { width: parent.width; elide: Text.ElideRight; text: card.need.where; font.family: Theme.caption; font.pixelSize: 12; color: "#6d6a73" }
-        }
+        Words { width: parent.width - 43; anchors.verticalCenter: parent.verticalCenter; role: "row"; wrapMode: Text.Wrap; text: card.need.title }
       }
-      Rectangle {
+      Words {
         visible: card.need.line !== ""
-        width: parent.width
-        height: quoteText.implicitHeight + 14
-        radius: 12
-        color: "#fffcf5"
-        border.color: Theme.ink
-        border.width: 2
-        Text {
-          id: quoteText
-          x: 10; y: 7
-          width: parent.width - 20
-          wrapMode: Text.Wrap
-          maximumLineCount: 4
-          elide: Text.ElideRight
-          text: card.need.line
-          font.family: Theme.lettering; font.pixelSize: 13
-          color: Theme.ink
-        }
+        x: 10
+        width: parent.width - 20
+        role: "lettering"
+        wrapMode: Text.Wrap
+        maximumLineCount: 4
+        elide: Text.ElideRight
+        text: "“" + card.need.line + "”"
+        color: Qt.alpha(Theme.surfaceInk, 0.9)
       }
-      Rectangle {
+      Item {
         visible: (card.need.link ?? "") !== ""
-        anchors.right: parent.right
-        width: action.implicitWidth + 28
-        height: 30
-        radius: 15
-        color: Theme.ink
-        Text { id: action; anchors.centerIn: parent; text: card.need.action; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13; color: "#f6f1e7" }
-        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: board.open(card.need.link) }
+        x: 10
+        width: parent.width - 20
+        height: action.height
+        PressTab { id: action; anchors.right: parent.right; text: card.need.action; kind: card.urgent ? "primary" : "secondary"; small: true; onClicked: board.open(card.need.link) }
       }
     }
-  }
-
-  // A worker in a line: its clanker, what it works on, and where; a click opens its session when it has one.
-  component WorkerRow: Item {
-    id: w
-    property var worker
-    property bool small: false
-    height: Math.max(small ? 28 : 36, texts.implicitHeight)
-    opacity: (worker.link ?? "") !== "" || !small ? 1 : 0.75
-    Clanker { id: icon; size: w.small ? 26 : 34; claws: !w.small; harness: w.worker.harness }
-    Column {
-      id: texts
-      anchors.left: icon.right
-      anchors.leftMargin: 10
-      anchors.right: parent.right
-      anchors.verticalCenter: icon.verticalCenter
-      Text { width: parent.width; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight; text: w.worker.title; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: w.small ? 12 : 13; color: Theme.pageInk }
-      Text { width: parent.width; elide: Text.ElideRight; text: w.worker.where + (w.small ? " · " + w.worker.status : ""); font.family: Theme.caption; font.pixelSize: 12; color: Theme.muted }
-    }
-    MouseArea { anchors.fill: parent; enabled: (w.worker.link ?? "") !== "" || (w.worker.task ?? "") !== ""; cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor; onClicked: board.show(w.worker.task ?? "", w.worker.link ?? "") }
-  }
-
-  // A task in a line: its state, title, a quoted report, and what it is waiting on; a click opens it in Emacs.
-  component TaskRow: Item {
-    id: t
-    property string chip: ""
-    property string title: ""
-    property string quote: ""
-    property string meta: ""
-    property string link: ""
-    property string task: ""
-    height: lines.implicitHeight
-    StateChip { id: badge; orgState: t.chip; y: 1 }
-    Column {
-      id: lines
-      anchors.left: badge.right
-      anchors.leftMargin: 8
-      anchors.right: parent.right
-      spacing: 1
-      Text { width: parent.width; wrapMode: Text.Wrap; text: t.title; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13; color: Theme.pageInk }
-      Text { visible: t.quote !== ""; width: parent.width; wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight; text: "“" + t.quote + "”"; font.family: Theme.lettering; font.pixelSize: 12; color: Theme.muted }
-      Text { visible: t.meta !== ""; width: parent.width; elide: Text.ElideRight; text: t.meta; font.family: Theme.caption; font.pixelSize: 12; color: Theme.muted }
-    }
-    MouseArea { anchors.fill: parent; enabled: t.link !== "" || t.task !== ""; cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor; onClicked: board.show(t.task, t.link) }
   }
 }

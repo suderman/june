@@ -167,6 +167,8 @@ ShellRoot {
   // pendingEdits: { [key]: { applied, change, queue, id, done, at, undo } }, and seen: the reviews opened since the
   // last agents board.
   property var taskNotice: ({ key: "", text: "", pending: "", from: "", undo: null })
+  // The roster's clankers (board.mjs rosterView), for handing a task to one from the projects board's pages too.
+  readonly property var rosterCards: Board.rosterView(agentsBoard).cards
   property var pendingEdits: ({})
   property var rosterNotice: ({ text: "", busy: false, seq: 0, saved: "", deleted: false })
   property string rosterPendingId: ""
@@ -194,9 +196,8 @@ ShellRoot {
     }
     // As shown: a saved edit the board has yet to carry counts.
     const task = Board.applyEntry(Board.findTask(Object.assign({}, agendaBoard?.tasks ?? {}, agentsBoard?.tasks ?? {}), key), held, "");
-    // A state change can be put back, to the state it showed before.
-    // Not from AUTO: going back there is a handoff, not a state.
-    const undo = change.action === "state" && (task?.state ?? "") !== "" && task.state !== "AUTO" ? { action: "state", state: task.state, undo: true } : null;
+    // A state change or handoff can be put back, as board.mjs undoOf says.
+    const undo = Board.undoOf(change, task);
     // A saved edit the board has yet to show stays drawn under the new one.
     sendEdit(key, change, held ? (held.applied ?? []).concat([held.change]) : [], [], undo);
   }
@@ -993,6 +994,7 @@ ShellRoot {
             view: root.agendaView
             notice: root.taskNotice
             dispatch: root.agentsBoard?.dispatch ?? null
+            roster: root.rosterCards
             pending: root.pendingEdits
             onEdit: (key, change) => root.editTask(key, change)
             user: root.agentsBoard?.user ?? ""
@@ -1139,6 +1141,7 @@ ShellRoot {
           view: root.agendaView
     notice: root.taskNotice
     dispatch: root.agentsBoard?.dispatch ?? null
+    roster: root.rosterCards
     pending: root.pendingEdits
     onEdit: (key, change) => root.editTask(key, change)
     user: root.agentsBoard?.user ?? ""

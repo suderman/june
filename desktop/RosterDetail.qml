@@ -1,13 +1,13 @@
-// One roster agent's card and editor (ROSTER.org via daemon `roster` op): shows host, harness, model, effort,
-// battery, status and instructions when opened, and edits, adds or removes cards in place.
+// One enlisted clanker's page (ROSTER.org via the daemon's `roster` op), as the phone's Squad.kt draws it: the full
+// enlistment card (portrait, name, class, unit, loadout, energy, standing orders, service record); or the card
+// filled in to enlist a new clanker or amend this one, where discharging asks once more before it removes the card.
 import QtQuick
-import QtQuick.Controls
 import "board.mjs" as Board
 
 Item {
   id: page
 
-  // Shaped card from board.mjs rosterView, or null when creating a new agent.
+  // Shaped card from board.mjs rosterView, or null when enlisting a new clanker.
   property var card: null
   property bool creating: false
   property var hosts: ["kit", "cog"]
@@ -30,23 +30,14 @@ Item {
 
   function loadForm(c) {
     confirmingDelete = false;
-    if (c) {
-      fName = c.name ?? "";
-      fHost = c.host ?? (hosts.length > 0 ? hosts[0] : "kit");
-      fHarness = c.harness && Board.ROSTER_HARNESSES.includes(c.harness) ? c.harness : "claude";
-      fModel = c.model ?? "";
-      fEffort = c.effort ?? "";
-      fAvatar = c.avatar ?? "";
-      fInstructions = c.instructions ?? "";
-    } else {
-      fName = "";
-      fHost = hosts.length > 0 ? hosts[0] : "kit";
-      fHarness = "claude";
-      fModel = "";
-      fEffort = "high";
-      fAvatar = "";
-      fInstructions = "";
-    }
+    fName = c?.name ?? "";
+    fHost = c?.host ?? (hosts.length > 0 ? hosts[0] : "kit");
+    fHarness = c?.harness && Board.ROSTER_HARNESSES.includes(c.harness) ? c.harness : "claude";
+    fModel = c?.model ?? "";
+    fEffort = c ? (c.effort ?? "") : "high";
+    fAvatar = c?.avatar ?? "";
+    fInstructions = c?.instructions ?? "";
+    name.text = fName; host.text = fHost; modelField.text = fModel; avatar.text = fAvatar; orders.text = fInstructions;
   }
 
   onCreatingChanged: {
@@ -63,8 +54,7 @@ Item {
       editing = false;
     }
   }
-
-  readonly property var colours: Board.HARNESS[Board.harnessOf(editing ? fHarness : (card?.harness ?? ""))] ?? Board.HARNESS.other
+  readonly property string stampTone: card?.stamp === "ON DUTY" ? Theme.tone("PROG") : card?.stamp === "INVALID" ? Theme.tone("TODO") : Theme.muted
 
   Flickable {
     anchors.fill: parent
@@ -74,479 +64,274 @@ Item {
 
     Column {
       id: col
-      width: parent.width
+      width: parent.width - 6
       spacing: 10
 
-      // Top bar: back/cancel and edit toggle.
+      // Back to the roster (or the card, while amending it), and amend.
       Item {
         width: parent.width
-        height: 28
-        Text {
-          anchors.left: parent.left
-          anchors.verticalCenter: parent.verticalCenter
-          text: page.editing && !page.creating ? "‹ card" : "‹ roster"
-          font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
-          color: Theme.pageInk
-          MouseArea {
-            anchors.fill: parent; anchors.margins: -6; cursorShape: Qt.PointingHandCursor
-            onClicked: {
-              if (page.editing && !page.creating) { page.editing = false; page.confirmingDelete = false; }
-              else page.back();
-            }
+        height: backLink.height
+        PressTab {
+          id: backLink
+          text: (Theme.consoleLook ? "< " : "‹  ") + (page.editing && !page.creating ? "card" : "roster")
+          kind: "quiet"; small: true
+          onClicked: {
+            if (page.editing && !page.creating) { page.editing = false; page.confirmingDelete = false; }
+            else page.back();
           }
         }
-        Choice {
+        PressTab {
           visible: !page.editing && page.card !== null
           anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          text: "edit"
+          text: "amend card"; small: true
           onClicked: { page.loadForm(page.card); page.editing = true; }
         }
       }
 
-      // ---- VIEW MODE: Pokemon-style Clanker Card ----
+      Words {
+        visible: !page.editing && page.card === null
+        width: parent.width
+        role: "lettering"
+        wrapMode: Text.Wrap
+        text: "That clanker is no longer in ROSTER.org."
+        color: Theme.muted
+      }
+
+      // ---- The enlistment card ----
       Column {
         visible: !page.editing && page.card !== null
         width: parent.width
         spacing: 10
 
-        Rectangle {
+        Item {
           width: parent.width
-          height: viewCardInner.implicitHeight + 26
-          radius: 14
-          color: Theme.balloon
-          border.color: Theme.ink
-          border.width: 2.5
-          clip: true
-
-          // Harness-coloured header stripe.
-          Rectangle { width: parent.width; height: 8; color: page.colours.band }
-
+          height: cardColumn.implicitHeight
+          Inked { anchors.fill: parent; lift: 4 }
           Column {
-            id: viewCardInner
-            x: 12; y: 16
-            width: parent.width - 24
-            spacing: 10
-
-            Row {
-              width: parent.width
-              spacing: 10
-              Clanker { size: 52; harness: page.card?.clanker ?? "other" }
-              Column {
-                width: parent.width - 62
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 4
-                Text {
-                  width: parent.width
-                  elide: Text.ElideRight
-                  text: page.card?.name ?? ""
-                  font.family: Theme.display; font.pixelSize: 20
-                  color: Theme.ink
-                }
-                Row {
-                  spacing: 6
-                  Rectangle {
-                    height: 20
-                    width: stText.implicitWidth + 12
-                    radius: 10
-                    color: page.card?.busy ? "#d7e4f2" : page.card?.status === "idle" ? "#dfead6" : "#ffd6cf"
-                    border.color: page.card?.busy ? "#1c3a66" : page.card?.status === "idle" ? "#2f5a22" : "#8a1f12"
-                    border.width: 1.5
-                    Text {
-                      id: stText
-                      anchors.centerIn: parent
-                      text: page.card?.statusLabel ?? ""
-                      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 10
-                      color: page.card?.busy ? "#1c3a66" : page.card?.status === "idle" ? "#2f5a22" : "#8a1f12"
-                    }
-                  }
-                  Text {
-                    visible: (page.card?.terminal ?? "") !== ""
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: page.card?.terminal ?? ""
-                    font.family: Theme.caption; font.pixelSize: 11
-                    color: "#6d6a73"
-                  }
-                }
+            id: cardColumn
+            width: parent.width
+            Band { label: "Enlistment card"; number: page.card?.serviceNo ?? "" }
+            Column {
+              x: 10
+              width: parent.width - 20
+              topPadding: 10; bottomPadding: 10
+              spacing: 6
+              Portrait {
+                visible: !Theme.consoleLook
+                width: parent.width; height: 130
+                harness: page.card?.clanker ?? "other"
+                stamp: page.card?.stamp ?? ""
+                art: 88
               }
-            }
-
-            // Battery gauge row.
-            Row {
-              visible: (page.card?.batteryText ?? "") !== ""
-              width: parent.width
-              spacing: 8
-              BatteryBar {
-                anchors.verticalCenter: parent.verticalCenter
-                level: page.card?.batteryLevel ?? -1
-                tone: page.card?.batteryTone ?? "unknown"
-              }
-              Text {
-                width: parent.width - 42
-                anchors.verticalCenter: parent.verticalCenter
+              Words { visible: Theme.consoleLook; role: "number"; text: "(o)  " + ((page.card?.stamp ?? "") !== "" ? page.card.stamp.toLowerCase() : "idle"); color: Theme.muted }
+              Words { width: parent.width; role: "masthead"; elide: Text.ElideRight; text: page.card?.name ?? "" }
+              Words {
+                width: parent.width
+                role: "meta"
                 elide: Text.ElideRight
-                text: (page.card?.batteryText ?? "") + ((page.card?.batteryAccount ?? "") !== "" ? " · " + page.card.batteryAccount : "")
-                font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
-                color: Theme.ink
+                textFormat: Text.StyledText
+                text: "<b><font color='" + (Theme.consoleLook ? Theme.surfaceInk : Theme.harnessTone(page.card?.clanker ?? "other")) + "'>" + ((page.card?.harness ?? "") !== "" ? page.card.harness : "no class").toUpperCase() + "</font></b>"
+                  + ((page.card?.loadout ?? "") !== "" ? "  ·  " + page.card.loadout : "")
+                color: Theme.surfaceMuted
               }
             }
-
-            Rectangle { width: parent.width; height: 1.5; color: Theme.ink; opacity: 0.15 }
-
-            // Core specs: host, harness, model, effort.
-            Grid {
-              width: parent.width
-              columns: 2
-              columnSpacing: 10
-              rowSpacing: 6
-              SpecCell { width: (parent.width - 10) / 2; label: "HOST"; value: page.card?.host || "—" }
-              SpecCell { width: (parent.width - 10) / 2; label: "HARNESS"; value: page.card?.harness || "—" }
-              SpecCell { width: (parent.width - 10) / 2; label: "MODEL"; value: page.card?.model || "default" }
-              SpecCell { width: (parent.width - 10) / 2; label: "EFFORT"; value: page.card?.effort || "default" }
+            Rectangle { width: parent.width; height: 1; color: Theme.rule }
+            FieldRow { label: "Unit"; Words { width: parent.width; role: "value"; text: (page.card?.unit ?? "") !== "" ? page.card.unit : "reserve"; color: (page.card?.unit ?? "") !== "" ? Theme.surfaceInk : Theme.surfaceMuted } }
+            FieldRow { label: "Class"; Words { width: parent.width; role: "value"; text: (page.card?.harness ?? "") !== "" ? page.card.harness : "none" } }
+            FieldRow { label: "Loadout"; Words { width: parent.width; role: "value"; wrapMode: Text.Wrap; text: ((page.card?.model ?? "") !== "" ? page.card.model : "harness default") + " · " + ((page.card?.effort ?? "") !== "" ? page.card.effort : "default effort") } }
+            FieldRow {
+              label: "Energy"
+              last: (page.card?.terminal ?? "") === "" && (page.card?.avatar ?? "") === ""
+              Column {
+                width: parent.width
+                spacing: 4
+                EnergyGauge { visible: (page.card?.batteryLevel ?? -1) >= 0; level: page.card?.batteryLevel ?? -1; tone: page.card?.batteryTone ?? "unknown"; gauge: page.card?.gauge ?? ""; cell: 6 }
+                Words {
+                  width: parent.width
+                  role: "value"
+                  wrapMode: Text.Wrap
+                  text: ((page.card?.energyText ?? "") !== "" ? page.card.energyText : "unknown") + ((page.card?.batteryAccount ?? "") !== "" ? " · " + page.card.batteryAccount : "")
+                  color: (page.card?.energyText ?? "") !== "" ? Theme.surfaceInk : Theme.surfaceMuted
+                }
+              }
             }
-
-            SpecCell {
-              visible: (page.card?.avatar ?? "") !== ""
-              width: parent.width
-              label: "AVATAR"
-              value: page.card?.avatar ?? ""
-            }
-
-            Text {
+            FieldRow { visible: (page.card?.terminal ?? "") !== ""; label: "Post"; last: (page.card?.avatar ?? "") === ""; Words { width: parent.width; role: "number"; text: page.card?.terminal ?? "" } }
+            FieldRow { visible: (page.card?.avatar ?? "") !== ""; label: "Avatar"; last: true; Words { width: parent.width; role: "number"; elide: Text.ElideMiddle; text: page.card?.avatar ?? "" } }
+            Words {
               visible: (page.card?.problems ?? []).length > 0
-              width: parent.width
+              x: 10; width: parent.width - 20
+              topPadding: 4; bottomPadding: 10
+              role: "meta"
+              font.weight: Font.Bold
               wrapMode: Text.Wrap
               text: (page.card?.problems ?? []).join("; ")
-              font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
-              color: Theme.accent
+              color: Theme.tone("TODO")
             }
           }
         }
 
-        Text {
-          text: "INSTRUCTIONS"
-          font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 11; font.letterSpacing: 1
-          color: Theme.muted
-        }
-        Rectangle {
+        SectionRule { text: "STANDING ORDERS" }
+        Item {
           width: parent.width
-          height: instrView.implicitHeight + 16
-          radius: 12
-          color: Theme.balloon
-          border.color: Theme.ink
-          border.width: 2
-          Text {
-            id: instrView
-            x: 10; y: 8
+          height: ordersText.implicitHeight + 18
+          Inked { anchors.fill: parent; lift: 2 }
+          Words {
+            id: ordersText
+            x: 10; y: 9
             width: parent.width - 20
+            role: (page.card?.instructions ?? "").length > 280 ? "body" : "lettering"
             wrapMode: Text.Wrap
-            text: (page.card?.instructions ?? "") !== "" ? page.card.instructions : "No extra instructions."
-            font.family: Theme.lettering; font.pixelSize: 13
-            color: (page.card?.instructions ?? "") !== "" ? Theme.ink : Theme.muted
+            text: (page.card?.instructions ?? "") !== "" ? page.card.instructions : "No standing orders."
+            color: (page.card?.instructions ?? "") !== "" ? Theme.surfaceInk : Theme.surfaceMuted
           }
         }
 
-        Text {
-          visible: (page.card?.runs ?? 0) > 0
-          text: "HISTORY"
-          font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 11; font.letterSpacing: 1
-          color: Theme.muted
-        }
-        Rectangle {
+        SectionRule { visible: (page.card?.runs ?? 0) > 0; text: "SERVICE RECORD" }
+        Item {
           visible: (page.card?.runs ?? 0) > 0
           width: parent.width
-          height: histCol.implicitHeight + 16
-          radius: 12
-          color: Theme.balloon
-          border.color: Theme.ink
-          border.width: 2
+          height: record.implicitHeight + 10
+          Inked { anchors.fill: parent; lift: 2 }
           Column {
-            id: histCol
-            x: 10; y: 8
+            id: record
+            x: 10; y: 5
             width: parent.width - 20
-            spacing: 6
-            Text {
+            spacing: 2
+            Words {
               width: parent.width
+              topPadding: 4; bottomPadding: 4
+              role: "meta"
+              font.weight: Font.Bold
               wrapMode: Text.Wrap
-              text: (page.card?.statsLine ?? "")
-                + ((page.card?.handoffs ?? 0) > 0 ? " · " + page.card.handoffs + " handoff" : "")
-                + ((page.card?.parked ?? 0) > 0 ? " · " + page.card.parked + " parked" : "")
-              font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
-              color: Theme.ink
+              text: (page.card?.statsLine ?? "") + ((page.card?.handoffs ?? 0) > 0 ? " · " + page.card.handoffs + " handed off" : "") + ((page.card?.parked ?? 0) > 0 ? " · " + page.card.parked + " parked" : "")
             }
             Repeater {
               model: page.card?.recentRuns ?? []
-              delegate: Row {
+              delegate: Item {
                 required property var modelData
-                width: histCol.width
-                spacing: 6
-                Text {
-                  width: 48
-                  text: modelData.outcome.toUpperCase()
-                  font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 10
-                  color: modelData.outcome === "done" || modelData.outcome === "eval" ? "#2f5a22" : modelData.outcome === "handoff" || modelData.outcome === "parked" ? "#8a1f12" : "#6d6a73"
-                }
-                Text {
-                  width: parent.width - 96
-                  elide: Text.ElideRight
-                  text: modelData.taskTitle
-                  font.family: Theme.caption; font.pixelSize: 12
-                  color: Theme.ink
-                }
-                Text {
-                  width: 36
-                  horizontalAlignment: Text.AlignRight
-                  text: modelData.duration
-                  font.family: Theme.caption; font.pixelSize: 11
-                  color: "#6d6a73"
-                }
+                width: record.width
+                height: 28
+                readonly property color tone: modelData.outcome === "done" ? Theme.tone("DONE") : modelData.outcome === "eval" ? Theme.tone("EVAL")
+                  : modelData.outcome === "handoff" || modelData.outcome === "parked" ? Theme.tone("TODO") : modelData.outcome === "running" ? Theme.tone("PROG") : Theme.surfaceMuted
+                Stamp { id: outcome; width: 66; anchors.verticalCenter: parent.verticalCenter; text: modelData.outcome !== "" ? modelData.outcome : "run"; tone: parent.tone; tilt: 0 }
+                Words { anchors.left: outcome.right; anchors.leftMargin: 8; anchors.right: duration.left; anchors.rightMargin: 6; anchors.verticalCenter: parent.verticalCenter; role: "meta"; elide: Text.ElideRight; text: modelData.taskTitle }
+                Words { id: duration; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; role: "number"; text: modelData.duration; color: Theme.surfaceMuted }
               }
             }
           }
         }
       }
 
-      // ---- EDIT / CREATE MODE ----
+      // ---- The enlistment card, blank or to amend ----
       Column {
         visible: page.editing
         width: parent.width
-        spacing: 9
+        spacing: 10
 
-        // Live card preview header.
-        Row {
+        Item {
           width: parent.width
-          spacing: 10
-          Clanker { size: 40; harness: Board.harnessOf(page.fHarness) }
+          height: form.implicitHeight
+          Inked { anchors.fill: parent; lift: 4 }
           Column {
-            width: parent.width - 50
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 1
-            Text {
-              width: parent.width; elide: Text.ElideRight
-              text: page.fName.trim() !== "" ? page.fName.trim() : (page.creating ? "New agent" : (page.card?.name ?? ""))
-              font.family: Theme.display; font.pixelSize: 18
-              color: Theme.pageInk
+            id: form
+            width: parent.width
+            Band { label: page.creating ? "Enlistment card · blank" : "Enlistment card · amend"; number: page.creating ? "" : (page.card?.serviceNo ?? "") }
+            Item {
+              width: parent.width
+              height: Math.max(formPortrait.height, name.implicitHeight) + 20
+              Portrait { id: formPortrait; visible: !Theme.consoleLook; x: 10; y: 10; width: 48; height: 48; harness: Board.harnessOf(page.fHarness); art: 36 }
+              RuledField {
+                id: name
+                x: Theme.consoleLook ? 10 : formPortrait.x + formPortrait.width + 10
+                y: 10
+                width: parent.width - x - 10
+                label: "Name"; placeholder: "e.g. Bolt"
+                onEdited: text => page.fName = text
+              }
             }
-            Text {
-              width: parent.width; elide: Text.ElideRight
-              text: [page.fHost.trim(), page.fHarness, page.fModel.trim(), page.fEffort].filter(s => s !== "").join(" · ")
-              font.family: Theme.caption; font.pixelSize: 11
-              color: Theme.muted
+            FieldRow {
+              label: "Unit"
+              Flow {
+                width: parent.width
+                spacing: 5
+                Repeater {
+                  model: page.hosts
+                  delegate: Stamp { required property string modelData; text: modelData; tone: Theme.edge; on: page.fHost === modelData; clickable: true; tilt: 0; onClicked: { page.fHost = modelData; host.text = modelData; } }
+                }
+              }
             }
-          }
-        }
-
-        FieldLabel { text: "NAME" }
-        StyledInput {
-          width: parent.width
-          text: page.fName
-          placeholderText: "e.g. Bolt"
-          onTextEdited: page.fName = text
-        }
-
-        FieldLabel { text: "HOST" }
-        Flow {
-          width: parent.width
-          spacing: 6
-          Repeater {
-            model: page.hosts
-            delegate: Choice {
-              required property string modelData
-              text: modelData
-              on: page.fHost === modelData
-              onClicked: page.fHost = modelData
+            Item {
+              visible: !page.hosts.includes(page.fHost)
+              width: parent.width
+              height: host.implicitHeight + 6
+              RuledField { id: host; x: 10; width: parent.width - 20; label: "Other unit"; placeholder: "host name"; mono: true; onEdited: text => page.fHost = text }
             }
-          }
-        }
-        StyledInput {
-          width: parent.width
-          text: page.fHost
-          placeholderText: "host name (kit, cog, …)"
-          onTextEdited: page.fHost = text
-        }
-
-        FieldLabel { text: "HARNESS" }
-        Flow {
-          width: parent.width
-          spacing: 6
-          Repeater {
-            model: Board.ROSTER_HARNESSES
-            delegate: Choice {
-              required property string modelData
-              text: modelData
-              on: page.fHarness === modelData
-              onClicked: page.fHarness = modelData
+            FieldRow {
+              label: "Class"
+              Flow {
+                width: parent.width
+                spacing: 5
+                Repeater {
+                  model: Board.ROSTER_HARNESSES
+                  delegate: Stamp { required property string modelData; text: modelData; tone: Theme.harnessTone(modelData); on: page.fHarness === modelData; clickable: true; tilt: 0; onClicked: page.fHarness = modelData }
+                }
+              }
             }
-          }
-        }
-
-        FieldLabel { text: "MODEL" }
-        StyledInput {
-          width: parent.width
-          text: page.fModel
-          placeholderText: "harness default"
-          onTextEdited: page.fModel = text
-        }
-
-        FieldLabel { text: "EFFORT" }
-        Flow {
-          width: parent.width
-          spacing: 6
-          Repeater {
-            model: Board.ROSTER_EFFORTS
-            delegate: Choice {
-              required property string modelData
-              text: modelData === "" ? "default" : modelData
-              on: page.fEffort === modelData
-              onClicked: page.fEffort = modelData
+            Item {
+              width: parent.width
+              height: modelField.implicitHeight + 10
+              RuledField { id: modelField; x: 10; y: 4; width: parent.width - 20; label: "Loadout · model"; placeholder: "harness default"; mono: true; onEdited: text => page.fModel = text }
+            }
+            FieldRow {
+              label: "Effort"
+              Flow {
+                width: parent.width
+                spacing: 5
+                Repeater {
+                  model: Board.ROSTER_EFFORTS
+                  delegate: Stamp { required property string modelData; text: modelData === "" ? "default" : modelData; tone: Theme.edge; on: page.fEffort === modelData; clickable: true; tilt: 0; onClicked: page.fEffort = modelData }
+                }
+              }
+            }
+            Item {
+              width: parent.width
+              height: avatar.implicitHeight + 16
+              RuledField { id: avatar; x: 10; y: 4; width: parent.width - 20; label: "Avatar"; placeholder: "optional path beside ROSTER.org"; mono: true; onEdited: text => page.fAvatar = text }
             }
           }
         }
 
-        FieldLabel { text: "AVATAR" }
-        StyledInput {
-          width: parent.width
-          text: page.fAvatar
-          placeholderText: "optional path beside ROSTER.org"
-          onTextEdited: page.fAvatar = text
-        }
+        SectionRule { text: "STANDING ORDERS" }
+        MemoField { id: orders; placeholder: "Role, skills, voice…"; lines: 4; onTextChanged: if (text !== page.fInstructions) page.fInstructions = text }
 
-        FieldLabel { text: "INSTRUCTIONS" }
-        Rectangle {
-          width: parent.width
-          height: Math.max(96, instrEdit.implicitHeight + 16)
-          radius: 10
-          color: Theme.balloon
-          border.color: Theme.pageInk
-          border.width: 1.5
-          TextArea {
-            id: instrEdit
-            anchors.fill: parent
-            anchors.margins: 4
-            wrapMode: TextEdit.Wrap
-            text: page.fInstructions
-            placeholderText: "Role, skills, voice…"
-            font.family: Theme.lettering; font.pixelSize: 13
-            color: Theme.ink
-            background: null
-            onTextChanged: if (text !== page.fInstructions) page.fInstructions = text
-          }
-        }
-
-        Text {
+        Words {
           visible: page.notice.busy || (page.notice.text ?? "") !== ""
           width: parent.width
           wrapMode: Text.Wrap
+          role: "meta"
+          font.weight: Font.Bold
           text: page.notice.busy ? "saving…" : (page.notice.text ?? "")
-          font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
           color: page.notice.busy || page.notice.text === "saved" ? Theme.muted : Theme.accent
         }
 
-        Row {
+        Flow {
+          width: parent.width
           spacing: 8
-          Choice {
-            text: page.creating ? "Add agent" : "Save"
-            on: true
+          PressTab {
+            text: page.creating ? "Enlist" : "Save card"
+            kind: "primary"
             enabled: !page.notice.busy
             onClicked: {
-              const payload = {
-                action: "save",
-                name: page.fName,
-                host: page.fHost,
-                harness: page.fHarness,
-                model: page.fModel,
-                effort: page.fEffort,
-                avatar: page.fAvatar,
-                instructions: page.fInstructions,
-              };
+              const payload = { action: "save", name: page.fName, host: page.fHost, harness: page.fHarness, model: page.fModel, effort: page.fEffort, avatar: page.fAvatar, instructions: page.fInstructions };
               if (!page.creating && page.card) payload.original = page.card.slug;
               page.save(payload);
             }
           }
-          Choice {
-            visible: !page.creating && page.card !== null && !page.confirmingDelete
-            text: "Remove"
-            danger: true
-            enabled: !page.notice.busy
-            onClicked: page.confirmingDelete = true
-          }
-          Choice {
-            visible: page.confirmingDelete && page.card !== null
-            text: "Confirm remove"
-            danger: true
-            on: true
-            enabled: !page.notice.busy
-            onClicked: page.remove(page.card.slug)
-          }
-          Choice {
-            visible: page.confirmingDelete
-            text: "Keep"
-            onClicked: page.confirmingDelete = false
-          }
+          PressTab { visible: !page.creating && page.card !== null && !page.confirmingDelete; text: "Discharge"; kind: "danger"; enabled: !page.notice.busy; onClicked: page.confirmingDelete = true }
+          PressTab { visible: page.confirmingDelete && page.card !== null; text: "Confirm discharge"; kind: "danger"; enabled: !page.notice.busy; onClicked: page.remove(page.card.slug) }
+          PressTab { visible: page.confirmingDelete; text: "Keep"; kind: "quiet"; onClicked: page.confirmingDelete = false }
         }
       }
     }
-  }
-
-  component FieldLabel: Text {
-    topPadding: 2
-    font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 11; font.letterSpacing: 1
-    color: Theme.muted
-  }
-
-  component SpecCell: Column {
-    property string label: ""
-    property string value: ""
-    spacing: 1
-    Text { text: label; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 10; font.letterSpacing: 0.8; color: "#6d6a73" }
-    Text { width: parent.width; elide: Text.ElideRight; text: value; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13; color: Theme.ink }
-  }
-
-  component StyledInput: TextField {
-    height: 30
-    font.family: Theme.caption; font.pixelSize: 12
-    color: Theme.ink
-    background: Rectangle { radius: 8; color: Theme.balloon; border.color: Theme.pageInk; border.width: 1.5 }
-  }
-
-  component Choice: Rectangle {
-    id: ch
-    property string text: ""
-    property bool on: false
-    property bool danger: false
-    signal clicked()
-    width: chLabel.implicitWidth + 20
-    height: 28
-    radius: 14
-    readonly property color edge: danger ? "#b3311f" : Theme.pageInk
-    color: on ? edge : "transparent"
-    border.color: edge
-    border.width: 2
-    opacity: enabled ? 1 : 0.5
-    Text { id: chLabel; anchors.centerIn: parent; text: ch.text; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: ch.on ? Theme.paper : ch.edge }
-    MouseArea { anchors.fill: parent; enabled: ch.enabled; cursorShape: Qt.PointingHandCursor; onClicked: ch.clicked() }
-  }
-
-  // Drawn battery icon filled to `level` (0..100, or -1 for unknown).
-  component BatteryBar: Item {
-    id: bat
-    property int level: -1
-    property string tone: "unknown"
-    width: 34; height: 15
-    readonly property color fill: tone === "high" ? "#2f8a4e" : tone === "mid" ? "#c88a12" : tone === "low" ? "#b3311f" : "#8b8892"
-    Rectangle {
-      x: 0; y: 0; width: 30; height: 15; radius: 4
-      color: "transparent"
-      border.color: Theme.ink; border.width: 2
-      Rectangle {
-        visible: bat.level >= 0
-        x: 3; y: 3
-        width: Math.max(bat.level > 0 ? 3 : 0, Math.round((parent.width - 6) * bat.level / 100))
-        height: parent.height - 6
-        radius: 1.5
-        color: bat.fill
-      }
-    }
-    Rectangle { x: 31; y: 4; width: 3; height: 7; radius: 1.5; color: Theme.ink }
   }
 }
