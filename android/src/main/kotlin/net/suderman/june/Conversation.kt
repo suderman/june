@@ -239,20 +239,31 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     var browsing by remember { mutableStateOf(false) }
     // The full screen's pages, side by side: the agents board on the left, the strip in the middle, the projects board
     // on the right (Boards.kt). A swipe moves the strip aside to show one; the assistant sheet keeps the strip alone.
+    // When agent terminals open in June, the Terminal page comes first, left of the agents board, as its tab does
+    // (see "Navigation" under "Embedded terminal" in docs/interfaces.org); FIRST is the agents board's page.
     // The pager keeps its page across Android remaking the screen, and each board its place.
-    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = 1) { 3 }
+    val first = if (Terminals.embedded(context)) 1 else 0
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = first + 1) { first + 3 }
+    val board = pager.currentPage - first
+    // The board Back returns to from the Terminal page: the last one settled on.
+    var lastBoard by remember { androidx.compose.runtime.mutableIntStateOf(first) }
+    LaunchedEffect(pager.settledPage) { if (pager.settledPage >= first) lastBoard = pager.settledPage }
+    LaunchedEffect(link.terminalWanted) {
+        if (!link.terminalWanted) return@LaunchedEffect
+        link.terminalWanted = false
+        if (first == 1) pager.scrollToPage(0)
+    }
     val pages = androidx.compose.runtime.rememberCoroutineScope()
     // A link asked for a view (the agenda widget, a reminder): jump there; a plain tab jump clears itself so tapping it again works.
     LaunchedEffect(link.requested) {
         val r = link.requested ?: return@LaunchedEffect
-        link.terminal = null
-        pager.scrollToPage(when (r.first) { "agents" -> 0; "chat" -> 1; else -> 2 })
+        pager.scrollToPage(first + when (r.first) { "agents" -> 0; "chat" -> 1; else -> 2 })
         if (r.second.isEmpty()) link.requested = null
     }
     // Summoned again while this shows: back to the chat, whose field then takes focus. Only a change since this
     // screen opened counts, and each only once.
     var answered by remember { androidx.compose.runtime.mutableIntStateOf(summoned) }
-    LaunchedEffect(summoned) { if (summoned != answered) pager.scrollToPage(1) }
+    LaunchedEffect(summoned) { if (summoned != answered) pager.scrollToPage(first + 1) }
     val ready = decisions
     // The boards stay while the link comes back after June was in the background, so their place is kept.
     val boards = !fromSheet && ready != null && (link.status is LinkStatus.Linked || link.agenda != null || link.agents != null)
@@ -265,15 +276,10 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
             val needs = link.agents?.optJSONArray("needs")?.length() ?: 0
             Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                 Tabs(
-                    pager.currentPage, needs, palette, terminal = link.terminal != null,
-                    // The Terminal tab, when terminals open in June: the last one shown, or the first agent listed.
-                    onTerminal = {
-                        if (link.terminal == null) {
-                            val t = Terminals.last(context) ?: firstTerminal(link)
-                            if (t != null) link.openTerminal(t) else android.widget.Toast.makeText(context, "No agent terminals listed yet", android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                ) { page -> link.terminal = null; pages.launch { pager.animateScrollToPage(page) } }
+                    board, needs, palette, terminal = board < 0,
+                    // The Terminal tab, when terminals open in June: its page, left of the agents board.
+                    onTerminal = { if (first == 1) pages.launch { pager.animateScrollToPage(0) } },
+                ) { page -> pages.launch { pager.animateScrollToPage(first + page) } }
             }
         }
         Column(
@@ -285,7 +291,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
             },
         ) {
         // An agent's terminal takes the whole screen, its own line naming it in place of June's status line.
-        val terminalShown = boards && link.terminal != null
+        val terminalShown = boards && board < 0
         if (!terminalShown) Column(Modifier.fillMaxWidth().then(header ?: Modifier)) {
         if (header != null) Box(
             Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp).size(width = 36.dp, height = 4.dp)
@@ -352,8 +358,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
             }
         }
         // The words to send belong to the chat alone. Leaving it, or putting the keyboard away, lets go of the field.
-        val shownTerminal = link.terminal.takeIf { boards }
-        val chat = (!boards || pager.currentPage == 1) && shownTerminal == null
+        val chat = !boards || board == 1
         val focus = androidx.compose.ui.platform.LocalFocusManager.current
         val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
         val typing = androidx.compose.foundation.layout.WindowInsets.isImeVisible
@@ -361,27 +366,32 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
         LaunchedEffect(chat) { if (!chat) { focus.clearFocus(); keyboard?.hide() } }
         if (boards) {
             LaunchedEffect(Unit) { link.wantBoards() }
-            // An agent's terminal lies over the boards rather than being a page of its own, so Back returns to the same
-            // board, task and place (see "Navigation" under "Embedded terminal" in docs/interfaces.org).
+            // The pager spans the screen's full width, so the Terminal page has every column; the boards keep the
+            // conversation's margins inside their pages.
+            val edgeToEdge = Modifier.layout { measurable, constraints ->
+                val margin = 16.dp.roundToPx()
+                val w = constraints.maxWidth + 2 * margin
+                val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
+                layout(constraints.maxWidth, placeable.height) { placeable.place(-margin, 0) }
+            }
+            androidx.activity.compose.BackHandler(enabled = board < 0) { pages.launch { pager.animateScrollToPage(lastBoard) } }
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, pageSpacing = 16.dp, userScrollEnabled = shownTerminal == null) { page ->
-                    when (page) {
-                        0 -> AgentsBoard(link, ready!!, palette, Modifier.fillMaxSize())
-                        2 -> ProjectsBoard(link, ready!!, palette, Modifier.fillMaxSize())
-                        else -> stripPage(Modifier.fillMaxSize())
-                    }
-                }
-                if (shownTerminal != null) {
-                    androidx.activity.compose.BackHandler { link.terminal = null }
-                    // One page per terminal: its view and stream belong to that target.
-                    androidx.compose.runtime.key(shownTerminal) {
-                        // Edge to edge: out past the conversation's side margins, so every column the screen holds is the terminal's.
-                        TerminalPage(link, shownTerminal, palette, Modifier.fillMaxSize().layout { measurable, constraints ->
-                            val margin = 16.dp.roundToPx()
-                            val w = constraints.maxWidth + 2 * margin
-                            val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
-                            layout(constraints.maxWidth, placeable.height) { placeable.place(-margin, 0) }
-                        })
+                androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxSize().then(edgeToEdge), beyondViewportPageCount = 1) { page ->
+                    val inset = Modifier.fillMaxSize().padding(horizontal = 16.dp)
+                    when (page - first) {
+                        -1 -> {
+                            // The terminal asked for, else the last one shown, else the first agent the board lists.
+                            val target = link.terminal ?: Terminals.last(context) ?: firstTerminal(link)
+                            // One page per terminal: its view and stream belong to that target.
+                            if (target != null) androidx.compose.runtime.key(target) {
+                                TerminalPage(link, target, palette, active = pager.settledPage == 0, modifier = Modifier.fillMaxSize())
+                            } else Box(Modifier.fillMaxSize().background(Color(0xFF1E1E2E)), contentAlignment = Alignment.Center) {
+                                Text("No agent terminals listed yet", color = Color(0xFF9399B2), fontSize = 14.sp)
+                            }
+                        }
+                        0 -> AgentsBoard(link, ready!!, palette, inset)
+                        2 -> ProjectsBoard(link, ready!!, palette, inset)
+                        else -> stripPage(inset)
                     }
                 }
             }

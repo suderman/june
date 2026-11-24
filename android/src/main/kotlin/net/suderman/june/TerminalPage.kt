@@ -114,7 +114,7 @@ private fun Agent.matches(t: TerminalTarget): Boolean =
  */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modifier: Modifier = Modifier) {
+fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, active: Boolean, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var state by remember(target) { mutableStateOf<TerminalStream.State>(TerminalStream.State.Connecting) }
     val view = remember(target) { TerminalView(context) }
@@ -135,14 +135,22 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
         stream.resize(grid / 10_000, grid % 10_000)
     }
     val lifecycle = (context as? androidx.lifecycle.LifecycleOwner)?.lifecycle
-    DisposableEffect(lifecycle, target) {
-        if (lifecycle == null) {
-            stream.start()
-            return@DisposableEffect onDispose {}
+    // Attached only while the page is the one on show and the app is started: a page drawn beside the agents board
+    // during a swipe must not take the terminal's size from the desktop.
+    val shown by androidx.compose.runtime.rememberUpdatedState(active)
+    LaunchedEffect(active) {
+        if (active && (lifecycle == null || lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))) stream.start()
+        else if (!active) {
+            stream.stop()
+            view.hideKeyboard()
+            view.clearFocus()
         }
+    }
+    DisposableEffect(lifecycle, target) {
+        if (lifecycle == null) return@DisposableEffect onDispose {}
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> stream.start()
+                Lifecycle.Event.ON_START -> if (shown) stream.start()
                 Lifecycle.Event.ON_STOP -> stream.stop()
                 else -> {}
             }
@@ -317,14 +325,18 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
                 decorationBox = { field -> Box { if (draft.isEmpty()) Text("Message the agent", color = muted, fontSize = 15.sp); field() } },
             )
             val ready = draft.isNotBlank() && attached
-            Text(
-                "↵", Modifier.clickable(enabled = ready) {
-                    view.send(draft.trimEnd())
-                    draft = ""
-                    Terminals.drafts.remove(target.key)
-                }.padding(horizontal = 12.dp, vertical = 4.dp),
-                color = if (ready) action else muted, fontSize = 24.sp,
-            )
+            Box(
+                Modifier.padding(start = 6.dp, end = 2.dp, bottom = 2.dp).size(40.dp)
+                    .background(if (ready) action else Color(0xFF313244), CircleShape)
+                    .clickable(enabled = ready) {
+                        view.send(draft.trimEnd())
+                        draft = ""
+                        Terminals.drafts.remove(target.key)
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                androidx.compose.material3.Icon(SendIcon, "Send", Modifier.size(20.dp), tint = if (ready) Color(0xFF1E1E2E) else muted)
+            }
         }
     }
     // Only once the keyboard has finished going down, so the sheet's window is laid out on the whole screen.
@@ -420,4 +432,13 @@ private fun statusColour(status: String, state: TerminalStream.State?): Color = 
     status == "done" -> Color(0xFFA6E3A1)
     status == "idle" -> Color(0xFF9399B2)
     else -> Color(0xFF6C7086)
+}
+
+/** A paper plane, as Material's Send icon draws it. */
+private val SendIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder("Send", 24.dp, 24.dp, 24f, 24f)
+        .addPath(
+            androidx.compose.ui.graphics.vector.PathParser().parsePathString("M2.01 21L23 12 2.01 3 2 10l15 2-15 2z").toNodes(),
+            fill = androidx.compose.ui.graphics.SolidColor(Color.White),
+        ).build()
 }

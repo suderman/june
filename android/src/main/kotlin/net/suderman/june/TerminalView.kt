@@ -236,7 +236,7 @@ class TerminalView(context: Context) : View(context) {
     private var dragging = false
     private var scrollRemainder = 0f
     private var pressed = false
-    private val longPress = Runnable { pressed = true; performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); onLongPress() }
+    private val longPress = Runnable { pressed = true; parent?.requestDisallowInterceptTouchEvent(true); performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); onLongPress() }
     private val flinger = android.widget.OverScroller(context)
     private var flingY = 0
     private var velocity: android.view.VelocityTracker? = null
@@ -273,7 +273,12 @@ class TerminalView(context: Context) : View(context) {
                 postDelayed(longPress, android.view.ViewConfiguration.getLongPressTimeout().toLong())
             }
             MotionEvent.ACTION_MOVE -> {
-                if (!dragging && abs(event.y - downY) > cellHeight / 2) { dragging = true; removeCallbacks(longPress) }
+                if (!dragging && abs(event.y - downY) > cellHeight / 2) {
+                    dragging = true
+                    removeCallbacks(longPress)
+                    // A vertical drag is the terminal's; until then a sideways one may still turn June's pages.
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                }
                 if (dragging) {
                     scrollBy(event.y - lastY, event.x, event.y)
                     lastY = event.y

@@ -112,11 +112,14 @@ class Link(private val context: Context) {
     /** A board and task a link asked for (june://task?key=KEY, june://projects): the tab, and the task's key or "". */
     var requested: Pair<String, String>? by mutableStateOf(null)
 
-    /** The agent terminal on show over the boards (TerminalPage.kt), or null. */
+    /** The agent terminal the Terminal page shows (TerminalPage.kt), or null for the last one shown. */
     var terminal: TerminalTarget? by mutableStateOf(null)
+    /** Set when something opens a terminal; the conversation turns to the Terminal page and clears it. */
+    var terminalWanted by mutableStateOf(false)
 
     fun openTerminal(target: TerminalTarget) {
         terminal = target
+        terminalWanted = true
         wantBoards()
     }
 
