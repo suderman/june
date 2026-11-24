@@ -408,6 +408,21 @@ export function resetIn(hours) {
 	return hours < 48 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)}d`;
 }
 
+/**
+ * Why a clanker's quota has no level, in a few words for its card: a quota that could not be read is not an empty
+ * one. REASON is the roster's (src/roster.ts), which may name each account it tried.
+ */
+export function quotaWhy(reason) {
+	const r = String(reason ?? "");
+	if (r === "") return "quota unread";
+	if (/rate limited/.test(r)) return "quota unread (rate limited)";
+	const remote = /^quota is read on (\S+)/.exec(r);
+	if (remote) return `quota read on ${remote[1]}`;
+	if (/^no \S+ login here/.test(r)) return r;
+	if (/expired/.test(r)) return "quota unread (login expired)";
+	return "quota unread";
+}
+
 /** A short, steady hash of TEXT, for docket and service numbers that do not move when the list does. */
 function hash(text) {
 	let h = 0x811c9dc5;
@@ -562,7 +577,9 @@ export function rosterView(agents) {
 			unit: c.host ?? "",
 			loadout: loadout(c.harness, c.model, c.effort),
 			stamp: st === "idle" ? "" : statusLabel === "WORKING" || busy ? "ON DUTY" : statusLabel,
-			energyText: hasLevel ? `${batteryLevel}% · resets ${resetWord}` : batteryText,
+			energyText: hasLevel ? `${batteryLevel}% · resets ${resetWord}` : b ? quotaWhy(b.reason) : "",
+			// The whole of why, for the card's own page, each account named once.
+			energyDetail: hasLevel ? "" : String(b?.reason ?? "").replace(/(\b[a-z]+\d+): \1: /g, "$1: "),
 			gauge: hasLevel ? `[${"#".repeat(cells)}${"-".repeat(10 - cells)}]` : "",
 			rank: rank,
 			runs: runs,

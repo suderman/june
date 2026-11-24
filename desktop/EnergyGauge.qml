@@ -34,7 +34,8 @@ Item {
           required property int index
           width: gauge.cell; height: gauge.height - 6
           radius: 1
-          color: index < gauge.cells ? gauge.colour : Theme.rule
+          // Unknown is not empty: every cell greyed, so an unread quota never looks spent.
+          color: gauge.level < 0 ? Qt.alpha(Theme.surfaceMuted, 0.35) : index < gauge.cells ? gauge.colour : Theme.rule
           border.color: index < gauge.cells && Theme.neon ? Qt.alpha(gauge.colour, 0.5) : "transparent"
           border.width: Theme.neon ? 1 : 0
         }

@@ -145,14 +145,15 @@ Item {
               Column {
                 width: parent.width
                 spacing: 4
-                EnergyGauge { visible: (page.card?.batteryLevel ?? -1) >= 0; level: page.card?.batteryLevel ?? -1; tone: page.card?.batteryTone ?? "unknown"; gauge: page.card?.gauge ?? ""; cell: 6 }
+                EnergyGauge { level: page.card?.batteryLevel ?? -1; tone: page.card?.batteryTone ?? "unknown"; gauge: page.card?.gauge ?? ""; cell: 6 }
                 Words {
                   width: parent.width
                   role: "value"
                   wrapMode: Text.Wrap
                   text: ((page.card?.energyText ?? "") !== "" ? page.card.energyText : "unknown") + ((page.card?.batteryAccount ?? "") !== "" ? " · " + page.card.batteryAccount : "")
-                  color: (page.card?.energyText ?? "") !== "" ? Theme.surfaceInk : Theme.surfaceMuted
+                  color: (page.card?.batteryLevel ?? -1) >= 0 ? Theme.surfaceInk : Theme.surfaceMuted
                 }
+                Words { visible: (page.card?.energyDetail ?? "") !== ""; width: parent.width; role: "meta"; wrapMode: Text.Wrap; text: page.card?.energyDetail ?? ""; color: Theme.surfaceMuted }
               }
             }
             FieldRow { visible: (page.card?.terminal ?? "") !== ""; label: "Post"; last: (page.card?.avatar ?? "") === ""; Words { width: parent.width; role: "number"; text: page.card?.terminal ?? "" } }

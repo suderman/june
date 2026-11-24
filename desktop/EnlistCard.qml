@@ -58,8 +58,16 @@ Item {
       visible: (card.entry.energyText ?? "") !== ""
       topPadding: 3
       spacing: 7
-      EnergyGauge { anchors.verticalCenter: parent.verticalCenter; level: card.entry.batteryLevel; tone: card.entry.batteryTone; gauge: card.entry.gauge ?? "" }
-      Words { anchors.verticalCenter: parent.verticalCenter; role: "meta"; font.weight: Font.Bold; text: card.entry.energyText ?? "" }
+      EnergyGauge { id: energy; anchors.verticalCenter: parent.verticalCenter; level: card.entry.batteryLevel; tone: card.entry.batteryTone; gauge: card.entry.gauge ?? "" }
+      Words {
+        width: lines.width - energy.width - 7
+        anchors.verticalCenter: parent.verticalCenter
+        role: "meta"
+        font.weight: card.entry.batteryLevel >= 0 ? Font.Bold : Font.Medium
+        elide: Text.ElideRight
+        text: card.entry.energyText ?? ""
+        color: card.entry.batteryLevel >= 0 ? Theme.surfaceInk : Theme.surfaceMuted
+      }
     }
     Words { visible: (card.entry.statsLine ?? "") !== ""; width: parent.width; role: "meta"; elide: Text.ElideRight; text: card.entry.statsLine ?? ""; color: Theme.surfaceMuted }
   }

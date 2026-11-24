@@ -246,7 +246,7 @@ internal fun TaskDocket(
                     if (assignable && held == null) FieldRow("Hand to") {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             for (c in clankers) Stamp(c.name, p.harness(c.harness), on = false, tilt = 0f) { handoff = Handoff(c.slug, c.host, "", c.name, fixed = true) }
-                            for (a in agents) Stamp(a, p.tone("AUTO"), on = false, tilt = 0f) { handoff = Handoff(a, host.ifEmpty { defaultHost }, "") }
+                            for (a in agents) Stamp(a, p.harness(if (a == "antigravity") "agy" else a), on = false, tilt = 0f) { handoff = Handoff(a, host.ifEmpty { defaultHost }, "") }
                         }
                     }
                     // Nothing is queued until the user confirms who, where and when.

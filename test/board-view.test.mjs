@@ -1,7 +1,7 @@
 // The boards as the clients draw them (desktop/board.mjs), shared by the desktop client and the phone.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agendaView, agentsView, boardLayout, dayHeading, dayWord, dialogBlocks, dialogKind, docketNo, entryMeta, findTask, harnessOf, loadout, monthDays, pendingTask, pickerStart, quickDays, resetIn, rosterView, serviceNo, stampOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink, undoOf } from "../desktop/board.mjs";
+import { agendaView, agentsView, boardLayout, dayHeading, dayWord, dialogBlocks, dialogKind, docketNo, entryMeta, findTask, harnessOf, loadout, monthDays, pendingTask, pickerStart, quickDays, resetIn, rosterView, serviceNo, stampOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink, undoOf, quotaWhy } from "../desktop/board.mjs";
 
 test("three columns fit a 1400 px window with the strip a little narrower, and tabs take over below about 1300", () => {
 	assert.deepEqual(boardLayout(1400), { columns: true, side: 268, gap: 20, strip: 784 });
@@ -80,7 +80,7 @@ test("the roster shapes each card with its battery tone, status label, spec line
 		["ON DUTY", "opus-4-7 · high", "78% · resets 2d", "[########--]"],
 		["", "medium", "40% · resets 10h", "[####------]"],
 		["", "", "12% · resets 3h", "[#---------]"],
-		["INVALID", "", "no login", ""],
+		["INVALID", "", "quota unread", ""],
 	]);
 	assert.match(rv.cards[0].serviceNo, /^KIT-\d{3}$/);
 	assert.equal(rv.cards[0].serviceNo, serviceNo("kit", "bolt"), "a service number is steady for its slug");
@@ -311,4 +311,13 @@ test("an edit's undo returns the task to how the board showed it, a queued task 
 	assert.equal(undoOf({ action: "state", state: "TODO" }, task("x", { state: "AUTO" })), null, "a queued task with no clanker named has none to return to");
 	assert.deepEqual(undoOf({ action: "assign", agent: "bolt", host: "kit" }, task("x", { state: "TODO" })), { action: "state", state: "TODO", undo: true });
 	assert.equal(undoOf({ action: "reply", text: "x" }, task("x", { state: "TODO" })), null);
+});
+
+test("a quota that could not be read says so, rather than reading as empty", () => {
+	assert.equal(quotaWhy("claude1: claude1: usage endpoint rate limited; claude2: claude2: usage endpoint rate limited"), "quota unread (rate limited)");
+	assert.equal(quotaWhy("quota is read on cog"), "quota read on cog");
+	assert.equal(quotaWhy("no claude login here"), "no claude login here");
+	assert.equal(quotaWhy(""), "quota unread");
+	const rv = rosterView({ hosts: [], roster: [{ card: { slug: "bolt", name: "Bolt", host: "kit", harness: "claude", problems: [] }, status: "idle", battery: { reason: "claude1: claude1: usage endpoint rate limited" } }] });
+	assert.deepEqual([rv.cards[0].batteryTone, rv.cards[0].energyText, rv.cards[0].energyDetail], ["unknown", "quota unread (rate limited)", "claude1: usage endpoint rate limited"]);
 });

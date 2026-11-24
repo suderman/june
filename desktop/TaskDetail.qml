@@ -314,7 +314,7 @@ Item {
                 model: page.dispatch?.agents ?? ["pi", "claude"]
                 delegate: Stamp {
                   required property string modelData
-                  text: modelData; tone: Theme.tone("AUTO"); on: false; clickable: true; tilt: 0
+                  text: modelData; tone: Theme.harnessTone(Board.harnessOf(modelData)); on: false; clickable: true; tilt: 0
                   onClicked: page.handoff = { agent: modelData, name: modelData, host: page.host !== "" ? page.host : (page.dispatch?.host ?? ""), when: "", fixed: false }
                 }
               }

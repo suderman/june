@@ -150,7 +150,8 @@ internal fun EnergyGauge(level: Int, tone: String, gauge: String, cell: Dp = 7.d
             val x = pad + i * (c + gap) - 0.5.dp.toPx()
             val on = i < cells
             if (on && p.neon) drawRoundRect(colour.copy(alpha = 0.25f), Offset(x - 1.5f, pad - 1.5f), Size(c + 3f, h + 3f), CornerRadius(2.dp.toPx()))
-            drawRoundRect(if (on) colour else p.rule, Offset(x, pad), Size(c, h), CornerRadius(1.dp.toPx()))
+            // Unknown is not empty: every cell greyed, so an unread quota never looks spent.
+            drawRoundRect(if (level < 0) p.surfaceMuted.copy(alpha = 0.35f) else if (on) colour else p.rule, Offset(x, pad), Size(c, h), CornerRadius(1.dp.toPx()))
         }
     }
 }
@@ -192,8 +193,9 @@ internal fun EnlistCard(card: JSONObject, colours: Colours, onClick: () -> Unit)
             ClassLine(card)
             val energy = card.optString("energyText")
             if (energy.isNotEmpty()) Row(Modifier.padding(top = 3.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                val known = card.optInt("batteryLevel", -1) >= 0
                 EnergyGauge(card.optInt("batteryLevel", -1), card.optString("batteryTone", "unknown"), card.optString("gauge"), cell = 6.dp)
-                Text(energy, style = p.type.meta.copy(color = p.surfaceInk, fontWeight = FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(energy, style = p.type.meta.copy(color = if (known) p.surfaceInk else p.surfaceMuted, fontWeight = if (known) FontWeight.Bold else FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             val stats = card.optString("statsLine")
             if (stats.isNotEmpty()) Text(stats, style = p.type.meta.copy(color = p.surfaceMuted), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -265,9 +267,11 @@ internal fun EnlistmentCard(card: JSONObject, colours: Colours) {
         val energy = card.optString("energyText")
         FieldRow("Energy", last = card.optString("terminal").isEmpty() && card.optString("avatar").isEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (card.optInt("batteryLevel", -1) >= 0) EnergyGauge(card.optInt("batteryLevel", -1), card.optString("batteryTone", "unknown"), card.optString("gauge"))
+                EnergyGauge(card.optInt("batteryLevel", -1), card.optString("batteryTone", "unknown"), card.optString("gauge"))
                 val account = card.optString("batteryAccount")
-                FieldValue(energy.ifEmpty { "unknown" } + if (account.isNotEmpty()) " · $account" else "", muted = energy.isEmpty())
+                FieldValue(energy.ifEmpty { "unknown" } + if (account.isNotEmpty()) " · $account" else "", muted = card.optInt("batteryLevel", -1) < 0)
+                val detail = card.optString("energyDetail")
+                if (detail.isNotEmpty()) Text(detail, style = p.type.meta.copy(color = p.surfaceMuted))
             }
         }
         val term = card.optString("terminal")
