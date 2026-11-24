@@ -321,3 +321,9 @@ test("a quota that could not be read says so, rather than reading as empty", () 
 	const rv = rosterView({ hosts: [], roster: [{ card: { slug: "bolt", name: "Bolt", host: "kit", harness: "claude", problems: [] }, status: "idle", battery: { reason: "claude1: claude1: usage endpoint rate limited" } }] });
 	assert.deepEqual([rv.cards[0].batteryTone, rv.cards[0].energyText, rv.cards[0].energyDetail], ["unknown", "quota unread (rate limited)", "claude1: usage endpoint rate limited"]);
 });
+
+test("a quota level kept from the last good read is greyed and says how old it is", () => {
+	const now = Date.UTC(2026, 10, 23, 12);
+	const rv = rosterView({ hosts: [], roster: [{ card: { slug: "bolt", name: "Bolt", host: "kit", harness: "claude", problems: [] }, status: "idle", battery: { account: "claude1", weekly: 4, hours: 0.4, rate: 1, stale: true, fetched: now / 1000 - 720 } }] }, now);
+	assert.deepEqual([rv.cards[0].batteryLevel, rv.cards[0].batteryTone, rv.cards[0].energyText, rv.cards[0].batteryStale], [4, "stale", "4% · read 12 min ago", true]);
+});

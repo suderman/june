@@ -494,7 +494,7 @@ export function dialogBlocks(text) {
  * The roster cards from the agents board, shaped for both clients: status, drawn battery level and label, harness
  * colours, leaderboard stats and recent runs, and the list of known hosts for the editor.
  */
-export function rosterView(agents) {
+export function rosterView(agents, now) {
 	const list = agents && Array.isArray(agents.roster) ? agents.roster : [];
 	const hostSet = {};
 	const hosts = [];
@@ -522,7 +522,10 @@ export function rosterView(agents) {
 		const batteryLevel = hasLevel ? Math.max(0, Math.min(100, Math.round(b.weekly))) : -1;
 		const resetWord = hasLevel ? resetIn(b.hours) : "";
 		const batteryText = hasLevel ? `${batteryLevel}% · ${resetWord}` : (b && b.reason ? String(b.reason) : "");
-		const batteryTone = !hasLevel ? "unknown" : batteryLevel >= 50 ? "high" : batteryLevel >= 20 ? "mid" : "low";
+		// A level kept from the last good read, because the newest failed, is shown greyed with its age.
+		const stale = hasLevel && b.stale === true;
+		const age = stale && typeof b.fetched === "number" ? since(b.fetched * 1000, now ?? Date.now()) : "";
+		const batteryTone = !hasLevel ? "unknown" : stale ? "stale" : batteryLevel >= 50 ? "high" : batteryLevel >= 20 ? "mid" : "low";
 		const remoteQuota = b && typeof b.reason === "string" && b.reason.indexOf("quota is read on") === 0;
 		const available = st === "idle" && (hasLevel || remoteQuota || !b);
 		const statusLabel = st === "idle" ? "IDLE" : st.indexOf("working") >= 0 ? "WORKING" : busy ? "BUSY" : st === "invalid" ? "INVALID" : "OFFLINE";
@@ -577,7 +580,8 @@ export function rosterView(agents) {
 			unit: c.host ?? "",
 			loadout: loadout(c.harness, c.model, c.effort),
 			stamp: st === "idle" ? "" : statusLabel === "WORKING" || busy ? "ON DUTY" : statusLabel,
-			energyText: hasLevel ? `${batteryLevel}% · resets ${resetWord}` : b ? quotaWhy(b.reason) : "",
+			energyText: stale ? `${batteryLevel}% · read ${age !== "" ? age + " ago" : "earlier"}` : hasLevel ? `${batteryLevel}% · resets ${resetWord}` : b ? quotaWhy(b.reason) : "",
+			batteryStale: stale,
 			// The whole of why, for the card's own page, each account named once.
 			energyDetail: hasLevel ? "" : String(b?.reason ?? "").replace(/(\b[a-z]+\d+): \1: /g, "$1: "),
 			gauge: hasLevel ? `[${"#".repeat(cells)}${"-".repeat(10 - cells)}]` : "",
@@ -609,7 +613,7 @@ export function rosterView(agents) {
 export function agentsView(agents, now, today, user, pending) {
 	if (!agents) return { summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], roster: [], rosterLeaderboard: [], rosterHasStats: false, rosterHosts: ["kit", "cog"] };
 	agents = withPending(agents, pending, user);
-	const rv = rosterView(agents);
+	const rv = rosterView(agents, now);
 	const tasks = agents.tasks;
 	// A review the user just opened is seen before the daemon says so.
 	const seen = pending?.seen ?? [];

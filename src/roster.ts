@@ -157,7 +157,8 @@ export function choose(options: readonly Option[]): { chosen?: string; why: stri
 /** For an Antigravity card, the model group its quota comes from (Gemini models for gemini-4-neon). */
 export const familyOf = (card: Card) => (card.harness === "agy" && card.model ? new RegExp(/^(gemini|claude|gpt)/i.exec(card.model)?.[1] ?? "^$", "i") : undefined);
 
-export type RosterBattery = { account: string; weekly: number; hours: number; rate: number } | { reason: string };
+/** A clanker's energy from its best login's quota; STALE when that is the last good read, kept over a failed one, from FETCHED (epoch s). */
+export type RosterBattery = { account: string; weekly: number; hours: number; rate: number; stale?: boolean; fetched?: number } | { reason: string };
 
 export type RosterStats = {
 	rank: number;
@@ -230,7 +231,10 @@ export function computeStanding(
 		const best = ranked.find((r) => r.usable);
 		if (!best?.budget) return { card, status: "idle", battery: { reason: ranked.map((r) => `${r.slot}: ${r.reason}`).join("; ") } };
 		const { weekly, hours, rate } = best.budget;
-		return { card, status: "idle", battery: { account: best.slot, weekly: weekly!, hours: hours!, rate } };
+		const login = mine.find((s) => s.name === best.slot);
+		const row = login && quotas.find((q) => q.provider === login.provider && q.number === login.number);
+		const stale = row?.stale ? { stale: true, ...(row.fetched ? { fetched: row.fetched } : {}) } : {};
+		return { card, status: "idle", battery: { account: best.slot, weekly: weekly!, hours: hours!, rate, ...stale } };
 	});
 }
 

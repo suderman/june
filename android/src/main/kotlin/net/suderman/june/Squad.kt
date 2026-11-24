@@ -132,6 +132,7 @@ internal fun Portrait(harness: String, colours: Colours, stamp: String, modifier
 @Composable
 internal fun EnergyGauge(level: Int, tone: String, gauge: String, cell: Dp = 7.dp) {
     val p = LocalPalette.current
+    // A stale level (the last good read, kept over a failed one) is grey, as an unknown one is.
     val colour = when (tone) { "high" -> p.tone("DONE"); "mid" -> p.tone("HOLD"); "low" -> p.tone("TODO"); else -> p.surfaceMuted }
     if (p.console) {
         Text(gauge.ifEmpty { "[??????????]" }, style = p.type.number.copy(color = colour))

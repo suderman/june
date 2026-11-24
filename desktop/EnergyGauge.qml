@@ -8,6 +8,7 @@ Item {
   property string tone: "unknown"
   property string gauge: ""
   property real cell: 5
+  // A stale level (the last good read, kept over a failed one) is grey, as an unknown one is.
   readonly property color colour: tone === "high" ? Theme.tone("DONE") : tone === "mid" ? Theme.tone("HOLD") : tone === "low" ? Theme.tone("TODO") : Theme.surfaceMuted
   readonly property int cells: level < 0 ? 0 : Math.max(level > 0 ? 1 : 0, Math.min(10, Math.round(level / 10)))
   implicitWidth: Theme.consoleLook ? text.implicitWidth : cell * 10 + 1.5 * 9 + 10
