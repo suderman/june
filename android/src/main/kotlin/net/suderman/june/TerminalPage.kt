@@ -319,15 +319,18 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                 }
             }
             var draft by remember(target) { mutableStateOf(Terminals.drafts[target.key] ?: "") }
+            val fieldStyle = androidx.compose.ui.text.TextStyle(color = ink, fontSize = 15.sp, lineHeight = 20.sp)
             androidx.compose.foundation.text.BasicTextField(
                 draft, { draft = it; Terminals.drafts[target.key] = it },
                 Modifier.weight(1f).padding(vertical = 4.dp).background(Color(0xFF1E1E2E), RoundedCornerShape(18.dp))
                     .padding(horizontal = 14.dp, vertical = 9.dp).onFocusChanged { composing = it.isFocused },
-                textStyle = androidx.compose.ui.text.TextStyle(color = ink, fontSize = 15.sp),
+                textStyle = fieldStyle,
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(ink),
                 maxLines = 6,
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
-                decorationBox = { field -> Box { if (draft.isEmpty()) Text("Message the agent", color = muted, fontSize = 15.sp); field() } },
+                // The hint in the field's own style: a taller one would change the bar's height, and so the terminal's
+                // rows, with the first letter typed or the last one deleted, making the program redraw.
+                decorationBox = { field -> Box { if (draft.isEmpty()) androidx.compose.foundation.text.BasicText("Message the agent", style = fieldStyle.copy(color = muted)); field() } },
             )
             val ready = draft.isNotBlank() && attached
             Box(
