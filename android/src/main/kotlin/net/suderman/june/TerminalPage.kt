@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -149,7 +150,8 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
     var picking by remember { mutableStateOf(false) }
     // A long press: the terminal's text in a sheet, to select and copy with Android's own handles, or paste.
     var copying by remember(target) { mutableStateOf<String?>(null) }
-    LaunchedEffect(view) { view.onLongPress = { copying = view.text() } }
+    // The keyboard goes first, so the sheet has the whole screen for the history.
+    LaunchedEffect(view) { view.onLongPress = { view.hideKeyboard(); copying = view.text() } }
     val ink = Color(0xFFCDD6F4)
     val muted = Color(0xFF9399B2)
     // A pointer target over its whole area, so no tap falls through to the board beneath.
@@ -188,7 +190,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            AndroidView({ view }, Modifier.fillMaxSize())
+            AndroidView({ view }, Modifier.fillMaxSize().clipToBounds())
             val s = state
             if (s !is TerminalStream.State.Attached) Column(
                 Modifier.align(Alignment.Center).padding(24.dp).background(Color(0xEE181825), RoundedCornerShape(10.dp)).padding(16.dp),
@@ -212,7 +214,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
         }
         if (Terminals.keyRow(context) && WindowInsets.isImeVisible) KeyRow(view)
     }
-    copying?.let { text -> CopySheet(text, view, close = { copying = null }, paste = { view.paste(it); copying = null }) }
+    if (!WindowInsets.isImeVisible) copying?.let { text -> CopySheet(text, view, close = { copying = null }, paste = { view.paste(it); copying = null }) }
 }
 
 /**

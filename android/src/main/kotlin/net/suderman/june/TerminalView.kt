@@ -146,7 +146,9 @@ class TerminalView(context: Context) : View(context) {
         b.int
         val defaultBg = b.int
         val cursorArgb = b.int
-        canvas.drawColor(defaultBg)
+        // A rectangle, not drawColor: Compose draws this view unclipped, and drawColor would paint the whole window.
+        fill.color = defaultBg
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fill)
         val left = (paddingLeft + offsetX).toFloat()
         val top = paddingTop.toFloat()
         for (y in 0 until rs) {
@@ -282,6 +284,10 @@ class TerminalView(context: Context) : View(context) {
     // The keyboard rising would otherwise have Android pan the whole window to keep this view in sight, pushing the
     // page's top line off the screen. The page makes room for the keyboard itself, so nothing here needs revealing.
     override fun getFocusedRect(r: android.graphics.Rect) = r.set(0, 0, 0, 0)
+
+    fun hideKeyboard() {
+        context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(windowToken, 0)
+    }
 
     fun showKeyboard() {
         requestFocus()
