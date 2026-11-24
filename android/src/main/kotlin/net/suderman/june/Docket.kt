@@ -192,12 +192,12 @@ internal fun TaskDocket(
         val asked = dialog.firstOrNull { it.optString("key") == ask && ask.isNotEmpty() }
         if (asked != null) {
             item { SectionRule("ASKS YOU", alert = true) }
-            item(key = "ask|$ask") { DialogNote(asked, d.optString("harness"), colours, lead = true) }
+            item(key = "ask|$ask") { DialogNote(asked, d.optString("harness"), colours, key, lead = true) }
         }
         val rest = dialog.filter { it !== asked }
         item { SectionRule(if (asked != null) "EARLIER IN DIALOG · ${rest.size}" else "DIALOG") }
         if (dialog.isEmpty()) item { Text("No Dialog yet.", style = t.lettering.copy(color = p.muted)) }
-        for (e in rest) item(key = "dialog|" + e.optString("key")) { DialogNote(e, d.optString("harness"), colours) }
+        for (e in rest) item(key = "dialog|" + e.optString("key")) { DialogNote(e, d.optString("harness"), colours, key) }
         // A reply in the user's name; with resume, the task goes back to its clanker with it.
         if (editable) item {
             Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -295,6 +295,13 @@ private fun Clip(modifier: Modifier) {
     }
 }
 
+/** An entry as one run of text for its folded lines, its points marked inline. */
+private fun folded(e: JSONObject): String {
+    val blocks = e.optJSONArray("blocks").objects()
+    if (blocks.isEmpty()) return e.optString("text")
+    return blocks.joinToString("  ") { b -> if (b.optString("kind") == "item") "${b.optString("mark")} ${b.optString("text")}" else b.optString("text") }
+}
+
 /** An entry's blocks: paragraphs, and its numbered or bulleted points as a list. */
 @Composable
 private fun EntryText(e: JSONObject, style: androidx.compose.ui.text.TextStyle) {
@@ -308,13 +315,17 @@ private fun EntryText(e: JSONObject, style: androidx.compose.ui.text.TextStyle) 
     }
 }
 
+/** How many lines a folded Dialog entry shows. */
+private const val FOLDED_LINES = 4
+
 /**
  * A Dialog entry: the user's as a blue note on the right, an agent's as a note clipped beside its clanker (LEAD,
  * the question the page leads with, edged in the accent), June's as a printed balloon, the dispatcher's as a caption.
- * Long entries are set in the reading face rather than lettering.
+ * Long entries are set in the reading face rather than lettering. Each folds to its first few lines, so a long
+ * thread can be skimmed down to the reply; a tap opens it (the question the page leads with starts open).
  */
 @Composable
-private fun DialogNote(e: JSONObject, harness: String, colours: Colours, lead: Boolean = false) {
+private fun DialogNote(e: JSONObject, harness: String, colours: Colours, task: String, lead: Boolean = false) {
     val p = LocalPalette.current
     val t = p.type
     val kind = e.optString("kind")
@@ -327,6 +338,9 @@ private fun DialogNote(e: JSONObject, harness: String, colours: Colours, lead: B
     val user = kind == "user"
     val ink = if (user && !p.neon && !p.console) Look.noteInk else p.surfaceInk
     val style = (if (long || user) t.body else t.lettering).copy(color = ink)
+    var open by androidx.compose.runtime.saveable.rememberSaveable(task, e.optString("key")) { mutableStateOf(lead) }
+    // Whether the folded text ran past its lines, so there is more to open.
+    var more by remember(task, e.optString("key")) { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Bottom) {
         if (kind == "agent" && !p.console) { Clanker(harness, colours, 30, claws = false); Spacer(Modifier.width(8.dp)) }
         Box(if (user) Modifier.fillMaxWidth(0.86f) else Modifier.weight(1f, fill = false)) {
@@ -338,11 +352,21 @@ private fun DialogNote(e: JSONObject, harness: String, colours: Colours, lead: B
                         fill = if (user && !p.neon && !p.console) Look.noteFill else p.surface,
                         lift = if (lead) 3.dp else 2.dp, width = if (lead) 2.5.dp else 2.dp,
                     )
+                    .then(if (more || open) Modifier.semantics { role = Role.Button }.clickable { open = !open } else Modifier)
                     .padding(horizontal = 12.dp, vertical = 9.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                Text(if (p.console) "$who:" else who, style = t.label.copy(color = if (user && !p.neon && !p.console) Look.noteInk else p.surfaceMuted, letterSpacing = t.number.letterSpacing))
-                EntryText(e, style)
+                val muted = if (user && !p.neon && !p.console) Look.noteInk else p.surfaceMuted
+                Text(if (p.console) "$who:" else who, style = t.label.copy(color = muted, letterSpacing = t.number.letterSpacing))
+                if (open) EntryText(e, style)
+                else Text(
+                    folded(e), style = style, maxLines = FOLDED_LINES, overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { if (it.hasVisualOverflow) more = true },
+                )
+                if (more) Text(
+                    if (open) (if (p.console) "[less]" else "less ▴") else (if (p.console) "[more]" else "more ▾"),
+                    Modifier.align(Alignment.End).padding(top = 2.dp), style = t.label.copy(color = if (lead) p.accent else muted),
+                )
             }
             if (kind == "agent" && !p.console) Clip(Modifier.align(Alignment.TopEnd).offset(x = (-22).dp))
         }
