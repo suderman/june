@@ -47,6 +47,11 @@ export class Herdr {
 		return [this.#config.host, ...Object.keys(this.#config.hosts)];
 	}
 
+	/** Whether this core reaches HOST itself: this machine, or a machine hc has added and is connected to. */
+	native(host: string): Promise<boolean> {
+		return this.#native(host);
+	}
+
 	/** Machines this core reaches natively, refreshed every half minute. */
 	#native(host: string): Promise<boolean> {
 		if (host === this.#config.host) return Promise.resolve(true);

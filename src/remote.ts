@@ -11,6 +11,7 @@ import type { Devices } from "./devices.ts";
 import { highlight } from "./highlight.ts";
 import { pdfPage, pdfPages } from "./inbox.ts";
 import type { Reply } from "./protocol.ts";
+import { type TerminalSocket, type TerminalStream, TOO_MANY } from "./terminal.ts";
 import type { Logger } from "./runtime.ts";
 
 export const PROTOCOL = 1;
@@ -35,6 +36,8 @@ export type RemoteOptions = {
 	/** Every account's quota as the daemon keeps it (accounts.ts sharedQuotas), for a paired device's GET /quota with
 	 * its token as a bearer: how worker hosts get quota without reading providers. REFRESH asks for a new read. */
 	readonly quota?: (refresh: boolean) => Promise<unknown[]>;
+	/** A terminal stream at /terminal (src/terminal.ts), after its hello; none without it. */
+	readonly terminal?: (hello: Record<string, unknown>, device: string, socket: TerminalSocket) => TerminalStream;
 	/** Tests shorten these. */
 	readonly helloMs?: number;
 	readonly pingMs?: number;
@@ -50,7 +53,10 @@ export type Remote = {
 	close(): Promise<void>;
 };
 
-type Entry = { device?: string; alive: boolean; shut(code: number, reason: string): void };
+type Entry = { device?: string; terminal?: boolean; alive: boolean; shut(code: number, reason: string): void };
+
+/** Terminal streams one device may hold at once. */
+const MAX_TERMINALS = 4;
 
 const MAX_PAYLOAD = 32 * 1024 * 1024;
 
@@ -236,10 +242,13 @@ export async function startRemote(options: RemoteOptions): Promise<Remote> {
 
 	/** Every open connection; `device` is set after hello. */
 	const open = new Map<WebSocket, Entry>();
+	const streams = new WeakMap<WebSocket, TerminalStream>();
 
-	server.on("connection", (ws) => {
+	server.on("connection", (ws, request) => {
 		let device: string | undefined;
 		let session: Session | undefined;
+		// A terminal stream (src/terminal.ts) says hello the same way, then carries binary frames.
+		const terminal = (request?.url ?? "").split("?")[0] === "/terminal";
 		let shut = false;
 		const end = (code: number, reason: string) => {
 			if (shut) return;
@@ -297,12 +306,31 @@ export async function startRemote(options: RemoteOptions): Promise<Remote> {
 				}
 				if (request.protocol !== PROTOCOL) return end(UNSUPPORTED, `protocol ${PROTOCOL} only`);
 				clearTimeout(hello);
+				if (terminal) {
+					if (options.terminal === undefined) return end(4404, "no terminal streams");
+					if ([...open.values()].filter((e) => e.terminal && e.device === name).length >= MAX_TERMINALS) return end(TOO_MANY, "too many terminals");
+					device = entry.device = name;
+					entry.terminal = true;
+					const stream = options.terminal(request as Record<string, unknown>, name, {
+						text: (value) => {
+							if (!shut && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(value));
+						},
+						binary: (data) => {
+							if (!shut && ws.readyState === WebSocket.OPEN) ws.send(data);
+						},
+						end,
+					});
+					session = { handle: () => {}, close: () => stream.close() };
+					streams.set(ws, stream);
+					return;
+				}
 				device = entry.device = name;
 				log.info("remote_hello", { device });
 				send({ type: "hello", requestId: String(request.requestId ?? ""), device, protocol: PROTOCOL, ...(options.avatar !== undefined ? { avatar: `/avatar/${keyFor(name)}/` } : {}), ...(options.attachment !== undefined ? { attached: `/attached/${keyFor(name)}/` } : {}) });
 				session = options.session(send, device);
 				return;
 			}
+			if (terminal) return streams.get(ws)?.message(data, isBinary);
 			if (isBinary) return send({ type: "error", message: "Binary frames are not supported yet" });
 			if (value === undefined || value === null || typeof value !== "object") return send({ type: "error", message: "Malformed request" });
 			if ((value as { op?: unknown }).op === "hello") return send({ type: "error", requestId: (value as { requestId?: string }).requestId, message: "Already said hello" });

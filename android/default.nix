@@ -14,6 +14,8 @@
   google-fonts,
   writeShellApplication,
   android-tools,
+  # The terminal's JNI library with libghostty-vt inside (android/native), for the embedded terminal; none without it.
+  juneterm ? null,
 }: let
   platform = "37.0";
   buildTools = "37.0.0";
@@ -88,6 +90,7 @@
       install -Dm644 ${fonts}/DelaGothicOne-Regular.ttf src/main/res/font/dela_gothic_one.ttf
       install -Dm644 ${fonts}/ZenKakuGothicNew-Medium.ttf src/main/res/font/zen_kaku_gothic_new_medium.ttf
       install -Dm644 ${fonts}/ZenKakuGothicNew-Bold.ttf src/main/res/font/zen_kaku_gothic_new_bold.ttf
+      ${lib.optionalString (juneterm != null) "install -Dm644 ${juneterm} src/main/jniLibs/arm64-v8a/libjuneterm.so"}
     '';
 
     installPhase = ''

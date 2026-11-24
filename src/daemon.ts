@@ -51,6 +51,7 @@ import { type Followed, listFollowing } from "./tools/follow.ts";
 import { shownFiles } from "./shown.ts";
 import { createShowExtension } from "./tools/show.ts";
 import { createHerdrExtension, Herdr, type Run, runProcess } from "./tools/herdr.ts";
+import { openTerminal } from "./terminal.ts";
 import { Boards } from "./board.ts";
 import { TaskEdits } from "./board-edit.ts";
 import { editRosterFile } from "./roster.ts";
@@ -344,7 +345,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		// The listener is a convenience beside the socket: a port already taken is logged and shown in status, not fatal.
 		if (config.remote) {
 			try {
-				remote = await startRemote({ port: config.remote.port, devices, log, session: (send, device) => session(send, scope, device), avatar: `${paths.data}/avatar`, attachment: (id, n) => attachment(root, id, n), file: (id, n) => inboxFile(root, inbox, id, n), quota: (refresh) => hostQuotas(`${paths.config}/config.json`, paths.data, paths.state, { maxAge: 600, force: refresh }), ...options.remoteTiming });
+				remote = await startRemote({ port: config.remote.port, devices, log, session: (send, device) => session(send, scope, device), avatar: `${paths.data}/avatar`, attachment: (id, n) => attachment(root, id, n), file: (id, n) => inboxFile(root, inbox, id, n), terminal: (hello, device, socket) => openTerminal(hello, device, socket, { log, host: config.herdr.host, ssh: Object.fromEntries(Object.entries(config.herdr.hosts).map(([h, v]) => [h, v.ssh])), agents: (host) => herdr.agents(host), native: (host) => herdr.native(host) }), quota: (refresh) => hostQuotas(`${paths.config}/config.json`, paths.data, paths.state, { maxAge: 600, force: refresh }), ...options.remoteTiming });
 			} catch (error) {
 				remoteError = (error as Error).message;
 				log.error("remote_listen_failed", { port: config.remote.port, error: remoteError });
