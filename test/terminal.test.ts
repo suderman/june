@@ -28,10 +28,11 @@ function frame(ch: number, kind: number, payload: Buffer = Buffer.alloc(0)) {
 type Frame = { ch: number; kind: number; payload: Buffer };
 
 /** A fake core behind `hc connect`: answers hello and attach as configured, records what the daemon sends. */
-function fakeCore(options: { features?: string[]; attach?: (params: any) => any } = {}) {
+function fakeCore(options: { features?: string[]; methods?: string[]; attach?: (params: any) => any } = {}) {
 	const argv: string[][] = [];
 	const frames: Frame[] = [];
 	const attaches: any[] = [];
+	const puts: any[] = [];
 	let stdout!: PassThrough;
 	let child!: ChildProcess;
 	const spawn = (a: string[]) => {
@@ -50,7 +51,7 @@ function fakeCore(options: { features?: string[]; attach?: (params: any) => any 
 				buffer = buffer.subarray(nl + 1);
 				framed = true;
 				const features = options.features ?? ["framed", "attach", "automatic_input"];
-				stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: hello.id, result: { generation: 1, version: "0.1.22", core: { id: "x", name: "kit" }, framed: true, methods: ["hello", "terminal.attach"], features } })}\n`);
+				stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: hello.id, result: { generation: 1, version: "0.1.22", core: { id: "x", name: "kit" }, framed: true, methods: options.methods ?? ["hello", "terminal.attach", "terminal.put"], features } })}\n`);
 			}
 			while (buffer.length >= 9) {
 				const len = buffer.readUInt32LE(5);
@@ -64,13 +65,18 @@ function fakeCore(options: { features?: string[]; attach?: (params: any) => any 
 						const answer = options.attach?.(m.params) ?? { result: { channel: 5, terminal: { cols: m.params.cols, rows: m.params.rows }, resize_notifications: false, automatic_input: true } };
 						stdout.write(frame(0, 0, Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: m.id, ...answer }))));
 						if (answer.result) stdout.write(frame(5, 0, Buffer.from("\x18\x1b[!pfirst paint")));
+					} else if (m.method === "terminal.put") {
+						puts.push(m.params);
+						const bytes = Buffer.from(m.params.data, "base64").length;
+						const answer = m.params.name === "gone.png" ? { error: { code: -32000, message: "finished", data: { kind: "finished" } } } : { result: { path: `/core/files/${m.params.terminal}/${m.params.name}`, bytes } };
+						stdout.write(frame(0, 0, Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: m.id, ...answer }))));
 					}
 				} else frames.push(f);
 			}
 		});
 		return child;
 	};
-	return { spawn, argv, frames, attaches, core: () => stdout, exit: () => child.emit("exit", 0) };
+	return { spawn, argv, frames, attaches, puts, core: () => stdout, exit: () => child.emit("exit", 0) };
 }
 
 function client() {
@@ -229,4 +235,35 @@ test("/terminal takes the same hello and token, counts streams per device, and c
 	assert.equal(remote.revoke("gem"), 4);
 	assert.deepEqual(await Promise.all(streams.map((s) => s.shut)), [4401, 4401, 4401, 4401]);
 	assert.deepEqual(closed.sort(), ["t1", "t2", "t3", "t4"]);
+});
+
+test("a file from the client lands beside the stream's own terminal, and the client hears where", async () => {
+	const core = fakeCore();
+	const c = client();
+	const stream = openTerminal({ host: "cog", terminal: "t3", cols: 56, rows: 29 }, "gem", c.socket, options(core.spawn));
+	const put = (op: object) => stream.message(Buffer.from(JSON.stringify({ op: "put", ...op })), false);
+	put({ id: "early", name: "a.png", data: "aGk=" });
+	await until(() => c.texts.some((t) => t.type === "attached"));
+	put({ id: "a", name: "../../shot.png", data: Buffer.from("png bytes").toString("base64"), terminal: "t1" });
+	put({ id: "b", name: "gone.png", data: "aGk=" });
+	put({ id: "c", name: "", data: "aGk=" });
+	put({ id: "d", name: "big.png", data: "A".repeat(10_666_680) });
+	await until(() => c.texts.filter((t) => t.type === "put").length === 5);
+	const answers = Object.fromEntries(c.texts.filter((t) => t.type === "put").map((t) => [t.id, t]));
+	assert.deepEqual(answers.early, { type: "put", id: "early", error: "not attached yet" });
+	assert.deepEqual(answers.a, { type: "put", id: "a", path: "/core/files/cog/t3/shot.png", bytes: 9 });
+	assert.deepEqual(core.puts[0], { terminal: "cog/t3", name: "shot.png", data: Buffer.from("png bytes").toString("base64") });
+	assert.equal(answers.b.error, "finished");
+	assert.equal(answers.c.error, "no file name");
+	assert.equal(answers.d.error, "files go up to 8 MB");
+	assert.equal(core.puts.length, 2);
+
+	const old = fakeCore({ methods: ["hello", "terminal.attach"] });
+	const o = client();
+	const s2 = openTerminal({ host: "kit", terminal: "t7", cols: 80, rows: 24 }, "gem", o.socket, options(old.spawn));
+	await until(() => o.texts.some((t) => t.type === "attached"));
+	s2.message(Buffer.from(JSON.stringify({ op: "put", id: 1, name: "x.png", data: "aGk=" })), false);
+	await until(() => o.texts.some((t) => t.type === "put"));
+	assert.deepEqual(o.texts.at(-1), { type: "put", id: 1, error: "this herdr-core cannot take files" });
+	assert.equal(old.puts.length, 0);
 });

@@ -2,7 +2,7 @@
 // "Terminal streams" in docs/architecture.org). The daemon only relays: for each stream it starts `hc connect` (or
 // `ssh HOST hc connect` for a host this core has not added), attaches to one terminal the agents board lists, and maps
 // the client's WebSocket frames onto the attach channel's frames. It never parses terminal output, never starts, resumes
-// or kills a program, and offers no other hc method.
+// or kills a program, and offers one other hc method: terminal.put, a file from the client beside that same terminal.
 import { type ChildProcess, spawn } from "node:child_process";
 import type { AgentSummary } from "./tools/herdr.ts";
 import type { Logger } from "./runtime.ts";
@@ -16,6 +16,8 @@ const FOCUS = 4;
 const FACTS = 5;
 const AUTOMATIC_INPUT = 6;
 const MAX_FRAME = 16 * 1024 * 1024;
+/** terminal.put takes at most 8 MB; its base64. */
+const MAX_PUT = Math.ceil((8_000_000 * 4) / 3) + 4;
 
 export const NOT_FOUND = 4404;
 export const UNAVAILABLE = 4409;
@@ -75,7 +77,12 @@ export function openTerminal(hello: Record<string, unknown>, device: string, soc
 	let child: ChildProcess | undefined;
 	let channel: number | undefined;
 	let auto = false;
+	let canPut = false;
 	let done = false;
+	let address = "";
+	// terminal.put requests in flight: the core's request id -> the client's.
+	const puts = new Map<number, unknown>();
+	let nextPut = 100;
 	let buffer = Buffer.alloc(0);
 	let where = "";
 	const pending: Buffer[] = [];
@@ -115,7 +122,16 @@ export function openTerminal(hello: Record<string, unknown>, device: string, soc
 			if (message.error || !r?.methods?.includes("terminal.attach") || !r?.features?.includes("attach"))
 				return finish(UNAVAILABLE, message.error?.message ?? "herdr-core cannot attach");
 			auto = r.features.includes("automatic_input");
+			canPut = r.methods.includes("terminal.put");
 			return;
+		}
+		if (puts.has(message.id)) {
+			const id = puts.get(message.id);
+			puts.delete(message.id);
+			const r = message.result;
+			if (message.error || typeof r?.path !== "string") return socket.text({ type: "put", id, error: String(message.error?.message ?? "the file did not arrive") });
+			log.info("terminal_put", { device, terminal: where, bytes: r.bytes });
+			return socket.text({ type: "put", id, path: r.path, bytes: r.bytes });
 		}
 		if (message.id === 2) {
 			if (message.error) {
@@ -172,7 +188,7 @@ export function openTerminal(hello: Record<string, unknown>, device: string, soc
 		sessionOf = found.session;
 		where = `${found.host}/${found.terminal}`;
 		const local = found.host === options.host || (await options.native(found.host));
-		const address = found.host === options.host || !local ? found.terminal : `${found.host}/${found.terminal}`;
+		address = found.host === options.host || !local ? found.terminal : `${found.host}/${found.terminal}`;
 		const argv = local ? ["hc", "connect"] : ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", options.ssh[found.host] ?? found.host, "hc", "connect"];
 		if (done) return;
 		child = (options.spawn ?? ((a) => spawn(a[0]!, a.slice(1), { stdio: ["pipe", "pipe", "ignore"] })))(argv);
@@ -243,6 +259,17 @@ export function openTerminal(hello: Record<string, unknown>, device: string, soc
 				const b = Buffer.alloc(4);
 				b.writeUInt32LE(op.bytes, 0);
 				toCore(CREDIT, b);
+			} else if (op?.op === "put") {
+				// A file for the program, beside its terminal on its machine; the client pastes the path it lands at.
+				const id = typeof op.id === "string" || Number.isInteger(op.id) ? op.id : null;
+				const fail = (error: string) => socket.text({ type: "put", id, error });
+				if (typeof op.name !== "string" || op.name.length === 0 || op.name.length > 200) return fail("no file name");
+				if (typeof op.data !== "string" || op.data.length > MAX_PUT) return fail("files go up to 8 MB");
+				if (channel === undefined) return fail("not attached yet");
+				if (!canPut) return fail("this herdr-core cannot take files");
+				const rid = nextPut++;
+				puts.set(rid, id);
+				write(rpc(rid, "terminal.put", { terminal: address, name: op.name.split(/[\\/]/).pop() || "file", data: op.data }));
 			} else if (op?.op === "close") finish(1000, "closed by client");
 		},
 		close() {

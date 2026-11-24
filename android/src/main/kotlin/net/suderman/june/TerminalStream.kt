@@ -51,6 +51,9 @@ class TerminalStream(
     private var running = false
     private var cols = 0
     private var rows = 0
+    // Files sent with put, by request id, until the daemon says where each landed. Main thread only.
+    private val puts = HashMap<String, (String?, String?) -> Unit>()
+    private var nextPut = 0
 
     init {
         view.onInput = { bytes, auto -> send(bytes, auto) }
@@ -89,6 +92,10 @@ class TerminalStream(
                         }
                     }
                     "closed" -> main.post { onState(State.Closed(m.optString("reason"))) }
+                    "put" -> main.post {
+                        val path = m.optString("path").takeIf { it.isNotEmpty() }
+                        puts.remove(m.optString("id"))?.invoke(path, if (path == null) m.optString("error", "not sent") else null)
+                    }
                 }
             }
 
@@ -110,6 +117,7 @@ class TerminalStream(
                     if (socket !== webSocket) return@post
                     socket = null
                     attached = false
+                    failPuts()
                     // 4409: the terminal is between programs (a kept terminal restarting); try again shortly.
                     if (code == 4409 && running) {
                         onState(State.Dropped(reason))
@@ -130,6 +138,7 @@ class TerminalStream(
                     if (socket !== webSocket) return@post
                     socket = null
                     attached = false
+                    failPuts()
                     if (!running) return@post
                     onState(State.Dropped(t.message ?: "connection lost"))
                     main.postDelayed({ if (running && socket == null) start(true) }, 2_000)
@@ -138,10 +147,33 @@ class TerminalStream(
         })
     }
 
+    /**
+     * Send a file to lie beside the terminal on its machine (herdr-core's terminal.put); DONE hears, on the main thread,
+     * the path it landed at or why it did not.
+     */
+    fun put(drop: Drop, done: (path: String?, error: String?) -> Unit) {
+        val s = socket
+        if (!attached || s == null) return done(null, "not attached")
+        val id = "p${nextPut++}"
+        puts[id] = done
+        Thread {
+            val data = android.util.Base64.encodeToString(drop.bytes, android.util.Base64.NO_WRAP)
+            if (!s.send(JSONObject().put("op", "put").put("id", id).put("name", drop.name).put("data", data).toString()))
+                main.post { puts.remove(id)?.invoke(null, "connection lost") }
+        }.start()
+    }
+
+    private fun failPuts() {
+        val waiting = puts.values.toList()
+        puts.clear()
+        waiting.forEach { it(null, "connection lost") }
+    }
+
     /** Detach; the agent keeps running. */
     fun stop() {
         running = false
         attached = false
+        failPuts()
         socket?.let { s ->
             socket = null
             runCatching { s.send(JSONObject().put("op", "close").toString()) }

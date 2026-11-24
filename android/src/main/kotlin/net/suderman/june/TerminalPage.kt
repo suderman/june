@@ -153,8 +153,58 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
     var copying by remember(target) { mutableStateOf<String?>(null) }
     // The keyboard goes first, so the sheet has the whole screen for the history.
     LaunchedEffect(view) { view.onLongPress = { view.hideKeyboard(); copying = view.text().trimEnd() } }
+    // Files for the agent (see "Files and screenshots" under "Embedded terminal" in docs/interfaces.org): each goes
+    // beside its terminal once attached, and its path is pasted where the cursor is, as dropping a file on a desktop
+    // terminal pastes it. Picked while the picker had June stopped, they wait for the stream to attach again.
+    val queue = remember(target) { androidx.compose.runtime.mutableStateListOf<Drop>() }
+    var note by remember(target) { mutableStateOf("") }
+    var sending by remember(target) { mutableIntStateOf(0) }
+    fun take(read: () -> Pair<List<Drop>, List<String>>) = Thread {
+        val (drops, refused) = read()
+        view.post {
+            queue.addAll(drops)
+            if (refused.isNotEmpty()) note = refused.joinToString("; ")
+        }
+    }.start()
+    val photos = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(10)) { uris ->
+        if (uris.isNotEmpty()) take { Drops.read(context, uris) }
+    }
+    val files = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) take { Drops.read(context, uris) }
+    }
+    LaunchedEffect(view) {
+        view.onImage = { info, flags ->
+            take {
+                if (flags and android.view.inputmethod.InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION != 0) runCatching { info.requestPermission() }
+                try {
+                    Drops.read(context, listOf(info.contentUri), info.description.getMimeType(0))
+                } finally {
+                    runCatching { info.releasePermission() }
+                }
+            }
+        }
+    }
+    val attached = state is TerminalStream.State.Attached
+    LaunchedEffect(attached, queue.size) {
+        if (!attached || queue.isEmpty()) return@LaunchedEffect
+        val batch = queue.toList()
+        queue.clear()
+        for (drop in batch) {
+            sending++
+            note = "sending ${drop.name}…"
+            stream.put(drop) { path, error ->
+                sending--
+                if (path != null) {
+                    view.pastePath(path)
+                    if (sending == 0) note = ""
+                } else note = "${drop.name}: $error"
+            }
+        }
+    }
     val ink = Color(0xFFCDD6F4)
     val muted = Color(0xFF9399B2)
+    val action = Color(0xFF89B4FA)
+    var attaching by remember { mutableStateOf(false) }
     // A pointer target over its whole area, so no tap falls through to the board beneath.
     Column(modifier.background(Color(0xFF1E1E2E)).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
         Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -168,6 +218,16 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
                 Modifier.weight(1f).padding(start = 8.dp), color = ink, fontSize = 13.sp, fontFamily = FontFamily.Monospace,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
+            Box {
+                Text("attach ▾", Modifier.clickable { attaching = true }.padding(start = 10.dp, top = 4.dp, bottom = 4.dp), color = muted, fontSize = 13.sp)
+                DropdownMenu(attaching, onDismissRequest = { attaching = false }) {
+                    DropdownMenuItem(text = { Text("Photos and screenshots") }, onClick = {
+                        attaching = false
+                        photos.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    })
+                    DropdownMenuItem(text = { Text("Files") }, onClick = { attaching = false; files.launch(arrayOf("*/*")) })
+                }
+            }
             Box {
                 Text("switch ▾", Modifier.clickable { picking = true }.padding(start = 10.dp, top = 4.dp, bottom = 4.dp), color = muted, fontSize = 13.sp)
                 DropdownMenu(picking, onDismissRequest = { picking = false }) {
@@ -189,6 +249,22 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
                     )
                 }
             }
+        }
+        // Files another app shared, waiting for Jon to send them here or switch first; and how sending is going.
+        val shared = Drops.shared
+        if (shared.isNotEmpty() || Drops.notice.isNotEmpty() || note.isNotEmpty()) Column(
+            Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 4.dp),
+        ) {
+            if (shared.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "shared: " + shared.joinToString(", ") { it.name }, Modifier.weight(1f), color = ink, fontSize = 13.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                Text("send here", Modifier.clickable { queue.addAll(shared); shared.clear() }.padding(6.dp), color = action, fontSize = 13.sp)
+                Text("✕", Modifier.clickable { shared.clear() }.padding(6.dp), color = muted, fontSize = 13.sp)
+            }
+            val said = listOf(Drops.notice, note).filter { it.isNotEmpty() }.joinToString("; ")
+            if (said.isNotEmpty()) Text(said, Modifier.clickable { Drops.notice = ""; note = "" }.padding(vertical = 2.dp), color = muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             AndroidView({ view }, Modifier.fillMaxSize().clipToBounds())
@@ -217,7 +293,12 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
     }
     // Only once the keyboard has finished going down, so the sheet's window is laid out on the whole screen.
     val keyboardGone = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) == 0
-    if (keyboardGone) copying?.let { text -> CopySheet(text, view, close = { copying = null }, paste = { view.paste(it); copying = null }) }
+    if (keyboardGone) copying?.let { text ->
+        CopySheet(
+            text, view, close = { copying = null }, paste = { view.paste(it); copying = null },
+            pasteFile = { uri -> take { Drops.read(context, listOf(uri)) }; copying = null },
+        )
+    }
 }
 
 /**
@@ -225,7 +306,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
  * its size, cell width and line height, so each line sits as it did on the terminal.
  */
 @Composable
-private fun CopySheet(text: String, view: TerminalView, close: () -> Unit, paste: (String) -> Unit) {
+private fun CopySheet(text: String, view: TerminalView, close: () -> Unit, paste: (String) -> Unit, pasteFile: (android.net.Uri) -> Unit) {
     val context = LocalContext.current
     val density = androidx.compose.ui.platform.LocalDensity.current
     val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
@@ -251,8 +332,12 @@ private fun CopySheet(text: String, view: TerminalView, close: () -> Unit, paste
         Column(Modifier.fillMaxSize().background(Color(0xFF1E1E2E))) {
             Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Select to copy", Modifier.weight(1f), color = Color(0xFF9399B2), fontSize = 13.sp)
-                val clip = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
-                if (!clip.isNullOrEmpty()) Text("paste", Modifier.clickable { paste(clip) }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
+                val item = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+                // A copied image or file goes to the agent as a file; anything else pastes as text.
+                val uri = item?.uri?.takeIf { it.scheme == "content" }
+                val clip = if (uri == null) item?.coerceToText(context)?.toString() else null
+                if (uri != null) Text("paste file", Modifier.clickable { pasteFile(uri) }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
+                else if (!clip.isNullOrEmpty()) Text("paste", Modifier.clickable { paste(clip) }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
                 Text("copy all", Modifier.clickable { clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text)); close() }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
                 Text("close", Modifier.clickable(onClick = close).padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
             }

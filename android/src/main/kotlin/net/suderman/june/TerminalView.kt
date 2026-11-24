@@ -39,6 +39,8 @@ class TerminalView(context: Context) : View(context) {
     var onModifiersUsed: () -> Unit = {}
     /** A long press: the page offers copying and pasting. */
     var onLongPress: () -> Unit = {}
+    /** An image from the keyboard (its clipboard, a screenshot, a sticker): the page sends it to the agent. */
+    var onImage: (android.view.inputmethod.InputContentInfo, Int) -> Unit = { _, _ -> }
 
     // The desktop terminal's colours (kitty's theme on kit), so agents look as they do there.
     val foreground = Color.parseColor("#CDD6F4")
@@ -109,6 +111,13 @@ class TerminalView(context: Context) : View(context) {
             TerminalBridge.nativePaste(handle, text.toByteArray(Charsets.UTF_8))
         }
         if (bytes.isNotEmpty()) onInput(bytes, false)
+    }
+
+    /** A file's PATH on the agent's machine, pasted as dropping a file on a desktop terminal pastes it, then a space. */
+    fun pastePath(path: String) {
+        val plain = path.all { it.isLetterOrDigit() || it in "/._-+~@" }
+        paste(if (plain) path else "'" + path.replace("'", "'\\''") + "'")
+        type(" ")
     }
 
     fun release() = synchronized(lock) {
@@ -385,7 +394,14 @@ class TerminalView(context: Context) : View(context) {
         // and T3 use: HeliBoard (GestureEnabler) turns swipe typing off for any password field.
         outAttrs.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or EditorInfo.IME_ACTION_NONE
+        // Keyboards may offer images here (their clipboard, screenshots), which go to the agent as files.
+        outAttrs.contentMimeTypes = arrayOf("image/*")
         return object : BaseInputConnection(this, true) {
+            override fun commitContent(inputContentInfo: android.view.inputmethod.InputContentInfo, flags: Int, opts: android.os.Bundle?): Boolean {
+                onImage(inputContentInfo, flags)
+                return true
+            }
+
             // Composing text (a swiped or voiced word) waits in the editable until the keyboard commits it.
             override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean {
                 super.setComposingText(text, newCursorPosition)
