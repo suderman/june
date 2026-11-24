@@ -24,6 +24,10 @@ const USAGE = `usage:
   june agents [NAME] [--json]
                           the roster (ROSTER.org): each agent's host, harness, model and effort, whether it is busy,
                           and its battery, the quota its harness has to spare there; NAME shows one agent's card
+  june agents leaderboard [--json]
+                          per-agent run counts, completions, handoffs, parked runs, and average duration from june.sqlite
+  june agents history [NAME] [--limit N] [--json]
+                          recent dispatched runs (newest first), optionally for one agent
   june agents pick NAME... [--host HOST] [--harnesses H,H] [--except A,A] [--explain]
                           which of these agents, in your order, to give a task: the first available, unless a later
                           one would lose quota at a reset within hours; a harness name (pi, claude, codex, agy) is
@@ -75,7 +79,10 @@ async function main(argv: string[]): Promise<number> {
 	const json = rest.includes("--json");
 	const args = rest.filter((a) => a !== "--json");
 	const p = paths();
-	if (["tui", "ask", "status", "agenda", "tasks", "transcript", "device", "usage"].includes(command)) {
+	if (
+		["tui", "ask", "status", "agenda", "tasks", "transcript", "device", "usage"].includes(command) ||
+		(command === "agents" && ["record", "leaderboard", "stats", "history"].includes(args[0] ?? ""))
+	) {
 		const remote = remoteHost(p);
 		if (remote !== undefined) return overSsh(remote, command, argv);
 	}
@@ -830,18 +837,27 @@ async function rosterStanding(p: ReturnType<typeof paths>): Promise<import("./ro
 	return computeStanding(cards, hosts, logins, quotas, here);
 }
 
-/** `june agents [NAME]`: the roster with each agent's status and battery, or one agent's card. */
+/** `june agents [NAME|pick|leaderboard|history|record]`: roster, picker, run history and leaderboard. */
 async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {
 	if (args[0] === "pick") return agentsPick(p, args.slice(1).filter((x) => x !== "--explain"), json || args.includes("--explain"));
+	if (args[0] === "record") return agentsRecord(p, args.slice(1));
+	if (args[0] === "leaderboard" || args[0] === "stats") return agentsLeaderboard(p, json);
+	if (args[0] === "history") return agentsHistory(p, args.slice(1), json);
 	if (args.length > 1) {
 		console.error(USAGE);
 		return 2;
 	}
 	const { findCard } = await import("./roster.ts");
+	const { statsByAgent } = await import("./runs.ts");
 	let rows = await rosterStanding(p);
 	if (!rows.length) {
 		console.error(`june agents: ${p.data}/ROSTER.org names no agents`);
 		return 1;
+	}
+	const { stats } = statsByAgent(p.database);
+	for (const row of rows) {
+		const s = stats.get(row.card.slug);
+		if (s) row.stats = { rank: s.rank, runs: s.runs, completed: s.completed, handoffs: s.handoffs, parked: s.parked, ...(s.avgDurationMs !== undefined ? { avgDurationMs: s.avgDurationMs } : {}), ...(s.lastRunAt !== undefined ? { lastRunAt: s.lastRunAt } : {}) };
 	}
 	if (args[0]) {
 		const card = findCard(rows.map((r) => r.card), args[0]);
@@ -858,9 +874,10 @@ async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: 
 	const battery = (b: import("./roster.ts").RosterEntry["battery"]) =>
 		!b ? "" : "account" in b ? `${b.weekly}% weekly, resets in ${b.hours < 48 ? `${Math.round(b.hours)}h` : `${Math.round(b.hours / 24)}d`}, via ${b.account}` : b.reason;
 	if (args[0]) {
-		const { card, status, terminal, battery: b } = rows[0]!;
+		const { card, status, terminal, battery: b, stats: s } = rows[0]!;
+		const runSummary = s ? `#${s.rank} · ${s.runs} run${s.runs === 1 ? "" : "s"} (${s.completed} ok${s.handoffs ? `, ${s.handoffs} handoff` : ""}${s.parked ? `, ${s.parked} parked` : ""}${s.avgDurationMs ? `, ${formatDuration(s.avgDurationMs)} avg` : ""})` : undefined;
 		console.log(`${card.name} (${card.slug})`);
-		for (const [k, v] of [["host", card.host], ["harness", card.harness], ["model", card.model ?? "the harness's default"], ["effort", card.effort ?? "the harness's default"], ["avatar", card.avatar], ["status", terminal ? `${status} in ${terminal}` : status], ["battery", battery(b)]] as const)
+		for (const [k, v] of [["host", card.host], ["harness", card.harness], ["model", card.model ?? "the harness's default"], ["effort", card.effort ?? "the harness's default"], ["avatar", card.avatar], ["status", terminal ? `${status} in ${terminal}` : status], ["battery", battery(b)], ["history", runSummary]] as const)
 			if (v) console.log(`  ${k.padEnd(8)} ${v}`);
 		for (const problem of card.problems) console.log(`  problem  ${problem}`);
 		if (card.instructions) console.log(`\n${card.instructions}`);
@@ -871,6 +888,118 @@ async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: 
 		const kit = [card.harness, card.model, card.effort].filter(Boolean).join(" ");
 		console.log(`${card.name.padEnd(width)}  ${(card.host ?? "?").padEnd(4)}  ${kit.padEnd(28)}  ${(terminal ? `${status} ${terminal}` : status).padEnd(16)}  ${battery(b)}`);
 		for (const problem of card.problems) console.log(`${"".padEnd(width)}  ${problem}`);
+	}
+	return 0;
+}
+
+function formatDuration(ms?: number): string {
+	if (ms === undefined || ms < 0) return "—";
+	const sec = Math.round(ms / 1000);
+	if (sec < 60) return `${sec}s`;
+	const min = Math.floor(sec / 60);
+	if (min < 60) return `${min}m`;
+	const h = Math.floor(min / 60);
+	const m = min % 60;
+	return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+/** `june agents record start|end ...`: called by org-dispatch to record run history in june.sqlite. */
+async function agentsRecord(p: ReturnType<typeof paths>, args: string[]): Promise<number> {
+	const phase = args[0];
+	const rest = args.slice(1);
+	const flag = (name: string): string | undefined => {
+		const i = rest.indexOf(name);
+		if (i < 0) return undefined;
+		const val = rest[i + 1];
+		rest.splice(i, 2);
+		return val;
+	};
+	const { recordRunEnd, recordRunStart } = await import("./runs.ts");
+	const at = flag("--at");
+	const atMs = at !== undefined && Number.isFinite(Number(at)) ? Number(at) : undefined;
+	if (phase === "start") {
+		recordRunStart(p.database, {
+			run: flag("--run") ?? "",
+			taskId: flag("--task") ?? "",
+			taskTitle: flag("--title") ?? "",
+			agent: flag("--agent") ?? "",
+			harness: flag("--harness") ?? "",
+			host: flag("--host") ?? "",
+			model: flag("--model") ?? "",
+			...(atMs !== undefined ? { startedAt: atMs } : {}),
+		});
+		return 0;
+	}
+	if (phase === "end") {
+		const sw = flag("--switches");
+		recordRunEnd(p.database, {
+			run: flag("--run") ?? "",
+			outcome: flag("--outcome") ?? "",
+			taskId: flag("--task"),
+			taskTitle: flag("--title"),
+			agent: flag("--agent"),
+			harness: flag("--harness"),
+			host: flag("--host"),
+			model: flag("--model"),
+			...(atMs !== undefined ? { endedAt: atMs } : {}),
+			...(sw !== undefined && Number.isFinite(Number(sw)) ? { switches: Number(sw) } : {}),
+			note: flag("--note") ?? "",
+		});
+		return 0;
+	}
+	console.error("usage: june agents record start|end --run ID ...");
+	return 2;
+}
+
+/** `june agents leaderboard [--json]`: per-agent completion counts and stats from june.sqlite. */
+async function agentsLeaderboard(p: ReturnType<typeof paths>, json: boolean): Promise<number> {
+	const { leaderboard } = await import("./runs.ts");
+	const rows = leaderboard(p.database);
+	if (json) {
+		console.log(JSON.stringify(rows));
+		return 0;
+	}
+	if (!rows.length) {
+		console.log("No agent runs recorded yet.");
+		return 0;
+	}
+	const width = Math.max(5, ...rows.map((r) => r.agent.length));
+	console.log(`${"#".padEnd(3)} ${"AGENT".padEnd(width)}  ${"RUNS".padStart(4)}  ${"OK".padStart(4)}  ${"RATE".padStart(5)}  ${"HAND".padStart(4)}  ${"PARK".padStart(4)}  ${"AVG".padStart(6)}  LAST`);
+	for (const r of rows) {
+		const finished = r.runs - r.running;
+		const rate = finished > 0 ? `${Math.round((r.completed * 100) / finished)}%` : "—";
+		const last = r.lastRunAt ? new Date(r.lastRunAt).toLocaleString("en-CA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }) : "—";
+		console.log(`${String(r.rank).padEnd(3)} ${r.agent.padEnd(width)}  ${String(r.runs).padStart(4)}  ${String(r.completed).padStart(4)}  ${rate.padStart(5)}  ${String(r.handoffs).padStart(4)}  ${String(r.parked).padStart(4)}  ${formatDuration(r.avgDurationMs).padStart(6)}  ${last}`);
+	}
+	return 0;
+}
+
+/** `june agents history [NAME] [--limit N] [--json]`: recent dispatched runs, newest first. */
+async function agentsHistory(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {
+	const rest = [...args];
+	const li = rest.indexOf("--limit");
+	let limit = 20;
+	if (li >= 0) {
+		limit = Number(rest[li + 1] ?? 20);
+		rest.splice(li, 2);
+	}
+	const agent = rest[0];
+	const { listRuns } = await import("./runs.ts");
+	const rows = listRuns(p.database, { ...(agent ? { agent } : {}), limit });
+	if (json) {
+		console.log(JSON.stringify(rows));
+		return 0;
+	}
+	if (!rows.length) {
+		console.log(agent ? `No runs recorded for ${agent}.` : "No agent runs recorded yet.");
+		return 0;
+	}
+	const width = Math.max(5, ...rows.map((r) => r.agent.length));
+	for (const r of rows) {
+		const at = new Date(r.startedAt).toLocaleString("en-CA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+		const dur = r.endedAt !== undefined && r.endedAt >= r.startedAt ? formatDuration(r.endedAt - r.startedAt) : "live";
+		const label = r.taskTitle || r.taskId;
+		console.log(`${at.padEnd(13)}  ${r.agent.padEnd(width)}  ${r.outcome.padEnd(7)}  ${dur.padStart(6)}  ${label}${r.note ? ` — ${r.note}` : ""}`);
 	}
 	return 0;
 }

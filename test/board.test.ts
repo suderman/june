@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { type Agenda, Boards, loadAgenda, parseDialog, reviewKey, shapeAgenda, shapeAgents, type Task } from "../src/board.ts";
 import { Client } from "../src/protocol.ts";
+import { recordRunEnd, recordRunStart } from "../src/runs.ts";
 import { createLogger } from "../src/runtime.ts";
 import { Herdr } from "../src/tools/herdr.ts";
 import { attachView, openTestDaemon, tempDir, testConfig, until } from "./helpers.ts";
@@ -284,6 +285,8 @@ test("the agents board serves ROSTER.org cards and the roster request adds, edit
 	const config = testConfig(tmp.dir);
 	await mkdir(tmp.paths.data, { recursive: true });
 	await writeFile(join(tmp.paths.data, "ROSTER.org"), "#+TITLE: Roster\n\n* Bolt\n:PROPERTIES:\n:HOST: kit\n:HARNESS: claude\n:EFFORT: high\n:END:\nCareful.\n");
+	recordRunStart(tmp.paths.database, { run: "r-1", taskId: "id:t1", taskTitle: "Test task", agent: "bolt", harness: "claude", host: "kit", startedAt: 1_000_000 });
+	recordRunEnd(tmp.paths.database, { run: "r-1", outcome: "done", endedAt: 1_120_000 });
 	const herdr = new Herdr(config.herdr, async () => JSON.stringify({ terminals: [] }));
 	const boards = new Boards({
 		config: { ...config, org: { ...config.org, root: "/o" } },
@@ -303,6 +306,7 @@ test("the agents board serves ROSTER.org cards and the roster request adds, edit
 	const first = await client.request({ op: "agents", requestId: randomUUID() });
 	assert.equal(first.type, "agents");
 	assert.deepEqual(first.agents.roster?.map((r) => [r.card.slug, r.card.host, r.card.harness, r.card.effort]), [["bolt", "kit", "claude", "high"]]);
+	assert.deepEqual([first.agents.roster?.[0]?.stats?.rank, first.agents.roster?.[0]?.stats?.completed, first.agents.roster?.[0]?.recentRuns?.[0]?.taskTitle], [1, 1, "Test task"]);
 
 	const added = await client.request({ op: "roster", requestId: randomUUID(), edit: { action: "save", name: "Rivet", host: "kit", harness: "codex", effort: "medium", instructions: "Quick." } });
 	assert.deepEqual([added.type, added.type === "roster" ? added.slug : ""], ["roster", "rivet"]);

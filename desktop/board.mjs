@@ -378,9 +378,21 @@ function lastWord(task, user) {
 	return task?.headline?.text ?? "";
 }
 
+/** Short duration label for run history ("45s", "4m", "1h 20m"). */
+export function formatDuration(ms) {
+	if (typeof ms !== "number" || ms < 0) return "";
+	const sec = Math.round(ms / 1000);
+	if (sec < 60) return `${sec}s`;
+	const min = Math.floor(sec / 60);
+	if (min < 60) return `${min}m`;
+	const h = Math.floor(min / 60);
+	const m = min % 60;
+	return m ? `${h}h ${m}m` : `${h}h`;
+}
+
 /**
  * The roster cards from the agents board, shaped for both clients: status, drawn battery level and label, harness
- * colours, and the list of known hosts for the editor.
+ * colours, leaderboard stats and recent runs, and the list of known hosts for the editor.
  */
 export function rosterView(agents) {
 	const list = agents && Array.isArray(agents.roster) ? agents.roster : [];
@@ -399,7 +411,8 @@ export function rosterView(agents) {
 	if (agents && Array.isArray(agents.hosts)) {
 		for (let i = 0; i < agents.hosts.length; i++) addHost(agents.hosts[i].host);
 	}
-	const cards = list.map((entry) => {
+	let hasStats = false;
+	const cards = list.map((entry, idx) => {
 		const c = entry.card || {};
 		addHost(c.host);
 		const st = String(entry.status ?? "idle");
@@ -414,6 +427,28 @@ export function rosterView(agents) {
 		const available = st === "idle" && (hasLevel || remoteQuota || !b);
 		const statusLabel = st === "idle" ? "IDLE" : st.indexOf("working") >= 0 ? "WORKING" : busy ? "BUSY" : st === "invalid" ? "INVALID" : "OFFLINE";
 		const spec = [c.host ?? "", c.harness ?? "", c.model ?? "", c.effort ?? ""].filter((s) => s !== "").join(" · ");
+		const s = entry.stats;
+		const runs = s && typeof s.runs === "number" ? s.runs : 0;
+		const rank = s && typeof s.rank === "number" && runs > 0 ? s.rank : 0;
+		const completed = s && typeof s.completed === "number" ? s.completed : 0;
+		const handoffs = s && typeof s.handoffs === "number" ? s.handoffs : 0;
+		const parked = s && typeof s.parked === "number" ? s.parked : 0;
+		const avgDuration = s && typeof s.avgDurationMs === "number" ? formatDuration(s.avgDurationMs) : "";
+		if (runs > 0) hasStats = true;
+		const statsParts = [];
+		if (rank > 0) statsParts.push(`#${rank}`);
+		if (runs > 0) {
+			statsParts.push(`${runs} ${runs === 1 ? "run" : "runs"}`);
+			statsParts.push(`${completed} ok`);
+			if (avgDuration) statsParts.push(`${avgDuration} avg`);
+		}
+		const recentRuns = Array.isArray(entry.recentRuns) ? entry.recentRuns.map((r, ri) => ({
+			key: `${c.slug ?? idx}|${ri}|${r.startedAt ?? ri}`,
+			taskId: r.taskId ?? "",
+			taskTitle: r.taskTitle || r.taskId || "task",
+			outcome: r.outcome ?? "",
+			duration: typeof r.durationMs === "number" ? formatDuration(r.durationMs) : (r.outcome === "running" ? "live" : ""),
+		})) : [];
 		return {
 			slug: c.slug ?? "",
 			name: c.name ?? "",
@@ -435,10 +470,24 @@ export function rosterView(agents) {
 			batteryAccount: hasLevel && b.account ? String(b.account) : "",
 			batteryTone: batteryTone,
 			specLine: spec,
+			rank: rank,
+			runs: runs,
+			completed: completed,
+			handoffs: handoffs,
+			parked: parked,
+			avgDuration: avgDuration,
+			statsLine: statsParts.join(" · "),
+			recentRuns: recentRuns,
+			order: idx,
 		};
 	});
+	const leaderboard = cards.slice().sort((a, b) => {
+		const ar = a.rank > 0 ? a.rank : 999999;
+		const br = b.rank > 0 ? b.rank : 999999;
+		return ar - br || a.order - b.order;
+	});
 	if (hosts.length === 0) hosts.push("kit", "cog");
-	return { cards: cards, hosts: hosts };
+	return { cards: cards, leaderboard: leaderboard, hasStats: hasStats, hosts: hosts };
 }
 
 /**
@@ -447,7 +496,7 @@ export function rosterView(agents) {
  * `user` signs the user's Dialog entries.
  */
 export function agentsView(agents, now, today, user, pending) {
-	if (!agents) return { summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], roster: [], rosterHosts: ["kit", "cog"] };
+	if (!agents) return { summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], roster: [], rosterLeaderboard: [], rosterHasStats: false, rosterHosts: ["kit", "cog"] };
 	agents = withPending(agents, pending, user);
 	const rv = rosterView(agents);
 	const tasks = agents.tasks;
@@ -504,7 +553,7 @@ export function agentsView(agents, now, today, user, pending) {
 	const summary = `${working.length} at work${hosts.length ? ` on ${hosts.join(", ")}` : ""}`;
 	const down = agents.hosts.filter((h) => !h.ok).map((h) => h.host);
 	for (const list of [needs, working, idle, queued, reviewing, recent]) uniqueKeys(list);
-	return { summary, needs, working, idle, queued, reviewing, recent, down, roster: rv.cards, rosterHosts: rv.hosts };
+	return { summary, needs, working, idle, queued, reviewing, recent, down, roster: rv.cards, rosterLeaderboard: rv.leaderboard, rosterHasStats: rv.hasStats, rosterHosts: rv.hosts };
 }
 
 /** Who wrote a Dialog entry, for how it is drawn: the user, June, the dispatcher, or an agent. */

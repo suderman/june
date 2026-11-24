@@ -215,6 +215,22 @@ started carries an org.session label."
                         (error (error "hc did not identify the caller; refusing state write")))))
           (and (org-dispatch--label record 'org.session) t)))))
 
+(defun org-edit--roster-slugs ()
+  "Lowercase slugs of first-level headings in ROSTER.org, or nil when absent."
+  (let* ((dir (or (getenv "JUNE_DATA_DIR") (expand-file-name "june" org-directory)))
+         (file (expand-file-name "ROSTER.org" dir))
+         slugs)
+    (when (file-regular-p file)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        (while (re-search-forward "^\\* +\\([^\n]+\\)$" nil t)
+          (let* ((raw (replace-regexp-in-string "[ \t]+:[[:alnum:]_@#%:]+:[ \t]*\\'" "" (string-trim (match-string 1))))
+                 (slug (replace-regexp-in-string "\\`-+\\|-+\\'" ""
+                         (replace-regexp-in-string "[^a-z0-9]+" "-" (downcase raw)))))
+            (unless (string-empty-p slug) (push slug slugs))))))
+    slugs))
+
 (defun org-edit-todo ()
   "Set FILE HEADING to STATE, optionally checking --expect STATE.
 For EVAL, DONE or HOLD, --headline LINE binds a fresh worker report to this write.
@@ -273,7 +289,9 @@ Coding workers must not set AUTO; that permission lives in instructions."
       (unless (and (equal state "AUTO") request host note (member expected '("TODO" "EVAL" "HOLD")))
         (error "resuming needs AUTO, --expect TODO|EVAL|HOLD, --request, --host, and --note"))
       (unless (member host org-dispatch-hosts) (error "unknown dispatcher host %s" host))
-      (when (and agent (not (member agent org-dispatch-launchable))) (error "unknown agent %s" agent))
+      (when (and agent (not (or (member agent org-dispatch-launchable)
+                                (member agent (org-edit--roster-slugs)))))
+        (error "unknown agent %s" agent))
       (when (or (string-match-p "[\n\r]" request) (string-match-p "[\n\r]" note))
         (error "request and note must each be one line"))
       (dolist (ref depends)

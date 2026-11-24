@@ -159,11 +159,31 @@ export const familyOf = (card: Card) => (card.harness === "agy" && card.model ? 
 
 export type RosterBattery = { account: string; weekly: number; hours: number; rate: number } | { reason: string };
 
+export type RosterStats = {
+	rank: number;
+	runs: number;
+	completed: number;
+	handoffs: number;
+	parked: number;
+	avgDurationMs?: number;
+	lastRunAt?: number;
+};
+
+export type RosterRecentRun = {
+	taskId: string;
+	taskTitle: string;
+	outcome: string;
+	startedAt: number;
+	durationMs?: number;
+};
+
 export type RosterEntry = {
 	card: Card;
 	status: string;
 	terminal?: string;
 	battery?: RosterBattery;
+	stats?: RosterStats;
+	recentRuns?: RosterRecentRun[];
 };
 
 /** An edit of ROSTER.org from a client: save (add or update) one card, or delete one by slug. */

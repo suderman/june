@@ -8,7 +8,8 @@ import { basename, dirname, join, relative } from "node:path";
 import { arr, bool, lit, num, obj, opt, str, union } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import { type Config, expandHome } from "../config.ts";
-import { type Card, parseRoster } from "../roster.ts";
+import { type Card, findCard, parseRoster } from "../roster.ts";
+import { leaderboard, listRuns } from "../runs.ts";
 import { type Run, runProcess } from "./herdr.ts";
 import { createFollowTask, FOLLOW_DEFAULTS, type FollowInput, type FollowOptions, follow, listFollowing } from "./follow.ts";
 import type { Herdr } from "./herdr.ts";
@@ -476,7 +477,18 @@ export class Dispatch {
 	async resume(request: ResumeRequest, herdr: Herdr) {
 		if (!this.#config.dispatch.hosts.includes(request.host)) throw new Error(`No allowed dispatcher on ${request.host}`);
 		if (!["TODO", "EVAL", "HOLD"].includes(request.expected)) throw new Error("Only TODO, EVAL, or HOLD tasks can resume");
-		checkAgent(request.agent, dispatchAgents(this.#config.dispatch));
+		if (request.agent !== undefined) {
+			const agents = dispatchAgents(this.#config.dispatch);
+			if (!agents.includes(request.agent)) {
+				const roster = rosterCards(this.#config);
+				const card = findCard(roster, request.agent);
+				if (!card) checkAgent(request.agent, agents);
+				else {
+					if (card.problems.length) throw new Error(`${card.name} cannot be used: ${card.problems.join("; ")}`);
+					if (card.host && card.host !== request.host) throw new Error(`${card.name} works on ${card.host}, not ${request.host}`);
+				}
+			}
+		}
 		if (!request.note.trim() || /[\n\r]/.test(request.note)) throw new Error(`note must be one non-empty line recording ${user()}'s instruction`);
 		for (const ref of request.depends ?? [])
 			if (!/^id:[0-9A-Za-z][0-9A-Za-z-]{0,63}$/.test(ref)) throw new Error(`depends takes id:UUID of existing Org tasks, not ${ref}`);
@@ -692,6 +704,7 @@ export function createDispatchExtension(
 	instance: string,
 	run: Run = runProcess,
 	followOptions: FollowOptions = FOLLOW_DEFAULTS,
+	database?: string,
 ): Extension {
 	const dispatch = new Dispatch(org, config, run);
 	const followTask = createFollowTask(org, herdr, followOptions);
@@ -870,8 +883,8 @@ review: opt(union([bool(), lit("agent")], { description: `Default true: the work
 					file: str({ description: "Org agenda file under ~/org" }),
 					heading: str({ description: "Exact title or id:UUID, as org_read_task accepts" }),
 					expected: union([lit("TODO"), lit("EVAL"), lit("HOLD")], { description: "Current state just read; a stale request is refused" }),
-					host: str({ description: `Keep the existing host unless the user changes it; otherwise default ${defaultHost}. Allowed: ${hosts.join(", ")}` }),
-					agent: agentParameter(`Only when ${user()} asks for a different agent: ${agents.join(" or ")}. Omit to keep the task's agent`),
+					host: str({ description: `Keep the existing host unless the user changes it (or match the new roster agent's host); otherwise default ${defaultHost}. Allowed: ${hosts.join(", ")}` }),
+					agent: opt(str({ description: `Only when ${user()} asks for a different agent or hands off to another roster agent: ${agents.join(", ")}${roster.length ? `, or a roster agent (${roster.map((c) => c.slug).join(", ")})` : ""}. Omit to keep the task's agent` })),
 					note: str({ description: `One line recording ${user()}'s request and any answer or revised scope, naming ${user()} rather than writing you` }),
 					depends: opt(arr(str(), { description: "id:UUID of existing Org tasks that must be DONE before this one launches, read with org_read_task first; added to any it already has" })),
 					revision: opt(str({ description: "Exact org_read_task revision; required for granting, retaining or revoking scoped live-content approval" })),
@@ -1030,6 +1043,24 @@ review: opt(union([bool(), lit("agent")], { description: `Default true: the work
 				replay: "safe",
 				execute: async () => ({ output: [{ type: "text", text: await dispatch.nudge() }] }),
 			}),
+			...(database ? [defineTool({
+				name: "org_agents_leaderboard",
+				description: "Read the agent roster leaderboard and recent dispatched run history from June's database: per-agent runs, completions, handoffs, parked runs, and average duration. Read-only.",
+				parameters: obj({
+					agent: opt(str({ description: "Optional roster agent slug to filter recent runs to one agent" })),
+					limit: opt(num({ description: "How many recent runs to include (default 15, max 50)" })),
+				}),
+				replay: "safe",
+				execute: async (args) => ({
+					output: [{
+						type: "text",
+						text: JSON.stringify({
+							leaderboard: leaderboard(database),
+							recent: listRuns(database, { ...(args.agent ? { agent: args.agent } : {}), limit: Math.min(50, Math.max(1, args.limit ?? 15)) }),
+						}, null, 1),
+					}],
+				}),
+			})] : []),
 		],
 	});
 }

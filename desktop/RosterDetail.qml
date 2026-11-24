@@ -245,6 +245,65 @@ Item {
             color: (page.card?.instructions ?? "") !== "" ? Theme.ink : Theme.muted
           }
         }
+
+        Text {
+          visible: (page.card?.runs ?? 0) > 0
+          text: "HISTORY"
+          font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 11; font.letterSpacing: 1
+          color: Theme.muted
+        }
+        Rectangle {
+          visible: (page.card?.runs ?? 0) > 0
+          width: parent.width
+          height: histCol.implicitHeight + 16
+          radius: 12
+          color: Theme.balloon
+          border.color: Theme.ink
+          border.width: 2
+          Column {
+            id: histCol
+            x: 10; y: 8
+            width: parent.width - 20
+            spacing: 6
+            Text {
+              width: parent.width
+              wrapMode: Text.Wrap
+              text: (page.card?.statsLine ?? "")
+                + ((page.card?.handoffs ?? 0) > 0 ? " · " + page.card.handoffs + " handoff" : "")
+                + ((page.card?.parked ?? 0) > 0 ? " · " + page.card.parked + " parked" : "")
+              font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
+              color: Theme.ink
+            }
+            Repeater {
+              model: page.card?.recentRuns ?? []
+              delegate: Row {
+                required property var modelData
+                width: histCol.width
+                spacing: 6
+                Text {
+                  width: 48
+                  text: modelData.outcome.toUpperCase()
+                  font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 10
+                  color: modelData.outcome === "done" || modelData.outcome === "eval" ? "#2f5a22" : modelData.outcome === "handoff" || modelData.outcome === "parked" ? "#8a1f12" : "#6d6a73"
+                }
+                Text {
+                  width: parent.width - 96
+                  elide: Text.ElideRight
+                  text: modelData.taskTitle
+                  font.family: Theme.caption; font.pixelSize: 12
+                  color: Theme.ink
+                }
+                Text {
+                  width: 36
+                  horizontalAlignment: Text.AlignRight
+                  text: modelData.duration
+                  font.family: Theme.caption; font.pixelSize: 11
+                  color: "#6d6a73"
+                }
+              }
+            }
+          }
+        }
       }
 
       // ---- EDIT / CREATE MODE ----

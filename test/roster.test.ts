@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { applyRosterEdit, choose, computeStanding, editRosterFile, familyOf, findCard, formatCard, launchArgs, parseRoster } from "../src/roster.ts";
+import { leaderboard, listRuns, recordRunEnd, recordRunStart, statsByAgent } from "../src/runs.ts";
 import { tempDir } from "./helpers.ts";
 
 const ROSTER = `#+TITLE: Roster
@@ -132,4 +133,32 @@ test("computeStanding combines roster cards, live workers, and account battery",
 		["bolt", "busy (working)", "kit/t3", undefined],
 		["rivet-jr", "idle", undefined, ["codex1", 40]],
 	]);
+});
+
+test("run history records starts and endings in june.sqlite and ranks agents on the leaderboard", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const db = join(tmp.dir, "june.sqlite");
+	assert.deepEqual(leaderboard(db), [], "missing db returns empty leaderboard");
+	assert.deepEqual(listRuns(db), []);
+
+	const t0 = Date.UTC(2026, 10, 23, 10, 0);
+	recordRunStart(db, { run: "r1", taskId: "id:1", taskTitle: "Fix login", agent: "bolt", harness: "claude", host: "kit", model: "opus", startedAt: t0 });
+	recordRunEnd(db, { run: "r1", outcome: "done", endedAt: t0 + 120_000, note: "All green" });
+	recordRunStart(db, { run: "r2", taskId: "id:2", taskTitle: "Write docs", agent: "bolt", harness: "claude", host: "kit", startedAt: t0 + 200_000 });
+	recordRunEnd(db, { run: "r2", outcome: "handoff", endedAt: t0 + 260_000, switches: 1, note: "out of quota" });
+	recordRunStart(db, { run: "r3", taskId: "id:2", taskTitle: "Write docs", agent: "rivet", harness: "codex", host: "kit", startedAt: t0 + 270_000 });
+	recordRunEnd(db, { run: "r3", outcome: "eval", endedAt: t0 + 390_000 });
+	// An end without a prior start still records when taskId and agent are given.
+	recordRunEnd(db, { run: "r4", taskId: "id:3", taskTitle: "Legacy finish", agent: "rivet", outcome: "done", startedAt: t0 + 400_000, endedAt: t0 + 460_000 });
+
+	const board = leaderboard(db);
+	assert.deepEqual(board.map((b) => [b.rank, b.agent, b.runs, b.completed, b.handoffs, b.avgDurationMs]), [
+		[1, "rivet", 2, 2, 0, 90_000],
+		[2, "bolt", 2, 1, 1, 90_000],
+	]);
+	assert.deepEqual(listRuns(db, { agent: "bolt" }).map((r) => [r.id, r.outcome, r.switches]), [["r2", "handoff", 1], ["r1", "done", 0]]);
+	const { stats, recent } = statsByAgent(db, 2);
+	assert.equal(stats.get("rivet")!.rank, 1);
+	assert.equal(recent.get("rivet")!.length, 2);
 });

@@ -4,10 +4,12 @@
 // tools make them, with the state or revision the board showed, so a task changed since is refused rather than
 // overwritten. These are the user's acts, sent by their client and written in their name; June is not asked. In a
 // protected file (org.protected), which another program rebuilds, the boards only set TODO or DONE.
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type Config, protectedOf } from "./config.ts";
 import { outlineKey, type Task } from "./board.ts";
 import { OrgEditError, type OrgWorker, OrgWorkerDown } from "./org-worker.ts";
+import { findCard, parseRoster } from "./roster.ts";
 import { type Run, runProcess } from "./tools/herdr.ts";
 
 const REPO = dirname(import.meta.dirname);
@@ -55,12 +57,14 @@ export class TaskEdits {
 	readonly #config: Config;
 	readonly #run: Run;
 	readonly #org: OrgWorker | undefined;
+	readonly #dataDir: string | undefined;
 
 	/** ORG, June's long-running Emacs, makes the edits when it is up; RUN runs the org-edit wrapper otherwise. */
-	constructor(config: Config, run: Run = runProcess, org?: OrgWorker) {
+	constructor(config: Config, run: Run = runProcess, org?: OrgWorker, dataDir?: string) {
 		this.#config = config;
 		this.#run = run;
 		this.#org = org;
+		this.#dataDir = dataDir;
 	}
 
 	/** The agent a task is run by: its AGENT, else its newest session's, else the dispatcher's default. */
@@ -145,7 +149,12 @@ export class TaskEdits {
 	#assignable(task: Task, agent: string, host: string): void {
 		if (!ASSIGNABLE.includes(task.state ?? "")) throw new Error("Only a TODO, EVAL or HOLD task can be handed to a clanker; stop a running one first");
 		const agents = this.#config.dispatch.agents ?? [this.#config.dispatch.agent ?? "pi"];
-		if (!agents.includes(agent)) throw new Error(`Agent must be one of ${agents.join(", ")}`);
+		if (!agents.includes(agent)) {
+			const file = this.#dataDir ? join(this.#dataDir, "ROSTER.org") : undefined;
+			const card = file && existsSync(file) ? findCard(parseRoster(readFileSync(file, "utf8")), agent) : undefined;
+			if (!card) throw new Error(`Agent must be one of ${agents.join(", ")}`);
+			if (card.problems.length) throw new Error(`${card.name} cannot be used: ${card.problems.join("; ")}`);
+		}
 		if (this.#config.dispatch.hosts.length > 0 && !this.#config.dispatch.hosts.includes(host)) throw new Error(`Host must be one of ${this.#config.dispatch.hosts.join(", ")}`);
 	}
 

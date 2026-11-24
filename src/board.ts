@@ -9,6 +9,7 @@ import { type Config, protectedOf, shortHostname } from "./config.ts";
 import type { Logger } from "./runtime.ts";
 import { type OrgWorker, OrgWorkerDown } from "./org-worker.ts";
 import { computeStanding, parseRoster, type RosterEntry } from "./roster.ts";
+import { statsByAgent } from "./runs.ts";
 import { type AgentSummary, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { orgTime } from "./tools/org.ts";
 
@@ -648,7 +649,38 @@ export class Boards {
 			const list = byHost.get(w.host);
 			if (list) list.push(w);
 		}
-		return computeStanding(cards, byHost, this.#roster?.logins ?? [], this.#roster?.quotas ?? [], this.#o.here);
+		const entries = computeStanding(cards, byHost, this.#roster?.logins ?? [], this.#roster?.quotas ?? [], this.#o.here);
+		if (!this.#o.stateDir) return entries;
+		try {
+			const { stats, recent } = statsByAgent(join(this.#o.stateDir, "june.sqlite"));
+			for (const entry of entries) {
+				const s = stats.get(entry.card.slug);
+				if (s) {
+					entry.stats = {
+						rank: s.rank,
+						runs: s.runs,
+						completed: s.completed,
+						handoffs: s.handoffs,
+						parked: s.parked,
+						...(s.avgDurationMs !== undefined ? { avgDurationMs: s.avgDurationMs } : {}),
+						...(s.lastRunAt !== undefined ? { lastRunAt: s.lastRunAt } : {}),
+					};
+				}
+				const runs = recent.get(entry.card.slug);
+				if (runs?.length) {
+					entry.recentRuns = runs.map((r) => ({
+						taskId: r.taskId,
+						taskTitle: r.taskTitle,
+						outcome: r.outcome,
+						startedAt: r.startedAt,
+						...(r.endedAt !== undefined && r.endedAt >= r.startedAt ? { durationMs: r.endedAt - r.startedAt } : {}),
+					}));
+				}
+			}
+		} catch {
+			// Run history is optional; a busy or missing database never blocks the board.
+		}
+		return entries;
 	}
 
 	/** Join the latest agenda and workers into the agents board, and tell listeners when either board changed. */

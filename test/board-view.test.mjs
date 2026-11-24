@@ -53,14 +53,18 @@ test("the roster shapes each card with its battery tone, status label, spec line
 		hosts: [{ host: "kit", ok: true }, { host: "cog", ok: true }],
 		workers: [], needs: [], queued: [], reviewing: [], recent: [], tasks: {},
 		roster: [
-			{ card: { slug: "bolt", name: "Bolt", host: "kit", harness: "claude", model: "claude-opus-4-7", effort: "high", instructions: "Careful.", problems: [] }, status: "busy (working)", terminal: "kit/t2", battery: { account: "claude1", weekly: 78, hours: 48, rate: 1.6 } },
-			{ card: { slug: "rivet", name: "Rivet", host: "cog", harness: "codex", effort: "medium", instructions: "", problems: [] }, status: "idle", battery: { account: "codex2", weekly: 40, hours: 10, rate: 4 } },
+			{ card: { slug: "bolt", name: "Bolt", host: "kit", harness: "claude", model: "claude-opus-4-7", effort: "high", instructions: "Careful.", problems: [] }, status: "busy (working)", terminal: "kit/t2", battery: { account: "claude1", weekly: 78, hours: 48, rate: 1.6 }, stats: { rank: 2, runs: 3, completed: 2, handoffs: 1, parked: 0, avgDurationMs: 240_000 }, recentRuns: [{ taskId: "id:1", taskTitle: "Fix auth", outcome: "done", startedAt: 1000, durationMs: 180_000 }] },
+			{ card: { slug: "rivet", name: "Rivet", host: "cog", harness: "codex", effort: "medium", instructions: "", problems: [] }, status: "idle", battery: { account: "codex2", weekly: 40, hours: 10, rate: 4 }, stats: { rank: 1, runs: 4, completed: 4, handoffs: 0, parked: 0, avgDurationMs: 90_000 } },
 			{ card: { slug: "gyro", name: "Gyro", host: "kit", harness: "agy", instructions: "", problems: [] }, status: "idle", battery: { account: "agy1", weekly: 12, hours: 3, rate: 4 } },
 			{ card: { slug: "broken", name: "Broken", host: "", instructions: "", problems: ["no :HOST:"] }, status: "invalid", battery: { reason: "no login" } },
 		],
 	};
 	const rv = rosterView(agents);
 	assert.deepEqual(rv.hosts, ["kit", "cog"]);
+	assert.equal(rv.hasStats, true);
+	assert.deepEqual(rv.leaderboard.map((c) => c.slug), ["rivet", "bolt", "gyro", "broken"]);
+	assert.equal(rv.cards[0].statsLine, "#2 · 3 runs · 2 ok · 4m avg");
+	assert.deepEqual(rv.cards[0].recentRuns.map((r) => [r.taskTitle, r.outcome, r.duration]), [["Fix auth", "done", "3m"]]);
 	assert.deepEqual(rv.cards.map((c) => [c.slug, c.statusLabel, c.busy, c.batteryLevel, c.batteryTone, c.batteryText, c.specLine]), [
 		["bolt", "WORKING", true, 78, "high", "78% · 2d", "kit · claude · claude-opus-4-7 · high"],
 		["rivet", "IDLE", false, 40, "mid", "40% · 10h", "cog · codex · medium"],
@@ -69,6 +73,8 @@ test("the roster shapes each card with its battery tone, status label, spec line
 	]);
 	const av = agentsView(agents, 0, "2026-11-21", "Alex");
 	assert.equal(av.roster.length, 4);
+	assert.equal(av.rosterHasStats, true);
+	assert.deepEqual(av.rosterLeaderboard.map((c) => c.slug), ["rivet", "bolt", "gyro", "broken"]);
 	assert.deepEqual(av.rosterHosts, ["kit", "cog"]);
 });
 

@@ -8,11 +8,12 @@ Item {
   id: board
 
   // agentsView's shape; empty until the daemon's board arrives.
-  property var view: ({ summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], roster: [], rosterHosts: ["kit", "cog"] })
+  property var view: ({ summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], roster: [], rosterLeaderboard: [], rosterHasStats: false, rosterHosts: ["kit", "cog"] })
   property bool loaded: false
   property bool idleOpen: false
   // activity (needs, workers, queued, recent) or roster (clanker cards and editor).
   property string mode: "activity"
+  property string rosterSort: "roster"
   property string rosterSlug: ""
   property bool rosterNew: false
   property var rosterNotice: ({ text: "", busy: false, seq: 0, saved: "" })
@@ -173,13 +174,22 @@ Item {
           height: 26
           SectionTitle {
             anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-            text: "CLANKERS · " + (board.view.roster ?? []).length
+            text: (board.rosterSort === "leaderboard" ? "LEADERBOARD · " : "CLANKERS · ") + (board.view.roster ?? []).length
           }
-          Segment {
+          Row {
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-            text: "+ new"
-            on: false
-            onClicked: { board.rosterSlug = ""; board.rosterNew = true; }
+            spacing: 5
+            Segment {
+              visible: board.view.rosterHasStats === true
+              text: "ranked"
+              on: board.rosterSort === "leaderboard"
+              onClicked: board.rosterSort = board.rosterSort === "leaderboard" ? "roster" : "leaderboard"
+            }
+            Segment {
+              text: "+ new"
+              on: false
+              onClicked: { board.rosterSlug = ""; board.rosterNew = true; }
+            }
           }
         }
         Text {
@@ -191,7 +201,7 @@ Item {
           color: Theme.muted
         }
         Repeater {
-          model: board.mode === "roster" ? (board.view.roster ?? []) : []
+          model: board.mode === "roster" ? (board.rosterSort === "leaderboard" ? (board.view.rosterLeaderboard ?? []) : (board.view.roster ?? [])) : []
           delegate: RosterCard { required property var modelData; entry: modelData; width: column.width }
         }
       }
@@ -379,6 +389,14 @@ Item {
           font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 11
           color: rc.entry.batteryLevel >= 0 ? Theme.ink : "#6d6a73"
         }
+      }
+      Text {
+        visible: (rc.entry.statsLine ?? "") !== ""
+        width: parent.width
+        elide: Text.ElideRight
+        text: rc.entry.statsLine ?? ""
+        font.family: Theme.caption; font.pixelSize: 11
+        color: "#6d6a73"
       }
     }
   }

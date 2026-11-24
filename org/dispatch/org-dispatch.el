@@ -283,10 +283,173 @@ reason and next, or nil when june cannot say."
 (defvar org-dispatch-max-switches 3
   "Account switches one run may make before its task goes to Jon.")
 
+(defvar org-dispatch-max-handoffs 2
+  "Agent-to-agent handoffs one run may make before its task goes to Jon.")
+
+(defun org-dispatch--state-agent-name (state)
+  "The roster slug when STATE ran a card, else its harness name."
+  (let ((card (and (plist-get state :card)
+                   (ignore-errors
+                     (json-parse-string (plist-get state :card) :object-type 'alist :null-object nil :false-object nil)))))
+    (or (alist-get 'slug card) (plist-get state :agent) "pi")))
+
+(defun org-dispatch--record-run (phase state &optional outcome note)
+  "Best-effort record of a run start or end in June's database.
+Calls `june agents record'; never fails a pass or blocks when june is absent."
+  (let ((june (executable-find org-dispatch-june))
+        (run (plist-get state :run))
+        (id (plist-get state :id)))
+    (when (and june run id)
+      (let* ((agent (org-dispatch--state-agent-name state))
+             (args (append (list "agents" "record" phase
+                                 "--run" run
+                                 "--task" id
+                                 "--agent" agent
+                                 "--title" (or (plist-get state :heading) "")
+                                 "--harness" (or (plist-get state :agent) "")
+                                 "--host" (or (plist-get state :host) org-dispatch-host)
+                                 "--model" (or (plist-get state :model) ""))
+                           (when (equal phase "end")
+                             (append (list "--outcome" (or outcome "stopped")
+                                           "--switches" (number-to-string (or (plist-get state :switches) 0)))
+                                     (when (and note (not (string-empty-p note)))
+                                       (list "--note" note)))))))
+        (ignore-errors
+          (apply #'call-process june nil nil nil args))))))
+
+(defun org-dispatch--task-agents (state)
+  "Candidate roster agents listed in :AGENTS: on STATE's Org heading, or nil."
+  (ignore-errors
+    (org-dispatch--edit (plist-get state :file) (plist-get state :id)
+                        (lambda ()
+                          (let ((agents (org-entry-get nil "AGENTS")))
+                            (when agents (split-string agents))))
+                        (plist-get state :heading))))
+
+(defun org-dispatch--pick-handoff (names tried)
+  "June's choice among handoff candidates NAMES across any host, skipping TRIED."
+  (let ((june (executable-find org-dispatch-june)))
+    (when june
+      (with-temp-buffer
+        (apply #'call-process june nil '(t nil) nil "agents" "pick" "--json"
+               "--harnesses" (string-join org-dispatch-launchable ",")
+               (append (when tried (list "--except" (string-join tried ","))) names))
+        (ignore-errors
+          (json-parse-string (buffer-string) :object-type 'alist :null-object nil :false-object nil))))))
+
+(defun org-dispatch--handoff (state reason)
+  "Hand STATE's task off to the next available agent in :AGENTS: for REASON.
+Same-host candidates start a fresh session immediately; cross-host candidates
+re-queue the task AUTO for that host. Returns non-nil if handed off."
+  (let* ((handoffs (or (plist-get state :handoffs) 0))
+         (current (org-dispatch--state-agent-name state))
+         (prev-tried (let ((raw (plist-get state :tried)))
+                       (cond ((stringp raw) (split-string raw))
+                             ((vectorp raw) (append raw nil))
+                             ((listp raw) raw))))
+         (tried (delete-dups (cons current prev-tried)))
+         (candidates (unless (or (eq (plist-get state :review-loop) 1)
+                                 (>= handoffs org-dispatch-max-handoffs))
+                       (seq-remove (lambda (n) (member n tried))
+                                   (org-dispatch--task-agents state))))
+         (pick (and candidates (org-dispatch--pick-handoff candidates tried)))
+         (card (alist-get 'card pick))
+         (new-harness (or (alist-get 'harness card) (alist-get 'legacy pick)))
+         (new-slug (or (alist-get 'slug card) (alist-get 'legacy pick)))
+         (new-host (or (alist-get 'host card) org-dispatch-host)))
+    (when (and new-slug (member new-harness org-dispatch-launchable))
+      (let ((old-terminal (plist-get state :terminal))
+            (id (plist-get state :id))
+            (file (plist-get state :file))
+            (heading (plist-get state :heading)))
+        (when old-terminal (ignore-errors (org-dispatch--hc "kill" old-terminal)))
+        (org-dispatch--record-run "end" state "handoff"
+                                  (format "handed off to %s (%s): %s" new-slug new-host reason))
+        (if (not (equal new-host org-dispatch-host))
+            ;; Cross-host continuation is a fresh handoff from the Org record.
+            (progn
+              (org-dispatch--drop-state id)
+              (org-dispatch--edit file id
+                (lambda ()
+                  (org-entry-put nil "AGENT" new-slug)
+                  (org-entry-put nil "HOST" new-host)
+                  (org-entry-delete nil "ASKED")
+                  (org-todo "AUTO")
+                  (org-dispatch--append "Dialog" (org-dispatch--entry "Dispatcher"
+                    (format "%s could not continue (%s); handed off to %s on %s (re-queued AUTO for %s)."
+                            current reason new-slug new-host new-host))))
+                heading)
+              (org-dispatch--log "%s: handed off from %s to %s on %s (%s)" id current new-slug new-host reason)
+              t)
+          ;; Same-host handoff: start a fresh session on the new agent immediately.
+          (let* ((run (org-id-uuid))
+                 (session (org-id-uuid))
+                 (model-raw (alist-get 'model card))
+                 (model (cond ((and model-raw (equal new-harness "pi") (not (string-search "/" model-raw)))
+                               (concat "openai-codex/" model-raw))
+                              (model-raw)
+                              ((equal new-harness "pi") org-dispatch-model)))
+                 (command (or (org-dispatch--command new-harness) new-harness))
+                 (task (list :id id :file file :heading heading :dir (plist-get state :dir)
+                             :agent new-harness :model model :card card
+                             :repeat (eq (plist-get state :repeat) 1)))
+                 (prompt (format "You are taking over Org task %s (\"%s\") in %s from %s, who could not continue (%s). This is a fresh handoff session. Read the whole Org heading and Dialog, and inspect the workspace (git status, git diff, recent files) before continuing the task."
+                                 id heading file current reason))
+                 (space (org-dispatch--space (file-name-base file)))
+                 (slug (alist-get 'slug card))
+                 (new-state (append (list :id id :file file :heading heading :dir (plist-get state :dir)
+                                          :agent new-harness :status "starting"
+                                          :host org-dispatch-host :run run :session session
+                                          :review-loop 0 :started (float-time) :nudges 0
+                                          :switches 0 :handoffs (1+ handoffs) :tried (string-join tried " ")
+                                          :repeat (or (plist-get state :repeat) 0))
+                                    (when model (list :model model))
+                                    (when card (list :card (json-serialize card))))))
+            (condition-case err
+                (let* ((started (apply #'org-dispatch--hc "run" "--bg" "--no-parent"
+                                       "--name" (format "auto-%s-%s" (org-dispatch--id8 id) (format-time-string "%H%M%S"))
+                                       "--cwd" (plist-get state :dir)
+                                       "--label" (concat "org.dispatch=" org-dispatch-host)
+                                       "--label" (concat "org.task=" id)
+                                       "--label" (concat "org.run=" run)
+                                       "--label" (concat "org.agent=" new-harness)
+                                       "--label" (concat "org.session=" session)
+                                       (append (when space (list "--label" (concat "herdr.space=" space)))
+                                               (when slug (list "--label" (concat "june.agent=" slug)))
+                                               (list "--")
+                                               (org-dispatch--agent-argv task command nil session prompt))))
+                       (address (alist-get 'address started)))
+                  (unless address (error "hc run returned no terminal address"))
+                  (setq new-state (plist-put new-state :terminal address))
+                  (org-dispatch--save-state new-state)
+                  (org-dispatch--await-start address new-harness)
+                  (when (member new-harness '("codex" "agy"))
+                    (setq new-state (org-dispatch--await-session new-state new-harness (plist-get state :dir) (plist-get new-state :started))))
+                  (setq new-state (plist-put new-state :status "running"))
+                  (org-dispatch--save-state new-state)
+                  (org-dispatch--edit file id
+                    (lambda ()
+                      (org-entry-put nil "AGENT" new-slug)
+                      (org-dispatch--append "Sessions"
+                        (format "- [[herdr:%s/%s:%s@%s][%s@%s/%s]]"
+                                org-dispatch-host new-harness (plist-get new-state :session) address
+                                new-harness org-dispatch-host (format-time-string "%Y-%m-%dT%H%M")))
+                      (org-dispatch--append "Dialog" (org-dispatch--entry "Dispatcher"
+                        (format "%s could not continue (%s); handed off to %s in hc terminal %s."
+                                current reason new-slug address))))
+                    heading)
+                  (org-dispatch--record-run "start" new-state)
+                  (org-dispatch--log "%s: handed off from %s to %s in %s (%s)" id current new-slug address reason)
+                  t)
+              (error
+               (org-dispatch--park state (format "%s could not continue (%s), and handoff to %s failed: %s."
+                                                 current reason new-slug (org-dispatch--reason err)))
+               t))))))))
+
 (defun org-dispatch--out-of-quota (state)
-  "Continue STATE's idle worker on another account when its own has run out.
-Return non-nil when it did, or when no account can continue and the task
-went to Jon; nil leaves the worker to the usual nudges."
+  "Continue STATE's idle worker on another account when its own has run out,
+or hand off to another candidate in :AGENTS: if no account of its harness can.
+Return non-nil when handled; nil leaves the worker to the usual nudges."
   (let* ((slot (org-dispatch--worker-account state))
          (check (and slot (org-dispatch--check-account slot))))
     (when (and check (not (alist-get 'usable check)))
@@ -294,10 +457,12 @@ went to Jon; nil leaves the worker to the usual nudges."
             (reason (alist-get 'reason check))
             (switches (or (plist-get state :switches) 0)))
         (if (or (null next) (>= switches org-dispatch-max-switches) (null (plist-get state :session)))
-            (org-dispatch--park state (format "%s ran out of quota (%s), and %s." slot reason
-                                              (cond ((null (plist-get state :session)) "its session is unknown, so it cannot continue elsewhere")
-                                                    ((null next) "no other account can continue it")
-                                                    (t (format "it already moved %d times" switches)))))
+            (let ((why (format "%s ran out of quota (%s), and %s" slot reason
+                               (cond ((null (plist-get state :session)) "its session is unknown, so it cannot continue elsewhere")
+                                     ((null next) "no other account can continue it")
+                                     (t (format "it already moved %d times" switches))))))
+              (unless (org-dispatch--handoff state why)
+                (org-dispatch--park state (concat why "."))))
           (org-dispatch--continue-elsewhere state slot reason))
         t))))
 
@@ -1680,6 +1845,7 @@ is accepted as unknown, which the watcher never mistakes for idle."
               (org-dispatch--claim task address (plist-get state :session))
               (setq state (plist-put state :status "running"))
               (org-dispatch--save-state state)
+              (org-dispatch--record-run "start" state)
               (org-dispatch--log "%s %s: %s in %s" (cond (fresh "restarted") (resume "resumed") (t "launched"))
                                  id (plist-get task :heading) address)
               t)
@@ -1714,6 +1880,7 @@ Not HOLD, which means the task waits on something outside."
                         (org-todo "EVAL")
                         (org-dispatch--ask "Dispatcher" reason)))
   (org-dispatch--drop-state (plist-get state :id))
+  (org-dispatch--record-run "end" state "parked" reason)
   (org-dispatch--notify (concat "EVAL · " (plist-get state :heading)) reason)
   (org-dispatch--log "parked %s for Jon: %s" (plist-get state :id) reason))
 
@@ -1768,15 +1935,20 @@ The original file may still exist after its heading has been archived."
      ((not (equal todo "PROG"))
       ;; A state change made elsewhere is not permission to interrupt the worker.
       (ignore-errors (org-dispatch--edit (plist-get state :file) id #'org-dispatch--untag-auto))
-      (org-dispatch--drop-state id))
+      (org-dispatch--drop-state id)
+      (org-dispatch--record-run "end" state
+                                (if (member todo '("DONE" "EVAL" "HOLD")) (downcase todo) "stopped")
+                                (format "state changed to %s" todo)))
      ((> (- (float-time) (plist-get state :started)) org-dispatch-time-limit)
       (ignore-errors (org-dispatch--hc "interrupt" (plist-get state :terminal)))
       (org-dispatch--park state (format "Interrupted after %d minutes without finishing."
                                         (/ org-dispatch-time-limit 60))))
      ((null status)
-      (org-dispatch--park state (format "%s is no longer running in its hc terminal %s."
-                                        (or (plist-get state :agent) "pi")
-                                        (plist-get state :terminal))))
+      (let ((why (format "%s is no longer running in its hc terminal %s"
+                         (or (plist-get state :agent) "pi")
+                         (plist-get state :terminal))))
+        (unless (org-dispatch--handoff state why)
+          (org-dispatch--park state (concat why ".")))))
      ((equal status "blocked")
       ;; herdr-notify's event consumer tells Jon; the dispatcher only waits.
       (org-dispatch--save-state (plist-put state :idle 0)))
@@ -1792,9 +1964,11 @@ The original file may still exist after its heading has been archived."
          ;; An agent that stopped because its account ran out continues on another.
          ((org-dispatch--out-of-quota state))
          ((>= nudges org-dispatch-max-nudges)
-          (org-dispatch--park state (format "Still idle without a state change after %d nudge%s."
-                                            org-dispatch-max-nudges
-                                            (if (= org-dispatch-max-nudges 1) "" "s"))))
+          (let ((why (format "still idle without a state change after %d nudge%s"
+                             org-dispatch-max-nudges
+                             (if (= org-dispatch-max-nudges 1) "" "s"))))
+            (unless (org-dispatch--handoff state why)
+              (org-dispatch--park state (concat (upcase-initials why) ".")))))
          (t
           (setq state (plist-put state :nudges (1+ nudges)))
           (setq state (plist-put state :idle 0))
@@ -2413,7 +2587,10 @@ ASK (a question for Jon in NOTE, recorded in Dialog with the task at EVAL)."
                (when ask (org-dispatch--ask "Agent" note))
                (if ask "EVAL (asked)" (org-get-todo-state))))))
     (when state
-      (org-dispatch--save-state (plist-put state :status "finished")))
+      (org-dispatch--save-state (plist-put state :status "finished"))
+      (org-dispatch--record-run "end" state
+                                (if (equal result "EVAL (asked)") "ask" (downcase todo))
+                                (or headline note)))
     (org-dispatch--notify (format "%s · %s" (if (equal result "EVAL (asked)") "ASK" todo) (or (plist-get state :heading) id))
                           (if (string-empty-p note) "Finished." note)
                           (and (plist-get state :terminal)
@@ -2468,7 +2645,8 @@ ASK (a question for Jon in NOTE, recorded in Dialog with the task at EVAL)."
          (org-dispatch--log-run id "AUTO" "PROG" (format "Retry <%s>: %s" stamp note))
          (org-todo "AUTO"))))
     (when state
-      (org-dispatch--save-state (plist-put state :status "finished")))
+      (org-dispatch--save-state (plist-put state :status "finished"))
+      (org-dispatch--record-run "end" state "retry" note))
     (org-dispatch--log "retry %s at <%s>, %d left: %s" id stamp left note)
     (princ (format "%s is now AUTO, scheduled for <%s> with %d retr%s left\n"
                    id stamp left (if (= left 1) "y" "ies")))))

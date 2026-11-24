@@ -462,6 +462,7 @@ fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifie
     }
     val open = LocalUriHandler.current
     var mode by rememberSaveable { mutableStateOf("activity") }
+    var rosterSort by rememberSaveable { mutableStateOf("roster") }
     var idleOpen by rememberSaveable { mutableStateOf(false) }
     var page by rememberSaveable { mutableStateOf("") }
     var rosterSlug by rememberSaveable { mutableStateOf("") }
@@ -516,14 +517,21 @@ fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifie
             }
         }
         if (v != null && colours != null && mode == "roster") {
+            val hasStats = v.optBoolean("rosterHasStats")
+            val shownRoster = if (rosterSort == "leaderboard" && hasStats) v.optJSONArray("rosterLeaderboard").objects() else roster
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    SectionTitle("AGENTS · ${roster.size}", palette)
-                    Segment("+ new", false, palette) { rosterSlug = ""; rosterCreating = true; rosterEditing = true }
+                    SectionTitle((if (rosterSort == "leaderboard" && hasStats) "LEADERBOARD" else "AGENTS") + " · ${roster.size}", palette)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (hasStats) Segment("ranked", rosterSort == "leaderboard", palette) {
+                            rosterSort = if (rosterSort == "leaderboard") "roster" else "leaderboard"
+                        }
+                        Segment("+ new", false, palette) { rosterSlug = ""; rosterCreating = true; rosterEditing = true }
+                    }
                 }
             }
-            if (roster.isEmpty()) item { Text("No agents in ROSTER.org yet.", fontFamily = Look.lettering, fontSize = 15.sp, color = palette.muted) }
-            for (card in roster) item(key = "roster|" + card.optString("slug")) {
+            if (shownRoster.isEmpty()) item { Text("No agents in ROSTER.org yet.", fontFamily = Look.lettering, fontSize = 15.sp, color = palette.muted) }
+            for (card in shownRoster) item(key = "roster|" + card.optString("slug")) {
                 RosterCard(card, colours) { rosterCreating = false; rosterEditing = false; rosterSlug = card.optString("slug") }
             }
         } else if (v != null && colours != null) {
@@ -587,6 +595,8 @@ private fun RosterCard(card: JSONObject, colours: Colours, onClick: () -> Unit) 
                 BatteryMeter(card.optInt("batteryLevel", -1), card.optString("batteryTone", "unknown"))
                 Text(batText, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Look.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            val statsLine = card.optString("statsLine")
+            if (statsLine.isNotEmpty()) Text(statsLine, fontFamily = Look.caption, fontSize = 12.sp, color = Color(0xFF6D6A73), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -715,6 +725,39 @@ private fun RosterDetailPage(
                     fontFamily = Look.lettering, fontSize = 14.sp, color = if (instr.isNotEmpty()) Look.ink else palette.muted,
                     modifier = Modifier.fillMaxWidth().background(Look.balloon, RoundedCornerShape(12.dp)).border(2.dp, Look.ink, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
                 )
+            }
+            val runCount = card.optInt("runs", 0)
+            if (runCount > 0) {
+                item { SectionTitle("HISTORY", palette) }
+                item {
+                    val handoffs = card.optInt("handoffs", 0)
+                    val parked = card.optInt("parked", 0)
+                    val summary = buildString {
+                        append(card.optString("statsLine"))
+                        if (handoffs > 0) append(" · $handoffs handoff")
+                        if (parked > 0) append(" · $parked parked")
+                    }
+                    val recentRuns = card.optJSONArray("recentRuns").objects()
+                    Column(
+                        Modifier.fillMaxWidth().background(Look.balloon, RoundedCornerShape(12.dp)).border(2.dp, Look.ink, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(summary, fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Look.ink)
+                        for (r in recentRuns) {
+                            val outcome = r.optString("outcome")
+                            val oColor = when (outcome) {
+                                "done", "eval" -> Color(0xFF2F5A22)
+                                "handoff", "parked" -> Color(0xFF8A1F12)
+                                else -> Color(0xFF6D6A73)
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(outcome.uppercase(), Modifier.width(54.dp), fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 10.sp, color = oColor)
+                                Text(r.optString("taskTitle"), Modifier.weight(1f), fontFamily = Look.caption, fontSize = 12.sp, color = Look.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(r.optString("duration"), fontFamily = Look.caption, fontSize = 11.sp, color = Color(0xFF6D6A73))
+                            }
+                        }
+                    }
+                }
             }
         } else {
             // Live card preview header while editing or creating.

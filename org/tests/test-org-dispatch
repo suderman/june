@@ -1216,6 +1216,101 @@ cat >"$fixture/launch-tests.el" <<'EOF'
                                                           (buffer-substring-no-properties (point) (point-max)))))))))
       (delete-directory bin t))))
 
+(ert-deftest a-worker-that-cannot-continue-hands-off-to-the-next-agent-in-agents ()
+  ;; When Bolt runs out of Claude accounts, the dispatcher kills Bolt and starts
+  ;; Rivet fresh on Codex from the task's :AGENTS: list, recording both runs.
+  (let* ((bin (make-temp-file "june-bin" t))
+         (rec (expand-file-name "recorded.log" bin))
+         (org-dispatch-june (expand-file-name "june" bin)))
+    (with-temp-file org-dispatch-june
+      (insert (format "#!/bin/sh
+case \"$1 $2\" in
+  'accounts check')
+    echo '{\"name\":\"claude1\",\"usable\":false,\"reason\":\"weekly at 0%%\"}'
+    ;;
+  'agents pick')
+    echo '{\"chosen\":\"rivet\",\"why\":\"next\",\"card\":{\"slug\":\"rivet\",\"name\":\"Rivet\",\"host\":\"kit\",\"harness\":\"codex\",\"model\":\"gpt-6.2-sol\",\"effort\":\"medium\",\"instructions\":\"Quick.\"}}'
+    ;;
+  'agents record')
+    printf '%%s\\n' \"$*\" >> %s
+    ;;
+esac
+" (shell-quote-argument rec))))
+    (set-file-modes org-dispatch-june #o755)
+    (unwind-protect
+        (test-with-hc
+         (let* ((task (plist-put (copy-sequence (test-task "claude")) :card '((slug . "bolt") (effort . "high"))))
+                (org-dispatch-nudge-after 0) (clock 1000))
+           ;; Put :AGENTS: bolt rivet on the heading before launching.
+           (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                               (lambda () (org-entry-put nil "AGENTS" "bolt rivet")))
+           (should (org-dispatch--launch task))
+           (cl-letf (((symbol-function 'float-time) (lambda (&rest _) (setq clock (+ clock 10))))
+                     ((symbol-function 'org-dispatch--worker-account) (lambda (_) "claude1"))
+                     ((symbol-function 'org-dispatch--find-session) (lambda (_a _d _s) "11111111-1111-4111-8111-111111111111")))
+             (setq test-calls nil)
+             (org-dispatch--watch (car (org-dispatch--states)))
+             (let* ((state (car (org-dispatch--states)))
+                    (run (test-run-call))
+                    (argv (test-argv run)))
+               (should (member '("kill" "t-new") test-calls))
+               (should (equal (plist-get state :agent) "codex"))
+               (should (equal (plist-get state :handoffs) 1))
+               (should (member "june.agent=rivet" run))
+               (should (equal (car argv) "codex"))
+               (should (string-search "taking over Org task" (car (last argv))))
+               (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                                   (lambda ()
+                                     (should (equal (org-get-todo-state) "PROG"))
+                                     (should (equal (org-entry-get nil "AGENT") "rivet"))
+                                     (should (equal (org-entry-get nil "AGENTS") "bolt rivet"))
+                                     (should (string-search "handed off to rivet" (org-dispatch--subtree-text)))))
+               (let ((log (with-temp-buffer (insert-file-contents rec) (buffer-string))))
+                 (should (string-search "agents record start" log))
+                 (should (string-search "--outcome handoff" log))
+                 (should (string-search "--agent rivet" log)))))))
+      (delete-directory bin t))))
+
+(ert-deftest a-handoff-to-an-agent-on-another-host-requeues-auto-there ()
+  ;; Cross-host continuation kills the local worker and sets AGENT, HOST and AUTO
+  ;; so the other host's dispatcher launches fresh from the Org record.
+  (let* ((bin (make-temp-file "june-bin" t))
+         (org-dispatch-june (expand-file-name "june" bin)))
+    (with-temp-file org-dispatch-june
+      (insert "#!/bin/sh
+case \"$1 $2\" in
+  'accounts check')
+    echo '{\"name\":\"claude1\",\"usable\":false,\"reason\":\"weekly at 0%\"}'
+    ;;
+  'agents pick')
+    echo '{\"chosen\":\"gyro\",\"why\":\"next\",\"card\":{\"slug\":\"gyro\",\"name\":\"Gyro\",\"host\":\"cog\",\"harness\":\"agy\",\"model\":\"gemini-4-neon\",\"effort\":\"high\",\"instructions\":\"\"}}'
+    ;;
+esac
+"))
+    (set-file-modes org-dispatch-june #o755)
+    (unwind-protect
+        (test-with-hc
+         (let* ((task (plist-put (copy-sequence (test-task "claude")) :card '((slug . "bolt"))))
+                (org-dispatch-nudge-after 0) (clock 1000))
+           (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                               (lambda () (org-entry-put nil "AGENTS" "bolt gyro")))
+           (should (org-dispatch--launch task))
+           (cl-letf (((symbol-function 'float-time) (lambda (&rest _) (setq clock (+ clock 10))))
+                     ((symbol-function 'org-dispatch--worker-account) (lambda (_) "claude1")))
+             (setq test-calls nil)
+             (org-dispatch--watch (car (org-dispatch--states)))
+             (should (member '("kill" "t-new") test-calls))
+             (should-not (test-run-call))
+             (should-not (org-dispatch--states))
+             (org-dispatch--edit (plist-get task :file) (plist-get task :id)
+                                 (lambda ()
+                                   (should (equal (org-get-todo-state) "AUTO"))
+                                   (should (equal (org-entry-get nil "AGENT") "gyro"))
+                                   (should (equal (org-entry-get nil "HOST") "cog"))
+                                   (should (equal (org-entry-get nil "AGENTS") "bolt gyro"))
+                                   (should (string-search "handed off to gyro on cog" (org-dispatch--subtree-text))))))))
+      (delete-directory bin t))))
+
 (ert-deftest a-worker-stopped-on-a-provider-error-is-nudged-to-retry ()
   (test-with-hc
    (let ((task (test-task "pi")) (org-dispatch-nudge-after 0) (clock 1000))

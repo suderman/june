@@ -143,7 +143,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			createOrgExtension(config, org),
 			createOrgWriteExtension(config, org, instanceId(paths.state)),
 			createHerdrExtension(config, herdr),
-			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, herdr, instanceId(paths.state))] : []),
+			...(config.dispatch.hosts.length > 0 ? [createDispatchExtension(config, org, herdr, instanceId(paths.state), undefined, undefined, paths.database)] : []),
 		];
 		const situation = createSituation({ config: config.situation, env: { ...(options.env ?? process.env), ...options.secrets }, log });
 		const prompt = createPromptExtension(config, paths, situation);
@@ -326,7 +326,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		// One long-running Emacs for the boards' agenda reads and edits; it starts on first use.
 		const orgWorker = new OrgWorker({ log, env: { ORG_EDIT_PROTECTED: protectedOf(config.org).join(":") } });
 		const boards = options.boards ?? new Boards({ config, herdr, seenFile: `${paths.state}/seen.json`, log, org: orgWorker, dataDir: paths.data, stateDir: paths.state, configFile: `${paths.config}/config.json` });
-		const edits = options.edits ?? new TaskEdits(config, undefined, orgWorker);
+		const edits = options.edits ?? new TaskEdits(config, undefined, orgWorker, paths.data);
 		// A phone's push address: the agenda changed, so its widget and reminders refresh at once (src/push.ts).
 		const pushes = new Pushes({ file: `${paths.state}/push.json`, origin: config.ntfy ? new URL(config.ntfy.url).origin : undefined, boards, log, ...(options.pushPost ? { post: options.pushPost } : {}) });
 		// How many connections have the phone app's conversation open (ntfy.ts pushes only while none does).
