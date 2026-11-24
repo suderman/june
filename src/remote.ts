@@ -32,6 +32,9 @@ export type RemoteOptions = {
 	readonly attachment?: (id: string, n: number) => Promise<{ data: string; mimeType: string } | undefined>;
 	/** The `n`th file the user's message `id` brought, while June's inbox keeps it; none without the callback. */
 	readonly file?: (id: string, n: number) => Promise<{ path: string; name: string; mimeType: string; language?: string } | undefined>;
+	/** Every account's quota as the daemon keeps it (accounts.ts sharedQuotas), for a paired device's GET /quota with
+	 * its token as a bearer: how worker hosts get quota without reading providers. REFRESH asks for a new read. */
+	readonly quota?: (refresh: boolean) => Promise<unknown[]>;
 	/** Tests shorten these. */
 	readonly helloMs?: number;
 	readonly pingMs?: number;
@@ -98,7 +101,28 @@ export async function startRemote(options: RemoteOptions): Promise<Remote> {
 			response.writeHead(404, { "content-type": "text/plain" });
 			response.end("not found\n");
 		};
-		const url = (request.url ?? "").split("?")[0];
+		const [url, query] = (request.url ?? "").split("?") as [string, string | undefined];
+		// The daemon's quota for a paired device, its token as a bearer, so worker hosts never read providers themselves.
+		if (url === "/quota" && request.method === "GET" && options.quota !== undefined) {
+			const bearer = /^Bearer (.+)$/.exec(String(request.headers.authorization ?? ""))?.[1];
+			const device = bearer === undefined ? undefined : devices.verify(bearer);
+			if (device === undefined) {
+				response.writeHead(401, { "content-type": "text/plain" });
+				return response.end("unauthorized\n");
+			}
+			void options.quota(/(?:^|&)refresh=1(?:&|$)/.test(query ?? "")).then(
+				(quotas) => {
+					response.writeHead(200, { "content-type": "application/json", "cache-control": "private, no-cache" });
+					response.end(JSON.stringify({ quotas }));
+				},
+				(error) => {
+					log.warn("remote_quota_failed", { device, error: (error as Error).message.slice(0, 200) });
+					response.writeHead(503, { "content-type": "text/plain" });
+					response.end("quota unavailable\n");
+				},
+			);
+			return;
+		}
 		const picture = /^\/attached\/([\w-]+)\/(\d{1,12})\/(\d)$/.exec(url);
 		if (picture && (request.method === "GET" || request.method === "HEAD") && options.attachment !== undefined) {
 			const owner = keys.get(picture[1]);

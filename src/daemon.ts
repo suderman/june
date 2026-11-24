@@ -45,6 +45,7 @@ import { createWatch } from "./watch.ts";
 import { type DeviceInfo, readLines, type Reply, type Request, SOURCES, type Status, writeLine } from "./protocol.ts";
 import { Devices } from "./devices.ts";
 import { type Remote, type Session, startRemote } from "./remote.ts";
+import { hostQuotas } from "./accounts.ts";
 import { createCodingExtension } from "./tools/coding.ts";
 import { type Followed, listFollowing } from "./tools/follow.ts";
 import { shownFiles } from "./shown.ts";
@@ -343,7 +344,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		// The listener is a convenience beside the socket: a port already taken is logged and shown in status, not fatal.
 		if (config.remote) {
 			try {
-				remote = await startRemote({ port: config.remote.port, devices, log, session: (send, device) => session(send, scope, device), avatar: `${paths.data}/avatar`, attachment: (id, n) => attachment(root, id, n), file: (id, n) => inboxFile(root, inbox, id, n), ...options.remoteTiming });
+				remote = await startRemote({ port: config.remote.port, devices, log, session: (send, device) => session(send, scope, device), avatar: `${paths.data}/avatar`, attachment: (id, n) => attachment(root, id, n), file: (id, n) => inboxFile(root, inbox, id, n), quota: (refresh) => hostQuotas(`${paths.config}/config.json`, paths.data, paths.state, { maxAge: 600, force: refresh }), ...options.remoteTiming });
 			} catch (error) {
 				remoteError = (error as Error).message;
 				log.error("remote_listen_failed", { port: config.remote.port, error: remoteError });

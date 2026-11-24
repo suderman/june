@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { AccountCredentials, accountsConfig, anthropicWindows, apply, withAuthLock, autoWrapper, budget, googleWindows, inUse, loginCommand, mergeQuotas, openaiWindows, parseAccountsOrg, places, projectRoots, quotas, rank, readQuota, refresh, resolveGroup, slots, status, trust } from "../src/accounts.ts";
+import { AccountCredentials, accountsConfig, BACKOFF_S, due, keepGood, sharedQuotas, savedQuotas, anthropicWindows, apply, withAuthLock, autoWrapper, budget, googleWindows, inUse, loginCommand, mergeQuotas, openaiWindows, parseAccountsOrg, places, projectRoots, quotas, rank, readQuota, refresh, resolveGroup, slots, status, trust } from "../src/accounts.ts";
 import { tempDir } from "./helpers.ts";
 
 const jwt = (payload: object) => `x.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.y`;
@@ -583,4 +583,51 @@ test("OpenCode account folders isolate auth.json under XDG_DATA_HOME while shari
 	const saved = JSON.parse(readFileSync(join(oc1, "opencode/auth.json"), "utf8")).openai;
 	assert.deepEqual([saved.access, saved.refresh, saved.expires], ["new-oc", "r2", now + 3_600_000]);
 	assert.equal(await refresh(slot2!, { fetcher, now, busy: () => false }), "failed");
+});
+
+test("a failed quota read keeps the last good one, stale, and a rate limit waits before the account is read again", () => {
+	const now = 1_800_000_000_000;
+	const at = now / 1000;
+	const good = { provider: "anthropic" as const, number: 1, windows: [{ name: "Weekly", used: 96, resetsAt: at + 1500 }] as never[], fetched: at - 300, source: "claude1" };
+	const failed = { provider: "anthropic" as const, number: 1, windows: [], error: "claude1: usage endpoint rate limited" };
+	const [kept] = keepGood([good], [failed], now);
+	assert.deepEqual([kept!.windows.length, kept!.stale, kept!.fetched, kept!.error, kept!.retryAt], [1, true, at - 300, "claude1: usage endpoint rate limited", at + BACKOFF_S]);
+	assert.equal(due(kept, now), false, "waiting out the rate limit");
+	assert.equal(due(kept, now + (BACKOFF_S + 1) * 1000), true);
+	const [never] = keepGood([], [failed], now);
+	assert.deepEqual([never!.windows.length, never!.stale, never!.retryAt], [0, undefined, at + BACKOFF_S], "with nothing good to keep, the failure shows as it is");
+	const [back] = keepGood([kept!], [{ ...good, fetched: at }], now);
+	assert.deepEqual([back!.stale, back!.retryAt, back!.error], [undefined, undefined, undefined], "a good read clears the marks");
+	assert.equal(due({ ...good, fetched: at - 10 }, now), false, "read a moment ago");
+	const skipped = keepGood([good, { ...good, number: 2 }], [failed], now);
+	assert.deepEqual(skipped.map((q) => q.number), [1, 2], "an account the read skipped stays as it was");
+});
+
+test("one reader keeps the quota: a fresh copy stands, a busy lock leaves it, and only accounts due are read", async (t) => {
+	const tmp = await tempDir();
+	t.after(() => tmp.cleanup());
+	const file = join(tmp.dir, "quota.json");
+	const now = 1_800_000_000_000;
+	const config = accountsConfig({ claude: 2 });
+	const people = parseAccountsOrg("");
+	const asked: number[] = [];
+	const read = (async (_c: unknown, _p: unknown, o: { only?: (q: { provider: "anthropic"; number: number }) => boolean }) => {
+		const rows = [1, 2].filter((n) => !o.only || o.only({ provider: "anthropic", number: n }));
+		asked.push(...rows);
+		return rows.map((n) => (n === 1 ? { provider: "anthropic", number: 1, windows: [], error: "claude1: usage endpoint rate limited" } : { provider: "anthropic", number: 2, windows: [{ name: "Weekly" }], fetched: now / 1000 }));
+	}) as never;
+	const first = await sharedQuotas(config, people, file, { maxAge: 300, now, read });
+	assert.deepEqual(asked, [1, 2]);
+	assert.equal(first.find((q) => q.number === 1)!.retryAt, now / 1000 + BACKOFF_S);
+	asked.length = 0;
+	await sharedQuotas(config, people, file, { maxAge: 300, now: now + 60_000, read });
+	assert.deepEqual(asked, [], "a copy under five minutes old stands");
+	await sharedQuotas(config, people, file, { maxAge: 300, now: now + 400_000, read });
+	assert.deepEqual(asked, [2], "the rate limited account waits out its ten minutes");
+	asked.length = 0;
+	writeFileSync(`${file}.lock`, "1");
+	const held = await sharedQuotas(config, people, file, { maxAge: 0, force: true, now: now + 400_500, read });
+	assert.deepEqual(asked, [], "another reader holds the lock");
+	assert.equal(held.length, 2);
+	assert.equal(savedQuotas(file)!.quotas.length, 2);
 });

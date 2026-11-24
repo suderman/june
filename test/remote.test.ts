@@ -443,3 +443,15 @@ test("WebSocket retake, Back and Forward change only art, survive restart, and r
 	for (const reply of phone.replies) if (reply.type === "view") phoneItems = "reset" in reply ? reply.items : applyChanges(phoneItems, reply.changes);
 	assert.deepEqual(phoneItems, desktop.items(), "Forward reaches both clients too");
 });
+
+test("a paired device reads the daemon's quota over HTTP with its token, and nothing without one", async (t) => {
+	const { tmp, port } = await remoteDaemon(t);
+	const token = ((await device(tmp.paths.socket, "add", "cog")) as Extract<Reply, { type: "devices" }>).token!;
+	const url = `http://127.0.0.1:${port}/quota`;
+	assert.equal((await fetch(url)).status, 401, "no token");
+	assert.equal((await fetch(url, { headers: { Authorization: "Bearer not-a-token" } })).status, 401, "a wrong token");
+	const answer = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+	assert.equal(answer.status, 200);
+	assert.deepEqual(await answer.json(), { quotas: [] }, "no accounts configured, so none to report");
+	assert.equal((await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${token}` } })).status, 404, "only GET");
+});

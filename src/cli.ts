@@ -1,6 +1,7 @@
 // june: the daemon (`serve`) and its clients (`june`, `ask`, `status`, `doctor`).
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
 import { createLogger } from "./runtime.ts";
 import { daemonHost, loadConfig, paths, readConfigFile, readEnvFiles, shortHostname } from "./config.ts";
@@ -178,12 +179,7 @@ async function juneModels(p: ReturnType<typeof paths>, config: ReturnType<typeof
 			const accounts = a.accountsConfig(readConfigFile(p).accounts);
 			const logins = (await a.status(accounts, people(p, a.parseAccountsOrg))).filter((r) => r.harness === "pi" && r.loggedIn && !r.problems.length);
 			if (!logins.length) return undefined;
-			const file = `${p.state}/quota.json`;
-			let quotas = a.cached(file, 600);
-			if (!quotas) {
-				quotas = await a.quotas(accounts, people(p, a.parseAccountsOrg));
-				a.save(file, quotas);
-			}
+			const quotas = await a.sharedQuotas(accounts, people(p, a.parseAccountsOrg), `${p.state}/quota.json`, { maxAge: 600 });
 			const ranked = a.rank(logins.map((slot) => ({ slot, quota: quotas!.find((q) => q.provider === slot.provider && q.number === slot.number) })));
 			const best = ranked.find((r) => r.usable)?.slot ?? logins[0]!.name;
 			return logins.find((s) => s.name === best);
@@ -703,35 +699,48 @@ async function accountsLogin(a: typeof import("./accounts.ts"), config: import("
 	return failed ? 1 : 0;
 }
 
-/** Ask the daemon host for its quota snapshot over SSH (never recursive, short timeout) when a local read failed. */
-function fetchRemoteQuotas(host: string, fresh: boolean): import("./accounts.ts").Quota[] | undefined {
-	const run = spawnSync("ssh", ["-o", "ConnectTimeout=5", "-o", "BatchMode=yes", host, "JUNE_LOCAL=1", "june", "quota", "--json", ...(fresh ? ["--refresh"] : [])], {
-		encoding: "utf8",
-		timeout: 15_000,
-	});
-	if (!run.stdout) return undefined;
+/**
+ * The daemon host's quota from its listener (GET /quota), authorised by this device's desktop token, as the desktop
+ * client connects: undefined when it cannot be reached. JUNE_DAEMON_URL overrides https://june.HOST.
+ */
+async function daemonQuotas(host: string, fresh: boolean): Promise<import("./accounts.ts").Quota[] | undefined> {
+	const base = process.env.JUNE_DAEMON_URL?.replace(/\/+$/, "") || `https://june.${host}`;
+	const tokenFile = process.env.JUNE_DESKTOP_TOKEN_FILE || `${homedir()}/.local/state/june-desktop/token`;
+	let token: string;
 	try {
-		const parsed = JSON.parse(run.stdout);
-		return Array.isArray(parsed) ? parsed : undefined;
+		token = readFileSync(tokenFile, "utf8").trim();
+	} catch {
+		return undefined;
+	}
+	try {
+		const response = await fetch(`${base}/quota${fresh ? "?refresh=1" : ""}`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(fresh ? 30_000 : 8_000) });
+		if (!response.ok) return undefined;
+		const body = (await response.json()) as { quotas?: unknown };
+		return Array.isArray(body.quotas) ? (body.quotas as import("./accounts.ts").Quota[]) : undefined;
 	} catch {
 		return undefined;
 	}
 }
 
-/** Every account's quota: the last read when it is under two minutes old, else a fresh one, saved for the next caller.
- * On a worker host, any account whose local token lapsed falls back to the daemon host's read of that same account. */
+/**
+ * Every account's quota. Only the daemon's host reads providers, through one shared, rate-limit-aware reader
+ * (accounts.ts sharedQuotas) that the daemon keeps fresh; a caller there reads providers itself only when the
+ * daemon's copy is ten minutes old, or for --refresh. A worker host never reads them: it asks the daemon host's
+ * listener, and while that cannot be reached it uses its last answer, marked stale.
+ */
 async function currentQuotas(a: typeof import("./accounts.ts"), config: import("./accounts.ts").AccountsConfig, p: ReturnType<typeof paths>, fresh = false) {
 	const file = `${p.state}/quota.json`;
+	const host = remoteHost(p);
+	if (!host) return a.sharedQuotas(config, people(p, a.parseAccountsOrg), file, { maxAge: 600, force: fresh });
 	const saved = fresh ? undefined : a.cached(file, 120);
 	if (saved) return saved;
-	let rows = await a.quotas(config, people(p, a.parseAccountsOrg));
-	const host = remoteHost(p);
-	if (host && rows.some((r) => r.error || !r.windows.length)) {
-		const remote = fetchRemoteQuotas(host, fresh);
-		if (remote) rows = a.mergeQuotas(rows, remote, host);
+	const remote = await daemonQuotas(host, fresh);
+	if (remote) {
+		a.save(file, remote);
+		return remote;
 	}
-	a.save(file, rows);
-	return rows;
+	const last = a.savedQuotas(file)?.quotas ?? [];
+	return last.map((q) => ({ ...q, stale: true, error: q.error ?? `${host} did not answer for its quota` }));
 }
 
 /**

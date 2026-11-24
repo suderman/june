@@ -5,7 +5,7 @@
 // have how many accounts is `accounts` in config.json; who each number is, and the address each login must be, is the
 // private ACCOUNTS.org table beside SOUL.org. Quota is read from each provider's usage endpoint with a login's own token,
 // as CLIProxyAPI's sampler did; tokens are read, never refreshed or printed.
-import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { type Run, runProcess } from "./tools/herdr.ts";
@@ -445,6 +445,10 @@ export type Quota = {
 	/** Epoch seconds of the last successful read. */
 	fetched?: number;
 	error?: string;
+	/** The windows are the last good read's, kept because the newest read failed (`error` says why). */
+	stale?: boolean;
+	/** Epoch seconds before which this account is not read again, after its provider rate limited it. */
+	retryAt?: number;
 };
 
 const num = (v: unknown): number | undefined => {
@@ -689,6 +693,90 @@ export function mergeQuotas(local: readonly Quota[], remote: readonly Quota[], h
 		if (!peer) return row;
 		return { ...peer, ...(row.label ? { label: row.label } : {}), source: `${host}/${peer.source ?? host}` };
 	});
+}
+
+/** How long an account waits after its provider rate limits a read, and the least time between reads of it. */
+export const BACKOFF_S = 600;
+export const MIN_READ_S = 60;
+
+/**
+ * NEXT's rows over PREVIOUS's: a failed read keeps the account's last good windows, marked stale with why the read
+ * failed, since a quota that could not be read is not an empty one; a rate limited read also waits BACKOFF_S before
+ * the account is read again. A row the read skipped (still waiting) stays as it was.
+ */
+export function keepGood(previous: readonly Quota[], next: readonly Quota[], now = Date.now()): Quota[] {
+	const at = Math.floor(now / 1000);
+	const before = (q: Quota) => previous.find((p) => p.provider === q.provider && p.number === q.number);
+	const out = next.map((row) => {
+		const old = before(row);
+		const limited = /rate limited/.test(row.error ?? "");
+		if (!row.error) return { ...row, stale: undefined, retryAt: undefined };
+		const wait = limited ? { retryAt: at + BACKOFF_S } : {};
+		if (old && old.windows.length && old.fetched)
+			return { ...old, error: row.error, stale: true, ...wait, ...(row.label ? { label: row.label } : {}), ...(row.email ? { email: row.email } : {}) };
+		return { ...row, ...wait };
+	});
+	for (const old of previous) if (!out.some((q) => q.provider === old.provider && q.number === old.number)) out.push(old);
+	return out.sort((a, b) => a.provider.localeCompare(b.provider) || a.number - b.number);
+}
+
+/** Whether an account may be read now: past any rate limit wait, and not read in the last MIN_READ_S. */
+export function due(row: Quota | undefined, now = Date.now()): boolean {
+	const at = now / 1000;
+	if (!row) return true;
+	if (row.retryAt && row.retryAt > at) return false;
+	return !(row.fetched && !row.stale && !row.error && at - row.fetched < MIN_READ_S);
+}
+
+/** The saved quota file's rows and when they were saved, whatever their age; undefined when there is none. */
+export function savedQuotas(file: string): { at: number; quotas: Quota[] } | undefined {
+	const saved = readJson(file);
+	return saved && Array.isArray(saved.quotas) && typeof saved.at === "number" ? { at: saved.at, quotas: saved.quotas } : undefined;
+}
+
+/**
+ * The quota as the daemon host keeps it in FILE: its saved rows while they are under MAXAGE seconds old, else a new
+ * read of the accounts that are due (see `due`), kept over the last good one (`keepGood`) and saved. One reader at a
+ * time: while another holds the read's lock, the saved rows stand. FORCE reads every due account whatever the age.
+ * Only the daemon's host reads providers; other hosts ask its listener (`june quota`, GET /quota).
+ */
+export async function sharedQuotas(
+	config: AccountsConfig,
+	people: People,
+	file: string,
+	options: { maxAge: number; force?: boolean; now?: number; read?: typeof quotas } = { maxAge: 300 },
+): Promise<Quota[]> {
+	const now = options.now ?? Date.now();
+	const saved = savedQuotas(file);
+	if (saved && !options.force && now / 1000 - saved.at < options.maxAge) return saved.quotas;
+	const lock = `${file}.lock`;
+	mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+	try {
+		// A lock older than two minutes, by the real clock, is a reader that died.
+		if (existsSync(lock) && Date.now() - statSync(lock).mtimeMs > 120_000) rmSync(lock, { force: true });
+		writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
+	} catch {
+		return saved?.quotas ?? [];
+	}
+	try {
+		const previous = saved?.quotas ?? [];
+		const fresh = await (options.read ?? quotas)(config, people, { now, only: (q) => due(previous.find((p) => p.provider === q.provider && p.number === q.number), now) });
+		const rows = keepGood(previous, fresh, now);
+		save(file, rows, now);
+		return rows;
+	} finally {
+		rmSync(lock, { force: true });
+	}
+}
+
+/** The daemon host's quota from its own files: config.json's accounts, DATA/ACCOUNTS.org, and STATE/quota.json. */
+export async function hostQuotas(configFile: string, dataDir: string, stateDir: string, options: { maxAge: number; force?: boolean }): Promise<Quota[]> {
+	const raw = existsSync(configFile) ? JSON.parse(readFileSync(configFile, "utf8")) : {};
+	const config = accountsConfig(raw?.accounts);
+	if (!Object.keys(config.harnesses).length) return [];
+	const org = join(dataDir, "ACCOUNTS.org");
+	const people = parseAccountsOrg(existsSync(org) ? readFileSync(org, "utf8") : "");
+	return sharedQuotas(config, people, join(stateDir, "quota.json"), options);
 }
 
 /** The last quota read, kept in ~/.local/state/june/quota.json so repeated calls do not poll the providers. */

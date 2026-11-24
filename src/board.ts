@@ -4,7 +4,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, renameSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { accountsConfig, cached, parseAccountsOrg, quotas as readQuotas, save as saveQuotas, status as accountStatus, type Quota, type SlotStatus } from "./accounts.ts";
+import { accountsConfig, parseAccountsOrg, sharedQuotas, status as accountStatus, type Quota, type SlotStatus } from "./accounts.ts";
 import { type Config, protectedOf, shortHostname } from "./config.ts";
 import type { Logger } from "./runtime.ts";
 import { type OrgWorker, OrgWorkerDown } from "./org-worker.ts";
@@ -623,12 +623,12 @@ export class Boards {
 			const accountsOrg = join(this.#o.dataDir, "ACCOUNTS.org");
 			const people = parseAccountsOrg(existsSync(accountsOrg) ? readFileSync(accountsOrg, "utf8") : "");
 			const logins = await accountStatus(accounts, people);
-			const quotaFile = this.#o.stateDir ? join(this.#o.stateDir, "quota.json") : undefined;
-			let quotaRows = quotaFile ? cached(quotaFile, 120) : undefined;
-			if (!quotaRows && logins.length) {
+			// The daemon is the one reader of providers' quota: every five minutes, kept over failed reads, shared with
+			// every caller here and on worker hosts through the listener's /quota (accounts.ts sharedQuotas).
+			let quotaRows: Quota[] | undefined;
+			if (logins.length && this.#o.stateDir) {
 				try {
-					quotaRows = await readQuotas(accounts, people);
-					if (quotaFile) saveQuotas(quotaFile, quotaRows);
+					quotaRows = await sharedQuotas(accounts, people, join(this.#o.stateDir, "quota.json"), { maxAge: 300 });
 				} catch {
 					quotaRows = this.#roster?.quotas ?? [];
 				}
