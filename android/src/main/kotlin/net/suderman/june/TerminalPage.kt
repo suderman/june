@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -150,7 +151,8 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, modi
     LaunchedEffect(view) { view.onLongPress = { copying = view.text() } }
     val ink = Color(0xFFCDD6F4)
     val muted = Color(0xFF9399B2)
-    Column(modifier.background(Color(0xFF1E1E2E))) {
+    // A pointer target over its whole area, so no tap falls through to the board beneath.
+    Column(modifier.background(Color(0xFF1E1E2E)).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
         Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).background(statusColour(here?.status ?: "", state), CircleShape))
             Text(

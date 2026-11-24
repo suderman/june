@@ -95,7 +95,7 @@
       install -Dm644 ${fonts}/ZenKakuGothicNew-Medium.ttf src/main/res/font/zen_kaku_gothic_new_medium.ttf
       install -Dm644 ${fonts}/ZenKakuGothicNew-Bold.ttf src/main/res/font/zen_kaku_gothic_new_bold.ttf
       install -Dm644 ${juneterm}/arm64-v8a/libjuneterm.so src/main/jniLibs/arm64-v8a/libjuneterm.so
-      for face in Regular Bold Italic BoldItalic; do install -Dm644 "${terminalFont}/CommitMonoNerdFontMono-$face.otf" "src/main/assets/terminal/$face.otf"; done
+      for face in Regular Bold; do install -Dm644 "${terminalFont}/CommitMonoNerdFontMono-$face.otf" "src/main/assets/terminal/$face.otf"; done
     '';
 
     installPhase = ''

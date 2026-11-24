@@ -162,7 +162,9 @@ class TerminalView(context: Context) : View(context) {
                     b.position(b.position() + len)
                     if (flags and (1 shl 4) != 0 || text == " ") continue
                     paint.color = fg
-                    paint.typeface = faces.of(flags and 1 != 0, flags and 2 != 0)
+                    paint.typeface = faces.of(flags and 1 != 0)
+                    // Italic slants the upright face: the APK carries only regular and bold (2.4 MB each with Nerd Font icons).
+                    paint.textSkewX = if (flags and 2 != 0) -0.2f else 0f
                     paint.isUnderlineText = flags and (1 shl 7) != 0
                     paint.isStrikeThruText = flags and (1 shl 5) != 0
                     canvas.drawText(text, px, py + baseline, paint)
@@ -174,6 +176,7 @@ class TerminalView(context: Context) : View(context) {
             val px = left + cx * cellWidth
             val py = top + cy * cellHeight
             paint.typeface = faces.regular
+            paint.textSkewX = 0f
             paint.isUnderlineText = true
             paint.isStrikeThruText = false
             val w = paint.measureText(composing)
@@ -383,13 +386,8 @@ class TerminalView(context: Context) : View(context) {
 }
 
 /** The terminal's faces: CommitMono Nerd Font Mono from the APK's assets (android/default.nix), else the system's monospace. */
-private class Faces(val regular: Typeface, val bold: Typeface, val italic: Typeface, val boldItalic: Typeface) {
-    fun of(bold: Boolean, italic: Boolean) = when {
-        bold && italic -> boldItalic
-        bold -> this.bold
-        italic -> this.italic
-        else -> regular
-    }
+private class Faces(val regular: Typeface, val bold: Typeface) {
+    fun of(bold: Boolean) = if (bold) this.bold else regular
 
     companion object {
         private var loaded: Faces? = null
@@ -398,7 +396,7 @@ private class Faces(val regular: Typeface, val bold: Typeface, val italic: Typef
             val assets: AssetManager = context.assets
             fun face(name: String, style: Int) =
                 runCatching { Typeface.createFromAsset(assets, "terminal/$name.otf") }.getOrElse { Typeface.create(Typeface.MONOSPACE, style) }
-            Faces(face("Regular", Typeface.NORMAL), face("Bold", Typeface.BOLD), face("Italic", Typeface.ITALIC), face("BoldItalic", Typeface.BOLD_ITALIC)).also { loaded = it }
+            Faces(face("Regular", Typeface.NORMAL), face("Bold", Typeface.BOLD)).also { loaded = it }
         }
     }
 }
