@@ -66,9 +66,9 @@ function sourceOf(entry: { kind: string; data?: unknown; model?: readonly any[] 
  * Admit a notice inside the caller's commit, routed to the surface the user last used. Call it before the commit's first
  * table write. Its request id makes a rerun admit it once.
  */
-export async function admitNotice(tx: Tx, conversation: Pick<ConversationHandle, "submit">, conversationId: ConversationId, notice: Notice): Promise<SubmissionId> {
+export async function admitNotice(tx: Tx, conversation: Pick<ConversationHandle, "admit">, conversationId: ConversationId, notice: Notice): Promise<SubmissionId> {
 	const surface = await surfaceFor(tx, conversationId);
-	return conversation.submit(tx, {
+	return conversation.admit(tx, {
 		type: "input",
 		requestId: notice.requestId,
 		content: notice.content,

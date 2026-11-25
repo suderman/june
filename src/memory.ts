@@ -224,16 +224,16 @@ export function createMemoryExtension(files: () => PromptFiles, getHarness: () =
 					delete state.failure;
 					state.last = { task: Number(api.taskId), file: review.file, changed: review.base !== review.next };
 				}, context);
-				return { summary: review.summary };
+				return { kind: "summary", summary: review.summary };
 			} catch (error) {
-				if (context.abortSignal?.aborted) return { decline: true };
+				if (context.abortSignal?.aborted) return { kind: "decline" };
 				const failure = error instanceof SyntaxError ? "Memory review returned invalid JSON; retry compaction" : (error as Error).message;
 				// Durable contains hook throws and would otherwise proceed with its default summary.
 				try {
 					await getHarness().commit(async (tx) => {
 						(await tx.doc(MemoryReview, api.conversationId)).failure = { task: Number(api.taskId), message: failure };
 					}, context);
-				} finally { return { decline: true }; }
+				} finally { return { kind: "decline" }; }
 			}
 		} })],
 	});
