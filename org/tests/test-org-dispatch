@@ -853,9 +853,11 @@ cat >"$fixture/launch-tests.el" <<'EOF'
            (should-not (plist-get one :agent))
            (should (equal (plist-get one :roster) '("bolt" "sprocket")))
            (should (equal (mapcar (lambda (task) (plist-get task :agent)) chosen) '("claude" "claude")))
+           (should (equal org-dispatch-launchable '("claude" "codex" "pi" "agy")))
            (should (equal (split-string (with-temp-buffer (insert-file-contents calls) (buffer-string)) "\n" t)
-                          '("agents pick --json --host kit --harnesses pi,claude,codex,agy bolt sprocket"
-                            "agents pick --json --host kit --harnesses pi,claude,codex,agy --except bolt bolt sprocket")))
+                          (let ((hs (string-join org-dispatch-launchable ",")))
+                            (list (format "agents pick --json --host kit --harnesses %s bolt sprocket" hs)
+                                  (format "agents pick --json --host kit --harnesses %s --except bolt bolt sprocket" hs)))))
            (should (org-dispatch--launch (car chosen)))
            (let ((run (test-run-call)) (argv (test-argv)))
              (should (equal (car argv) "claude"))

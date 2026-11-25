@@ -1,6 +1,8 @@
 // The agents and projects boards as both clients draw them (see "Agents and projects" in docs/interfaces.org): the
 // window's layout, and the daemon's agenda and agents boards (src/board.ts) shaped into sections and rows. Plain
 // JavaScript that QML's engine, QuickJS on the phone, and Node all run: no flatMap, no .at().
+import { HARNESSES as HARNESS_TABLE, HARNESS_ALIASES, HARNESS_NAMES, HARNESS_TONES, OTHER_HARNESS_COLOURS } from "./harnesses.mjs";
+export { HARNESS_TONES };
 
 /** The side columns' width and the gaps around them, and the strip's narrowest and widest. */
 export const SIDE = 268;
@@ -32,17 +34,19 @@ export const CHIPS = {
 export const COUNT_ORDER = ["PROG", "EVAL", "HOLD", "AUTO", "TODO"];
 
 /** A placeholder clanker's colours by harness, until the art lands. */
-export const HARNESS = {
-	pi: { eye: "#1fa89a", band: "#2a8f84" },
-	claude: { eye: "#f08a3e", band: "#d9692a" },
-	codex: { eye: "#4a7fd4", band: "#355fa3" },
-	agy: { eye: "#8b63d9", band: "#6a45b3" },
-	opencode: { eye: "#4c9e5b", band: "#367842" },
-	other: { eye: "#e0b419", band: "#b8911a" },
-};
+export const HARNESS = (() => {
+	const map = {};
+	for (let i = 0; i < HARNESS_NAMES.length; i++) {
+		const name = HARNESS_NAMES[i];
+		const c = HARNESS_TABLE[name].colours;
+		map[name] = { eye: c.eye, band: c.band };
+	}
+	map.other = { eye: OTHER_HARNESS_COLOURS.eye, band: OTHER_HARNESS_COLOURS.band };
+	return map;
+})();
 
 /** Harnesses and effort levels offered by the roster card editor. */
-export const ROSTER_HARNESSES = ["claude", "codex", "pi", "opencode", "agy"];
+export const ROSTER_HARNESSES = HARNESS_NAMES;
 export const ROSTER_EFFORTS = ["", "low", "medium", "high", "xhigh", "max"];
 
 /** The chip and clanker colours together, for clients that cannot read the constants directly (the phone). */
@@ -51,9 +55,8 @@ export function colours() {
 }
 
 export function harnessOf(agent) {
-	const raw = String(agent ?? "").toLowerCase().replace(/-code$/, "");
-	const name = raw === "antigravity" ? "agy" : raw;
-	return HARNESS[name] ? name : "other";
+	const raw = String(agent ?? "").toLowerCase();
+	return HARNESS_ALIASES[raw] ?? HARNESS_ALIASES[raw.replace(/-code$/, "")] ?? "other";
 }
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

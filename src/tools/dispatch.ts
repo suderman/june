@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { arr, bool, lit, num, obj, opt, str, union } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
+import { LAUNCHABLE_HARNESSES } from "../../desktop/harnesses.mjs";
 import { type Config, expandHome } from "../config.ts";
 import { type Card, findCard, parseRoster } from "../roster.ts";
 import { leaderboard, listRuns } from "../runs.ts";
@@ -75,7 +76,7 @@ export function dispatchAgents(dispatch: Config["dispatch"]): readonly string[] 
 }
 
 /** The agents org-dispatch can start, as its `org-dispatch-launchable` lists them. */
-export const LAUNCHABLE = ["pi", "claude", "codex", "agy"] as const;
+export const LAUNCHABLE = LAUNCHABLE_HARNESSES;
 
 /** ROSTER.org beside SOUL.org: June's named agents. */
 export function rosterCards(config: Pick<Config, "soulFile">): Card[] {

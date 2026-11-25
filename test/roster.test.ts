@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
+import { HARNESSES as HARNESS_TABLE, HARNESS_NAMES, LAUNCHABLE_HARNESSES } from "../desktop/harnesses.mjs";
+import { HARNESSES as ACCOUNT_HARNESSES } from "../src/accounts.ts";
 import { applyRosterEdit, choose, computeStanding, editRosterFile, familyOf, findCard, formatCard, launchArgs, parseRoster } from "../src/roster.ts";
+import { LAUNCHABLE } from "../src/tools/dispatch.ts";
 import { leaderboard, listRuns, recordRunEnd, recordRunStart, statsByAgent } from "../src/runs.ts";
 import { tempDir } from "./helpers.ts";
 
@@ -237,4 +240,13 @@ test("run history records starts and endings in june.sqlite and ranks agents on 
 	const { stats, recent } = statsByAgent(db, 2);
 	assert.equal(stats.get("rivet")!.rank, 1);
 	assert.equal(recent.get("rivet")!.length, 2);
+});
+
+test("desktop/harnesses.mjs is valid strict JSON for Emacs and drives accounts and dispatch", async () => {
+	const text = await readFile(new URL("../desktop/harnesses.mjs", import.meta.url), "utf8");
+	const m = /^export const HARNESSES = (\{[\s\S]*?\n\});/m.exec(text);
+	assert.ok(m, "HARNESSES export must remain a strict JSON object literal for org-dispatch.el");
+	assert.deepEqual(JSON.parse(m[1]!), HARNESS_TABLE);
+	assert.deepEqual(Object.keys(ACCOUNT_HARNESSES), HARNESS_NAMES);
+	assert.deepEqual(LAUNCHABLE, LAUNCHABLE_HARNESSES);
 });

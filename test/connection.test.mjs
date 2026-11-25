@@ -16,6 +16,7 @@ test("Qt renders artifact beats in both looks, bounds previews and copies full l
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await mkdir(join(dir, "ui"));
 	for (const file of ["Artifact.qml", "ArtifactButton.qml", "ArtifactIcon.qml", "Preview.qml", "ConsolePanel.qml", "Panel.qml", "Balloon.qml", "Backdrop.qml", "Scenery.qml", "FileCard.qml", "Code.mjs", "console.mjs", "compose.mjs", "strip.mjs", "light.mjs", "live.mjs", "scenery.mjs"]) await copyFile(new URL(`../desktop/${file}`, import.meta.url), join(dir, "ui", file));
+	await copyFile(new URL("../desktop/harnesses.mjs", import.meta.url), join(dir, "ui", "harnesses.mjs"));
 	const theme = (await readFile(new URL("../desktop/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
 	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\n");
@@ -261,6 +262,7 @@ test("Qt's right-click take menu preserves left selection, targets the reply, an
 	await mkdir(join(dir, "ui"));
 	for (const file of ["TakeMenu.qml", "compose.mjs", "strip.mjs"]) await copyFile(new URL(`../desktop/${file}`, import.meta.url), join(dir, "ui", file));
 	// Only Quickshell's singleton wrapper is replaced; use the actual palette and menu with Qt Quick Test.
+	await copyFile(new URL("../desktop/harnesses.mjs", import.meta.url), join(dir, "ui", "harnesses.mjs"));
 	const theme = (await readFile(new URL("../desktop/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
 	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\n");
@@ -357,6 +359,7 @@ test("Qt's file card shows the file's name and size, asks to open it by its url,
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await mkdir(join(dir, "ui"));
 	await copyFile(new URL("../desktop/FileCard.qml", import.meta.url), join(dir, "ui", "FileCard.qml"));
+	await copyFile(new URL("../desktop/harnesses.mjs", import.meta.url), join(dir, "ui", "harnesses.mjs"));
 	const theme = (await readFile(new URL("../desktop/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
 	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\nFileCard 1.0 FileCard.qml\n");
@@ -422,6 +425,7 @@ test("Qt's preview shows a picture over the strip, hands it to the desktop on re
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await mkdir(join(dir, "ui"));
 	for (const file of ["Preview.qml", "Code.mjs"]) await copyFile(new URL(`../desktop/${file}`, import.meta.url), join(dir, "ui", file));
+	await copyFile(new URL("../desktop/harnesses.mjs", import.meta.url), join(dir, "ui", "harnesses.mjs"));
 	const theme = (await readFile(new URL("../desktop/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
 	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\nPreview 1.0 Preview.qml\n");
@@ -554,6 +558,7 @@ test("Qt's masthead steps between days and its calendar and search open a day or
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await mkdir(join(dir, "ui"));
 	for (const file of ["Masthead.qml", "Browse.qml", "strip.mjs"]) await copyFile(new URL(`../desktop/${file}`, import.meta.url), join(dir, "ui", file));
+	await copyFile(new URL("../desktop/harnesses.mjs", import.meta.url), join(dir, "ui", "harnesses.mjs"));
 	const theme = (await readFile(new URL("../desktop/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
 	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\nMasthead 1.0 Masthead.qml\nBrowse 1.0 Browse.qml\n");

@@ -1,7 +1,8 @@
 // The boards as the clients draw them (desktop/board.mjs), shared by the desktop client and the phone.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { agendaView, agentsView, boardLayout, dayHeading, dayWord, dialogBlocks, dialogKind, docketNo, entryMeta, findTask, harnessOf, loadout, monthDays, pendingTask, pickerStart, quickDays, resetIn, rosterView, serviceNo, stampOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink, undoOf, quotaWhy } from "../desktop/board.mjs";
+import { HARNESS, HARNESS_TONES, ROSTER_HARNESSES, agendaView, agentsView, boardLayout, dayHeading, dayWord, dialogBlocks, dialogKind, docketNo, entryMeta, findTask, harnessOf, loadout, monthDays, pendingTask, pickerStart, quickDays, resetIn, rosterView, serviceNo, stampOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink, undoOf, quotaWhy } from "../desktop/board.mjs";
+import { HARNESSES as HARNESS_TABLE, HARNESS_NAMES } from "../desktop/harnesses.mjs";
 
 test("three columns fit a 1400 px window with the strip a little narrower, and tabs take over below about 1300", () => {
 	assert.deepEqual(boardLayout(1400), { columns: true, side: 268, gap: 20, strip: 784 });
@@ -326,4 +327,13 @@ test("a quota level kept from the last good read is greyed and says how old it i
 	const now = Date.UTC(2026, 10, 23, 12);
 	const rv = rosterView({ hosts: [], roster: [{ card: { slug: "bolt", name: "Bolt", host: "kit", harness: "claude", problems: [] }, status: "idle", battery: { account: "claude1", weekly: 4, hours: 0.4, rate: 1, stale: true, fetched: now / 1000 - 720 } }] }, now);
 	assert.deepEqual([rv.cards[0].batteryLevel, rv.cards[0].batteryTone, rv.cards[0].energyText, rv.cards[0].batteryStale], [4, "stale", "4% · read 12 min ago", true]);
+});
+
+test("board harness colours and roster list come from desktop/harnesses.mjs", () => {
+	assert.deepEqual(ROSTER_HARNESSES, HARNESS_NAMES);
+	for (const name of HARNESS_NAMES) {
+		assert.deepEqual(HARNESS[name], { eye: HARNESS_TABLE[name].colours.eye, band: HARNESS_TABLE[name].colours.band });
+		assert.equal(HARNESS_TONES.paper[name], HARNESS_TABLE[name].colours.paper);
+		assert.equal(HARNESS_TONES.neon[name], HARNESS_TABLE[name].colours.neon);
+	}
 });

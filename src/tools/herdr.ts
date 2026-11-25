@@ -4,11 +4,12 @@
 import { execFile } from "node:child_process";
 import { int, obj, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
+import { HARNESS_ALIASES } from "../../desktop/harnesses.mjs";
 import type { Config } from "../config.ts";
 
 /** A terminal address (t7), a name, or a session label value; never a path or an option. */
 const TARGET = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
-const AGENTS = /^(pi|claude|claude-code|codex|antigravity)$/;
+const isKnownAgent = (name: unknown) => typeof name === "string" && name.toLowerCase() in HARNESS_ALIASES;
 
 export type Run = (argv: readonly string[], timeoutMs: number) => Promise<string>;
 
@@ -125,7 +126,7 @@ export class Herdr {
 		const { prefix } = await this.#argv(host, []);
 		const list = await this.#json(host, ["ls", "--json"]);
 		const rows = (list?.terminals ?? []).filter((row: any) =>
-			row.state === "live" && sameHost(row.address, prefix) && row.agent !== "june" && (AGENTS.test(row.agent ?? "") || row.status != null));
+			row.state === "live" && sameHost(row.address, prefix) && row.agent !== "june" && (isKnownAgent(row.agent) || row.status != null));
 		const full = await Promise.all(rows.map((row: any) => this.#json(host, ["get", row.address, "--json"]).catch(() => undefined)));
 		return rows.map((row: any, i: number) => summarize(host, prefix, row, full[i]));
 	}
@@ -166,7 +167,8 @@ function sameHost(address: string, prefix: string): boolean {
 function summarize(host: string, prefix: string, row: any, full: Terminal | undefined): AgentSummary {
 	const labels = full?.labels ?? {};
 	const terminal = String(row.address).slice(prefix.length);
-	const agent = labels["org.agent"] ?? (row.agent === "claude-code" ? "claude" : String(row.agent ?? "unknown"));
+	const rawAgent = String(row.agent ?? "unknown");
+	const agent = labels["org.agent"] ?? HARNESS_ALIASES[rawAgent.toLowerCase()] ?? rawAgent;
 	const session = labels["org.session"];
 	return {
 		host, terminal, agent,

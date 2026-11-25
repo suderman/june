@@ -8,10 +8,10 @@
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
+import { HARNESSES as HARNESS_TABLE, HARNESS_NAMES, type HarnessName, type Provider } from "../desktop/harnesses.mjs";
 import { type Run, runProcess } from "./tools/herdr.ts";
 
-export type Provider = "openai" | "anthropic" | "google";
-export type HarnessName = "claude" | "codex" | "pi" | "opencode" | "agy";
+export type { HarnessName, Provider };
 
 type Harness = {
 	provider: Provider;
@@ -31,42 +31,39 @@ type Harness = {
 	settings?: { file: string; adapt: (shared: Record<string, unknown>) => Record<string, unknown> };
 };
 
-export const HARNESSES: Record<HarnessName, Harness> = {
-	// claude-direct clears proxy settings and keeps the permission default; it honours CLAUDE_CONFIG_DIR.
-	claude: { provider: "anthropic", env: "CLAUDE_CONFIG_DIR", base: ".claude", own: [".credentials.json", ".claude.json"], command: "claude-direct" },
-	codex: { provider: "openai", env: "CODEX_HOME", base: ".codex", own: ["auth.json", "auth.json.lock", "auth.lock", "models_cache.json"], command: "codex" },
-	// Each Pi account folder uses its own ChatGPT login under openai-codex.
-	pi: {
-		provider: "openai",
-		env: "PI_CODING_AGENT_DIR",
-		base: ".pi/agent",
-		own: ["auth.json", "settings.json"],
-		command: "pi",
-		settings: {
-			file: "settings.json",
-			adapt: (shared) => ({
-				...shared,
-				defaultProvider: "openai-codex",
-				...(Array.isArray(shared.enabledModels)
-					? { enabledModels: shared.enabledModels.map((m) => (typeof m === "string" ? m.replace(/^[^/:]+\//, "openai-codex/") : m)) }
-					: {}),
-			}),
-		},
-	},
-	// OpenCode reads auth.json from $XDG_DATA_HOME/opencode and its SQLite store from OPENCODE_DB; pointing OPENCODE_DB
-	// directly at the shared database keeps -wal and -shm beside it instead of split across account folders.
-	opencode: {
-		provider: "openai",
-		env: "XDG_DATA_HOME",
-		base: ".local/share/opencode",
-		subdir: "opencode",
-		own: ["auth.json", "opencode.db", "opencode.db-shm", "opencode.db-wal"],
-		extraEnv: () => ['export OPENCODE_DB="${OPENCODE_DB:-$HOME/.local/share/opencode/opencode.db}"'],
-		command: "opencode",
-	},
-	// Antigravity keeps its login in the system keyring, one per host, so it has no account folder.
-	agy: { provider: "google", base: ".gemini", own: [], command: "agy" },
+// Each Pi account folder uses its own ChatGPT login under openai-codex.
+const PI_SETTINGS: NonNullable<Harness["settings"]> = {
+	file: "settings.json",
+	adapt: (shared) => ({
+		...shared,
+		defaultProvider: "openai-codex",
+		...(Array.isArray(shared.enabledModels)
+			? { enabledModels: shared.enabledModels.map((m) => (typeof m === "string" ? m.replace(/^[^/:]+\//, "openai-codex/") : m)) }
+			: {}),
+	}),
 };
+
+export const HARNESSES: Record<HarnessName, Harness> = Object.fromEntries(
+	HARNESS_NAMES.map((name) => {
+		const spec = HARNESS_TABLE[name];
+		const a = spec.account;
+		return [
+			name,
+			{
+				provider: spec.provider,
+				...(a.env ? { env: a.env } : {}),
+				base: a.base,
+				...(a.subdir ? { subdir: a.subdir } : {}),
+				...(a.extraEnv
+					? { extraEnv: () => Object.entries(a.extraEnv!).map(([k, v]) => `export ${k}="\${${k}:-${v}}"`) }
+					: {}),
+				own: a.own,
+				command: a.command,
+				...(name === "pi" ? { settings: PI_SETTINGS } : {}),
+			} satisfies Harness,
+		];
+	}),
+) as Record<HarnessName, Harness>;
 
 export const PROVIDERS: Record<Provider, string> = { openai: "ChatGPT", anthropic: "Claude", google: "Antigravity" };
 

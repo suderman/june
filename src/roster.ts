@@ -4,6 +4,7 @@
 // card; the harness's plain name picks one from quota on the agent's host (src/accounts.ts).
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { HARNESSES as HARNESS_TABLE } from "../desktop/harnesses.mjs";
 import { HARNESSES, type HarnessName, type Quota, rank, type SlotStatus } from "./accounts.ts";
 import type { AgentSummary } from "./tools/herdr.ts";
 
@@ -75,52 +76,30 @@ export function parseRoster(text: string): Card[] {
 export const findCard = (cards: readonly Card[], name: string) => cards.find((c) => c.slug === slugOf(name));
 
 /**
- * The arguments that start `card`'s harness as the card says, with PROMPT as its first message. Antigravity takes no
- * instructions flag, so its instructions lead the prompt, and an interactive start without a prompt goes without them.
+ * The arguments that start `card`'s harness as the card says, with PROMPT as its first message. Harnesses without an
+ * instructions flag prepend the card's instructions to the prompt, and an interactive start without a prompt goes without them.
  */
 export function launchArgs(card: Card, prompt?: string): string[] {
+	if (!card.harness || !(card.harness in HARNESS_TABLE)) throw new Error(`${card.name} has no harness`);
+	const { cli } = HARNESS_TABLE[card.harness];
 	const { model, effort, instructions: text } = card;
-	switch (card.harness) {
-		case "claude":
-			return [
-				...(model ? ["--model", model] : []),
-				...(effort ? ["--effort", effort] : []),
-				...(text ? ["--append-system-prompt", text] : []),
-				"--name",
-				card.name,
-				...(prompt ? [prompt] : []),
-			];
-		case "codex":
-			return [
-				...(model ? ["--model", model] : []),
-				...(effort ? ["-c", `model_reasoning_effort=${JSON.stringify(effort === "max" ? "xhigh" : effort)}`] : []),
-				...(text ? ["-c", `developer_instructions=${JSON.stringify(text)}`] : []),
-				...(prompt ? [prompt] : []),
-			];
-		case "pi":
-			return [
-				// An account folder's default provider is its ChatGPT login; a bare model ID means that provider.
-				...(model ? ["--model", model.includes("/") ? model : `openai-codex/${model}`] : []),
-				...(effort ? ["--thinking", effort] : []),
-				...(text ? ["--append-system-prompt", text] : []),
-				"--name",
-				card.name,
-				...(prompt ? [prompt] : []),
-			];
-		case "opencode":
-			return [
-				...(model ? ["--model", model.includes("/") ? model : `openai/${model}`] : []),
-				...(prompt ? ["--prompt", text ? `${text}\n\n${prompt}` : prompt] : []),
-			];
-		case "agy":
-			return [
-				...(model ? ["--model", model] : []),
-				...(effort ? ["--effort", effort] : []),
-				...(prompt ? ["--prompt-interactive", text ? `${text}\n\n${prompt}` : prompt] : []),
-			];
-		default:
-			throw new Error(`${card.name} has no harness`);
+	const args: string[] = [];
+	if (model) args.push(cli.modelFlag, cli.modelPrefix && !model.includes("/") ? `${cli.modelPrefix}${model}` : model);
+	if (effort && cli.effort) {
+		if (cli.effort.kind === "flag") args.push(cli.effort.flag, effort);
+		else args.push(cli.effort.flag, `${cli.effort.key}=${JSON.stringify(effort === "max" && cli.effort.maxAs ? cli.effort.maxAs : effort)}`);
 	}
+	if (text && cli.instructions) {
+		if (cli.instructions.kind === "flag") args.push(cli.instructions.flag, text);
+		else if (cli.instructions.kind === "config") args.push(cli.instructions.flag, `${cli.instructions.key}=${JSON.stringify(text)}`);
+	}
+	if (cli.nameFlag) args.push(cli.nameFlag, card.name);
+	if (prompt) {
+		const full = text && cli.instructions?.kind === "prepend-prompt" ? `${text}\n\n${prompt}` : prompt;
+		if (cli.promptFlag) args.push(cli.promptFlag, full);
+		else args.push(full);
+	}
+	return args;
 }
 
 /** Hours before a weekly reset within which unspent quota counts as about to be lost, and the least worth chasing. */

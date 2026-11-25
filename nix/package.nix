@@ -22,7 +22,7 @@
   timezoneData = callPackage ./icu-timezone-data.nix {};
   src = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test ../skills ../desktop/strip.mjs ../desktop/strip.d.mts ../org/agenda ../org/dispatch/org-dispatch.el];
+    fileset = lib.fileset.unions [../package.json ../package-lock.json ../tsconfig.json ../bin ../src ../templates ../test ../skills ../desktop/strip.mjs ../desktop/strip.d.mts ../desktop/harnesses.mjs ../desktop/harnesses.d.mts ../org/agenda ../org/dispatch/org-dispatch.el];
   };
   # The tests also cover org-dispatch and org-edit, whose Emacs Lisp lives beside the daemon.
   testSrc = lib.fileset.toSource {

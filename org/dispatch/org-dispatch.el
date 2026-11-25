@@ -37,13 +37,50 @@
 
 (defvar org-dispatch-host
   (org-dispatch--env "ORG_DISPATCH_HOST" (car (split-string (system-name) "\\."))))
+(defvar org-dispatch-harnesses-file
+  ;; One shared table (desktop/harnesses.mjs) read by Node, QML, Android and Emacs.
+  (expand-file-name
+   (org-dispatch--env "ORG_DISPATCH_HARNESSES"
+                      (expand-file-name "../../desktop/harnesses.mjs"
+                                        (file-name-directory (or load-file-name buffer-file-name default-directory)))))
+  "Path to desktop/harnesses.mjs holding the shared HARNESSES JSON object.")
+
+(defun org-dispatch--read-harnesses (file)
+  "Read the shared HARNESSES JSON table from FILE as an alist keyed by string."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (goto-char (point-min))
+    (unless (re-search-forward "^export const HARNESSES = " nil t)
+      (error "Missing HARNESSES table in %s" file))
+    (mapcar (lambda (pair) (cons (symbol-name (car pair)) (cdr pair)))
+            (json-parse-buffer :object-type 'alist :array-type 'list
+                               :null-object nil :false-object nil))))
+
+(defconst org-dispatch--harnesses
+  (org-dispatch--read-harnesses org-dispatch-harnesses-file)
+  "Shared harness table read from `org-dispatch-harnesses-file'.")
+
+(defun org-dispatch--harness (name)
+  "Table entry for harness NAME, or nil when unknown."
+  (cdr (assoc name org-dispatch--harnesses)))
+
+(defun org-dispatch--awaits-session-p (harness)
+  "Non-nil when HARNESS picks its own session ID after launch."
+  (let ((dispatch (alist-get 'dispatch (org-dispatch--harness harness))))
+    (and (alist-get 'launchable dispatch)
+         (not (alist-get 'sessionIdFlag dispatch)))))
+
 (defvar org-dispatch-hosts
   (split-string (org-dispatch--env "ORG_DISPATCH_HOSTS" "kit cog lux")))
-(defvar org-dispatch-agents
-  (split-string (org-dispatch--env "ORG_DISPATCH_AGENTS" "pi claude codex agy"))
-  "Agents a task may name in AGENT or a tag.")
-(defconst org-dispatch-launchable '("pi" "claude" "codex" "agy")
+(defconst org-dispatch-launchable
+  (delq nil (mapcar (lambda (entry)
+                      (when (alist-get 'launchable (alist-get 'dispatch (cdr entry)))
+                        (car entry)))
+                    org-dispatch--harnesses))
   "Agents this dispatcher can start; a task for another waits until it can.")
+(defvar org-dispatch-agents
+  (split-string (org-dispatch--env "ORG_DISPATCH_AGENTS" (string-join org-dispatch-launchable " ")))
+  "Agents a task may name in AGENT or a tag.")
 (defvar org-dispatch-config
   (expand-file-name "config.json"
                     (org-dispatch--env "JUNE_CONFIG_DIR"
@@ -65,7 +102,18 @@
   "The june command, which picks a roster agent for a task (june agents pick).
 Without it a task naming one harness runs on it as before the roster.")
 (defvar org-dispatch-model (getenv "ORG_DISPATCH_MODEL")
-  "Model for pi, such as codex-lb/gpt-6.1-sol:high. Nil uses pi's defaults.")
+  "Model for harnesses marked defaultModelEnv (pi) when a task sets no MODEL.")
+
+(defun org-dispatch--model-for (harness model)
+  "Model flag value for roster HARNESS given MODEL.
+Applies its prefix or `org-dispatch-model' when configured."
+  (let* ((spec (org-dispatch--harness harness))
+         (cli (alist-get 'cli spec))
+         (dispatch (alist-get 'dispatch spec))
+         (prefix (alist-get 'modelPrefix cli)))
+    (cond ((and model prefix (not (string-search "/" model))) (concat prefix model))
+          (model model)
+          ((alist-get 'defaultModelEnv dispatch) org-dispatch-model))))
 (defvar org-dispatch-max-agents
   (string-to-number (org-dispatch--env "ORG_DISPATCH_MAX_AGENTS" "5")))
 (defvar org-dispatch-max-nudges
@@ -388,10 +436,7 @@ re-queue the task AUTO for that host. Returns non-nil if handed off."
           (let* ((run (org-id-uuid))
                  (session (org-id-uuid))
                  (model-raw (alist-get 'model card))
-                 (model (cond ((and model-raw (equal new-harness "pi") (not (string-search "/" model-raw)))
-                               (concat "openai-codex/" model-raw))
-                              (model-raw)
-                              ((equal new-harness "pi") org-dispatch-model)))
+                 (model (org-dispatch--model-for new-harness model-raw))
                  (command (or (org-dispatch--command new-harness) new-harness))
                  (task (list :id id :file file :heading heading :dir (plist-get state :dir)
                              :agent new-harness :model model :card card
@@ -426,7 +471,7 @@ re-queue the task AUTO for that host. Returns non-nil if handed off."
                   (setq new-state (plist-put new-state :terminal address))
                   (org-dispatch--save-state new-state)
                   (org-dispatch--await-start address new-harness)
-                  (when (member new-harness '("codex" "agy"))
+                  (when (org-dispatch--awaits-session-p new-harness)
                     (setq new-state (org-dispatch--await-session new-state new-harness (plist-get state :dir) (plist-get new-state :started))))
                   (setq new-state (plist-put new-state :status "running"))
                   (org-dispatch--save-state new-state)
@@ -872,7 +917,8 @@ has none of FALLBACK's type. A nil FALLBACK returns the untyped value."
        (lambda (kind command)
          (unless (and (member kind org-dispatch-launchable) (stringp command)
                       (string-match-p "\\`\\(?:[A-Za-z0-9_][A-Za-z0-9_.+-]*\\|/[A-Za-z0-9_./+-]+\\)\\'" command))
-           (error "dispatch.commands must map pi, claude, codex or agy to executable names or absolute paths, without arguments")))
+           (error "dispatch.commands must map %s to executable names or absolute paths, without arguments"
+                  (string-join org-dispatch-launchable ", "))))
        commands)
       (gethash agent commands))))
 
@@ -981,7 +1027,8 @@ heading, else in #+FILETAGS, else DEFAULT. Return (:value V :fill BOOL) or
           :live-content live-content
           :branch (org-entry-get nil "BRANCH")
           :model (or (org-entry-get nil "MODEL")
-                     (when (equal (plist-get agent :value) "pi") org-dispatch-model))
+                     (when (alist-get 'defaultModelEnv (alist-get 'dispatch (org-dispatch--harness (plist-get agent :value))))
+                       org-dispatch-model))
           :model-set (org-entry-get nil "MODEL")
           ;; Roster agents to choose among, in Jon's order: AGENTS, a roster
           ;; AGENT, or June's dispatch.roster. A harness name among them is an
@@ -1059,11 +1106,7 @@ TAKEN lists the roster agents given tasks earlier in this pass."
         (setq task (plist-put task :session
                               (org-dispatch--session-for (plist-get task :sessions) harness
                                                          (plist-get task :stopped))))
-        (setq task (plist-put task :model
-                              (cond ((and model (equal harness "pi") (not (string-search "/" model)))
-                                     (concat "openai-codex/" model))
-                                    (model)
-                                    ((equal harness "pi") org-dispatch-model))))
+        (setq task (plist-put task :model (org-dispatch--model-for harness model)))
         ;; The task now names its agent, so a resume returns to the same one.
         (setq task (plist-put task :set (list (cons "AGENT" (or (alist-get 'slug card) harness)))))
         task)))))
@@ -1640,70 +1683,67 @@ hc refuses to type into a blocked dialog."
 (defun org-dispatch--agent-argv (task command resume session prompt)
   "The argv that starts TASK's agent with COMMAND in SESSION, taking PROMPT first.
 RESUME names the session to continue; nil starts SESSION fresh."
-  (let ((agent (plist-get task :agent))
-        (label (truncate-string-to-width (concat "auto · " (plist-get task :heading)) 60)))
-    (pcase agent
-      ;; Codex resumes through a subcommand, its options after it, and names
-      ;; its own sessions, found once it starts (org-dispatch--find-session).
-      ("codex"
-       (append (list command) (when resume (list "resume"))
-               (list "--dangerously-bypass-approvals-and-sandbox")
-               (when (plist-get task :model) (list "--model" (plist-get task :model)))
-               (org-dispatch--card-flags agent (plist-get task :card))
-               (when resume (list resume))
-               (list prompt)))
-      ;; Antigravity's wrapper skips permissions already; it has no
-      ;; instructions flag, so a card's instructions lead the prompt.
-      ("agy"
-       (let ((text (alist-get 'instructions (plist-get task :card))))
-         (append (list command)
-                 (when (plist-get task :model) (list "--model" (plist-get task :model)))
-                 (org-dispatch--card-flags agent (plist-get task :card))
-                 (when resume (list "--conversation" resume))
-                 (list "--prompt-interactive"
-                       (if (and text (not (string-empty-p text))) (concat text "\n\n" prompt) prompt)))))
-      (_
-       (append
-        (list command)
-        (if (equal agent "claude")
-            ;; CLAUDE_CODE_DISABLE_TERMINAL_TITLE also turns off Claude's OSC 7501
-            ;; status, which the watcher needs; clear it for this worker only.
-            (list "--dangerously-skip-permissions"
-                  "--settings" "{\"env\":{\"CLAUDE_CODE_DISABLE_TERMINAL_TITLE\":\"\"}}")
-          (list "--no-approve"))
-        (list "--name" label)
-        (when (plist-get task :model) (list "--model" (plist-get task :model)))
-        (org-dispatch--card-flags agent (plist-get task :card))
-        (cond ((and resume (equal agent "claude")) (list "--resume" resume))
-              (resume (list "--session" (or (org-dispatch--session-file resume) resume)))
-              (t (list "--session-id" session)))
-        (list prompt))))))
+  (let* ((agent (plist-get task :agent))
+         (spec (or (org-dispatch--harness agent) (error "Unknown harness %s" agent)))
+         (cli (alist-get 'cli spec))
+         (dispatch (alist-get 'dispatch spec))
+         (resume-spec (alist-get 'resume dispatch))
+         (resume-kind (alist-get 'kind resume-spec))
+         (label (truncate-string-to-width (concat "auto · " (plist-get task :heading)) 60))
+         (instructions (alist-get 'instructions (plist-get task :card)))
+         (prepend (equal (alist-get 'kind (alist-get 'instructions cli)) "prepend-prompt"))
+         (full-prompt (if (and prepend instructions (not (string-empty-p instructions)))
+                          (concat instructions "\n\n" prompt)
+                        prompt))
+         (model-flag (alist-get 'modelFlag cli))
+         (name-flag (alist-get 'nameFlag cli))
+         (prompt-flag (alist-get 'promptFlag cli))
+         (session-id-flag (alist-get 'sessionIdFlag dispatch)))
+    (append
+     (list command)
+     (when (and resume (equal resume-kind "subcommand"))
+       (list (alist-get 'subcommand resume-spec)))
+     (alist-get 'flags dispatch)
+     (when name-flag (list name-flag label))
+     (when (and model-flag (plist-get task :model))
+       (list model-flag (plist-get task :model)))
+     (org-dispatch--card-flags agent (plist-get task :card))
+     (cond
+      ((and resume (equal resume-kind "subcommand")) (list resume))
+      ((and resume (equal resume-kind "flag")) (list (alist-get 'flag resume-spec) resume))
+      ((and resume (equal resume-kind "session-file"))
+       (list (alist-get 'flag resume-spec) (or (org-dispatch--session-file resume) resume)))
+      ((and (not resume) session-id-flag) (list session-id-flag session)))
+     (if prompt-flag (list prompt-flag full-prompt) (list full-prompt)))))
 
 (defun org-dispatch--card-flags (agent card)
   "AGENT's flags for roster CARD's effort and instructions.
 The card's model comes through the task's :model."
-  (let ((effort (alist-get 'effort card))
-        (instructions (alist-get 'instructions card)))
-    (pcase agent
-      ("codex"
-       (append
-        (when effort (list "-c" (format "model_reasoning_effort=%S" (if (equal effort "max") "xhigh" effort))))
-        (when (and instructions (not (string-empty-p instructions)))
-          (list "-c" (concat "developer_instructions=" (json-serialize instructions))))))
-      ;; Its instructions lead the prompt instead.
-      ("agy" (when effort (list "--effort" effort)))
-      (_
-       (append
-        (when effort (list (if (equal agent "pi") "--thinking" "--effort") effort))
-        (when (and instructions (not (string-empty-p instructions)))
-          (list "--append-system-prompt" instructions)))))))
+  (let* ((cli (alist-get 'cli (org-dispatch--harness agent)))
+         (effort (alist-get 'effort card))
+         (instructions (alist-get 'instructions card))
+         (eff-spec (alist-get 'effort cli))
+         (ins-spec (alist-get 'instructions cli)))
+    (append
+     (when (and effort eff-spec)
+       (pcase (alist-get 'kind eff-spec)
+         ("flag" (list (alist-get 'flag eff-spec) effort))
+         ("config"
+          (let ((val (if (and (equal effort "max") (alist-get 'maxAs eff-spec))
+                         (alist-get 'maxAs eff-spec)
+                       effort)))
+            (list (alist-get 'flag eff-spec)
+                  (format "%s=%S" (alist-get 'key eff-spec) val))))))
+     (when (and instructions (not (string-empty-p instructions)) ins-spec)
+       (pcase (alist-get 'kind ins-spec)
+         ("flag" (list (alist-get 'flag ins-spec) instructions))
+         ("config" (list (alist-get 'flag ins-spec)
+                         (concat (alist-get 'key ins-spec) "=" (json-serialize instructions)))))))))
 
 (defun org-dispatch--find-session (agent dir since)
   "The session AGENT started in DIR after SINCE (float time), or nil.
-Codex and Antigravity pick their own IDs: Codex names its working directory
-in each session log's first line; an Antigravity conversation database
-mentions it."
-  (pcase agent
+Harnesses that pick their own IDs declare a sessionLookup in the shared table."
+  (pcase (alist-get 'sessionLookup (alist-get 'dispatch (org-dispatch--harness agent)))
     ("codex"
      (seq-some (lambda (file)
                  (and (time-less-p (seconds-to-time (- since 5)) (file-attribute-modification-time (file-attributes file)))
@@ -1777,9 +1817,10 @@ is accepted as unknown, which the watcher never mistakes for idle."
              (live (and resume (org-dispatch--live-session resume agent)))
              (session (or resume (org-id-uuid)))
              (run (org-id-uuid))
+             (lookup (alist-get 'sessionLookup (alist-get 'dispatch (org-dispatch--harness agent))))
              ;; A closed Claude session resumes through its own account's
              ;; launcher; a custom chooser such as claude-auto may pick another.
-             (native (and resume (not live) (equal agent "claude")
+             (native (and resume (not live) (equal lookup "claude")
                           (org-dispatch--claude-launcher resume)))
              (custom (unless (or live native) (org-dispatch--command agent)))
              (command (or native custom agent))
@@ -1788,7 +1829,7 @@ is accepted as unknown, which the watcher never mistakes for idle."
              ;; resumes on any of them; one only in a separate store restarts
              ;; from the Org record.
              (fresh (and resume custom
-                         (not (and (equal agent "claude")
+                         (not (and (equal lookup "claude")
                                    (org-dispatch--shared-claude-session-p resume)))))
              (name (format "auto-%s-%s" (org-dispatch--id8 id) (format-time-string "%H%M%S")))
              (state (list :id id :file (plist-get task :file) :heading (plist-get task :heading)
@@ -1846,7 +1887,7 @@ is accepted as unknown, which the watcher never mistakes for idle."
                   (setq state (plist-put state :terminal address))
                   (org-dispatch--save-state state)
                   (org-dispatch--await-start address agent)
-                  (when (and (member agent '("codex" "agy")) (not (and resume (not fresh))))
+                  (when (and (org-dispatch--awaits-session-p agent) (not (and resume (not fresh))))
                     (setq state (org-dispatch--await-session state agent (plist-get task :dir) (plist-get state :started)))
                     (org-dispatch--save-state state))))
               (org-dispatch--claim task address (plist-get state :session))
@@ -2204,7 +2245,7 @@ only files whose text contains one of those strings."
 
 (defun org-dispatch--reopenable (session)
   "Non-nil when SESSION (AGENT . UUID) can be reopened from its Org link."
-  (pcase (car session)
+  (pcase (alist-get 'sessionLookup (alist-get 'dispatch (org-dispatch--harness (car session))))
     ("pi" (org-dispatch--session-file (cdr session)))
     ("claude" (or (org-dispatch--claude-launcher (cdr session))
                   (org-dispatch--shared-claude-session-p (cdr session))))

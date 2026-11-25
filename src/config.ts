@@ -5,6 +5,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
+import { LAUNCHABLE_HARNESSES } from "../desktop/harnesses.mjs";
 import { DIGEST, type Period } from "./journal.ts";
 
 export type HerdrHost = { readonly ssh?: string };
@@ -336,9 +337,9 @@ function dispatch(given: Partial<Config["dispatch"]> | undefined): Config["dispa
 		throw new Error("dispatch.roster must be a list of roster agent names, such as [\"bolt\", \"sprocket\"]");
 	const commands = given?.commands;
 	if (commands !== undefined && (!commands || typeof commands !== "object" || Array.isArray(commands) ||
-		Object.entries(commands).some(([agent, command]) => !["pi", "claude", "codex", "agy"].includes(agent) ||
+		Object.entries(commands).some(([agent, command]) => !(LAUNCHABLE_HARNESSES as readonly string[]).includes(agent) ||
 			typeof command !== "string" || !/^(?:[A-Za-z0-9_][A-Za-z0-9_.+-]*|\/[A-Za-z0-9_./+-]+)$/.test(command))))
-		throw new Error("dispatch.commands must map pi, claude, codex or agy to executable names or absolute paths, without arguments");
+		throw new Error(`dispatch.commands must map ${LAUNCHABLE_HARNESSES.join(", ")} to executable names or absolute paths, without arguments`);
 	const improve = given?.improve;
 	if (improve !== undefined) {
 		if (!(typeof improve?.file === "string" && improve.file.endsWith(".org"))) throw new Error("dispatch.improve.file must be an Org file");

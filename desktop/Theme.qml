@@ -7,6 +7,7 @@
 pragma Singleton
 import QtQuick
 import Quickshell
+import "harnesses.mjs" as Harnesses
 
 Singleton {
   property bool consoleLook: false
@@ -71,10 +72,7 @@ Singleton {
     { TODO: "#cf222e", PROG: "#0550ae", EVAL: "#8250df", HOLD: "#9a6700", AUTO: "#1b7c83", DONE: "#1a7f37" })
   function tone(state) { return tones[state] ?? edge; }
   // Each clanker's frame colour by harness; the console has none, so its frames use the edge.
-  readonly property var harnessTones: pick(
-    { pi: "#1f7f75", claude: "#b4531c", codex: "#355fa3", agy: "#6a45b3", opencode: "#367842", other: "#8a6d10" },
-    { pi: "#2ee6d2", claude: "#ff9a4d", codex: "#6fa8ff", agy: "#b48cff", opencode: "#7ce38b", other: "#ffd84d" },
-    {}, {})
+  readonly property var harnessTones: pick(Harnesses.HARNESS_TONES.paper, Harnesses.HARNESS_TONES.neon, {}, {})
   function harnessTone(name) { return harnessTones[name] ?? harnessTones.other ?? edge; }
   // The boards' type scale in pixels, each with its line height set: Zen Kaku Gothic New's own is nearly a line tall,
   // so a wrapped title would otherwise read as two rows. Words.qml sets a Text from a role.
