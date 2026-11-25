@@ -99,7 +99,7 @@ test("through this checkout's org-edit, a board edits a task, refuses a stale st
 	const file = join(root, "work", "demo", "demo.org");
 	await writeFile(file, "#+TITLE: Demo\n\n* EVAL Hand off\n:PROPERTIES:\n:ID: 5b0c6c4e-1111-4222-8333-444455556666\n:HOST: kit\n:AGENT: pi\n:REVIEW: agent\n:ASKED: [2026-11-21 Sat 01:00]\n:END:\nBody.\n\n** Dialog\n- Agent [2026-11-18 Wed 15:40]: Kit or cog?\n\n* TODO Plain\n\n* TODO Rename me\n:PROPERTIES:\n:ID: 6c1d7d5f-2222-4333-8444-555566667777\n:END:\n");
 	// Its own lock, state and Org root, never the live dispatcher's.
-	const env = { ...process.env, HC_TERMINAL_ID: undefined, HOME: tmp.dir, XDG_RUNTIME_DIR: join(tmp.dir, "run"), XDG_STATE_HOME: join(tmp.dir, "state"), ORG_DISPATCH_ROOT: join(root, "work"), ORG_DISPATCH_EMACS_INIT: join(tmp.dir, "none"), JUNE_CONFIG_DIR: join(tmp.dir, "june"), TZDIR: process.env.TZDIR ?? "/etc/zoneinfo" };
+	const env = { ...process.env, HC_TERMINAL_ID: undefined, HOME: tmp.dir, XDG_RUNTIME_DIR: join(tmp.dir, "run"), XDG_STATE_HOME: join(tmp.dir, "state"), ORG_DISPATCH_HOST: "kit", ORG_DISPATCH_ROOT: join(root, "work"), ORG_DISPATCH_EMACS_INIT: join(tmp.dir, "none"), JUNE_CONFIG_DIR: join(tmp.dir, "june"), TZDIR: process.env.TZDIR ?? "/etc/zoneinfo" };
 	const run = (argv: readonly string[], timeoutMs: number) => runProcess(["env", "-u", "HC_TERMINAL_ID", "-u", "CLAUDECODE", "-u", "PI_SESSION_ID", ...Object.entries(env).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${v}`), ...argv], timeoutMs);
 	const config = testConfig(tmp.dir, { org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") }, dispatch: { hosts: ["kit", "cog"], host: "kit", agent: "pi", agents: ["pi", "claude"] } });
 	const edits = new TaskEdits(config, run);
