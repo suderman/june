@@ -183,7 +183,8 @@ test("task content edits round-trip org_read_task revisions through the real pri
 	const script = fileURLToPath(new URL("../org/edit/org-edit", import.meta.url));
 	const org = new Org(f.root);
 	const writes = new OrgWrites(org, f.config, (argv) => runProcess([
-		"env", `HOME=${f.dir}`, `XDG_RUNTIME_DIR=${f.paths.runtime}`, `XDG_STATE_HOME=${f.paths.state}`,
+		"env", "-u", "HC_TERMINAL_ID", "-u", "CLAUDECODE", "-u", "PI_SESSION_ID",
+		`HOME=${f.dir}`, `XDG_RUNTIME_DIR=${f.paths.runtime}`, `XDG_STATE_HOME=${f.paths.state}`,
 		`ORG_DISPATCH_ROOT=${f.root}`, `ORG_DISPATCH_EMACS_INIT=${join(f.dir, "no-init.el")}`,
 		"bash", script, ...argv.slice(1),
 	], 60_000));
@@ -218,7 +219,7 @@ test("through this checkout's org-edit, a TODO gets its deadline and later close
 	// Its own lock, never the live dispatcher's, which the timer holds every minute.
 	const runtime = await mkdtemp(join(tmpdir(), "june-lock-"));
 	t.after(() => rm(runtime, { recursive: true, force: true }));
-	const f = await fixture((argv) => runProcess(["env", `XDG_RUNTIME_DIR=${runtime}`, "bash", script, ...argv.slice(1)], 60_000));
+	const f = await fixture((argv) => runProcess(["env", "-u", "HC_TERMINAL_ID", "-u", "CLAUDECODE", "-u", "PI_SESSION_ID", `XDG_RUNTIME_DIR=${runtime}`, "bash", script, ...argv.slice(1)], 60_000));
 	t.after(f.cleanup);
 	const added = await f.writes.addTask({ file: "life/school.org", under: "Pickup", title: "Leave to pick up the kids", deadline: "2026-10-28 15:25" });
 	assert.match(added.planning ?? "", /DEADLINE: <2026-10-28 Wed 15:25>/);

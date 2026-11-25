@@ -13,7 +13,7 @@ export XDG_RUNTIME_DIR="$fixture/runtime"
 mkdir -p "$XDG_RUNTIME_DIR"
 # The date checks compare against Calgary time, which needs zone data; NixOS keeps it in /etc/zoneinfo.
 if [[ -z ${TZDIR:-} && ! -d /usr/share/zoneinfo && -d /etc/zoneinfo ]]; then export TZDIR=/etc/zoneinfo; fi
-unset JUNE_CONFIG_DIR
+unset JUNE_CONFIG_DIR HC_TERMINAL_ID CLAUDECODE PI_SESSION_ID
 mkdir -p "$HOME/org"
 
 edit="$org/edit/org-edit"

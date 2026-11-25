@@ -48,7 +48,11 @@ export class OrgWorker {
 	#stopped = false;
 
 	constructor(options: OrgWorkerOptions) {
-		const env = { ...process.env, ...options.env };
+		const env: NodeJS.ProcessEnv = { ...process.env, ...options.env };
+		// OrgWorker runs for June's daemon, never as a coding worker inheriting an hc terminal.
+		for (const key of ["HC_TERMINAL_ID", "CLAUDECODE", "PI_SESSION_ID"]) {
+			if (!options.env?.[key]) delete env[key];
+		}
 		// org-dispatch.el pins Calgary time; NixOS keeps zone data in /etc/zoneinfo, not the libc default.
 		if (!env.TZDIR && !existsSync("/usr/share/zoneinfo") && existsSync("/etc/zoneinfo")) env.TZDIR = "/etc/zoneinfo";
 		this.#o = {

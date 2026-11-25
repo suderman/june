@@ -13,7 +13,7 @@ export XDG_STATE_HOME="$fixture/state"
 export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_RUNTIME_DIR="$fixture/runtime"
 mkdir -p "$XDG_RUNTIME_DIR"
-unset JUNE_CONFIG_DIR
+unset JUNE_CONFIG_DIR HC_TERMINAL_ID CLAUDECODE PI_SESSION_ID
 export ORG_DISPATCH_EMACS_INIT="$fixture/no-init.el"
 export ORG_DISPATCH_ROOT="$fixture/org"
 export ORG_DISPATCH_PROMPTS="$org/prompts"
