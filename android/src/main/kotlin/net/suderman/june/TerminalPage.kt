@@ -259,7 +259,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
     // A pointer target over its whole area, so no tap falls through to the board beneath.
     Box(modifier) {
     Column(Modifier.fillMaxSize().background(Color(0xFF1E1E2E)).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
-        Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).background(statusColour(here?.status ?: "", state), CircleShape))
             Text(
                 when {
@@ -271,7 +271,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Box {
-                Text("switch ▾", Modifier.clickable { picking = true }.padding(start = 10.dp, top = 4.dp, bottom = 4.dp), color = muted, fontSize = 13.sp)
+                BarIcon(SwitchIcon, "Switch pane", muted) { picking = true }
                 DropdownMenu(picking, onDismissRequest = { picking = false }) {
                     if (agents.isEmpty()) DropdownMenuItem(text = { Text("No agents listed yet") }, onClick = { picking = false })
                     for (a in agents) DropdownMenuItem(
@@ -291,12 +291,6 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                     )
                 }
             }
-            if (attached) Text(
-                "✕",
-                Modifier.clickable(enabled = !closing) { confirmClose = true }.padding(start = 12.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
-                color = muted,
-                fontSize = 13.sp,
-            )
         }
         // Files another app shared, waiting for Jon to send them here or switch first; and how sending is going.
         val shared = Drops.shared
@@ -452,7 +446,11 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
     copying?.let { text ->
         androidx.activity.compose.BackHandler { copying = null }
         CopySheet(
-            text, view, Modifier.matchParentSize(), close = { copying = null }, paste = { view.paste(it); copying = null },
+            text, view, Modifier.matchParentSize(),
+            canKill = attached && !closing,
+            onKill = { copying = null; confirmClose = true },
+            close = { copying = null },
+            paste = { view.paste(it); copying = null },
             pasteFile = { uri -> take { Drops.read(context, listOf(uri)) }; copying = null },
             resetZoom = { view.setFontSize(TerminalView.DEFAULT_SP); copying = null },
         )
@@ -460,12 +458,30 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
     }
 }
 
+@Composable
+private fun BarIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.size(36.dp).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { androidx.compose.material3.Icon(icon, label, Modifier.size(20.dp), tint = tint) }
+}
+
 /**
  * The terminal's text with its history, to select with Android's own handles: over the whole page, in the terminal's face at
  * its size, cell width and line height, so each line sits as it did on the terminal.
  */
 @Composable
-private fun CopySheet(text: String, view: TerminalView, modifier: Modifier, close: () -> Unit, paste: (String) -> Unit, pasteFile: (android.net.Uri) -> Unit, resetZoom: () -> Unit) {
+private fun CopySheet(
+    text: String,
+    view: TerminalView,
+    modifier: Modifier,
+    canKill: Boolean,
+    onKill: () -> Unit,
+    close: () -> Unit,
+    paste: (String) -> Unit,
+    pasteFile: (android.net.Uri) -> Unit,
+    resetZoom: () -> Unit,
+) {
     val context = LocalContext.current
     val density = androidx.compose.ui.platform.LocalDensity.current
     val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
@@ -487,19 +503,25 @@ private fun CopySheet(text: String, view: TerminalView, modifier: Modifier, clos
     }
     // Half a cell spare, so rounding never wraps a line that filled the terminal.
     val width = with(density) { (view.cols.coerceAtLeast(1) * view.cellWidth + view.cellWidth / 2).toDp() }
+    val action = Color(0xFF89B4FA)
+    val muted = Color(0xFF9399B2)
     run {
         Column(modifier.background(Color(0xFF1E1E2E)).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
-            Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Select to copy", Modifier.weight(1f), color = Color(0xFF9399B2), fontSize = 13.sp)
+            Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Select to copy", Modifier.weight(1f), color = muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (canKill) {
+                    BarIcon(TrashIcon, "Close pane", Color(0xFFF38BA8), onKill)
+                    androidx.compose.foundation.layout.Spacer(Modifier.width(10.dp))
+                }
+                if (kotlin.math.abs(view.fontSp - TerminalView.DEFAULT_SP) > 0.3f) BarIcon(ResetZoomIcon, "Reset zoom", action, resetZoom)
                 val item = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
                 // A copied image or file goes to the agent as a file; anything else pastes as text.
                 val uri = item?.uri?.takeIf { it.scheme == "content" }
                 val clip = if (uri == null) item?.coerceToText(context)?.toString() else null
-                if (uri != null) Text("paste file", Modifier.clickable { pasteFile(uri) }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
-                else if (!clip.isNullOrEmpty()) Text("paste", Modifier.clickable { paste(clip) }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
-                if (kotlin.math.abs(view.fontSp - TerminalView.DEFAULT_SP) > 0.3f) Text("reset zoom", Modifier.clickable(onClick = resetZoom).padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
-                Text("copy all", Modifier.clickable { clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text)); close() }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
-                Text("close", Modifier.clickable(onClick = close).padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
+                if (uri != null) BarIcon(AttachIcon, "Paste file", action) { pasteFile(uri) }
+                else if (!clip.isNullOrEmpty()) BarIcon(PasteIcon, "Paste", action) { paste(clip) }
+                BarIcon(CopyIcon, "Copy all", action) { clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text)); close() }
+                BarIcon(CloseIcon, "Close", muted, close)
             }
             // Scrolled from the bottom, so the latest lines stay in view whatever the sheet's height.
             Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll, reverseScrolling = true), contentAlignment = Alignment.TopCenter) {
@@ -546,22 +568,30 @@ private fun statusColour(status: String, state: TerminalStream.State?): Color = 
     else -> Color(0xFF6C7086)
 }
 
+private fun iconOf(name: String, path: String) = androidx.compose.ui.graphics.vector.ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
+    .addPath(androidx.compose.ui.graphics.vector.PathParser().parsePathString(path).toNodes(), fill = androidx.compose.ui.graphics.SolidColor(Color.White))
+    .build()
+
 /** A paperclip, as Material's Attach File icon draws it. */
-private val AttachIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
-    androidx.compose.ui.graphics.vector.ImageVector.Builder("Attach", 24.dp, 24.dp, 24f, 24f)
-        .addPath(
-            androidx.compose.ui.graphics.vector.PathParser().parsePathString(
-                "M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z",
-            ).toNodes(),
-            fill = androidx.compose.ui.graphics.SolidColor(Color.White),
-        ).build()
-}
+private val AttachIcon by lazy { iconOf("Attach", "M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z") }
 
 /** A paper plane, as Material's Send icon draws it. */
-private val SendIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
-    androidx.compose.ui.graphics.vector.ImageVector.Builder("Send", 24.dp, 24.dp, 24f, 24f)
-        .addPath(
-            androidx.compose.ui.graphics.vector.PathParser().parsePathString("M2.01 21L23 12 2.01 3 2 10l15 2-15 2z").toNodes(),
-            fill = androidx.compose.ui.graphics.SolidColor(Color.White),
-        ).build()
-}
+private val SendIcon by lazy { iconOf("Send", "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z") }
+
+/** Swap arrows for switching agent terminal panes. */
+private val SwitchIcon by lazy { iconOf("Switch", "M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z") }
+
+/** Outline trash can for closing (killing and removing) a pane from the copy sheet. */
+private val TrashIcon by lazy { iconOf("ClosePane", "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM8 9h8v10H8V9zm7.5-5l-1-1h-5l-1 1H5v2h14V4h-3.5z") }
+
+/** Clipboard icon for pasting text into the terminal. */
+private val PasteIcon by lazy { iconOf("Paste", "M19 2h-4.18C14.4.84 13.3 0 12 0c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z") }
+
+/** Double-sheet icon for copying the terminal's text. */
+private val CopyIcon by lazy { iconOf("CopyAll", "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z") }
+
+/** Frame-fit icon for resetting pinch-to-zoom font size back to default. */
+private val ResetZoomIcon by lazy { iconOf("ResetZoom", "M17 4h3c1.1 0 2 .9 2 2v2h-2V6h-3V4zM4 8V6h3V4H4c-1.1 0-2 .9-2 2v2h2zm16 8v2h-3v2h3c1.1 0 2-.9 2-2v-2h-2zM7 18H4v-2H2v2c0 1.1.9 2 2 2h3v-2zM18 8H6v8h12V8z") }
+
+/** X icon for closing the copy sheet. */
+private val CloseIcon by lazy { iconOf("Close", "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z") }
