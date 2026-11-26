@@ -296,56 +296,61 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                 layout(placeable.width, placeable.height) { placeable.place(0, 0) }
             },
         ) {
-        // An agent's terminal takes the whole screen, its own line naming it in place of June's status line.
-        val terminalShown = boards && board < 0
-        if (!terminalShown) Column(Modifier.fillMaxWidth().then(header ?: Modifier)) {
-        if (header != null) Box(
-            Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp).size(width = 36.dp, height = 4.dp)
-                .background(palette.muted.copy(alpha = 0.5f), RoundedCornerShape(50)),
-        )
-        Row(Modifier.fillMaxWidth().padding(top = if (header != null) 8.dp else 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            val ready = decisions
-            if (ready != null && avatar != null) {
-                LiveBadge(link, ready, avatar)
-                Spacer(Modifier.width(8.dp))
-            }
-            val needsYou = detail != null && (0 until detail.length()).any { detail.getJSONObject(it).optBoolean("needsYou") }
-            Text(
-                (said?.optString("text") ?: statusLine(link)).let { if (detail != null && detail.length() > 0) it + if (showFollows) "  ▴" else "  ▾" else it },
-                style = palette.type.meta.copy(color = if (needsYou) palette.accent else palette.muted),
-                maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).clickable(enabled = detail != null && detail.length() > 0) { showFollows = !showFollows },
-            )
-            // The look, toggled as the desktop's window toggles it: a quiet word beside settings, checked when on.
-            val on = LookChoice.console
-            Text(
-                if (on) "✓ console" else "console", style = palette.type.meta.copy(color = if (on) palette.pageInk else palette.muted),
-                modifier = Modifier.heightIn(min = 40.dp).clickable { LookChoice.set(context, !on) }.padding(start = 12.dp, top = 11.dp, bottom = 11.dp),
-            )
-            if (settings != null) Text("settings", style = palette.type.meta.copy(color = palette.muted), modifier = Modifier.heightIn(min = 40.dp).clickable(onClick = settings).padding(start = 14.dp, top = 11.dp, bottom = 11.dp))
-        }
-        }
-        // The tasks she follows, each with where it stands, under the status line while it is open.
-        val followed = detail
-        if (!terminalShown && showFollows && followed != null && followed.length() > 0) {
-            Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).background(palette.field, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                for (i in 0 until followed.length()) {
-                    val f = followed.getJSONObject(i)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(f.optString("title") + "  ·  " + f.optString("state"), fontSize = 13.sp, color = if (f.optBoolean("needsYou")) palette.accent else palette.pageInk, fontWeight = if (f.optBoolean("needsYou")) androidx.compose.ui.text.font.FontWeight.Bold else null, modifier = Modifier.weight(1f))
-                        if (f.optBoolean("needsYou")) Text(
-                            "dismiss", fontSize = 12.sp, color = palette.muted,
-                            modifier = Modifier.clickable {
-                                // Keep only keys of tasks still followed, so the set never grows past what shows.
-                                val live = (0 until followed.length()).map { followed.getJSONObject(it).optString("key") }.toSet()
-                                seen = (seen.intersect(live) + f.optString("key"))
-                                prefs.edit().putStringSet("seen", seen).apply()
-                            }.padding(start = 10.dp, top = 4.dp, bottom = 4.dp),
+        // The status line and follow drawer: pinned across Agents, Chat and Projects, sliding out with the Agents
+        // board when the Terminal page comes in so the Terminal page never changes height or forces a resize.
+        val statusHeader: @Composable (Modifier) -> Unit = { mod ->
+            Column(mod.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().then(header ?: Modifier)) {
+                    if (header != null) Box(
+                        Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp).size(width = 36.dp, height = 4.dp)
+                            .background(palette.muted.copy(alpha = 0.5f), RoundedCornerShape(50)),
+                    )
+                    Row(Modifier.fillMaxWidth().padding(top = if (header != null) 8.dp else 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        val ready = decisions
+                        if (ready != null && avatar != null) {
+                            LiveBadge(link, ready, avatar)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        val needsYou = detail != null && (0 until detail.length()).any { detail.getJSONObject(it).optBoolean("needsYou") }
+                        Text(
+                            (said?.optString("text") ?: statusLine(link)).let { if (detail != null && detail.length() > 0) it + if (showFollows) "  ▴" else "  ▾" else it },
+                            style = palette.type.meta.copy(color = if (needsYou) palette.accent else palette.muted),
+                            maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f).clickable(enabled = detail != null && detail.length() > 0) { showFollows = !showFollows },
                         )
+                        // The look, toggled as the desktop's window toggles it: a quiet word beside settings, checked when on.
+                        val on = LookChoice.console
+                        Text(
+                            if (on) "✓ console" else "console", style = palette.type.meta.copy(color = if (on) palette.pageInk else palette.muted),
+                            modifier = Modifier.heightIn(min = 40.dp).clickable { LookChoice.set(context, !on) }.padding(start = 12.dp, top = 11.dp, bottom = 11.dp),
+                        )
+                        if (settings != null) Text("settings", style = palette.type.meta.copy(color = palette.muted), modifier = Modifier.heightIn(min = 40.dp).clickable(onClick = settings).padding(start = 14.dp, top = 11.dp, bottom = 11.dp))
+                    }
+                }
+                // The tasks she follows, each with where it stands, under the status line while it is open.
+                val followed = detail
+                if (showFollows && followed != null && followed.length() > 0) {
+                    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).background(palette.field, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        for (i in 0 until followed.length()) {
+                            val f = followed.getJSONObject(i)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(f.optString("title") + "  ·  " + f.optString("state"), fontSize = 13.sp, color = if (f.optBoolean("needsYou")) palette.accent else palette.pageInk, fontWeight = if (f.optBoolean("needsYou")) androidx.compose.ui.text.font.FontWeight.Bold else null, modifier = Modifier.weight(1f))
+                                if (f.optBoolean("needsYou")) Text(
+                                    "dismiss", fontSize = 12.sp, color = palette.muted,
+                                    modifier = Modifier.clickable {
+                                        // Keep only keys of tasks still followed, so the set never grows past what shows.
+                                        val live = (0 until followed.length()).map { followed.getJSONObject(it).optString("key") }.toSet()
+                                        seen = (seen.intersect(live) + f.optString("key"))
+                                        prefs.edit().putStringSet("seen", seen).apply()
+                                    }.padding(start = 10.dp, top = 4.dp, bottom = 4.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
+        if (!boards) statusHeader(Modifier)
         // The strip, with its day picker above it, which is the strip's alone.
         val stripPage: @Composable (Modifier) -> Unit = { modifier ->
             Column(modifier) {
@@ -373,17 +378,20 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
         if (boards) {
             LaunchedEffect(Unit) { link.wantBoards() }
             // The pager spans the screen's full width, so the Terminal page has every column; the boards keep the
-            // conversation's margins inside their pages.
+            // conversation's margins and status-header room inside their pages.
             val edgeToEdge = Modifier.layout { measurable, constraints ->
                 val margin = 16.dp.roundToPx()
                 val w = constraints.maxWidth + 2 * margin
                 val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
                 layout(constraints.maxWidth, placeable.height) { placeable.place(-margin, 0) }
             }
+            var headerPx by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+            val headerDp = with(androidx.compose.ui.platform.LocalDensity.current) { headerPx.toDp() }
+            val headerReveal = if (first == 1) (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f) else 1f
             androidx.activity.compose.BackHandler(enabled = board < 0) { pages.launch { pager.animateScrollToPage(lastBoard) } }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxSize().then(edgeToEdge), beyondViewportPageCount = 1) { page ->
-                    val inset = Modifier.fillMaxSize().padding(horizontal = 16.dp)
+                    val inset = Modifier.fillMaxSize().padding(top = headerDp, start = 16.dp, end = 16.dp)
                     when (page - first) {
                         -1 -> {
                             // The terminal asked for, else the last one shown, else the first agent the board lists.
@@ -400,6 +408,11 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                         else -> stripPage(inset)
                     }
                 }
+                if (headerReveal > 0.001f) statusHeader(
+                    Modifier.align(Alignment.TopStart)
+                        .onSizeChanged { headerPx = it.height }
+                        .graphicsLayer { translationX = (1f - headerReveal) * (size.width + 32.dp.toPx()) },
+                )
             }
         } else stripPage(Modifier.weight(1f).fillMaxWidth())
         if (link.notice.isNotEmpty()) Text(link.notice, color = Color(0xFFFFD36B), fontSize = 13.sp, modifier = Modifier.padding(vertical = 4.dp))

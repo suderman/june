@@ -143,9 +143,9 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
             view.release()
         }
     }
-    // One resize once the size settles, not one per frame of the keyboard's animation.
-    LaunchedEffect(grid) {
-        if (grid == 0) return@LaunchedEffect
+    // One resize once the size settles, and only while this page is active: never resize the terminal from off-tab.
+    LaunchedEffect(grid, active) {
+        if (!active || grid == 0) return@LaunchedEffect
         delay(150)
         stream.resize(grid / 10_000, grid % 10_000)
     }
