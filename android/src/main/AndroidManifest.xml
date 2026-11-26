@@ -101,9 +101,9 @@
             </intent-filter>
         </activity>
 
-        <!-- The share sheet's "Agent terminal": shared files wait on June's terminal page until Jon sends them
+        <!-- The share sheet's "Agent": shared files wait on June's terminal page until Jon sends them
              (TerminalDrops.kt). -->
-        <activity android:name=".TerminalShareActivity" android:exported="true" android:label="Agent terminal"
+        <activity android:name=".TerminalShareActivity" android:exported="true" android:label="Agent"
             android:excludeFromRecents="true" android:noHistory="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
