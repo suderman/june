@@ -245,12 +245,12 @@ val BoardMargin = 16.dp
 val AgentsSections = listOf("hosts", "clankers", "activity")
 
 @Composable
-fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, section: String, onSection: (String) -> Unit, modifier: Modifier = Modifier, reset: Int = 0) {
+fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, section: String, modifier: Modifier = Modifier, reset: Int = 0) {
     CompositionLocalProvider(LocalPalette provides palette) {
         when (section) {
-            "hosts" -> HostsPage(link, decisions, onSection, modifier, reset)
-            "clankers" -> ClankersPage(link, decisions, onSection, modifier, reset)
-            else -> ActivityPage(link, decisions, onSection, modifier, reset)
+            "hosts" -> HostsPage(link, decisions, modifier, reset)
+            "clankers" -> ClankersPage(link, decisions, modifier, reset)
+            else -> ActivityPage(link, decisions, modifier, reset)
         }
     }
 }
@@ -269,12 +269,11 @@ private fun rememberAgentsView(link: Link, decisions: Decisions): JSONObject? {
     return view
 }
 
-/** The section's masthead on each of its pages, the tabs turning the pager. */
+/** The top of an agents page: nothing once the board has come, the sections being named in the bar below. */
 @Composable
-private fun AgentsMasthead(v: JSONObject?, section: String, onSection: (String) -> Unit) {
-    val roster = v?.optJSONArray("roster").objects()
-    val tabs = listOf("hosts" to "hosts", "clankers" to "clankers" + if (roster.isNotEmpty()) " · ${roster.size}" else "", "activity" to "activity")
-    Masthead("agents", v?.optString("summary") ?: "asking hc…", tabs, section, onSection)
+private fun AgentsWaiting(v: JSONObject?) {
+    val p = LocalPalette.current
+    if (v == null) Text("asking hc…", Modifier.padding(top = 6.dp), style = p.type.meta.copy(color = p.muted))
 }
 
 /** RESET changing (the Agents tab tapped again) runs ACTION, which puts away what the page has open. */
@@ -293,7 +292,7 @@ private fun keptWhileClosing(key: String): String {
 }
 
 @Composable
-private fun ActivityPage(link: Link, decisions: Decisions, onSection: (String) -> Unit, modifier: Modifier, reset: Int) {
+private fun ActivityPage(link: Link, decisions: Decisions, modifier: Modifier, reset: Int) {
     val p = LocalPalette.current
     val v = rememberAgentsView(link, decisions)
     val colours = rememberColours(decisions)
@@ -315,7 +314,7 @@ private fun ActivityPage(link: Link, decisions: Decisions, onSection: (String) -
     val shown = keptWhileClosing(page)
     Box(modifier.clipToBounds()) {
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = BoardMargin), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item { AgentsMasthead(v, "activity", onSection) }
+            item { AgentsWaiting(v) }
             if (v != null && colours != null) {
             val needs = v.optJSONArray("needs").objects()
             if (needs.isNotEmpty()) item { SectionRule("NEEDS YOU · ${needs.size}", alert = true) }
@@ -381,7 +380,7 @@ private fun ActivityPage(link: Link, decisions: Decisions, onSection: (String) -
 }
 
 @Composable
-private fun ClankersPage(link: Link, decisions: Decisions, onSection: (String) -> Unit, modifier: Modifier, reset: Int) {
+private fun ClankersPage(link: Link, decisions: Decisions, modifier: Modifier, reset: Int) {
     val p = LocalPalette.current
     val v = rememberAgentsView(link, decisions)
     val colours = rememberColours(decisions)
@@ -408,7 +407,7 @@ private fun ClankersPage(link: Link, decisions: Decisions, onSection: (String) -
     val shown = keptWhileClosing(if (rosterCreating) "+" else rosterSlug)
     Box(modifier.clipToBounds()) {
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = BoardMargin), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item { AgentsMasthead(v, "clankers", onSection) }
+            item { AgentsWaiting(v) }
             if (v != null && colours != null) {
                 val canRank = v.optBoolean("rosterHasStats")
                 val cards = if (ranked && canRank) v.optJSONArray("rosterLeaderboard").objects() else roster
@@ -454,7 +453,7 @@ private fun ClankersPage(link: Link, decisions: Decisions, onSection: (String) -
 
 /** The hosts work goes to (board.mjs agentsView hosts): reachable or not, their sessions, the clankers that work there. */
 @Composable
-private fun HostsPage(link: Link, decisions: Decisions, onSection: (String) -> Unit, modifier: Modifier, reset: Int) {
+private fun HostsPage(link: Link, decisions: Decisions, modifier: Modifier, reset: Int) {
     val p = LocalPalette.current
     val v = rememberAgentsView(link, decisions)
     val colours = rememberColours(decisions)
@@ -465,7 +464,7 @@ private fun HostsPage(link: Link, decisions: Decisions, onSection: (String) -> U
     val shown = keptWhileClosing(hostKey)
     Box(modifier.clipToBounds()) {
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = BoardMargin), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item { AgentsMasthead(v, "hosts", onSection) }
+            item { AgentsWaiting(v) }
             if (v != null && colours != null) {
                 item { SectionRule("HOSTS · ${hosts.size}") }
                 if (hosts.isEmpty()) item { Text("No hosts reported yet.", style = p.type.lettering.copy(color = p.muted)) }

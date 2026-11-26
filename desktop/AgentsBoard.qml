@@ -88,6 +88,17 @@ Item {
   // Whether a sheet is open, so Esc has something to put away.
   readonly property bool sheetOpen: detailKey !== "" || rosterSlug !== "" || rosterNew || hostKey !== ""
 
+  // The showing section again: put its sheet away and go back to its top.
+  function resetSection() {
+    if (mode === "activity") detailKey = "";
+    else if (mode === "clankers") { rosterSlug = ""; rosterNew = false; }
+    else hostKey = "";
+    flick.contentY = 0;
+  }
+
+  // In the narrow layout a tab bar names the board, so it shows no masthead, as on the phone.
+  property bool compact: false
+
   // Put away the open sheet, if there is one; whether there was.
   function dismissSheet() {
     if (detailKey !== "") detailKey = "";
@@ -107,7 +118,7 @@ Item {
 
   Sheet {
     id: taskSheet
-    anchors.fill: parent
+    anchors { left: parent.left; right: parent.right; top: parent.top; bottom: sections.top; bottomMargin: 8 }
     z: 2
     open: board.detailKey !== ""
     onDismissed: board.detailKey = ""
@@ -129,7 +140,7 @@ Item {
 
   Sheet {
     id: clankerSheet
-    anchors.fill: parent
+    anchors { left: parent.left; right: parent.right; top: parent.top; bottom: sections.top; bottomMargin: 8 }
     z: 2
     open: board.rosterSlug !== "" || board.rosterNew
     onDismissed: { board.rosterSlug = ""; board.rosterNew = false; }
@@ -147,16 +158,30 @@ Item {
 
   Sheet {
     id: hostSheet
-    anchors.fill: parent
+    anchors { left: parent.left; right: parent.right; top: parent.top; bottom: sections.top; bottomMargin: 8 }
     z: 2
     open: board.hostKey !== ""
     onDismissed: board.hostKey = ""
     HostDetail { anchors.fill: parent; host: board.activeHost; onOpen: link => board.open(link) }
   }
 
+  // The sections, at the bottom as the phone has them in the compose bar's place.
+  SectionBar {
+    id: sections
+    anchors { left: parent.left; right: parent.right; bottom: parent.bottom; rightMargin: 4 }
+    sections: [
+      { id: "hosts", label: "hosts" },
+      { id: "clankers", label: (board.view.roster ?? []).length > 0 ? "clankers " + board.view.roster.length : "clankers" },
+      { id: "activity", label: "activity", badge: board.view.needs.length },
+    ]
+    current: board.mode
+    onPicked: id => { if (id === board.mode) board.resetSection(); else board.mode = id; }
+  }
+
   Flickable {
+    id: flick
     visible: !(taskSheet.covers || clankerSheet.covers || hostSheet.covers)
-    anchors.fill: parent
+    anchors { left: parent.left; right: parent.right; top: parent.top; bottom: sections.top; bottomMargin: 8 }
     contentHeight: column.implicitHeight + 16
     clip: true
     boundsBehavior: Flickable.StopAtBounds
@@ -166,8 +191,9 @@ Item {
       width: parent.width - 4
       spacing: 10
 
-      // The masthead: the board's name, its summary, and its pages as folder tabs on the rule.
+      // The masthead: the board's name and its summary; the sections are in the bar below.
       Item {
+        visible: !board.compact
         width: parent.width
         height: mastheadText.implicitHeight + summary.implicitHeight + 2
         Words { id: mastheadText; role: "masthead"; text: (Theme.consoleLook ? "$ " : "") + "agents"; color: Theme.pageInk }
@@ -191,11 +217,6 @@ Item {
           TabIcon { anchors.centerIn: parent; width: 20; height: 20; kind: "terminal"; on: false; ink: termHover.containsMouse ? Theme.pageInk : Theme.muted; paper: Theme.paper }
           MouseArea { id: termHover; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: board.launchTerminal() }
         }
-      }
-      FolderTabs {
-        tabs: [{ id: "hosts", label: "hosts" }, { id: "clankers", label: (board.view.roster ?? []).length > 0 ? "clankers · " + board.view.roster.length : "clankers" }, { id: "activity", label: "activity" }]
-        current: board.mode
-        onPicked: id => board.mode = id
       }
 
       // ---- HOSTS: where work goes, from the agents board ----

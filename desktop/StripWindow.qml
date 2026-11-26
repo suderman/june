@@ -184,6 +184,7 @@ FloatingWindow {
 
     AgentsBoard {
       id: narrowAgents
+      compact: true
       visible: !win.layout.columns && win.tab === "agents"
       anchors.top: toggles.bottom
       anchors.bottom: tabBar.top

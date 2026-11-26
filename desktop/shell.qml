@@ -973,6 +973,7 @@ ShellRoot {
 
           AgentsBoard {
             id: overlayAgents
+            compact: true
             visible: !boardsPaper.fits && root.overlayTab === "agents"
             anchors.top: masthead.bottom
             anchors.bottom: overlayTabBar.top

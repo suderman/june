@@ -38,6 +38,11 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
@@ -132,3 +137,55 @@ internal fun DetailSheet(open: Boolean, onDismiss: () -> Unit, content: @Composa
         }
     }
 }
+
+/**
+ * A board's sections as a sub-navbar in the compose bar's place, so a page without one keeps the same height and its
+ * navigation stays at the bottom: each section's name, the showing one filled. POSITION is the pager's place among the
+ * sections (1.5 is halfway from the second to the third), so the fill follows a swipe. BADGES counts by section, as
+ * the tab bar counts what needs the user. A tap on a section goes there; on the one showing, it resets it.
+ */
+@Composable
+fun SectionBar(labels: List<String>, position: Float, palette: Look.Palette, badges: Map<Int, Int> = emptyMap(), onPick: (Int) -> Unit) {
+    val p = palette
+    val shape = if (p.console) RectangleShape else RoundedCornerShape(23.dp)
+    androidx.compose.foundation.layout.BoxWithConstraints(
+        Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp).height(46.dp)
+            .background(p.field, shape).border(1.dp, p.rule, shape).padding(4.dp),
+    ) {
+        val cell = maxWidth / labels.size
+        // The fill, sliding with the pager.
+        Box(
+            Modifier.offset { IntOffset((cell * position.coerceIn(0f, (labels.size - 1).toFloat())).roundToPx(), 0) }
+                .size(width = cell, height = maxHeight)
+                .background(p.pageInk, if (p.console) RectangleShape else RoundedCornerShape(19.dp)),
+        )
+        androidx.compose.foundation.layout.Row(Modifier.fillMaxSize()) {
+            labels.forEachIndexed { i, label ->
+                // Ink turns to paper as the fill passes under the name.
+                val under = (1f - kotlin.math.abs(position - i)).coerceIn(0f, 1f)
+                val ink = androidx.compose.ui.graphics.lerp(p.pageInk, p.page, under)
+                Box(
+                    Modifier.weight(1f).fillMaxSize()
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onPick(i) }
+                        .sectionTab(label, under > 0.5f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)) {
+                        androidx.compose.material3.Text(if (p.console && under > 0.5f) "[$label]" else label, style = p.type.button.copy(color = ink), maxLines = 1)
+                        // What needs the user, after the name, as the tab bar counts it.
+                        val n = badges[i] ?: 0
+                        if (n > 0) androidx.compose.material3.Text(
+                            "$n", fontSize = androidx.compose.ui.unit.TextUnit(10f, androidx.compose.ui.unit.TextUnitType.Sp),
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = p.page,
+                            modifier = Modifier.background(p.accent, androidx.compose.foundation.shape.CircleShape).padding(horizontal = 5.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A section's name as a tab for accessibility, selected when it shows. */
+private fun Modifier.sectionTab(label: String, on: Boolean) =
+    this.then(Modifier.semantics { contentDescription = label; role = Role.Tab; selected = on })

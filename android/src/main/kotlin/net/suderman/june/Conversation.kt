@@ -418,11 +418,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                                 Text("No agent terminals listed yet", color = palette.muted, fontSize = 14.sp)
                             }
                         }
-                        in AgentsSections.indices -> AgentsBoard(
-                            link, ready!!, palette, AgentsSections[page - first],
-                            onSection = { s -> pages.launch { pager.animateScrollToPage(first + AgentsSections.indexOf(s)) } },
-                            boardArea, reset = agentsReset,
-                        )
+                        in AgentsSections.indices -> AgentsBoard(link, ready!!, palette, AgentsSections[page - first], boardArea, reset = agentsReset)
                         chatPage + 1 -> ProjectsBoard(link, ready!!, palette, boardArea, reset = projectsReset)
                         else -> stripPage(inset)
                     }
@@ -435,6 +431,17 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
             }
         } else stripPage(Modifier.weight(1f).fillMaxWidth())
         if (link.notice.isNotEmpty()) Text(link.notice, color = Color(0xFFFFD36B), fontSize = 13.sp, modifier = Modifier.padding(vertical = 4.dp))
+        // The agents' sections in the compose bar's place, the same height, so every page keeps one height and their
+        // navigation stays at the bottom; out of sight while the keyboard is up, as the tab bar is.
+        if (boards && board in AgentsSections.indices && !typing) {
+            val clankers = link.agents?.optJSONArray("roster")?.length() ?: 0
+            val needs = link.agents?.optJSONArray("needs")?.length() ?: 0
+            SectionBar(
+                listOf("hosts", if (clankers > 0) "clankers $clankers" else "clankers", "activity"),
+                (pager.currentPage + pager.currentPageOffsetFraction - first).coerceIn(0f, (AgentsSections.size - 1).toFloat()),
+                palette, badges = mapOf(AgentsSections.indexOf("activity") to needs),
+            ) { i -> if (board == i) agentsReset++ else pages.launch { pager.animateScrollToPage(first + i) } }
+        }
         if (chat) {
         // The screen she was summoned over, offered for the next message: off until Jon adds it, since most messages do
         // not need the picture's tokens; gone once sent.
