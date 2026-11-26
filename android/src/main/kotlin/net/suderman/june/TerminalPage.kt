@@ -2,6 +2,7 @@ package net.suderman.june
 
 import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -139,11 +140,19 @@ private fun Agent.matches(t: TerminalTarget): Boolean =
 @Composable
 fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, active: Boolean, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val termColors = remember(palette.kind, palette.dark) { TerminalColors.of(palette) }
     var state by remember(target) { mutableStateOf<TerminalStream.State>(TerminalStream.State.Connecting) }
-    val view = remember(target) { TerminalView(context, Terminals.fontSize(context)) }
+    val view = remember(target) { TerminalView(context, Terminals.fontSize(context), termColors) }
     val stream = remember(target) { TerminalStream(context, target, view) { state = it } }
     var grid by remember(target) { mutableIntStateOf(0) }
     var zoomingSp by remember(target) { mutableStateOf<Float?>(null) }
+    LaunchedEffect(termColors) {
+        if (view.setColors(termColors) && active && state is TerminalStream.State.Attached) {
+            stream.stop()
+            stream.start(resumed = true)
+            stream.focus(true)
+        }
+    }
     DisposableEffect(target) {
         Terminals.remember(context, target)
         view.onGrid = { c, r, _, _ -> grid = c * 10_000 + r }
@@ -246,9 +255,25 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
             }
         }
     }
-    val ink = Color(0xFFCDD6F4)
-    val muted = Color(0xFF9399B2)
-    val action = Color(0xFF89B4FA)
+    val barBg = palette.page
+    val ink = palette.pageInk
+    val muted = palette.muted
+    val rule = palette.rule
+    val fieldBg = palette.field
+    val pillBg = when {
+        palette.neon -> Color(0xFF282242)
+        palette.console && palette.dark -> Color(0xFF262A33)
+        palette.console -> Color(0xFFE5E9EF)
+        else -> Color(0xFFE7DFD0)
+    }
+    val action = when {
+        palette.neon -> palette.line
+        palette.console -> palette.user
+        else -> palette.noteLine
+    }
+    val actionInk = if (palette.dark) palette.page else Color.White
+    val termBg = Color(termColors.background)
+    val termFg = Color(termColors.foreground)
     var attaching by remember { mutableStateOf(false) }
     var confirmClose by remember(target) { mutableStateOf(false) }
     var closing by remember(target) { mutableStateOf(false) }
@@ -258,9 +283,9 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
     LaunchedEffect(view) { view.onTap = { focus.clearFocus(true); stream.focus(true) } }
     // A pointer target over its whole area, so no tap falls through to the board beneath.
     Box(modifier) {
-    Column(Modifier.fillMaxSize().background(Color(0xFF1E1E2E)).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
-        Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).background(statusColour(here?.status ?: "", state), CircleShape))
+    Column(Modifier.fillMaxSize().background(termBg).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
+        Row(Modifier.fillMaxWidth().background(barBg).padding(horizontal = 10.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).background(statusColour(here?.status ?: "", state, palette), CircleShape))
             Text(
                 when {
                     here != null -> "${here.name} · ${here.detail} · ${here.status.ifEmpty { "unknown" }}"
@@ -271,13 +296,13 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Box {
-                BarIcon(SwitchIcon, "Switch pane", ink, fill = Color(0xFF313244)) { picking = true }
+                BarIcon(SwitchIcon, "Switch pane", ink, fill = pillBg) { picking = true }
                 DropdownMenu(picking, onDismissRequest = { picking = false }) {
                     if (agents.isEmpty()) DropdownMenuItem(text = { Text("No agents listed yet") }, onClick = { picking = false })
                     for (a in agents) DropdownMenuItem(
                         text = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(8.dp).background(statusColour(a.status, null), CircleShape))
+                                Box(Modifier.size(8.dp).background(statusColour(a.status, null, palette), CircleShape))
                                 Column(Modifier.padding(start = 10.dp)) {
                                     Text(a.name + if (a.matches(target)) "  ·  shown" else "", fontSize = 14.sp)
                                     Text("${a.detail} · ${a.status}" + a.worker.optString("title").let { if (it.isNotEmpty()) " · $it" else "" }, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -292,10 +317,11 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                 }
             }
         }
+        Box(Modifier.fillMaxWidth().heightIn(min = 1.dp, max = 1.dp).background(rule))
         // Files another app shared, waiting for Jon to send them here or switch first; and how sending is going.
         val shared = Drops.shared
         if (shared.isNotEmpty() || Drops.notice.isNotEmpty() || note.isNotEmpty()) Column(
-            Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().background(barBg).padding(horizontal = 10.dp, vertical = 4.dp),
         ) {
             if (shared.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -320,14 +346,18 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                     Text(
                         "%.1f sp".format(sp),
                         Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
-                            .background(Color(0xDD181825), RoundedCornerShape(8.dp))
+                            .background(barBg.copy(alpha = 0.92f), RoundedCornerShape(8.dp))
+                            .border(1.dp, rule, RoundedCornerShape(8.dp))
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                         color = ink, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
                     )
                 }
                 val s = state
                 if (s !is TerminalStream.State.Attached) Column(
-                    Modifier.align(Alignment.Center).padding(24.dp).background(Color(0xEE181825), RoundedCornerShape(10.dp)).padding(16.dp),
+                    Modifier.align(Alignment.Center).padding(24.dp)
+                        .background(barBg.copy(alpha = 0.94f), RoundedCornerShape(10.dp))
+                        .border(1.dp, rule, RoundedCornerShape(10.dp))
+                        .padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
@@ -341,27 +371,27 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                     )
                     // When June cannot show it (a session that ended, an old link), Termux can still attach or resume it.
                     if (s is TerminalStream.State.Closed && target.link.isNotEmpty()) Text(
-                        "open in Termux", Modifier.clickable { Links.termux(context, target.link) }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp,
+                        "open in Termux", Modifier.clickable { Links.termux(context, target.link) }.padding(6.dp), color = action, fontSize = 14.sp,
                     )
-                    if (s is TerminalStream.State.Closed) Text("try again", Modifier.clickable { stream.start() }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
+                    if (s is TerminalStream.State.Closed) Text("try again", Modifier.clickable { stream.start() }.padding(6.dp), color = action, fontSize = 14.sp)
                 }
             }
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
-                if (Terminals.keyRow(context) && WindowInsets.isImeVisible && !composing) KeyRow(view)
-                // Subtle top hairline so an expanded multi-line compose bar separates cleanly from the terminal behind it.
-                Box(Modifier.fillMaxWidth().heightIn(min = 1.dp, max = 1.dp).background(Color(0xFF313244)))
+                if (Terminals.keyRow(context) && WindowInsets.isImeVisible && !composing) KeyRow(view, barBg, ink, palette.busy, rule)
+                // Subtle top hairline so the compose bar separates cleanly from the dark terminal behind it.
+                Box(Modifier.fillMaxWidth().heightIn(min = 1.dp, max = 1.dp).background(rule))
                 // The compose bar, by the keyboard: + attaches, and the box writes a message with the keyboard's full help
                 // (autocorrect, moving the cursor, selecting), sent as one paste and then Enter. Tapping the terminal types
                 // into it directly, for keys and shortcuts.
                 Row(
-                    Modifier.fillMaxWidth().background(Color(0xFF181825)).onSizeChanged { size ->
+                    Modifier.fillMaxWidth().background(barBg).onSizeChanged { size ->
                         if (draft.isEmpty() || oneLineBarPx == 0 || size.height < oneLineBarPx) oneLineBarPx = size.height
                     }.padding(horizontal = 4.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.Bottom,
                 ) {
                     Box {
                         Box(
-                            Modifier.padding(start = 2.dp, end = 6.dp, bottom = 4.dp).size(40.dp).background(Color(0xFF313244), CircleShape)
+                            Modifier.padding(start = 2.dp, end = 6.dp, bottom = 4.dp).size(40.dp).background(pillBg, CircleShape)
                                 .clickable { attaching = true },
                             contentAlignment = Alignment.Center,
                         ) { androidx.compose.material3.Icon(AttachIcon, "Attach", Modifier.size(20.dp), tint = ink) }
@@ -376,7 +406,9 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                     val fieldStyle = androidx.compose.ui.text.TextStyle(color = ink, fontSize = 15.sp, lineHeight = 20.sp)
                     androidx.compose.foundation.text.BasicTextField(
                         draft, { draft = it; Terminals.drafts[target.key] = it },
-                        Modifier.weight(1f).padding(vertical = 4.dp).background(Color(0xFF1E1E2E), RoundedCornerShape(18.dp))
+                        Modifier.weight(1f).padding(vertical = 4.dp)
+                            .background(fieldBg, RoundedCornerShape(18.dp))
+                            .border(1.dp, rule, RoundedCornerShape(18.dp))
                             .padding(horizontal = 14.dp, vertical = 9.dp).onFocusChanged { composing = it.isFocused },
                         textStyle = fieldStyle,
                         cursorBrush = androidx.compose.ui.graphics.SolidColor(ink),
@@ -389,7 +421,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                     val ready = draft.isNotBlank() && attached
                     Box(
                         Modifier.padding(start = 6.dp, end = 2.dp, bottom = 4.dp).size(40.dp)
-                            .background(if (ready) action else Color(0xFF313244), CircleShape)
+                            .background(if (ready) action else pillBg, CircleShape)
                             .clickable(enabled = ready) {
                                 view.send(draft.trimEnd())
                                 draft = ""
@@ -397,7 +429,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        androidx.compose.material3.Icon(SendIcon, "Send", Modifier.size(20.dp), tint = if (ready) Color(0xFF1E1E2E) else muted)
+                        androidx.compose.material3.Icon(SendIcon, "Send", Modifier.size(20.dp), tint = if (ready) actionInk else muted)
                     }
                 }
             }
@@ -438,7 +470,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                             }
                         }
                     },
-                ) { Text("Close pane", color = Color(0xFFF38BA8)) }
+                ) { Text("Close pane", color = palette.fail) }
             },
         )
     }
@@ -446,7 +478,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
     copying?.let { text ->
         androidx.activity.compose.BackHandler { copying = null }
         CopySheet(
-            text, view, Modifier.matchParentSize(),
+            text, view, palette, termBg, termFg, action, Modifier.matchParentSize(),
             canKill = attached && !closing,
             onKill = { copying = null; confirmClose = true },
             close = { copying = null },
@@ -474,6 +506,10 @@ private fun BarIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, label
 private fun CopySheet(
     text: String,
     view: TerminalView,
+    palette: Look.Palette,
+    termBg: Color,
+    termFg: Color,
+    action: Color,
     modifier: Modifier,
     canKill: Boolean,
     onKill: () -> Unit,
@@ -486,11 +522,11 @@ private fun CopySheet(
     val density = androidx.compose.ui.platform.LocalDensity.current
     val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
     val scroll = androidx.compose.foundation.rememberScrollState()
-    val style = remember(view, view.textSize) {
+    val style = remember(view, view.textSize, termFg) {
         val advance = android.graphics.Paint().apply { typeface = view.face; textSize = view.textSize }.measureText("M")
         with(density) {
             androidx.compose.ui.text.TextStyle(
-                color = Color(0xFFCDD6F4),
+                color = termFg,
                 fontFamily = FontFamily(androidx.compose.ui.text.font.Typeface(view.face)),
                 fontSize = view.textSize.toSp(),
                 lineHeight = view.cellHeight.toFloat().toSp(),
@@ -503,14 +539,13 @@ private fun CopySheet(
     }
     // Half a cell spare, so rounding never wraps a line that filled the terminal.
     val width = with(density) { (view.cols.coerceAtLeast(1) * view.cellWidth + view.cellWidth / 2).toDp() }
-    val action = Color(0xFF89B4FA)
-    val muted = Color(0xFF9399B2)
+    val muted = palette.muted
     run {
-        Column(modifier.background(Color(0xFF1E1E2E)).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
-            Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier.background(termBg).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
+            Row(Modifier.fillMaxWidth().background(palette.page).padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Select to copy", Modifier.weight(1f), color = muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (canKill) {
-                    BarIcon(TrashIcon, "Close pane", Color(0xFFF38BA8)) { onKill() }
+                    BarIcon(TrashIcon, "Close pane", palette.fail) { onKill() }
                     androidx.compose.foundation.layout.Spacer(Modifier.width(10.dp))
                 }
                 if (kotlin.math.abs(view.fontSp - TerminalView.DEFAULT_SP) > 0.3f) BarIcon(ResetZoomIcon, "Reset zoom", action) { resetZoom() }
@@ -523,6 +558,7 @@ private fun CopySheet(
                 BarIcon(CopyIcon, "Copy all", action) { clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text)); close() }
                 BarIcon(CloseIcon, "Close", muted) { close() }
             }
+            Box(Modifier.fillMaxWidth().heightIn(min = 1.dp, max = 1.dp).background(palette.rule))
             // Scrolled from the bottom, so the latest lines stay in view whatever the sheet's height.
             Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll, reverseScrolling = true), contentAlignment = Alignment.TopCenter) {
                 androidx.compose.foundation.text.selection.SelectionContainer {
@@ -534,13 +570,12 @@ private fun CopySheet(
 }
 
 @Composable
-private fun KeyRow(view: TerminalView) {
+private fun KeyRow(view: TerminalView, barBg: Color, off: Color, on: Color, rule: Color) {
     var ctrl by remember { mutableStateOf(false) }
     var alt by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { view.onModifiersUsed = { ctrl = false; alt = false } }
-    val on = Color(0xFFF9E2AF)
-    val off = Color(0xFFCDD6F4)
-    Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+    Box(Modifier.fillMaxWidth().heightIn(min = 1.dp, max = 1.dp).background(rule))
+    Row(Modifier.fillMaxWidth().background(barBg).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
         @Composable
         fun key(label: String, lit: Boolean = false, act: () -> Unit) = Text(
             label, Modifier.weight(1f).clickable(onClick = act).padding(vertical = 12.dp), color = if (lit) on else off, fontSize = 14.sp,
@@ -558,14 +593,14 @@ private fun KeyRow(view: TerminalView) {
     }
 }
 
-private fun statusColour(status: String, state: TerminalStream.State?): Color = when {
-    state is TerminalStream.State.Closed -> Color(0xFF6C7086)
-    state is TerminalStream.State.Dropped || state is TerminalStream.State.Connecting -> Color(0xFFF9E2AF)
-    status == "working" -> Color(0xFF89B4FA)
-    status == "blocked" -> Color(0xFFF38BA8)
-    status == "done" -> Color(0xFFA6E3A1)
-    status == "idle" -> Color(0xFF9399B2)
-    else -> Color(0xFF6C7086)
+private fun statusColour(status: String, state: TerminalStream.State?, palette: Look.Palette): Color = when {
+    state is TerminalStream.State.Closed -> palette.muted
+    state is TerminalStream.State.Dropped || state is TerminalStream.State.Connecting -> palette.busy
+    status == "working" -> palette.tone("PROG")
+    status == "blocked" -> palette.fail
+    status == "done" -> palette.ok
+    status == "idle" -> palette.muted
+    else -> palette.muted
 }
 
 private fun iconOf(name: String, path: String) = androidx.compose.ui.graphics.vector.ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)

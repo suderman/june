@@ -399,8 +399,8 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                             // One page per terminal: its view and stream belong to that target.
                             if (target != null) androidx.compose.runtime.key(target) {
                                 TerminalPage(link, target, palette, active = pager.settledPage == 0, modifier = Modifier.fillMaxSize())
-                            } else Box(Modifier.fillMaxSize().background(Color(0xFF1E1E2E)), contentAlignment = Alignment.Center) {
-                                Text("No agent terminals listed yet", color = Color(0xFF9399B2), fontSize = 14.sp)
+                            } else Box(Modifier.fillMaxSize().background(palette.page), contentAlignment = Alignment.Center) {
+                                Text("No agent terminals listed yet", color = palette.muted, fontSize = 14.sp)
                             }
                         }
                         0 -> AgentsBoard(link, ready!!, palette, inset)

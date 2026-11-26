@@ -27,7 +27,47 @@ import kotlin.math.floor
  * current keyboard modes. The view is also the keyboard's target, through its own input connection. The grid follows
  * the view's size, reported through [onGrid]. The drawing and input handling follow T3 Code's Android terminal (MIT).
  */
-class TerminalView(context: Context, initialSp: Float = DEFAULT_SP) : View(context) {
+/** The terminal grid's dark palette: always dark so TUIs stay readable, tuned to June's look. */
+data class TerminalColors(val foreground: Int, val background: Int, val cursor: Int, val selection: Int, val ansi: IntArray) {
+    companion object {
+        private fun argb(vararg rgb: Int) = rgb.map { it or 0xFF000000.toInt() }.toIntArray()
+
+        fun of(palette: Look.Palette): TerminalColors = when {
+            palette.neon -> TerminalColors(
+                foreground = 0xFFF4EEFF.toInt(),
+                background = 0xFF12101C.toInt(),
+                cursor = 0xFFB48CFF.toInt(),
+                selection = 0xFF3A2B66.toInt(),
+                ansi = argb(
+                    0x1C1830, 0xFF5C7A, 0xA8F05A, 0xFFC247, 0x6FA8FF, 0xB48CFF, 0x3FE0F0, 0xF4EEFF,
+                    0x584E82, 0xFF7591, 0xB8F573, 0xFFD166, 0x89BDFF, 0xC9A8FF, 0x6BEBF7, 0xFFFFFF,
+                ),
+            )
+            palette.console && palette.dark -> TerminalColors(
+                foreground = 0xFFD7DBE3.toInt(),
+                background = 0xFF121418.toInt(),
+                cursor = 0xFF8FB4FF.toInt(),
+                selection = 0xFF2D3B55.toInt(),
+                ansi = argb(
+                    0x1A1D23, 0xFF8F80, 0x86E08F, 0xFFD36B, 0x8FB4FF, 0xC9A8FF, 0x6FD6C8, 0xD7DBE3,
+                    0x5C6577, 0xFFA599, 0x9EE8A6, 0xFFDF8E, 0xA8C6FF, 0xD9C0FF, 0x8CE3D8, 0xFFFFFF,
+                ),
+            )
+            else -> TerminalColors(
+                foreground = 0xFFE4E8F2.toInt(),
+                background = 0xFF1B1E2B.toInt(),
+                cursor = 0xFF89B4FA.toInt(),
+                selection = 0xFF3B4F7A.toInt(),
+                ansi = argb(
+                    0x1F2433, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xCBA6F7, 0x94E2D5, 0xE4E8F2,
+                    0x5B6683, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xCBA6F7, 0x94E2D5, 0xFFFFFF,
+                ),
+            )
+        }
+    }
+}
+
+class TerminalView(context: Context, initialSp: Float = DEFAULT_SP, colors: TerminalColors = TerminalColors.of(Look.palette(console = false, dark = true))) : View(context) {
     /** Bytes for the program; AUTO marks the emulator's own replies rather than typing. */
     var onInput: (ByteArray, Boolean) -> Unit = { _, _ -> }
     /** The grid fits the view: columns and rows, and the cell size in pixels. */
@@ -48,14 +88,28 @@ class TerminalView(context: Context, initialSp: Float = DEFAULT_SP) : View(conte
     /** An image from the keyboard (its clipboard, a screenshot, a sticker): the page sends it to the agent. */
     var onImage: (android.view.inputmethod.InputContentInfo, Int) -> Unit = { _, _ -> }
 
-    // The desktop terminal's colours (kitty's theme on kit), so agents look as they do there.
-    val foreground = Color.parseColor("#CDD6F4")
-    val background = Color.parseColor("#1E1E2E")
-    val cursorColor = Color.parseColor("#CDD6F4")
-    private val palette = intArrayOf(
-        0x1E1E2E, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xCBA6F7, 0x94E2D5, 0xCDD6F4,
-        0x45475A, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xCBA6F7, 0x94E2D5, 0xB4BEFE,
-    ).map { it or 0xFF000000.toInt() }.toIntArray()
+    // Dark terminal colours tuned to June's look (always dark so shared TUIs stay readable).
+    var foreground = colors.foreground
+        private set
+    var background = colors.background
+        private set
+    var cursorColor = colors.cursor
+        private set
+    private var selectionColor = colors.selection
+    private var palette = colors.ansi
+
+    /** Apply a new palette; takes effect on background immediately and on native cells at next reset/attach. */
+    fun setColors(colors: TerminalColors): Boolean {
+        if (colors.background == background && colors.foreground == foreground && colors.cursor == cursorColor) return false
+        foreground = colors.foreground
+        background = colors.background
+        cursorColor = colors.cursor
+        selectionColor = colors.selection
+        palette = colors.ansi
+        setBackgroundColor(background)
+        postInvalidateOnAnimation()
+        return true
+    }
 
     private val faces = Faces.load(context)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -203,7 +257,7 @@ class TerminalView(context: Context, initialSp: Float = DEFAULT_SP) : View(conte
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fill)
         val left = (paddingLeft + offsetX).toFloat()
         val top = paddingTop.toFloat()
-        val selectedBg = Color.parseColor("#3B4F7A")
+        val selectedBg = selectionColor
         if (runChars.size < cs) runChars = CharArray(cs)
         // Style flags that affect glyph rendering: bold, italic, strikethrough, underline.
         val styleMask = 1 or 2 or (1 shl 5) or (1 shl 7)
