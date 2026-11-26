@@ -12,7 +12,7 @@ import androidx.compose.runtime.setValue
 import java.io.ByteArrayOutputStream
 
 /** A picture or file waiting to go with the next message: pictures as base64 JPEG, files as they are. */
-class Attachment(val name: String, val mimeType: String, val data: String, val thumb: Bitmap?) {
+class Attachment(val name: String, val mimeType: String, val data: String, val thumb: Bitmap?, val mediaId: Long? = null) {
     val picture get() = thumb != null
 }
 
@@ -100,16 +100,16 @@ object Outbox {
     fun base64(): Long = items.sumOf { it.data.length.toLong() }
 
     /** A picture as JPEG at most LONG_SIDE on its long side, with a small thumbnail for the strip above the input. */
-    fun picture(context: Context, uri: Uri, name: String): Attachment {
+    fun picture(context: Context, uri: Uri, name: String, mediaId: Long? = null): Attachment {
         val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             val scale = minOf(1f, LONG_SIDE.toFloat() / maxOf(info.size.width, info.size.height))
             if (scale < 1f) decoder.setTargetSize((info.size.width * scale).toInt(), (info.size.height * scale).toInt())
         }
-        return picture(bitmap, name)
+        return picture(bitmap, name, mediaId)
     }
 
-    fun picture(bitmap: Bitmap, name: String): Attachment {
+    fun picture(bitmap: Bitmap, name: String, mediaId: Long? = null): Attachment {
         val soft = if (bitmap.config == Bitmap.Config.HARDWARE) bitmap.copy(Bitmap.Config.ARGB_8888, false) else bitmap
         val scale = minOf(1f, LONG_SIDE.toFloat() / maxOf(soft.width, soft.height))
         val sized = if (scale < 1f) Bitmap.createScaledBitmap(soft, (soft.width * scale).toInt(), (soft.height * scale).toInt(), true) else soft
@@ -117,7 +117,7 @@ object Outbox {
         sized.compress(Bitmap.CompressFormat.JPEG, 82, out)
         val t = 120f / maxOf(sized.width, sized.height)
         val thumb = Bitmap.createScaledBitmap(sized, maxOf(1, (sized.width * t).toInt()), maxOf(1, (sized.height * t).toInt()), true)
-        return Attachment(name, "image/jpeg", Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP), thumb)
+        return Attachment(name, "image/jpeg", Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP), thumb, mediaId)
     }
 
     private fun describe(context: Context, uri: Uri): Pair<String, Long?> {
@@ -132,5 +132,39 @@ object Outbox {
             }
         }
         return name to size
+    }
+}
+
+/**
+ * The share sheet's "June": shared images, files, or text go into [Outbox] and June opens on the chat tab ready to
+ * review and send.
+ */
+class ChatShareActivity : androidx.activity.ComponentActivity() {
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (savedInstanceState != null) return finish()
+        val uris = when (intent.action) {
+            android.content.Intent.ACTION_SEND -> listOfNotNull(intent.getParcelableExtra(android.content.Intent.EXTRA_STREAM, Uri::class.java))
+            android.content.Intent.ACTION_SEND_MULTIPLE -> intent.getParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+            else -> emptyList()
+        }
+        val text = intent.getStringExtra(android.content.Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() }
+        if (uris.isEmpty() && text == null) return finish()
+        val alreadyPictures = Outbox.pictures.size
+        val alreadyFiles = Outbox.files.size
+        val alreadyBase64 = Outbox.base64()
+        Thread {
+            val (added, refused) = if (uris.isNotEmpty()) Outbox.read(this, uris, alreadyPictures, alreadyFiles, alreadyBase64) else emptyList<Attachment>() to emptyList()
+            runOnUiThread {
+                for (item in added) Outbox.add(item)
+                if (refused.isNotEmpty()) Outbox.notice = refused.joinToString("; ")
+                if (text != null) Outbox.draft = if (Outbox.draft.isBlank()) text else "${Outbox.draft}\n$text"
+                startActivity(
+                    android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("june://chat")).setClass(this, ConversationActivity::class.java)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                )
+                finish()
+            }
+        }.start()
     }
 }

@@ -259,7 +259,6 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
     val ink = palette.pageInk
     val muted = palette.muted
     val rule = palette.rule
-    val fieldBg = palette.field
     val pillBg = when {
         palette.neon -> Color(0xFF282242)
         palette.console && palette.dark -> Color(0xFF262A33)
@@ -271,10 +270,8 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
         palette.console -> palette.user
         else -> palette.noteLine
     }
-    val actionInk = if (palette.dark) palette.page else Color.White
     val termBg = Color(termColors.background)
     val termFg = Color(termColors.foreground)
-    var attaching by remember { mutableStateOf(false) }
     var confirmClose by remember(target) { mutableStateOf(false) }
     var closing by remember(target) { mutableStateOf(false) }
     // Whether the compose box has the keyboard; a tap on the terminal takes it back.
@@ -338,7 +335,15 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
         // bar expands upward over the bottom of the terminal instead of resizing the grid and forcing the agent to redraw.
         var oneLineBarPx by remember { mutableIntStateOf(0) }
         val oneLineBarDp = with(androidx.compose.ui.platform.LocalDensity.current) { oneLineBarPx.toDp() }
-        var draft by remember(target) { mutableStateOf(Terminals.drafts[target.key] ?: "") }
+        var draft by remember(target) {
+            val saved = Terminals.drafts[target.key] ?: ""
+            mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(saved, androidx.compose.ui.text.TextRange(saved.length)))
+        }
+        // Track gallery images quick-attached during this turn so repeated taps attach 1st, 2nd, 3rd newest.
+        val recentAttached = remember(target) { mutableSetOf<Long>() }
+        val agentName = (here?.name?.takeIf { it.isNotBlank() }
+            ?: (state as? TerminalStream.State.Attached)?.agent?.takeIf { it.isNotBlank() }
+            ?: "agent").lowercase()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             Box(Modifier.fillMaxSize().padding(bottom = oneLineBarDp)) {
                 AndroidView({ view }, Modifier.fillMaxSize().clipToBounds())
@@ -380,56 +385,40 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                 if (Terminals.keyRow(context) && WindowInsets.isImeVisible && !composing) KeyRow(view, barBg, ink, palette.busy, rule)
                 // Subtle top hairline so the compose bar separates cleanly from the dark terminal behind it.
                 Box(Modifier.fillMaxWidth().heightIn(min = 1.dp, max = 1.dp).background(rule))
-                // The compose bar, by the keyboard: + attaches, and the box writes a message with the keyboard's full help
-                // (autocorrect, moving the cursor, selecting), sent as one paste and then Enter. Tapping the terminal types
-                // into it directly, for keys and shortcuts.
-                Row(
+                // Shared Muse-style rounded compose bar: plus + quick recent-screenshot on the left, newline-capable
+                // field in the middle ("to <name>..."), and circular up-arrow send on the right.
+                Box(
                     Modifier.fillMaxWidth().background(barBg).onSizeChanged { size ->
-                        if (draft.isEmpty() || oneLineBarPx == 0 || size.height < oneLineBarPx) oneLineBarPx = size.height
-                    }.padding(horizontal = 4.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.Bottom,
+                        if (draft.text.isEmpty() || oneLineBarPx == 0 || size.height < oneLineBarPx) oneLineBarPx = size.height
+                    }.padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
-                    Box {
-                        Box(
-                            Modifier.padding(start = 2.dp, end = 6.dp, bottom = 4.dp).size(40.dp).background(pillBg, CircleShape)
-                                .clickable { attaching = true },
-                            contentAlignment = Alignment.Center,
-                        ) { androidx.compose.material3.Icon(AttachIcon, "Attach", Modifier.size(20.dp), tint = ink) }
-                        DropdownMenu(attaching, onDismissRequest = { attaching = false }) {
-                            DropdownMenuItem(text = { Text("Photos and screenshots") }, onClick = {
-                                attaching = false
-                                photos.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
-                            })
-                            DropdownMenuItem(text = { Text("Files") }, onClick = { attaching = false; files.launch(arrayOf("*/*")) })
-                        }
-                    }
-                    val fieldStyle = androidx.compose.ui.text.TextStyle(color = ink, fontSize = 15.sp, lineHeight = 20.sp)
-                    androidx.compose.foundation.text.BasicTextField(
-                        draft, { draft = it; Terminals.drafts[target.key] = it },
-                        Modifier.weight(1f).padding(vertical = 4.dp)
-                            .background(fieldBg, RoundedCornerShape(18.dp))
-                            .border(1.dp, rule, RoundedCornerShape(18.dp))
-                            .padding(horizontal = 14.dp, vertical = 9.dp).onFocusChanged { composing = it.isFocused },
-                        textStyle = fieldStyle,
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(ink),
-                        maxLines = 6,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
-                        // The hint in the field's own style: a taller one would change the bar's height, and so the terminal's
-                        // rows, with the first letter typed or the last one deleted, making the program redraw.
-                        decorationBox = { field -> Box { if (draft.isEmpty()) androidx.compose.foundation.text.BasicText("Message the agent", style = fieldStyle.copy(color = muted)); field() } },
-                    )
-                    val ready = draft.isNotBlank() && attached
-                    Box(
-                        Modifier.padding(start = 6.dp, end = 2.dp, bottom = 4.dp).size(40.dp)
-                            .background(if (ready) action else pillBg, CircleShape)
-                            .clickable(enabled = ready) {
-                                view.send(draft.trimEnd())
-                                draft = ""
-                                Terminals.drafts.remove(target.key)
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        androidx.compose.material3.Icon(SendIcon, "Send", Modifier.size(20.dp), tint = if (ready) actionInk else muted)
+                    ComposeBar(
+                        value = draft,
+                        onValueChange = { draft = it; Terminals.drafts[target.key] = it.text },
+                        placeholder = "to $agentName...",
+                        palette = palette,
+                        canSend = draft.text.isNotBlank() && attached,
+                        onSend = {
+                            view.send(draft.text.trimEnd())
+                            draft = androidx.compose.ui.text.input.TextFieldValue("")
+                            Terminals.drafts.remove(target.key)
+                            recentAttached.clear()
+                        },
+                        onRecentImage = {
+                            val next = RecentGallery.nextImage(context, recentAttached)
+                            if (next == null) note = "no more recent images"
+                            else {
+                                recentAttached.add(next.id)
+                                take { Drops.read(context, listOf(next.uri)) }
+                            }
+                        },
+                        onFocusChange = { composing = it },
+                    ) { dismiss ->
+                        DropdownMenuItem(text = { Text("Photos and screenshots") }, onClick = {
+                            dismiss()
+                            photos.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        })
+                        DropdownMenuItem(text = { Text("Files") }, onClick = { dismiss(); files.launch(arrayOf("*/*")) })
                     }
                 }
             }
@@ -609,9 +598,6 @@ private fun iconOf(name: String, path: String) = androidx.compose.ui.graphics.ve
 
 /** A paperclip, as Material's Attach File icon draws it. */
 private val AttachIcon by lazy { iconOf("Attach", "M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z") }
-
-/** A paper plane, as Material's Send icon draws it. */
-private val SendIcon by lazy { iconOf("Send", "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z") }
 
 /** Swap arrows for switching agent terminal panes. */
 private val SwitchIcon by lazy { iconOf("Switch", "M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z") }

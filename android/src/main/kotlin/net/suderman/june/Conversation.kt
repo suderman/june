@@ -455,15 +455,40 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
             }
         }
         if (Outbox.notice.isNotEmpty()) Text("not attached: ${Outbox.notice}", color = palette.accent, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
-        // One rounded field, as Muse has it: the attach button inside on the left, and no send button, since return
-        // sends; alt+return starts a new line.
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = if (boards) 4.dp else 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            var choosing by remember { mutableStateOf(false) }
+        // Shared Muse-style rounded compose bar: plus + quick recent-screenshot on the left, newline-capable field in
+        // the middle, circular up-arrow send on the right, and a stop button beside it while June is working.
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = if (boards) 4.dp else 10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val anything = Outbox.draft.isNotBlank() || showing != null || waiting.isNotEmpty()
+            val canSend = link.status is LinkStatus.Linked && anything
             val send = {
-                val anything = Outbox.draft.isNotBlank() || showing != null || waiting.isNotEmpty()
-                if (link.status is LinkStatus.Linked && anything && link.submit(Outbox.draft, images = Outbox.pictures.map { it.data } + listOfNotNull(showing?.jpeg()), files = Outbox.files)) {
+                if (canSend && link.submit(Outbox.draft, images = Outbox.pictures.map { it.data } + listOfNotNull(showing?.jpeg()), files = Outbox.files)) {
                     Outbox.clear()
                     if (showing != null) used = true
+                }
+            }
+            // Track in-flight recent-image IDs so rapid taps step cleanly through 1st, 2nd, 3rd newest screenshots.
+            val pendingRecent = remember { mutableSetOf<Long>() }
+            val addRecent = {
+                val already = Outbox.items.mapNotNull { it.mediaId }.toSet() + pendingRecent
+                val next = RecentGallery.nextImage(context, already)
+                if (next == null) {
+                    Outbox.notice = "no more recent images"
+                } else if (Outbox.pictures.size >= Outbox.MAX_PICTURES) {
+                    Outbox.notice = "at most ${Outbox.MAX_PICTURES} pictures a message"
+                } else {
+                    pendingRecent.add(next.id)
+                    val base64 = Outbox.base64()
+                    Thread {
+                        val item = runCatching { Outbox.picture(context, next.uri, "recent-${next.id}.jpg", mediaId = next.id) }.getOrNull()
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            pendingRecent.remove(next.id)
+                            when {
+                                item == null -> Outbox.notice = "recent image could not be read"
+                                base64 + item.data.length > Outbox.MAX_BASE64 -> Outbox.notice = "one message carries at most 30 MiB of attachments"
+                                else -> { Outbox.notice = ""; Outbox.add(item) }
+                            }
+                        }
+                    }.start()
                 }
             }
             // The field keeps its cursor; the outbox keeps the words, so they outlast the chat page and the screen.
@@ -478,53 +503,35 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                     keyboard?.show()
                 }
             }
-            androidx.compose.material3.TextField(
-                field, { field = it; Outbox.draft = it.text },
-                Modifier.weight(1f).focusRequester(words).onPreviewKeyEvent { e ->
-                    if (e.key != Key.Enter && e.key != Key.NumPadEnter) return@onPreviewKeyEvent false
-                    if (e.type == KeyEventType.KeyDown) {
-                        if (e.isAltPressed || e.isShiftPressed) {
-                            val at = field.selection
-                            val text = field.text.replaceRange(at.min, at.max, "\n")
-                            field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(at.min + 1))
-                            Outbox.draft = text
-                        } else send()
-                    }
-                    true
-                },
-                placeholder = { Text(if (showing != null) "about this screen…" else "to june…") },
-                leadingIcon = {
-                    Box {
-                        Text("+", fontSize = 24.sp, color = palette.pageInk, modifier = Modifier.clickable { choosing = true }.padding(horizontal = 10.dp, vertical = 2.dp))
-                        androidx.compose.material3.DropdownMenu(choosing, { choosing = false }) {
-                            for ((source, label) in listOf("camera" to "camera", "photos" to "photos", "files" to "files")) androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(label) },
-                                onClick = {
-                                    choosing = false
-                                    // The screen goes with the rest if Jon added it: the sheet forgets it once it hides.
-                                    if (showing != null) {
-                                        Outbox.add(Outbox.picture(showing.picture, "screen from ${showing.app}"))
-                                        used = true
-                                    }
-                                    AttachActivity.open(context, source, fromSheet)
-                                    if (fromSheet) leave()
-                                },
-                            )
+            ComposeBar(
+                value = field,
+                onValueChange = { field = it; Outbox.draft = it.text },
+                placeholder = if (showing != null) "about this screen..." else "to june...",
+                palette = palette,
+                canSend = canSend,
+                onSend = send,
+                onRecentImage = addRecent,
+                modifier = Modifier.weight(1f),
+                fieldModifier = Modifier.focusRequester(words),
+            ) { dismiss ->
+                for ((source, label) in listOf("camera" to "camera", "photos" to "photos", "files" to "files")) androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        dismiss()
+                        // The screen goes with the rest if Jon added it: the sheet forgets it once it hides.
+                        if (showing != null) {
+                            Outbox.add(Outbox.picture(showing.picture, "screen from ${showing.app}"))
+                            used = true
                         }
-                    }
-                },
-                maxLines = 5,
-                shape = RoundedCornerShape(24.dp),
-                colors = androidx.compose.material3.TextFieldDefaults.colors(
-                    focusedContainerColor = palette.field, unfocusedContainerColor = palette.field,
-                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
-                    focusedTextColor = palette.pageInk, unfocusedTextColor = palette.pageInk,
-                    focusedPlaceholderColor = palette.muted, unfocusedPlaceholderColor = palette.muted,
-                ),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { send() }),
-            )
-            if (link.state.running || link.state.compacting) OutlinedButton(onClick = link::stop) { Text("Stop") }
+                        AttachActivity.open(context, source, fromSheet)
+                        if (fromSheet) leave()
+                    },
+                )
+            }
+            if (link.state.running || link.state.compacting) Box(
+                Modifier.padding(bottom = 5.dp).size(36.dp).background(palette.accent, androidx.compose.foundation.shape.CircleShape).clickable(onClick = link::stop),
+                contentAlignment = Alignment.Center,
+            ) { androidx.compose.material3.Icon(StopSquareIcon, "Stop", Modifier.size(18.dp), tint = if (palette.dark) palette.page else Color.White) }
         }
         }
     }
