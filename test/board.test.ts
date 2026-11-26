@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { fauxProvider } from "@earendil-works/pi-ai";
-import { Boards, loadAgenda, parseDialog, parseLoad, reviewKey, shapeAgenda, shapeAgents, type Agenda, type Task } from "../src/board.ts";
+import { Boards, loadAgenda, parseDialog, parseLoad, reviewKey, shapeAgenda, shapeAgents, type Agenda, type Task, deployPlaces } from "../src/board.ts";
 import { Client } from "../src/protocol.ts";
 import { recordRunEnd, recordRunStart } from "../src/runs.ts";
 import { createLogger } from "../src/runtime.ts";
@@ -333,4 +333,14 @@ test("a host's load is the CPU it spent since the last look and the memory in us
 	const second = parseLoad(text(1300, 8600), first.sample);
 	assert.deepEqual(second.load, { cpu: 35, mem: 11.4, memTotal: 30.5 }, "300 of 900 ticks busy is 33%, shown as 35");
 	assert.deepEqual(parseLoad("nonsense"), {});
+});
+
+test("deploy places are where sessions work now, the busiest first, then each checkout under ~/src", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const home = tmp.dir;
+	for (const d of ["src/suderman/june", "src/suderman/nixos", "src/nonfiction/site", "src/.cache/x"]) await mkdir(join(home, d), { recursive: true });
+	const workers = [{ cwd: `${home}/org` }, { cwd: `${home}/src/suderman/june` }, { cwd: `${home}/src/suderman/june` }, { cwd: home }, {}];
+	assert.deepEqual(deployPlaces(workers, home), ["~/src/suderman/june", "~/org", "~/src/nonfiction/site", "~/src/suderman/nixos"]);
+	assert.deepEqual(deployPlaces([], join(home, "none")), [], "no ~/src, no checkouts");
 });

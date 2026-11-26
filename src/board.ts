@@ -2,7 +2,8 @@
 // agenda by Org's own rules (org/agenda/june-agenda.el); hc reports the agents. Both are read-only here: edits go through
 // org-edit. A board is computed on request, and kept fresh while a client subscribes.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, renameSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { accountsConfig, parseAccountsOrg, sharedQuotas, status as accountStatus, type Quota, type SlotStatus } from "./accounts.ts";
 import { type Config, protectedOf, shortHostname } from "./config.ts";
@@ -114,7 +115,23 @@ export type Agents = {
 	roster?: RosterEntry[];
 	/** Each harness with a login and its battery, for a raw session on any host: the same accounts are on every host. */
 	harnesses?: { harness: string; battery: RosterBattery }[];
+	/** Folders to offer when deploying a session (deployPlaces). */
+	places?: string[];
 };
+
+/**
+ * Folders to offer when deploying, as ~/ paths: where sessions work now, the busiest first, then each checkout under
+ * ~/src/OWNER/REPO here. Home is always offered beside them, so it is not one.
+ */
+export function deployPlaces(workers: readonly { cwd?: string }[], home = homedir(), limit = 40): string[] {
+	const tilde = (dir: string) => (dir === home ? "~" : dir.startsWith(home + "/") ? "~" + dir.slice(home.length) : dir);
+	const count = new Map<string, number>();
+	for (const w of workers) if (w.cwd && w.cwd !== home) count.set(tilde(w.cwd), (count.get(tilde(w.cwd)) ?? 0) + 1);
+	const working = [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([d]) => d);
+	const dirs = (path: string) => { try { return readdirSync(path, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith(".")).map((d) => d.name).sort(); } catch { return []; } };
+	const checkouts = dirs(join(home, "src")).flatMap((owner) => dirs(join(home, "src", owner)).map((repo) => `~/src/${owner}/${repo}`));
+	return [...new Set([...working, ...checkouts])].slice(0, limit);
+}
 
 /** A host work goes to: whether hc answered, and its load when it could be read. */
 export type Host = { host: string; ok: boolean; error?: string; load?: Load };
@@ -457,6 +474,11 @@ export class Boards {
 		return this.#refreshAgenda();
 	}
 
+	/** The herdr-core client the boards read agents through, for starting sessions from them. */
+	get herdr(): Herdr {
+		return this.#o.herdr;
+	}
+
 	/** The agents, with hc checked again once they are `maxAgeMs` old; a subscription checks every `agentsMs`. */
 	async agents(maxAgeMs = 20_000): Promise<Held<Agents>> {
 		await this.agenda();
@@ -771,7 +793,8 @@ export class Boards {
 			const dispatch = { hosts: [...hosts], ...(host ?? hosts[0] ? { host: host ?? hosts[0] } : {}), agents: [...(agents ?? [agent ?? "pi"])] };
 			const { roster, workers } = this.#readRoster(agenda);
 			const harnesses = this.#roster ? harnessBatteries(this.#roster.logins, this.#roster.quotas) : [];
-			const value = { ...shapeAgents({ workers, hosts: this.#workers.hosts, agenda, seen: this.#seen.marks(), user: this.#o.config.user.name ?? "" }), dispatch, ...(roster !== undefined ? { roster } : {}), ...(harnesses.length ? { harnesses } : {}) };
+			const places = deployPlaces(workers);
+			const value = { ...shapeAgents({ workers, hosts: this.#workers.hosts, agenda, seen: this.#seen.marks(), user: this.#o.config.user.name ?? "" }), dispatch, ...(roster !== undefined ? { roster } : {}), ...(harnesses.length ? { harnesses } : {}), ...(places.length ? { places } : {}) };
 			this.#agents = hold(value, this.#agents);
 		}
 		const after = this.revisions();

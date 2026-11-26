@@ -65,6 +65,24 @@ export function normalizeTab(name) {
  * Shell command to focus or launch a desktop companion app ("terminal" for Herdr, "editor" for Emacs), respecting
  * optional JUNE_DESKTOP_TERMINAL / JUNE_DESKTOP_EDITOR overrides. Exits promptly so Process never stays busy.
  */
+/**
+ * The argv that shows a deployed session in the Herdr app on this desktop, as `herdr-link jump` shows one: the app is
+ * started if it is not running; a terminal hidden from it (no herdr.space label) joins the space it shows; the window
+ * comes forward; the agent is focused. HOST and TERMINAL are where it runs (kit, t7); one on another host is HOST/t7
+ * to this machine's hc. Arguments go to the script as $1 and $2, never into its text.
+ */
+export function showDeployedCommand(host, terminal) {
+	const script = [
+		'here=$(hostname -s 2>/dev/null || hostname); [ "$1" = "$here" ] && a="$2" || a="$1/$2"',
+		'if ! herdr-app status >/dev/null 2>&1; then setsid -f herdr-app >/dev/null 2>&1 </dev/null; i=0; while [ $i -lt 40 ] && ! herdr-app status >/dev/null 2>&1; do sleep 0.25; i=$((i+1)); done; fi',
+		'space=$(herdr-app status 2>/dev/null | sed -n \'s/^  "space": "\\([^"]*\\)".*/\\1/p\')',
+		'if [ -n "$space" ] && ! hc get --json "$a" 2>/dev/null | grep -q \'"herdr.space"\'; then hc label "$a" "herdr.space=$space" >/dev/null 2>&1; fi',
+		'hyprctl dispatch \'hl.dsp.focus({ window = "class:herdr-app" })\' >/dev/null 2>&1 || hyprctl dispatch focuswindow "class:^herdr-app$" >/dev/null 2>&1',
+		'herdr-app do agent.focus --terminal "$a"',
+	].join("\n");
+	return ["sh", "-c", script, "june-show", String(host), String(terminal)];
+}
+
 export function appLaunchCommand(app, env) {
 	const overrides = env || {};
 	if (app === "terminal") {

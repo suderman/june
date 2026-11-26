@@ -81,6 +81,8 @@ export type Request =
 	| { op: "task"; requestId: string; key: string; edit: TaskEdit }
 	/** The user's edit of a clanker (create, update, or destroy one in clankers/). */
 	| { op: "roster"; requestId: string; edit: RosterEdit }
+	/** Start a session from the boards (src/deploy.ts): a CLANKER, or HARNESS on HOST, in DIR; a working clanker is visited. */
+	| { op: "deploy"; requestId: string; host?: string; harness?: string; clanker?: string; dir?: string }
 	/** Devices allowed on the WebSocket: Unix socket only. `add` answers with the new token, once. */
 	| { op: "device"; requestId: string; action: "add" | "list" | "revoke"; name?: string }
 	/** A device's offer to act on itself for June's `phone` tool, until the connection closes: WebSocket only. */
@@ -136,6 +138,8 @@ export type Reply =
 	| { type: "task"; requestId: string; key: string; from?: string; text: string }
 	/** A clanker edit saved in clankers/; `slug` is the saved clanker's slug for saves. */
 	| { type: "roster"; requestId: string; slug?: string }
+	/** Where a deployed session runs: its host and terminal, whether it was already running, and whether hc lists it yet. */
+	| { type: "deploy"; requestId: string; host: string; terminal: string; existing?: boolean; listed: boolean }
 	| { type: "push"; requestId: string }
 	| { type: "accepted"; requestId: string; submissionId: number }
 	| { type: "settled"; requestId: string; status: "done" | "unanswered"; text?: string; reason?: string }

@@ -19,6 +19,15 @@ Item {
   property string mode: "activity"
   // The host whose page is open, or "".
   property string hostKey: ""
+  // Deploying from a sheet: the host's harness, or the open clanker; DEPLOYASKED once a folder is picked, so the
+  // picker closes when the session has started. The session shows in the Herdr app (shell.qml showSession).
+  property string deployingHarness: ""
+  property bool clankerDeploying: false
+  property bool deployAsked: false
+  property var deployNotice: ({ text: "", busy: false })
+  signal deploy(var request)
+  signal visit(string host, string terminal)
+  onDeployNoticeChanged: if (deployAsked && !deployNotice.busy && (deployNotice.text ?? "") === "") { deployAsked = false; deployingHarness = ""; clankerDeploying = false; }
   readonly property var activeHost: (view.hosts ?? []).find(h => h.host === shownHost) ?? null
   // The pointer is over the board, so Esc puts its sheet away (shell.qml).
   readonly property bool hovered: hover.hovered
@@ -41,9 +50,9 @@ Item {
   property string shownSlug: ""
   property bool shownNew: false
   property string shownHost: ""
-  onRosterSlugChanged: if (rosterSlug !== "") { shownSlug = rosterSlug; shownNew = false; }
+  onRosterSlugChanged: { if (rosterSlug !== "") { shownSlug = rosterSlug; shownNew = false; } else clankerDeploying = false; }
   onRosterNewChanged: if (rosterNew) shownNew = true
-  onHostKeyChanged: if (hostKey !== "") shownHost = hostKey
+  onHostKeyChanged: { if (hostKey !== "") shownHost = hostKey; else deployingHarness = ""; }
   readonly property var activeCard: {
     if (shownNew || shownSlug === "") return null;
     const cards = view.roster ?? [];
@@ -146,6 +155,7 @@ Item {
     onDismissed: { board.rosterSlug = ""; board.rosterNew = false; }
     RosterDetail {
       anchors.fill: parent
+      visible: !board.clankerDeploying
       card: board.activeCard
       creating: board.shownNew
       hosts: board.view.rosterHosts ?? ["kit", "cog"]
@@ -153,6 +163,17 @@ Item {
       onBack: { board.rosterSlug = ""; board.rosterNew = false; }
       onSave: edit => board.rosterEdit(edit)
       onRemove: slug => board.rosterEdit({ action: "delete", slug: slug })
+      onDeploy: { board.deployAsked = false; board.clankerDeploying = true; }
+      onVisit: at => board.visit(at.split("/")[0], at.split("/")[1])
+    }
+    DeployPicker {
+      anchors.fill: parent
+      visible: board.clankerDeploying && board.activeCard !== null
+      what: (board.activeCard?.name ?? "") + " on " + (board.activeCard?.host ?? "")
+      places: board.view.places ?? []
+      notice: board.deployNotice
+      onBack: board.clankerDeploying = false
+      onPicked: dir => { board.deployAsked = true; board.deploy({ clanker: board.activeCard.slug, dir: dir }); }
     }
   }
 
@@ -162,7 +183,22 @@ Item {
     z: 2
     open: board.hostKey !== ""
     onDismissed: board.hostKey = ""
-    HostDetail { anchors.fill: parent; host: board.activeHost; onOpen: link => board.open(link) }
+    HostDetail {
+      anchors.fill: parent
+      visible: board.deployingHarness === ""
+      host: board.activeHost
+      onOpen: link => board.open(link)
+      onDeploy: harness => { board.deployAsked = false; board.deployingHarness = harness; }
+    }
+    DeployPicker {
+      anchors.fill: parent
+      visible: board.deployingHarness !== ""
+      what: board.deployingHarness + " on " + board.shownHost
+      places: board.view.places ?? []
+      notice: board.deployNotice
+      onBack: board.deployingHarness = ""
+      onPicked: dir => { board.deployAsked = true; board.deploy({ host: board.shownHost, harness: board.deployingHarness, dir: dir }); }
+    }
   }
 
   // The sections, at the bottom as the phone has them in the compose bar's place.

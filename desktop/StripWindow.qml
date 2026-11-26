@@ -199,6 +199,9 @@ FloatingWindow {
     notice: win.shell.taskNotice
     rosterNotice: win.shell.rosterNotice
     onRosterEdit: edit => win.shell.editRoster(edit)
+      deployNotice: win.shell.deployNotice
+      onDeploy: request => win.shell.deploy(request)
+      onVisit: (host, terminal) => win.shell.showSession(host, terminal)
     dispatch: win.shell.agentsBoard?.dispatch ?? null
     pending: win.shell.pendingEdits
     onEdit: (key, change) => win.shell.editTask(key, change)
@@ -337,6 +340,9 @@ FloatingWindow {
     notice: win.shell.taskNotice
     rosterNotice: win.shell.rosterNotice
     onRosterEdit: edit => win.shell.editRoster(edit)
+      deployNotice: win.shell.deployNotice
+      onDeploy: request => win.shell.deploy(request)
+      onVisit: (host, terminal) => win.shell.showSession(host, terminal)
     dispatch: win.shell.agentsBoard?.dispatch ?? null
     pending: win.shell.pendingEdits
     onEdit: (key, change) => win.shell.editTask(key, change)

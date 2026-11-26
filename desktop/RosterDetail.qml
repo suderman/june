@@ -13,6 +13,9 @@ Item {
   property var hosts: ["kit", "cog"]
   property var notice: ({ text: "", busy: false, seq: 0, saved: "" })
   signal back()
+  // Deploy this clanker somewhere, or visit it at work (AT is HOST/TERMINAL).
+  signal deploy()
+  signal visit(string at)
   signal save(var edit)
   signal remove(string slug)
 
@@ -67,7 +70,7 @@ Item {
 
       // Back to the card while editing it, and edit; the sheet it sits in closes the page.
       Item {
-        visible: backLink.visible || editLink.visible
+        visible: (page.editing && !page.creating) || (!page.editing && page.card !== null)
         width: parent.width
         height: backLink.height
         PressTab {
@@ -79,6 +82,16 @@ Item {
             if (page.editing && !page.creating) { page.editing = false; page.confirmingDelete = false; }
             else page.back();
           }
+        }
+        // A clanker at work is visited, in its terminal; an idle one is deployed somewhere first.
+        PressTab {
+          visible: !page.editing && page.card !== null
+          anchors.right: editLink.left; anchors.rightMargin: 8
+          readonly property string at: page.card?.terminal ?? ""
+          text: at.indexOf("/") > 0 ? "visit" : "deploy"
+          small: true
+          enabled: at.indexOf("/") > 0 || (page.card?.problems ?? []).length === 0
+          onClicked: at.indexOf("/") > 0 ? page.visit(at) : page.deploy()
         }
         PressTab {
           id: editLink

@@ -1496,3 +1496,13 @@ test("desktop tab names normalize strip to chat and companion app launchers resp
 	assert.deepEqual(appLaunchCommand("editor", { JUNE_DESKTOP_EDITOR: "nvim" }), ["sh", "-c", "setsid -f nvim >/dev/null 2>&1 </dev/null"]);
 	assert.equal(appLaunchCommand("unknown"), null);
 });
+
+test("a deployed session shows in the Herdr app through hc and herdr-app, its host and terminal kept out of the script", async () => {
+	const { showDeployedCommand } = await import("../desktop/desktop.mjs");
+	const argv = showDeployedCommand("cog", "t7; rm -rf ~");
+	assert.deepEqual(argv.slice(0, 2), ["sh", "-c"]);
+	assert.deepEqual(argv.slice(3), ["june-show", "cog", "t7; rm -rf ~"], "host and terminal are arguments, never script text");
+	assert.doesNotMatch(argv[2], /t7|cog/);
+	assert.match(argv[2], /hc label "\$a" "herdr\.space=\$space"/);
+	assert.match(argv[2], /herdr-app do agent\.focus --terminal "\$a"$/);
+});

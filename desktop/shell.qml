@@ -183,6 +183,26 @@ ShellRoot {
     rosterDeleting = edit.action === "delete";
     rosterNotice = { text: "", busy: true, seq: rosterNotice.seq + 1, saved: "", deleted: false };
   }
+  // A deploy from the boards (src/deploy.ts) on its way, and why the last one failed; its session then shows in the
+  // Herdr app here (Desktop.showDeployedCommand).
+  property var deployNotice: ({ text: "", busy: false })
+  property string deployPendingId: ""
+  function deploy(request) {
+    const id = rid();
+    if (!send(Object.assign({ op: "deploy", requestId: id }, request))) {
+      deployNotice = { text: "not connected", busy: false };
+      return;
+    }
+    deployPendingId = id;
+    deployNotice = { text: "", busy: true };
+  }
+  Process { id: shower }
+  function showSession(host, terminal) {
+    if (shower.running) return;
+    shower.command = Desktop.showDeployedCommand(host, terminal);
+    shower.running = true;
+    hide();
+  }
   Timer { id: rosterNoticeFade; interval: 4000; onTriggered: if (root.rosterNotice.text === "saved") root.rosterNotice = { text: "", busy: false, seq: root.rosterNotice.seq + 1, saved: "", deleted: false } }
   property bool agentsFetching: false
   function setPending(next) { pendingEdits = next; }
@@ -684,6 +704,10 @@ ShellRoot {
         rosterDeleting = false;
         rosterNotice = { text: "The connection dropped", busy: false, seq: rosterNotice.seq + 1, saved: "", deleted: false };
       }
+      if (deployPendingId !== "") {
+        deployPendingId = "";
+        deployNotice = { text: "The connection dropped; look on the hosts tab before deploying again", busy: false };
+      }
       agentsFetching = false;
       if (boardsWanted) fetchBoards(true, true);
       return;
@@ -712,6 +736,18 @@ ShellRoot {
       setPending(Object.assign({}, next));
       taskNotice = { key: reply.key, from: reply.from ?? "", text: "saved", pending: "", undo: held.undo };
       noticeFade.restart();
+      return;
+    }
+    if (reply.type === "deploy" && reply.requestId === deployPendingId) {
+      deployPendingId = "";
+      deployNotice = { text: "", busy: false };
+      fetchBoards(false, true);
+      showSession(reply.host, reply.terminal);
+      return;
+    }
+    if (reply.type === "error" && reply.requestId !== undefined && reply.requestId === deployPendingId) {
+      deployPendingId = "";
+      deployNotice = { text: reply.message, busy: false };
       return;
     }
     if (reply.type === "roster" && reply.requestId === rosterPendingId) {
@@ -986,6 +1022,9 @@ ShellRoot {
             notice: root.taskNotice
             rosterNotice: root.rosterNotice
             onRosterEdit: edit => root.editRoster(edit)
+            deployNotice: root.deployNotice
+            onDeploy: request => root.deploy(request)
+            onVisit: (host, terminal) => root.showSession(host, terminal)
             dispatch: root.agentsBoard?.dispatch ?? null
             pending: root.pendingEdits
             onEdit: (key, change) => root.editTask(key, change)
@@ -1147,6 +1186,9 @@ ShellRoot {
     notice: root.taskNotice
     rosterNotice: root.rosterNotice
     onRosterEdit: edit => root.editRoster(edit)
+            deployNotice: root.deployNotice
+            onDeploy: request => root.deploy(request)
+            onVisit: (host, terminal) => root.showSession(host, terminal)
     dispatch: root.agentsBoard?.dispatch ?? null
     pending: root.pendingEdits
     onEdit: (key, change) => root.editTask(key, change)

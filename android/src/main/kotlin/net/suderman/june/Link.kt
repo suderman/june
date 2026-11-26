@@ -107,6 +107,10 @@ class Link(private val context: Context) {
     var rosterDone: Pair<Int, String> by mutableStateOf(0 to "")
         private set
     private var rosterPendingId = ""
+    /** A deploy on its way (Boards.kt): busy while it is, and why the last one failed, or "". */
+    var deployBusy: Boolean by mutableStateOf(false)
+    var deployNotice: String by mutableStateOf("")
+    private var deployPendingId = ""
     private var rosterDeleting = false
     private var rosterNoticeAt = 0L
     /** A board and task a link asked for (june://task?key=KEY, june://projects): the tab, and the task's key or "". */
@@ -227,6 +231,23 @@ class Link(private val context: Context) {
         if (lost.isNotEmpty() || settled.isNotEmpty()) changePending { p -> (lost + settled).forEach { p.remove(it) } }
         if (taskNotice.second == "saved" && now - noticeAt > 5_000) notice(taskNotice.first, "")
         if (rosterNotice == "saved" && now - rosterNoticeAt > 4_000) rosterNotice = ""
+    }
+
+    /**
+     * Start a session through the daemon's `deploy` op (src/deploy.ts): a CLANKER, or HARNESS on HOST, in DIR; a clanker
+     * at work is visited. Its terminal then opens on the Terminal page.
+     */
+    fun deploy(host: String, harness: String, clanker: String, dir: String) {
+        val id = requestId()
+        val op = JSONObject().put("op", "deploy").put("dir", dir)
+        if (clanker.isNotEmpty()) op.put("clanker", clanker) else op.put("host", host).put("harness", harness)
+        if (!send(op, id)) {
+            deployNotice = "not connected"
+            return
+        }
+        deployPendingId = id
+        deployBusy = true
+        deployNotice = ""
     }
 
     /** Save or destroy a clanker in clankers/ through the daemon's `roster` op. */
@@ -424,6 +445,11 @@ class Link(private val context: Context) {
                                 rosterBusy = false
                                 rosterNotice = "The connection dropped"
                             }
+                            if (deployPendingId.isNotEmpty()) {
+                                deployPendingId = ""
+                                deployBusy = false
+                                deployNotice = "The connection dropped; look on the hosts tab before deploying again"
+                            }
                             agentsFetching = false
                             if (boardsWanted) fetchBoards(agenda = true, agents = true)
                         }
@@ -470,6 +496,12 @@ class Link(private val context: Context) {
                             agenda?.let { AgendaStore.save(context, it, agendaRevision) }
                             settlePending()
                         }
+                        "deploy" -> if (reply.optString("requestId") == deployPendingId && deployPendingId.isNotEmpty()) {
+                            deployPendingId = ""
+                            deployBusy = false
+                            fetchBoards(agenda = false, agents = true)
+                            openTerminal(TerminalTarget(reply.optString("host"), reply.optString("terminal")))
+                        }
                         "roster" -> if (reply.optString("requestId") == rosterPendingId && rosterPendingId.isNotEmpty()) {
                             rosterPendingId = ""
                             val del = rosterDeleting
@@ -494,7 +526,11 @@ class Link(private val context: Context) {
                         "reply" -> notice = reply.optString("text")
                         "error" -> {
                             val reqId = reply.optString("requestId")
-                            if (reqId.isNotEmpty() && reqId == rosterPendingId) {
+                            if (reqId.isNotEmpty() && reqId == deployPendingId) {
+                                deployPendingId = ""
+                                deployBusy = false
+                                deployNotice = reply.optString("message")
+                            } else if (reqId.isNotEmpty() && reqId == rosterPendingId) {
                                 rosterPendingId = ""
                                 rosterDeleting = false
                                 rosterBusy = false

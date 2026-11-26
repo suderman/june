@@ -55,6 +55,7 @@ import { openTerminal } from "./terminal.ts";
 import { Boards } from "./board.ts";
 import { TaskEdits } from "./board-edit.ts";
 import { editClanker } from "./roster.ts";
+import { deploy } from "./deploy.ts";
 import { OrgWorker } from "./org-worker.ts";
 import { Pushes } from "./push.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
@@ -416,7 +417,7 @@ type Scope = CommandScope & { wake: string; immich?: { server: Immich; watch: Im
 /** The sky a view sends with its state, and how it learns of a change. */
 type SkySource = Pick<Situation, "sky" | "onSky">;
 /** The boards' revisions a view sends with its state, and their contents for the requests. */
-type BoardSource = Pick<Boards, "revisions" | "onChange" | "agenda" | "agents" | "seen" | "subscribe" | "refresh" | "refreshRoster" | "watchAgenda">;
+type BoardSource = Pick<Boards, "revisions" | "onChange" | "agenda" | "agents" | "seen" | "subscribe" | "refresh" | "refreshRoster" | "watchAgenda" | "herdr">;
 /** How many followed tasks are still going, and how a view learns of a change. */
 export type FollowSource = { following(): number; follows(): Followed[]; onFollowing(listener: () => void): () => void };
 
@@ -589,6 +590,13 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 				for (const k of keys) scope.edited.set(k, refreshed);
 				void refreshed.finally(() => { for (const k of keys) if (scope.edited.get(k) === refreshed) scope.edited.delete(k); });
 				return;
+			}
+			case "deploy": {
+				const done = await deploy(scope.boards.herdr, scope.dataDir, { host: request.host, harness: request.harness, clanker: request.clanker, dir: request.dir });
+				scope.log.info("deploy", { host: done.host, terminal: done.terminal, clanker: request.clanker ?? "", harness: request.harness ?? "", existing: done.existing === true, device: device ?? "socket" });
+				// The boards show it working soon after, rather than at the next look.
+				void scope.boards.agents(0).catch(() => {});
+				return send({ type: "deploy", requestId: request.requestId, ...done });
 			}
 			case "roster": {
 				if (!request.edit || typeof request.edit.action !== "string") throw new Error("roster needs an edit");

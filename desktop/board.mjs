@@ -655,7 +655,7 @@ export function rosterView(agents, now) {
  * `user` signs the user's Dialog entries.
  */
 export function agentsView(agents, now, today, user, pending) {
-	if (!agents) return { summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], hosts: [], roster: [], rosterLeaderboard: [], rosterHasStats: false, rosterHosts: ["kit", "cog"] };
+	if (!agents) return { summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], hosts: [], places: [], roster: [], rosterLeaderboard: [], rosterHasStats: false, rosterHosts: ["kit", "cog"] };
 	agents = withPending(agents, pending, user);
 	const rv = rosterView(agents, now);
 	const tasks = agents.tasks;
@@ -734,7 +734,7 @@ export function agentsView(agents, now, today, user, pending) {
 		};
 	});
 	for (const list of [needs, working, idle, queued, reviewing, recent]) uniqueKeys(list);
-	return { summary, needs, working, idle, queued, reviewing, recent, down, hosts: hostRows, roster: rv.cards, rosterLeaderboard: rv.leaderboard, rosterHasStats: rv.hasStats, rosterHosts: rv.hosts };
+	return { summary, needs, working, idle, queued, reviewing, recent, down, hosts: hostRows, places: Array.isArray(agents.places) ? agents.places : [], roster: rv.cards, rosterLeaderboard: rv.leaderboard, rosterHasStats: rv.hasStats, rosterHosts: rv.hosts };
 }
 
 /** Who wrote a Dialog entry, for how it is drawn: the user, June, the dispatcher, or an agent. */

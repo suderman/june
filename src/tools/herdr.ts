@@ -131,6 +131,23 @@ export class Herdr {
 		return rows.map((row: any, i: number) => summarize(host, prefix, row, full[i]));
 	}
 
+	/**
+	 * Start ARGV in a new terminal on HOST in DIR (absolute; the machine's home without one), in the background with no
+	 * parent, named NAME with LABELS. Only this machine and machines this core has added: over SSH it would need a shell.
+	 * Returns the terminal's address on HOST, as agents() names it (t7).
+	 */
+	async start(host: string, argv: readonly string[], options: { name: string; dir?: string; labels?: Record<string, string> }): Promise<string> {
+		if (!(await this.#native(host))) throw new Error(`hc here has not added ${host}, so June cannot start a session there`);
+		if (!/^[a-z0-9_-]{1,32}$/.test(options.name)) throw new Error(`bad terminal name ${options.name}`);
+		const local = host === this.#config.host;
+		const args = ["hc", "run", "--json", "--bg", "--no-parent", "--name", options.name, ...(local ? [] : ["--on", host]), ...(options.dir ? ["--cwd", options.dir] : [])];
+		for (const [k, v] of Object.entries(options.labels ?? {})) args.push("--label", `${k}=${v}`);
+		const out = await this.#run([...args, "--", ...argv], 30_000);
+		const address = String(JSON.parse(out).address ?? "");
+		if (!address) throw new Error(`hc run on ${host} returned no terminal`);
+		return local ? address : address.replace(new RegExp(`^${host}/`), "");
+	}
+
 	/** HOST's /proc/stat and /proc/meminfo, for its load: read here, through hc on a machine it has added, else over SSH. */
 	async load(host: string): Promise<string> {
 		const files = ["/proc/stat", "/proc/meminfo"];

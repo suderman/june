@@ -408,6 +408,9 @@ private fun ClankersPage(link: Link, decisions: Decisions, modifier: Modifier, r
     val roster = v?.optJSONArray("roster").objects()
     val rosterHosts = v?.optJSONArray("rosterHosts").strings().ifEmpty { listOf("kit", "cog") }
     val opened = rosterCreating || rosterSlug.isNotEmpty()
+    // Choosing where the card's clanker deploys, in its sheet.
+    var clankerDeploying by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(opened) { if (!opened) clankerDeploying = false }
     // The sheet keeps the card it showed while it slides away: "+" while creating, else its slug.
     val shown = keptWhileClosing(if (rosterCreating) "+" else rosterSlug)
     Box(modifier.clipToBounds()) {
@@ -430,11 +433,23 @@ private fun ClankersPage(link: Link, decisions: Decisions, modifier: Modifier, r
             val amend = rosterEditing && !creating
             // While editing a card, Back returns to the card; otherwise it puts the sheet away.
             androidx.activity.compose.BackHandler(enabled = opened && amend) { rosterEditing = false }
+            if (clankerDeploying && card != null) {
+                DeployPicker(link, "${card.optString("name")} on ${card.optString("host")}", v?.optJSONArray("places").strings(), { clankerDeploying = false }) { dir ->
+                    link.deploy("", "", card.optString("slug"), dir)
+                }
+                return@DetailSheet
+            }
             LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (amend || (!rosterEditing && card != null)) item {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (amend) BackLink("card", { rosterEditing = false }, Modifier.weight(1f)) else Spacer(Modifier.weight(1f))
-                        if (!rosterEditing && card != null) PressTab("edit card", { rosterEditing = true }, small = true)
+                        if (!rosterEditing && card != null) {
+                            // A clanker at work is visited, in its terminal; an idle one is deployed somewhere first.
+                            val at = card.optString("terminal")
+                            if (at.contains('/')) PressTab("visit", { link.openTerminal(TerminalTarget(at.substringBefore('/'), at.substringAfter('/'))) }, small = true)
+                            else PressTab("deploy", { link.deployNotice = ""; clankerDeploying = true }, small = true, enabled = card.optJSONArray("problems").strings().isEmpty())
+                            PressTab("edit card", { rosterEditing = true }, small = true)
+                        }
                     }
                 }
                 item {
@@ -464,9 +479,12 @@ private fun HostsPage(link: Link, decisions: Decisions, modifier: Modifier, rese
     val colours = rememberColours(decisions)
     val open = LocalUriHandler.current
     var hostKey by rememberSaveable { mutableStateOf("") }
-    OnReset(reset) { hostKey = "" }
+    // The harness being deployed from the host's page, or "": its sheet then shows where to.
+    var deploying by rememberSaveable { mutableStateOf("") }
+    OnReset(reset) { hostKey = ""; deploying = "" }
     val hosts = v?.optJSONArray("hosts").objects()
     val shown = keptWhileClosing(hostKey)
+    LaunchedEffect(hostKey) { if (hostKey.isEmpty()) deploying = "" }
     Box(modifier.clipToBounds()) {
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = BoardMargin), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { AgentsWaiting(v) }
@@ -486,15 +504,56 @@ private fun HostsPage(link: Link, decisions: Decisions, modifier: Modifier, rese
         if (colours != null) DetailSheet(hostKey.isNotEmpty(), { hostKey = "" }) {
             val h = hosts.firstOrNull { it.optString("host") == shown }
             if (h == null) Text("That host is no longer on the board.", style = p.type.lettering.copy(color = p.muted))
-            else HostDetail(h, colours) { url -> open.openUri(url) }
+            else if (deploying.isNotEmpty()) DeployPicker(link, "$deploying on $shown", v?.optJSONArray("places").strings(), { deploying = "" }) { dir -> link.deploy(shown, deploying, "", dir) }
+            else HostDetail(h, colours, { url -> open.openUri(url) }) { harness -> link.deployNotice = ""; deploying = harness }
         }
+    }
+}
+
+/**
+ * Where to deploy WHAT ("pi on cog", "cid on cog"): home, for throwaways and chat; a folder where sessions work now
+ * or a checkout (PLACES); or one typed in. A pick starts it, and its terminal opens on the Terminal page; until then the
+ * picker says so, and says why if it could not.
+ */
+@Composable
+private fun DeployPicker(link: Link, what: String, places: List<String>, onBack: () -> Unit, onPick: (String) -> Unit) {
+    val p = LocalPalette.current
+    var typed by rememberSaveable(what) { mutableStateOf("") }
+    // Once it has started, the picker's work is done.
+    var asked by remember(what) { mutableStateOf(false) }
+    LaunchedEffect(link.deployBusy) { if (asked && !link.deployBusy && link.deployNotice.isEmpty()) onBack() }
+    val pick: (String) -> Unit = { dir -> if (!link.deployBusy) { asked = true; onPick(dir) } }
+    androidx.activity.compose.BackHandler(onBack = onBack)
+    LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { BackLink("back", onBack) }
+        item {
+            Column {
+                Text("deploy $what", style = p.type.title.copy(color = p.pageInk))
+                if (link.deployBusy) Text("starting…", style = p.type.meta.copy(color = p.muted))
+                if (link.deployNotice.isNotEmpty()) Text(link.deployNotice, style = p.type.meta.copy(color = p.accent, fontWeight = FontWeight.Bold))
+            }
+        }
+        item { SectionRule("WHERE") }
+        item(key = "places") {
+            Pad {
+                StubRow("home", "~ · for throwaways and chat", first = true) { pick("~") }
+                for (place in places) StubRow(place.substringAfterLast('/'), place) { pick(place) }
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth().inked(lift = 2.dp).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                RuledField(typed, { typed = it }, "Another folder", Modifier.weight(1f), placeholder = "~/src/…", onDone = { if (typed.isNotBlank()) pick(typed) }, mono = true)
+                PressTab("go", { pick(typed) }, small = true, enabled = typed.isNotBlank() && !link.deployBusy)
+            }
+        }
+        item { Spacer(Modifier.height(16.dp)) }
     }
 }
 
 /** One host's page in its sheet: whether it answers and its load, its harnesses with the quota each would spend, its
  * sessions (each opens where it runs), and its clankers. */
 @Composable
-private fun HostDetail(h: JSONObject, colours: Colours, open: (String) -> Unit) {
+private fun HostDetail(h: JSONObject, colours: Colours, open: (String) -> Unit, onDeploy: (String) -> Unit) {
     val p = LocalPalette.current
     val ok = h.optBoolean("ok")
     val sessions = h.optJSONArray("sessions").objects()
@@ -525,6 +584,8 @@ private fun HostDetail(h: JSONObject, colours: Colours, open: (String) -> Unit) 
                                 val account = x.optString("batteryAccount")
                                 Text(x.optString("energyText").ifEmpty { "unknown" } + if (account.isNotEmpty()) " · $account" else "", style = p.type.meta.copy(color = p.surfaceMuted), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
+                            // A raw session of it here: not a clanker, the harness as typed in a new terminal.
+                            PressTab("deploy", { onDeploy(x.optString("harness")) }, small = true)
                         }
                     }
                 }

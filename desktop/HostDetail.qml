@@ -7,6 +7,8 @@ Item {
   id: page
   property var host: null
   signal open(string link)
+  // A raw session of HARNESS on this host: the harness as typed, not a clanker.
+  signal deploy(string harness)
 
   readonly property bool ok: host?.ok ?? false
   readonly property var sessions: host?.sessions ?? []
@@ -67,10 +69,16 @@ Item {
             width: parent ? parent.width : 0
             height: Math.max(48, harnessText.implicitHeight + 16)
             Rectangle { visible: harnessRow.index > 0; x: 12; width: parent.width - 24; height: 1; color: Theme.rule }
+            PressTab {
+              id: deployTab
+              anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
+              text: "deploy"; small: true
+              onClicked: page.deploy(harnessRow.modelData.harness)
+            }
             Clanker { id: harnessArt; x: 12; anchors.verticalCenter: parent.verticalCenter; harness: harnessRow.modelData.clanker; size: 26; claws: false }
             Column {
               id: harnessText
-              anchors.left: harnessArt.right; anchors.leftMargin: 10; anchors.right: parent.right; anchors.rightMargin: 12
+              anchors.left: harnessArt.right; anchors.leftMargin: 10; anchors.right: deployTab.left; anchors.rightMargin: 8
               anchors.verticalCenter: parent.verticalCenter
               spacing: 3
               Words { role: "row"; text: harnessRow.modelData.harness; color: Theme.surfaceInk }
