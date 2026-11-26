@@ -92,13 +92,16 @@ test("June can give a task to roster agents in order, with a harness as the unna
 	t.after(f.cleanup);
 	const soulFile = join(f.root, "june-data", "SOUL.org");
 	await mkdir(join(f.root, "june-data"), { recursive: true });
-	await writeFile(join(f.root, "june-data", "ROSTER.org"), "* Bolt\n:PROPERTIES:\n:HOST: kit\n:HARNESS: claude\n:END:\n* Broken\n:PROPERTIES:\n:HARNESS: gemini\n:END:\n");
+	for (const [slug, card] of [["bolt", "* Bolt\n:PROPERTIES:\n:HOST: kit\n:HARNESS: claude\n:END:\n"], ["broken", "* Broken\n:PROPERTIES:\n:HARNESS: gemini\n:END:\n"]]) {
+		await mkdir(join(f.root, "june-data", "clankers", slug!), { recursive: true });
+		await writeFile(join(f.root, "june-data", "clankers", slug!, "CARD.org"), card!);
+	}
 	const dispatch = new Dispatch(new Org(f.root), { ...f.config, soulFile }, async () => "");
 	await dispatch.queue({ ...request, body, agents: ["bolt", "pi"] });
 	const text = await readFile(f.project, "utf8");
 	assert.match(text, /^:ID: .+\n:AGENTS: bolt pi\n:HOST: kit$/m);
 	assert.doesNotMatch(text, /^:AGENT:/m, "AGENTS stands in for AGENT");
-	await assert.rejects(dispatch.queue({ ...request, body, key: "inst:30", agents: ["nobody"] }), /nobody is neither on the roster \(bolt, broken\) nor one of pi, claude/);
+	await assert.rejects(dispatch.queue({ ...request, body, key: "inst:30", agents: ["nobody"] }), /nobody is neither a clanker \(bolt, broken\) nor one of pi, claude/);
 	await assert.rejects(dispatch.queue({ ...request, body, key: "inst:31", agents: ["broken"] }), /Broken's card has problems/);
 	await assert.rejects(dispatch.queue({ ...request, body, key: "inst:32", agents: [] }), /at least one/);
 	await assert.rejects(dispatch.queue({ ...request, body, key: "inst:33", agents: ["bolt", "bolt"] }), /each agent once/);

@@ -1,5 +1,5 @@
-// One enlisted clanker in the roster list (board.mjs rosterView): portrait, name and service number, class and
-// loadout, energy, and its service record when it has one; its status stamp only when it is not idle.
+// One clanker in the clankers list (board.mjs rosterView): portrait, name and ID, harness and model, quota, and its
+// history when it has one; its status stamp only when it is not idle.
 import QtQuick
 
 Item {
@@ -8,7 +8,7 @@ Item {
   signal clicked()
   width: parent ? parent.width : 0
   implicitHeight: Math.max(portrait.height, lines.implicitHeight) + 20
-  readonly property color stampTone: entry.stamp === "ON DUTY" ? Theme.tone("PROG") : entry.stamp === "INVALID" ? Theme.tone("TODO") : Theme.muted
+  readonly property color stampTone: entry.stamp === "WORKING" ? Theme.tone("PROG") : entry.stamp === "INVALID" ? Theme.tone("TODO") : Theme.muted
 
   Inked { anchors.fill: parent; lift: 3 }
   Rectangle { anchors.fill: parent; anchors.margins: 2; radius: 4; visible: hover.containsMouse; color: Qt.alpha(Theme.surfaceInk, 0.04) }

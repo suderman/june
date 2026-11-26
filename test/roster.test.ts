@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { HARNESSES as HARNESS_TABLE, HARNESS_NAMES, LAUNCHABLE_HARNESSES } from "../desktop/harnesses.mjs";
 import { HARNESSES as ACCOUNT_HARNESSES } from "../src/accounts.ts";
-import { applyRosterEdit, assignRosterAgents, choose, computeStanding, editRosterFile, familyOf, findCard, formatCard, launchArgs, parseRoster } from "../src/roster.ts";
+import { assignRosterAgents, choose, computeStanding, editClanker, familyOf, findCard, formatCard, launchArgs, launchInstructions, MEMORY_CHARS, parseRoster, readClankers } from "../src/roster.ts";
 import { LAUNCHABLE } from "../src/tools/dispatch.ts";
 import { activeRunsByTask, leaderboard, listRuns, recordRunEnd, recordRunStart, statsByAgent } from "../src/runs.ts";
 import { tempDir } from "./helpers.ts";
@@ -17,7 +17,6 @@ const ROSTER = `#+TITLE: Roster
 :HARNESS: claude
 :MODEL: claude-opus-5-5
 :EFFORT: high
-:AVATAR: roster/bolt.png
 :END:
 Careful and thorough.
 
@@ -39,7 +38,7 @@ Quick fixes.
 :END:
 `;
 
-test("ROSTER.org cards take their properties, keep child headings as instructions, and report what is missing", () => {
+test("cards take their properties, keep child headings as instructions, and report what is missing", () => {
 	const [bolt, rivet, broken] = parseRoster(ROSTER);
 	assert.deepEqual(bolt, {
 		name: "Bolt",
@@ -48,7 +47,6 @@ test("ROSTER.org cards take their properties, keep child headings as instruction
 		harness: "claude",
 		model: "claude-opus-5-5",
 		effort: "high",
-		avatar: "roster/bolt.png",
 		instructions: "Careful and thorough.\n\n** Habits\nReads before editing.",
 		problems: [],
 	});
@@ -84,37 +82,70 @@ test("the first available candidate wins unless a later one would otherwise lose
 	assert.equal(familyOf({ ...card, harness: "claude" }), undefined);
 });
 
-test("roster edits add, update, rename and remove cards while preserving preamble and untouched headings", async (t) => {
-	const added = applyRosterEdit(ROSTER, { action: "save", name: "Gyro", host: "cog", harness: "agy", model: "gemini-4", effort: "medium", instructions: "Fast worker.\n\n** Notes\nKeep it short." });
-	assert.equal(added.slug, "gyro");
-	assert.ok(added.text.startsWith("#+TITLE: Roster\n"), "preamble kept");
-	assert.ok(added.text.includes("* Rivet Jr :fast:\n"), "untouched card preserved verbatim");
-	const afterAdd = parseRoster(added.text);
-	assert.equal(afterAdd.length, 4);
-	assert.deepEqual([afterAdd[3]!.name, afterAdd[3]!.host, afterAdd[3]!.harness, afterAdd[3]!.model, afterAdd[3]!.effort], ["Gyro", "cog", "agy", "gemini-4", "medium"]);
-
-	const updated = applyRosterEdit(added.text, { action: "save", original: "rivet-jr", name: "Rivet", host: "kit", harness: "pi", model: "gpt-5", effort: "high", instructions: "Updated." });
-	assert.equal(updated.slug, "rivet");
-	assert.equal(parseRoster(updated.text).map((c) => c.slug).join(","), "bolt,rivet,broken,gyro");
-	assert.equal(findCard(parseRoster(updated.text), "rivet")!.harness, "pi");
-
-	const deleted = applyRosterEdit(updated.text, { action: "delete", slug: "broken" });
-	assert.equal(deleted.slug, undefined);
-	assert.equal(parseRoster(deleted.text).map((c) => c.slug).join(","), "bolt,rivet,gyro");
-
-	assert.throws(() => applyRosterEdit(ROSTER, { action: "save", name: "Bolt", host: "kit", harness: "claude" }), /already called/);
-	assert.throws(() => applyRosterEdit(ROSTER, { action: "save", name: "Bad", host: "kit", harness: "bogus" }), /harness/);
-	assert.throws(() => applyRosterEdit(ROSTER, { action: "save", name: "Bad", host: "kit", harness: "claude", instructions: "* Top heading" }), /top-level/);
-	assert.throws(() => applyRosterEdit(ROSTER, { action: "delete", slug: "nope" }), /no agent/);
-	assert.match(formatCard({ name: "Solo", host: "kit", harness: "claude", effort: "high", instructions: "" }), /^\* Solo\n:PROPERTIES:\n:HOST: kit\n:HARNESS: claude\n:EFFORT: high\n:END:$/);
-
+test("clankers are folders: the folder is the slug, CARD.org the card, and a bad folder says what is wrong", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
-	const file = join(tmp.dir, "ROSTER.org");
-	await writeFile(file, ROSTER);
-	const res = await editRosterFile(file, { action: "save", name: "Spark", host: "kit", harness: "opencode" });
-	assert.equal(res.slug, "spark");
-	assert.equal(findCard(parseRoster(await readFile(file, "utf8")), "spark")!.host, "kit");
+	const card = (slug: string, text: string) => mkdir(join(tmp.dir, "clankers", slug), { recursive: true }).then(() => writeFile(join(tmp.dir, "clankers", slug, "CARD.org"), text));
+	assert.deepEqual(readClankers(tmp.dir), [], "no clankers folder, no clankers");
+	await card("pax", "#+TITLE: Pax\n\n* Pax\n:PROPERTIES:\n:HOST: kit\n:HARNESS: claude\n:EFFORT: high\n:END:\nWrites code.\n");
+	await card("odd", "* Someone Else\n:PROPERTIES:\n:HOST: kit\n:HARNESS: pi\n:END:\n");
+	await mkdir(join(tmp.dir, "clankers", "empty"));
+	await mkdir(join(tmp.dir, "clankers", ".destroyed", "old-2026-01-01"), { recursive: true });
+	const [empty, odd, pax] = readClankers(tmp.dir);
+	assert.deepEqual([pax!.name, pax!.slug, pax!.host, pax!.harness, pax!.effort, pax!.instructions, pax!.dir, pax!.problems], ["Pax", "pax", "kit", "claude", "high", "Writes code.", join(tmp.dir, "clankers", "pax"), []]);
+	assert.deepEqual([odd!.slug, odd!.problems], ["odd", ["its heading names Someone Else, but its folder is odd"]]);
+	assert.deepEqual([empty!.slug, empty!.problems], ["empty", ["CARD.org has no heading"]]);
+	assert.equal(readClankers(tmp.dir).length, 3, "dot folders are not clankers");
+});
+
+test("a clanker's memory follows its directives at launch, newest lessons kept when it grows long", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const dir = join(tmp.dir, "clankers", "pax");
+	await mkdir(dir, { recursive: true });
+	const card = { name: "Pax", slug: "pax", host: "kit", harness: "claude" as const, instructions: "Writes code.", dir, problems: [] };
+	assert.equal(launchInstructions({ ...card, dir: undefined }), "Writes code.", "a card without a folder has only its directives");
+	assert.match(launchInstructions(card), /^Writes code\.\n\nYour memory is .*clankers\/pax\/MEMORY\.org\. It holds nothing yet\.\n\nBefore you finish, add each lesson/);
+	await writeFile(join(dir, "MEMORY.org"), "#+TITLE: Pax's memory\n\n- Run the typecheck before tests.\n");
+	const text = launchInstructions(card);
+	assert.match(text, /holds what you learned in earlier sessions:\n\n#\+TITLE: Pax's memory\n\n- Run the typecheck before tests\.\n\nBefore you finish/);
+	assert.equal(launchArgs(card, "go")[launchArgs(card, "go").indexOf("--append-system-prompt") + 1], text, "the harness gets directives and memory");
+	await writeFile(join(dir, "MEMORY.org"), `- first lesson\n${"- filler lesson\n".repeat(MEMORY_CHARS / 10)}- newest lesson\n`);
+	const long = launchInstructions(card);
+	assert.ok(long.includes("- newest lesson") && !long.includes("- first lesson") && long.includes("[older lessons left out"), "the oldest end is left out");
+});
+
+test("clanker edits create, update, rename and destroy folders, keeping memory and archiving instead of deleting", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const root = join(tmp.dir, "clankers");
+	assert.deepEqual(editClanker(tmp.dir, { action: "save", name: "cid", host: "cog", harness: "claude", model: "claude-opus-5-5", effort: "high", instructions: "Writes code.\n\n** Notes\nKeep it short." }), { slug: "cid" });
+	assert.equal(await readFile(join(root, "cid", "CARD.org"), "utf8"), "* cid\n:PROPERTIES:\n:HOST: cog\n:HARNESS: claude\n:MODEL: claude-opus-5-5\n:EFFORT: high\n:END:\nWrites code.\n\n** Notes\nKeep it short.\n");
+	assert.match(await readFile(join(root, "cid", "MEMORY.org"), "utf8"), /^#\+TITLE: cid's memory\n/);
+	await writeFile(join(root, "cid", "MEMORY.org"), "- a lesson\n");
+	await writeFile(join(root, "cid", "CARD.org"), "#+TITLE: Cid\n\n" + (await readFile(join(root, "cid", "CARD.org"), "utf8")));
+
+	assert.deepEqual(editClanker(tmp.dir, { action: "save", original: "cid", name: "sid", host: "kit", harness: "pi", instructions: "Updated." }), { slug: "sid" });
+	assert.equal(await readFile(join(root, "sid", "CARD.org"), "utf8"), "#+TITLE: Cid\n\n* sid\n:PROPERTIES:\n:HOST: kit\n:HARNESS: pi\n:END:\nUpdated.\n", "text above the heading is kept");
+	assert.equal(await readFile(join(root, "sid", "MEMORY.org"), "utf8"), "- a lesson\n", "a rename keeps the clanker's memory");
+	assert.deepEqual(readClankers(tmp.dir).map((c) => c.slug), ["sid"]);
+
+	editClanker(tmp.dir, { action: "save", name: "pax", host: "kit", harness: "claude" });
+	assert.throws(() => editClanker(tmp.dir, { action: "save", name: "Pax", host: "kit", harness: "claude" }), /already called/);
+	assert.throws(() => editClanker(tmp.dir, { action: "save", original: "pax", name: "sid", host: "kit", harness: "claude" }), /already called/);
+	assert.throws(() => editClanker(tmp.dir, { action: "save", name: "Bad", host: "kit", harness: "bogus" }), /harness/);
+	assert.throws(() => editClanker(tmp.dir, { action: "save", name: "Bad", host: "kit", harness: "claude", instructions: "* Top heading" }), /top-level/);
+	assert.throws(() => editClanker(tmp.dir, { action: "save", name: "", host: "kit", harness: "claude" }), /name is required/);
+
+	const day = new Date(2026, 10, 26);
+	assert.deepEqual(editClanker(tmp.dir, { action: "delete", slug: "sid" }, day), {});
+	editClanker(tmp.dir, { action: "save", name: "sid", host: "kit", harness: "pi" });
+	editClanker(tmp.dir, { action: "delete", slug: "sid" }, day);
+	assert.deepEqual((await readdir(join(root, ".destroyed"))).sort(), ["sid-2026-11-26", "sid-2026-11-26-2"]);
+	assert.equal(await readFile(join(root, ".destroyed", "sid-2026-11-26", "MEMORY.org"), "utf8"), "- a lesson\n", "a destroyed clanker's folder is archived whole");
+	assert.deepEqual(readClankers(tmp.dir).map((c) => c.slug), ["pax"]);
+	assert.throws(() => editClanker(tmp.dir, { action: "delete", slug: "nope" }), /no clanker/);
+	assert.match(formatCard({ name: "Solo", host: "kit", harness: "claude", effort: "high", instructions: "" }), /^\* Solo\n:PROPERTIES:\n:HOST: kit\n:HARNESS: claude\n:EFFORT: high\n:END:$/);
 });
 
 test("computeStanding combines roster cards, live workers, and account battery", () => {
@@ -281,7 +312,7 @@ test("assignRosterAgents and activeRunsByTask link unlabelled dispatched workers
 		["t4", undefined],
 		["t5", "cogbot"],
 	]);
-	// On a remote host (cog), a finished terminal (status "done") does not keep CogBot ON DUTY.
+	// On a remote host (cog), a finished terminal (status "done") does not keep CogBot WORKING.
 	const byHost = new Map([["kit", enriched.filter((w) => w.host === "kit")], ["cog", enriched.filter((w) => w.host === "cog")]]);
 	const standing = computeStanding(cards, byHost, [], [], "kit", (id, host, status) => (host === "kit" ? id === "task-bolt" || id === "task-rivet" : status === "working"));
 	const bySlug = new Map(standing.map((s) => [s.card.slug, [s.status, s.terminal]]));

@@ -229,7 +229,7 @@ class Link(private val context: Context) {
         if (rosterNotice == "saved" && now - rosterNoticeAt > 4_000) rosterNotice = ""
     }
 
-    /** Save or remove a card in ROSTER.org through the daemon's `roster` op. */
+    /** Save or destroy a clanker in clankers/ through the daemon's `roster` op. */
     fun editRoster(edit: JSONObject) {
         val id = requestId()
         if (!send(JSONObject().put("op", "roster").put("edit", edit), id)) {

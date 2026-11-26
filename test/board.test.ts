@@ -279,12 +279,13 @@ test("a change to the agenda alone tells clients, and a refresh after an edit re
 	assert.ok(told >= 1, "a task on no agent's list changed, and listeners heard");
 });
 
-test("the agents board serves ROSTER.org cards and the roster request adds, edits and removes them", async (t) => {
+test("the agents board serves clanker cards and the roster request creates, edits and destroys them", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
 	const config = testConfig(tmp.dir);
 	await mkdir(tmp.paths.data, { recursive: true });
-	await writeFile(join(tmp.paths.data, "ROSTER.org"), "#+TITLE: Roster\n\n* Bolt\n:PROPERTIES:\n:HOST: kit\n:HARNESS: claude\n:EFFORT: high\n:END:\nCareful.\n");
+	await mkdir(join(tmp.paths.data, "clankers", "bolt"), { recursive: true });
+	await writeFile(join(tmp.paths.data, "clankers", "bolt", "CARD.org"), "* Bolt\n:PROPERTIES:\n:HOST: kit\n:HARNESS: claude\n:EFFORT: high\n:END:\nCareful.\n");
 	recordRunStart(tmp.paths.database, { run: "r-1", taskId: "id:t1", taskTitle: "Test task", agent: "bolt", harness: "claude", host: "kit", startedAt: 1_000_000 });
 	recordRunEnd(tmp.paths.database, { run: "r-1", outcome: "done", endedAt: 1_120_000 });
 	const herdr = new Herdr(config.herdr, async () => JSON.stringify({ terminals: [] }));

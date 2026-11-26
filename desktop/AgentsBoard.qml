@@ -1,6 +1,6 @@
 // The agents board as the clankers' room (board.mjs agentsView), drawn as the phone draws it: what needs the user, as
 // dockets, most urgent first; then who is working, what is queued (slips on a spike) and under agent review, who is
-// idle, and what reported today, each list a pad of docket stubs; or the roster's enlisted clankers. A docket or row
+// idle, and what reported today, each list a pad of docket stubs; or the clankers. A docket or row
 // opens where it can: its task's page, an agent's session in Herdr. See "Agents and projects" in docs/interfaces.org.
 import QtQuick
 import "board.mjs" as Board
@@ -141,19 +141,19 @@ Item {
         }
       }
       FolderTabs {
-        tabs: [{ id: "activity", label: "activity" }, { id: "roster", label: (board.view.roster ?? []).length > 0 ? "roster · " + board.view.roster.length : "roster" }]
+        tabs: [{ id: "activity", label: "activity" }, { id: "roster", label: (board.view.roster ?? []).length > 0 ? "clankers · " + board.view.roster.length : "clankers" }]
         current: board.mode
         onPicked: id => board.mode = id
       }
 
-      // ---- ROSTER: ROSTER.org's enlisted clankers ----
+      // ---- CLANKERS: clankers/*/CARD.org ----
       Column {
         visible: board.mode === "roster"
         width: parent.width
         spacing: 10
         SectionRule {
-          text: (board.rosterSort === "leaderboard" ? "SERVICE RECORD · " : "ROSTER · ") + (board.view.roster ?? []).length
-          PressTab { text: "+ enlist"; small: true; onClicked: { board.rosterSlug = ""; board.rosterNew = true; } }
+          text: (board.rosterSort === "leaderboard" ? "HISTORY · " : "CLANKERS · ") + (board.view.roster ?? []).length
+          PressTab { text: "+ create"; small: true; onClicked: { board.rosterSlug = ""; board.rosterNew = true; } }
         }
         // The order, under the rule so the column's narrow header keeps its title.
         Item {
@@ -163,7 +163,7 @@ Item {
           PressTab {
             id: sortLink
             anchors.right: parent.right
-            text: board.rosterSort === "leaderboard" ? "in roster order" : "by service record"
+            text: board.rosterSort === "leaderboard" ? "by name" : "by history"
             kind: "quiet"; small: true
             onClicked: board.rosterSort = board.rosterSort === "leaderboard" ? "roster" : "leaderboard"
           }
@@ -173,7 +173,7 @@ Item {
           width: parent.width
           wrapMode: Text.Wrap
           role: "lettering"
-          text: "No clankers enlisted in ROSTER.org yet."
+          text: "No clankers yet."
           color: Theme.muted
         }
         Repeater {

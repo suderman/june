@@ -1,13 +1,13 @@
-// One enlisted clanker's page (ROSTER.org via the daemon's `roster` op), as the phone's Squad.kt draws it: the full
-// enlistment card (portrait, name, class, unit, loadout, energy, standing orders, service record); or the card
-// filled in to enlist a new clanker or amend this one, where discharging asks once more before it removes the card.
+// One clanker's page (clankers/<slug>/CARD.org via the daemon's `roster` op), as the phone's Squad.kt draws it: the
+// full clanker card (portrait, name, host, harness, model, quota, directives, history); or the card filled in to
+// create a new clanker or edit this one, where destroying asks once more before it archives the clanker's folder.
 import QtQuick
 import "board.mjs" as Board
 
 Item {
   id: page
 
-  // Shaped card from board.mjs rosterView, or null when enlisting a new clanker.
+  // Shaped card from board.mjs rosterView, or null when creating a new clanker.
   property var card: null
   property bool creating: false
   property var hosts: ["kit", "cog"]
@@ -25,7 +25,6 @@ Item {
   property string fHarness: "claude"
   property string fModel: ""
   property string fEffort: ""
-  property string fAvatar: ""
   property string fInstructions: ""
 
   function loadForm(c) {
@@ -35,9 +34,8 @@ Item {
     fHarness = c?.harness && Board.ROSTER_HARNESSES.includes(c.harness) ? c.harness : "claude";
     fModel = c?.model ?? "";
     fEffort = c ? (c.effort ?? "") : "high";
-    fAvatar = c?.avatar ?? "";
     fInstructions = c?.instructions ?? "";
-    name.text = fName; host.text = fHost; modelField.text = fModel; avatar.text = fAvatar; orders.text = fInstructions;
+    name.text = fName; host.text = fHost; modelField.text = fModel; orders.text = fInstructions;
   }
 
   onCreatingChanged: {
@@ -54,7 +52,7 @@ Item {
       editing = false;
     }
   }
-  readonly property string stampTone: card?.stamp === "ON DUTY" ? Theme.tone("PROG") : card?.stamp === "INVALID" ? Theme.tone("TODO") : Theme.muted
+  readonly property string stampTone: card?.stamp === "WORKING" ? Theme.tone("PROG") : card?.stamp === "INVALID" ? Theme.tone("TODO") : Theme.muted
 
   Flickable {
     anchors.fill: parent
@@ -67,13 +65,13 @@ Item {
       width: parent.width - 6
       spacing: 10
 
-      // Back to the roster (or the card, while amending it), and amend.
+      // Back to the clankers (or the card, while editing it), and edit.
       Item {
         width: parent.width
         height: backLink.height
         PressTab {
           id: backLink
-          text: (Theme.consoleLook ? "< " : "‹  ") + (page.editing && !page.creating ? "card" : "roster")
+          text: (Theme.consoleLook ? "< " : "‹  ") + (page.editing && !page.creating ? "card" : "clankers")
           kind: "quiet"; small: true
           onClicked: {
             if (page.editing && !page.creating) { page.editing = false; page.confirmingDelete = false; }
@@ -83,7 +81,7 @@ Item {
         PressTab {
           visible: !page.editing && page.card !== null
           anchors.right: parent.right
-          text: "amend card"; small: true
+          text: "edit card"; small: true
           onClicked: { page.loadForm(page.card); page.editing = true; }
         }
       }
@@ -93,11 +91,11 @@ Item {
         width: parent.width
         role: "lettering"
         wrapMode: Text.Wrap
-        text: "That clanker is no longer in ROSTER.org."
+        text: "That clanker is gone."
         color: Theme.muted
       }
 
-      // ---- The enlistment card ----
+      // ---- The clanker card ----
       Column {
         visible: !page.editing && page.card !== null
         width: parent.width
@@ -110,7 +108,7 @@ Item {
           Column {
             id: cardColumn
             width: parent.width
-            Band { label: "Enlistment card"; number: page.card?.serviceNo ?? "" }
+            Band { label: "Clanker card"; number: page.card?.serviceNo ?? "" }
             Column {
               x: 10
               width: parent.width - 20
@@ -136,12 +134,12 @@ Item {
               }
             }
             Rectangle { width: parent.width; height: 1; color: Theme.rule }
-            FieldRow { label: "Unit"; Words { width: parent.width; role: "value"; text: (page.card?.unit ?? "") !== "" ? page.card.unit : "reserve"; color: (page.card?.unit ?? "") !== "" ? Theme.surfaceInk : Theme.surfaceMuted } }
-            FieldRow { label: "Class"; Words { width: parent.width; role: "value"; text: (page.card?.harness ?? "") !== "" ? page.card.harness : "none" } }
-            FieldRow { label: "Loadout"; Words { width: parent.width; role: "value"; wrapMode: Text.Wrap; text: ((page.card?.model ?? "") !== "" ? page.card.model : "harness default") + " · " + ((page.card?.effort ?? "") !== "" ? page.card.effort : "default effort") } }
+            FieldRow { label: "Host"; Words { width: parent.width; role: "value"; text: (page.card?.unit ?? "") !== "" ? page.card.unit : "none"; color: (page.card?.unit ?? "") !== "" ? Theme.surfaceInk : Theme.surfaceMuted } }
+            FieldRow { label: "Harness"; Words { width: parent.width; role: "value"; text: (page.card?.harness ?? "") !== "" ? page.card.harness : "none" } }
+            FieldRow { label: "Model"; Words { width: parent.width; role: "value"; wrapMode: Text.Wrap; text: ((page.card?.model ?? "") !== "" ? page.card.model : "harness default") + " · " + ((page.card?.effort ?? "") !== "" ? page.card.effort : "default effort") } }
             FieldRow {
-              label: "Energy"
-              last: (page.card?.terminal ?? "") === "" && (page.card?.avatar ?? "") === ""
+              label: "Quota"
+              last: (page.card?.terminal ?? "") === ""
               Column {
                 width: parent.width
                 spacing: 4
@@ -156,8 +154,7 @@ Item {
                 Words { visible: (page.card?.energyDetail ?? "") !== ""; width: parent.width; role: "meta"; wrapMode: Text.Wrap; text: page.card?.energyDetail ?? ""; color: Theme.surfaceMuted }
               }
             }
-            FieldRow { visible: (page.card?.terminal ?? "") !== ""; label: "Post"; last: (page.card?.avatar ?? "") === ""; Words { width: parent.width; role: "number"; text: page.card?.terminal ?? "" } }
-            FieldRow { visible: (page.card?.avatar ?? "") !== ""; label: "Avatar"; last: true; Words { width: parent.width; role: "number"; elide: Text.ElideMiddle; text: page.card?.avatar ?? "" } }
+            FieldRow { visible: (page.card?.terminal ?? "") !== ""; label: "Terminal"; last: true; Words { width: parent.width; role: "number"; text: page.card?.terminal ?? "" } }
             Words {
               visible: (page.card?.problems ?? []).length > 0
               x: 10; width: parent.width - 20
@@ -171,7 +168,7 @@ Item {
           }
         }
 
-        SectionRule { text: "STANDING ORDERS" }
+        SectionRule { text: "DIRECTIVES" }
         Item {
           width: parent.width
           height: ordersText.implicitHeight + 18
@@ -182,12 +179,12 @@ Item {
             width: parent.width - 20
             role: (page.card?.instructions ?? "").length > 280 ? "body" : "lettering"
             wrapMode: Text.Wrap
-            text: (page.card?.instructions ?? "") !== "" ? page.card.instructions : "No standing orders."
+            text: (page.card?.instructions ?? "") !== "" ? page.card.instructions : "No directives."
             color: (page.card?.instructions ?? "") !== "" ? Theme.surfaceInk : Theme.surfaceMuted
           }
         }
 
-        SectionRule { visible: (page.card?.runs ?? 0) > 0; text: "SERVICE RECORD" }
+        SectionRule { visible: (page.card?.runs ?? 0) > 0; text: "HISTORY" }
         Item {
           visible: (page.card?.runs ?? 0) > 0
           width: parent.width
@@ -223,7 +220,7 @@ Item {
         }
       }
 
-      // ---- The enlistment card, blank or to amend ----
+      // ---- The clanker card, new or to edit ----
       Column {
         visible: page.editing
         width: parent.width
@@ -236,7 +233,7 @@ Item {
           Column {
             id: form
             width: parent.width
-            Band { label: page.creating ? "Enlistment card · blank" : "Enlistment card · amend"; number: page.creating ? "" : (page.card?.serviceNo ?? "") }
+            Band { label: page.creating ? "Clanker card · new" : "Clanker card · edit"; number: page.creating ? "" : (page.card?.serviceNo ?? "") }
             Item {
               width: parent.width
               height: Math.max(formPortrait.height, name.implicitHeight) + 20
@@ -251,7 +248,7 @@ Item {
               }
             }
             FieldRow {
-              label: "Unit"
+              label: "Host"
               Flow {
                 width: parent.width
                 spacing: 5
@@ -268,7 +265,7 @@ Item {
               RuledField { id: host; x: 10; width: parent.width - 20; label: "Other unit"; placeholder: "host name"; mono: true; onEdited: text => page.fHost = text }
             }
             FieldRow {
-              label: "Class"
+              label: "Harness"
               Flow {
                 width: parent.width
                 spacing: 5
@@ -281,7 +278,7 @@ Item {
             Item {
               width: parent.width
               height: modelField.implicitHeight + 10
-              RuledField { id: modelField; x: 10; y: 4; width: parent.width - 20; label: "Loadout · model"; placeholder: "harness default"; mono: true; onEdited: text => page.fModel = text }
+              RuledField { id: modelField; x: 10; y: 4; width: parent.width - 20; label: "Model"; placeholder: "harness default"; mono: true; onEdited: text => page.fModel = text }
             }
             FieldRow {
               label: "Effort"
@@ -294,15 +291,11 @@ Item {
                 }
               }
             }
-            Item {
-              width: parent.width
-              height: avatar.implicitHeight + 16
-              RuledField { id: avatar; x: 10; y: 4; width: parent.width - 20; label: "Avatar"; placeholder: "optional path beside ROSTER.org"; mono: true; onEdited: text => page.fAvatar = text }
-            }
+            Item { width: parent.width; height: 8 }
           }
         }
 
-        SectionRule { text: "STANDING ORDERS" }
+        SectionRule { text: "DIRECTIVES" }
         MemoField { id: orders; placeholder: "Role, skills, voice…"; lines: 4; onTextChanged: if (text !== page.fInstructions) page.fInstructions = text }
 
         Words {
@@ -319,17 +312,17 @@ Item {
           width: parent.width
           spacing: 8
           PressTab {
-            text: page.creating ? "Enlist" : "Save card"
+            text: page.creating ? "Create" : "Save card"
             kind: "primary"
             enabled: !page.notice.busy
             onClicked: {
-              const payload = { action: "save", name: page.fName, host: page.fHost, harness: page.fHarness, model: page.fModel, effort: page.fEffort, avatar: page.fAvatar, instructions: page.fInstructions };
+              const payload = { action: "save", name: page.fName, host: page.fHost, harness: page.fHarness, model: page.fModel, effort: page.fEffort, instructions: page.fInstructions };
               if (!page.creating && page.card) payload.original = page.card.slug;
               page.save(payload);
             }
           }
-          PressTab { visible: !page.creating && page.card !== null && !page.confirmingDelete; text: "Discharge"; kind: "danger"; enabled: !page.notice.busy; onClicked: page.confirmingDelete = true }
-          PressTab { visible: page.confirmingDelete && page.card !== null; text: "Confirm discharge"; kind: "danger"; enabled: !page.notice.busy; onClicked: page.remove(page.card.slug) }
+          PressTab { visible: !page.creating && page.card !== null && !page.confirmingDelete; text: "Destroy"; kind: "danger"; enabled: !page.notice.busy; onClicked: page.confirmingDelete = true }
+          PressTab { visible: page.confirmingDelete && page.card !== null; text: "Confirm destroy"; kind: "danger"; enabled: !page.notice.busy; onClicked: page.remove(page.card.slug) }
           PressTab { visible: page.confirmingDelete; text: "Keep"; kind: "quiet"; onClicked: page.confirmingDelete = false }
         }
       }

@@ -8,7 +8,7 @@ Item {
   property string stamp: ""
   property real art: 40
   readonly property color frame: Theme.consoleLook ? Theme.edge : Theme.harnessTone(harness)
-  readonly property color stampTone: stamp === "ON DUTY" ? Theme.tone("PROG") : stamp === "INVALID" ? Theme.tone("TODO") : Theme.muted
+  readonly property color stampTone: stamp === "WORKING" ? Theme.tone("PROG") : stamp === "INVALID" ? Theme.tone("TODO") : Theme.muted
 
   Inked { anchors.fill: parent; radius: 4; edge: portrait.frame; fill: Qt.tint(Theme.surface, Qt.alpha(portrait.frame, 0.10)); lift: 0; lineWidth: 2.5 }
   Item {

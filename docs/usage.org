@@ -14,8 +14,8 @@ june tasks [--json]  # dispatched tasks: what needs you, what is working, what i
 june transcript --since 16:20 --detail  # the conversation as text; see below
 june usage [--since WHEN] [--json]      # what June uses, and her art picks
 june device add NAME # allow a device on the WebSocket; also list, revoke
-june agents [NAME]   # the roster, status and battery, or one agent's card
-june start NAME      # launch a roster agent on its host
+june agents [NAME]   # the clankers, status and quota, or one clanker's card
+june start NAME      # launch a clanker on its host
 june accounts        # this host's numbered logins (claude1, codex2, ...) and who each is
 june accounts apply  # make the account folders and wrappers; see Harness accounts below
 june accounts login  # sign in what this host lacks, as ACCOUNTS.org says
@@ -73,7 +73,7 @@ With =programs.june.remote.enable=, the daemon also serves its protocol as a Web
 The desktop client is a Quickshell program for Hyprland, enabled per host with =programs.june.desktop.enable=, =url=, and =tokenFile=. It shows June in two modes: an overlay on top of the desktop, and an ordinary window opened with =june-desktop window=. Its command, service, and options still carry the older name =overlay=. The phone client is an Android app, installed from the flake with =nix run .#android-install=. Both are designed in [[file:interfaces.org][interfaces]].
 
 ** Phone embedded terminal
-In June's Android settings, *Agent terminals* defaults to *In June* (embedded =libghostty-vt= terminal page left of the Agents board), with *Terminal app and Termux* kept as a fallback. The Terminal tab, worker rows, task dockets, roster cards, =herdr:= links and the agenda widget open live agent terminals inside June over the daemon's =/terminal= WebSocket; leaving the app or staying away from the Terminal tab detaches without stopping the agent.
+In June's Android settings, *Agent terminals* defaults to *In June* (embedded =libghostty-vt= terminal page left of the Agents board), with *Terminal app and Termux* kept as a fallback. The Terminal tab, worker rows, task dockets, clanker cards, =herdr:= links and the agenda widget open live agent terminals inside June over the daemon's =/terminal= WebSocket; leaving the app or staying away from the Terminal tab detaches without stopping the agent.
 
 - *Input:* tap the terminal to type directly (swipe typing, voice, HeliBoard keys, optional *Terminal key row* in settings), or write in the rounded compose bar at the bottom (matching June's chat bar: =+= attach and one-tap recent-image buttons on the left, newline-Return text field in the middle, circular =↑= send button on the right) to send as one paste + Enter.
 - *Files and screenshots:* tap =+= (photos or files), tap the recent-image button beside =+= to attach the newest gallery image in one tap (tap again to step through 2nd, 3rd newest), paste an image from the keyboard, use *paste file* in the long-press copy sheet, or share from Android's share sheet to *Agent* (for an agent terminal) or *June* (for June's chat). Terminal files up to 8 MB upload through =terminal.put= beside the agent's terminal on its host and paste their quoted path without going through June's LLM.

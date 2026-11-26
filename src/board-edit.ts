@@ -4,12 +4,11 @@
 // tools make them, with the state or revision the board showed, so a task changed since is refused rather than
 // overwritten. These are the user's acts, sent by their client and written in their name; June is not asked. In a
 // protected file (org.protected), which another program rebuilds, the boards only set TODO or DONE.
-import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type Config, protectedOf } from "./config.ts";
 import { outlineKey, type Task } from "./board.ts";
 import { OrgEditError, type OrgWorker, OrgWorkerDown } from "./org-worker.ts";
-import { findCard, parseRoster } from "./roster.ts";
+import { findCard, readClankers } from "./roster.ts";
 import { type Run, runProcess } from "./tools/herdr.ts";
 
 const REPO = dirname(import.meta.dirname);
@@ -151,8 +150,7 @@ export class TaskEdits {
 		if (!ASSIGNABLE.includes(task.state ?? "")) throw new Error("Only a TODO, EVAL or HOLD task can be handed to a clanker; stop a running one first");
 		const agents = this.#config.dispatch.agents ?? [this.#config.dispatch.agent ?? "pi"];
 		if (!agents.includes(agent)) {
-			const file = this.#dataDir ? join(this.#dataDir, "ROSTER.org") : undefined;
-			const card = file && existsSync(file) ? findCard(parseRoster(readFileSync(file, "utf8")), agent) : undefined;
+			const card = this.#dataDir ? findCard(readClankers(this.#dataDir), agent) : undefined;
 			if (!card) throw new Error(`Agent must be one of ${agents.join(", ")}`);
 			if (card.problems.length) throw new Error(`${card.name} cannot be used: ${card.problems.join("; ")}`);
 		}

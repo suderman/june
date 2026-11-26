@@ -74,7 +74,7 @@ export type Config = {
 		readonly commands?: Readonly<Partial<Record<"pi" | "claude" | "codex" | "agy", string>>>;
 		readonly settle?: number;
 		readonly improve?: { readonly file: string; readonly agent?: string; readonly host?: string };
-		/** Roster agents (ROSTER.org) a task with no AGENT, AGENTS or agent tag goes to, in order; read by the dispatcher. */
+		/** Clankers (clankers/ beside SOUL.org) a task with no AGENT, AGENTS or agent tag goes to, in order; read by the dispatcher. */
 		readonly roster?: readonly string[];
 	};
 	readonly herdr: {

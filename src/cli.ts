@@ -23,7 +23,7 @@ const USAGE = `usage:
   june org-work [--clean] [--keep PATH]... [--record FILE] [--after-days N] [--json]
                           this host's org-work folders and what the tidy rules make of them; --clean removes those due
   june agents [NAME] [--json]
-                          the roster (ROSTER.org): each agent's host, harness, model and effort, whether it is busy,
+                          the clankers (clankers/*/CARD.org): each agent's host, harness, model and effort, whether it is busy,
                           and its battery, the quota its harness has to spare there; NAME shows one agent's card
   june agents leaderboard [--json]
                           per-agent run counts, completions, handoffs, parked runs, and average duration from june.sqlite
@@ -34,7 +34,7 @@ const USAGE = `usage:
                           one would lose quota at a reset within hours; a harness name (pi, claude, codex, agy) is
                           an unnamed worker on it; the dispatcher passes its host and the harnesses it can start
   june start NAME [PROMPT...]
-                          start roster agent NAME here, in this terminal, on the account its harness picks; refuses
+                          start clanker NAME here, in this terminal, on the account its harness picks; refuses
                           while NAME is busy or works on another host
   june tasks [--json]     the dispatched tasks: what needs you, what is working, what is queued, and what finished today
   june transcript [--last N] [--since WHEN] [--detail] [--json]
@@ -889,12 +889,11 @@ async function quotaCommand(p: ReturnType<typeof paths>, args: string[], json: b
 /** Each roster card with whether it is busy (a live terminal carries its june.agent label) and, on this host, its battery:
  * the tightest window left on the account its harness would pick now. */
 async function rosterStanding(p: ReturnType<typeof paths>): Promise<import("./roster.ts").RosterEntry[]> {
-	const { assignRosterAgents, computeStanding, parseRoster } = await import("./roster.ts");
+	const { assignRosterAgents, computeStanding, readClankers } = await import("./roster.ts");
 	const { activeRunsByTask } = await import("./runs.ts");
 	const a = await import("./accounts.ts");
 	const { Herdr } = await import("./tools/herdr.ts");
-	const file = `${p.data}/ROSTER.org`;
-	const cards = parseRoster(existsSync(file) ? readFileSync(file, "utf8") : "");
+	const cards = readClankers(p.data);
 	const config = loadConfig(p);
 	const herdr = new Herdr(config.herdr);
 	const here = shortHostname();
@@ -927,7 +926,7 @@ async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: 
 	const { statsByAgent } = await import("./runs.ts");
 	let rows = await rosterStanding(p);
 	if (!rows.length) {
-		console.error(`june agents: ${p.data}/ROSTER.org names no agents`);
+		console.error(`june agents: ${p.data}/clankers holds no clankers`);
 		return 1;
 	}
 	const { stats } = statsByAgent(p.database);
@@ -938,7 +937,7 @@ async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: 
 	if (args[0]) {
 		const card = findCard(rows.map((r) => r.card), args[0]);
 		if (!card) {
-			console.error(`june agents: no agent called ${args[0]}; the roster has ${rows.map((r) => r.card.name).join(", ")}`);
+			console.error(`june agents: no clanker called ${args[0]}; the clankers are ${rows.map((r) => r.card.name).join(", ")}`);
 			return 2;
 		}
 		rows = rows.filter((r) => r.card === card);
@@ -953,7 +952,7 @@ async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: 
 		const { card, status, terminal, battery: b, stats: s } = rows[0]!;
 		const runSummary = s ? `#${s.rank} · ${s.runs} run${s.runs === 1 ? "" : "s"} (${s.completed} ok${s.handoffs ? `, ${s.handoffs} handoff` : ""}${s.parked ? `, ${s.parked} parked` : ""}${s.avgDurationMs ? `, ${formatDuration(s.avgDurationMs)} avg` : ""})` : undefined;
 		console.log(`${card.name} (${card.slug})`);
-		for (const [k, v] of [["host", card.host], ["harness", card.harness], ["model", card.model ?? "the harness's default"], ["effort", card.effort ?? "the harness's default"], ["avatar", card.avatar], ["status", terminal ? `${status} in ${terminal}` : status], ["battery", battery(b)], ["history", runSummary]] as const)
+		for (const [k, v] of [["host", card.host], ["harness", card.harness], ["model", card.model ?? "the harness's default"], ["effort", card.effort ?? "the harness's default"], ["status", terminal ? `${status} in ${terminal}` : status], ["battery", battery(b)], ["history", runSummary]] as const)
 			if (v) console.log(`  ${k.padEnd(8)} ${v}`);
 		for (const problem of card.problems) console.log(`  problem  ${problem}`);
 		if (card.instructions) console.log(`\n${card.instructions}`);
@@ -1085,7 +1084,7 @@ async function agentsHistory(p: ReturnType<typeof paths>, args: string[], json: 
  * available, unless a later one would otherwise lose quota at a reset within hours. Prints the name alone.
  */
 async function agentsPick(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {
-	const { choose, findCard } = await import("./roster.ts");
+	const { choose, findCard, launchInstructions } = await import("./roster.ts");
 	const a = await import("./accounts.ts");
 	const flag = (name: string) => {
 		const i = args.indexOf(name);
@@ -1125,7 +1124,7 @@ async function agentsPick(p: ReturnType<typeof paths>, args: string[], json: boo
 			if (harnesses && !harnesses.includes(name)) return [{ name, available: false, reason: `the dispatcher cannot start ${name} yet` }];
 			return [{ name, legacy: name, available: true, reason: `an unnamed ${name} worker` }];
 		}
-		return [{ name, available: false, reason: "not on the roster" }];
+		return [{ name, available: false, reason: "not a clanker" }];
 	});
 	const result = choose(options);
 	const picked = options.find((o) => o.name === result.chosen);
@@ -1133,7 +1132,8 @@ async function agentsPick(p: ReturnType<typeof paths>, args: string[], json: boo
 		console.log(
 			JSON.stringify({
 				...result,
-				...(picked?.row ? { card: picked.row.card } : {}),
+				// The dispatcher launches with the card's instructions: its directives and its memory.
+				...(picked?.row ? { card: { ...picked.row.card, instructions: launchInstructions(picked.row.card) } } : {}),
 				...(picked?.legacy ? { legacy: picked.legacy } : {}),
 				options: options.map(({ row: _, ...o }) => o),
 			}),
@@ -1154,7 +1154,7 @@ async function startCommand(p: ReturnType<typeof paths>, args: string[]): Promis
 	const rows = await rosterStanding(p);
 	const row = rows.find((r) => r.card === findCard(rows.map((x) => x.card), name));
 	if (!row) {
-		console.error(`june start: no agent called ${name}; the roster has ${rows.map((r) => r.card.name).join(", ") || "no one"}`);
+		console.error(`june start: no clanker called ${name}; the clankers are ${rows.map((r) => r.card.name).join(", ") || "none"}`);
 		return 2;
 	}
 	const { card } = row;
@@ -1173,7 +1173,7 @@ async function startCommand(p: ReturnType<typeof paths>, args: string[]): Promis
 	// Label this terminal as the agent's while it runs, so the roster shows it busy; the label goes when it stops.
 	const terminal = process.env.HC_TERMINAL_ID;
 	const label = (value: string) => terminal && spawnSync("hc", ["label", terminal, `june.agent=${value}`], { stdio: "ignore" });
-	if (!terminal) console.error(`june start: not in a herdr terminal, so the roster cannot show ${card.name} busy`);
+	if (!terminal) console.error(`june start: not in a herdr terminal, so the board cannot show ${card.name} busy`);
 	label(card.slug);
 	// Ctrl+C belongs to the agent; june stays to take the label off when it exits.
 	for (const signal of ["SIGINT", "SIGQUIT"] as const) process.on(signal, () => {});

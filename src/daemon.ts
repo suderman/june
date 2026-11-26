@@ -54,7 +54,7 @@ import { createHerdrExtension, Herdr, type Run, runProcess } from "./tools/herdr
 import { openTerminal } from "./terminal.ts";
 import { Boards } from "./board.ts";
 import { TaskEdits } from "./board-edit.ts";
-import { editRosterFile } from "./roster.ts";
+import { editClanker } from "./roster.ts";
 import { OrgWorker } from "./org-worker.ts";
 import { Pushes } from "./push.ts";
 import { createDispatchExtension, instanceId } from "./tools/dispatch.ts";
@@ -335,7 +335,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		const apkViews = { count: 0 };
 		const immichServer = immichFrom({ ...(options.env ?? process.env), ...options.secrets });
 		const immich = immichServer && { server: immichServer, watch: watchImmich(immichServer, { file: `${paths.state}/immich.json`, warn: (error) => log.warn("immich_status_failed", { error: error.message }) }) };
-		const scope: Scope = { wake: config.rhythm.wake, apkViews, harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, boards, edits, edited: new Map(), rosterFile: `${paths.data}/ROSTER.org`, pushes, ...(expressions ? { expressions } : {}), ...(immich ? { immich } : {}) };
+		const scope: Scope = { wake: config.rhythm.wake, apkViews, harness, root, timeline, hidden, models: options.models, status, reload: prompt.reload, relax, log, inbox, devices, phones, remote: () => remote, sky: situation, follows, boards, edits, edited: new Map(), dataDir: paths.data, pushes, ...(expressions ? { expressions } : {}), ...(immich ? { immich } : {}) };
 		const clients = new Set<Socket>();
 		const server = await listen(paths.socket, (socket) => {
 			clients.add(socket);
@@ -409,7 +409,8 @@ function listen(path: string, onConnection: (socket: Socket) => void): Promise<S
 type Scope = CommandScope & { wake: string; immich?: { server: Immich; watch: ImmichWatch }; apkViews: { count: number }; timeline: Timeline; hidden: Hidden; log: Logger; inbox: string; devices: Devices; phones: Phones; remote: () => Remote | undefined; sky?: SkySource; follows?: FollowSource; boards: BoardSource; edits: Pick<TaskEdits, "apply">;
 	/** Tasks edited from a board since the agenda was last read, each with the refresh that will read it again. */
 	edited: Map<string, Promise<void>>;
-	rosterFile: string;
+	/** June's data directory, holding clankers/. */
+	dataDir: string;
 	pushes: Pick<Pushes, "register">;
 	expressions?: ReturnType<typeof startExpressions> };
 /** The sky a view sends with its state, and how it learns of a change. */
@@ -591,7 +592,7 @@ function session(send: (reply: Reply) => void, scope: Scope, device?: string): S
 			}
 			case "roster": {
 				if (!request.edit || typeof request.edit.action !== "string") throw new Error("roster needs an edit");
-				const { slug } = editRosterFile(scope.rosterFile, request.edit);
+				const { slug } = editClanker(scope.dataDir, request.edit);
 				scope.log.info("roster_edit", { action: request.edit.action, slug: slug ?? "", device: device ?? "socket" });
 				await scope.boards.refreshRoster();
 				return send({ type: "roster", requestId: request.requestId, ...(slug ? { slug } : {}) });

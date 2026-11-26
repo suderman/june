@@ -9,7 +9,7 @@ import { arr, bool, lit, num, obj, opt, str, union } from "@earendil-works/pi-sc
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import { LAUNCHABLE_HARNESSES } from "../../desktop/harnesses.mjs";
 import { type Config, expandHome } from "../config.ts";
-import { type Card, findCard, parseRoster } from "../roster.ts";
+import { type Card, findCard, readClankers } from "../roster.ts";
 import { leaderboard, listRuns } from "../runs.ts";
 import { type Run, runProcess } from "./herdr.ts";
 import { createFollowTask, FOLLOW_DEFAULTS, type FollowInput, type FollowOptions, follow, listFollowing } from "./follow.ts";
@@ -78,24 +78,19 @@ export function dispatchAgents(dispatch: Config["dispatch"]): readonly string[] 
 /** The agents org-dispatch can start, as its `org-dispatch-launchable` lists them. */
 export const LAUNCHABLE = LAUNCHABLE_HARNESSES;
 
-/** ROSTER.org beside SOUL.org: June's named agents. */
+/** The clankers in clankers/ beside SOUL.org: June's named agents. */
 export function rosterCards(config: Pick<Config, "soulFile">): Card[] {
-	if (!config.soulFile) return [];
-	try {
-		return parseRoster(readFileSync(join(dirname(config.soulFile), "ROSTER.org"), "utf8"));
-	} catch {
-		return [];
-	}
+	return config.soulFile ? readClankers(dirname(config.soulFile)) : [];
 }
 
 /** Names June may list in AGENTS: roster agents with usable cards, and the harnesses she may choose. */
 function checkAgents(names: readonly string[] | undefined, agents: readonly string[], roster: readonly Card[]): void {
 	if (!names) return;
-	if (names.length === 0) throw new Error("agents lists at least one roster agent or harness");
+	if (names.length === 0) throw new Error("agents lists at least one clanker or harness");
 	for (const name of names) {
 		if (agents.includes(name)) continue;
 		const card = roster.find((c) => c.slug === name);
-		if (!card) throw new Error(`${name} is neither on the roster (${roster.map((c) => c.slug).join(", ") || "empty"}) nor one of ${agents.join(", ")}; use the roster's lowercase names`);
+		if (!card) throw new Error(`${name} is neither a clanker (${roster.map((c) => c.slug).join(", ") || "none yet"}) nor one of ${agents.join(", ")}; use the clankers' lowercase names`);
 		if (card.problems.length) throw new Error(`${card.name}'s card has problems: ${card.problems.join("; ")}`);
 	}
 	if (new Set(names).size !== names.length) throw new Error("agents names each agent once");
@@ -720,7 +715,7 @@ export function createDispatchExtension(
 	const rosterList = roster.map((c) => `${c.slug} (${[c.harness, c.model, c.effort].filter(Boolean).join(" ")} on ${c.host})`).join(", ");
 	const agentsParameter = opt(arr(str(), {
 		minItems: 1,
-		description: `Instead of agent, the roster agents to choose among, in ${user()}'s order of preference, written as :AGENTS:. The dispatcher gives the task to the first one free when it launches, unless a later one would lose quota at a reset within hours; each works one task at a time. A harness name (${agents.join(", ")}) in the list means an unnamed worker on it, always free, such as ["bolt", "pi"]. Use it when ${user()} names agents or asks for one of them${roster.length ? `. The roster: ${rosterList}; run june agents for who is free now and their quota` : ""}`,
+		description: `Instead of agent, the clankers to choose among, in ${user()}'s order of preference, written as :AGENTS:. The dispatcher gives the task to the first one free when it launches, unless a later one would lose quota at a reset within hours; each works one task at a time. A harness name (${agents.join(", ")}) in the list means an unnamed worker on it, always free, such as ["pax", "pi"]. Use it when ${user()} names agents or asks for one of them${roster.length ? `. The clankers: ${rosterList}; run june agents for who is free now and their quota` : ""}`,
 	}));
 	// Say what the dispatcher could run but June may not choose, so she gives one accurate answer instead of a workaround.
 	const disabled = disabledAgents(config.dispatch);
@@ -884,8 +879,8 @@ review: opt(union([bool(), lit("agent")], { description: `Default true: the work
 					file: str({ description: "Org agenda file under ~/org" }),
 					heading: str({ description: "Exact title or id:UUID, as org_read_task accepts" }),
 					expected: union([lit("TODO"), lit("EVAL"), lit("HOLD")], { description: "Current state just read; a stale request is refused" }),
-					host: str({ description: `Keep the existing host unless the user changes it (or match the new roster agent's host); otherwise default ${defaultHost}. Allowed: ${hosts.join(", ")}` }),
-					agent: opt(str({ description: `Only when ${user()} asks for a different agent or hands off to another roster agent: ${agents.join(", ")}${roster.length ? `, or a roster agent (${roster.map((c) => c.slug).join(", ")})` : ""}. Omit to keep the task's agent` })),
+					host: str({ description: `Keep the existing host unless the user changes it (or match the new clanker's host); otherwise default ${defaultHost}. Allowed: ${hosts.join(", ")}` }),
+					agent: opt(str({ description: `Only when ${user()} asks for a different agent or hands off to another clanker: ${agents.join(", ")}${roster.length ? `, or a clanker (${roster.map((c) => c.slug).join(", ")})` : ""}. Omit to keep the task's agent` })),
 					note: str({ description: `One line recording ${user()}'s request and any answer or revised scope, naming ${user()} rather than writing you` }),
 					depends: opt(arr(str(), { description: "id:UUID of existing Org tasks that must be DONE before this one launches, read with org_read_task first; added to any it already has" })),
 					revision: opt(str({ description: "Exact org_read_task revision; required for granting, retaining or revoking scoped live-content approval" })),
@@ -1046,9 +1041,9 @@ review: opt(union([bool(), lit("agent")], { description: `Default true: the work
 			}),
 			...(database ? [defineTool({
 				name: "org_agents_leaderboard",
-				description: "Read the agent roster leaderboard and recent dispatched run history from June's database: per-agent runs, completions, handoffs, parked runs, and average duration. Read-only.",
+				description: "Read the clankers' leaderboard and recent dispatched run history from June's database: per-agent runs, completions, handoffs, parked runs, and average duration. Read-only.",
 				parameters: obj({
-					agent: opt(str({ description: "Optional roster agent slug to filter recent runs to one agent" })),
+					agent: opt(str({ description: "Optional clanker slug to filter recent runs to one agent" })),
 					limit: opt(num({ description: "How many recent runs to include (default 15, max 50)" })),
 				}),
 				replay: "safe",

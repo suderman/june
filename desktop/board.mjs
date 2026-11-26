@@ -456,9 +456,9 @@ function hash(text) {
 	return h;
 }
 
-/** A clanker's service number: its unit (host) and three digits from its slug, "KIT-042". */
+/** A clanker's ID: its host and three digits from its slug, "KIT-042". */
 export function serviceNo(host, slug) {
-	const unit = String(host ?? "").trim().toUpperCase() || "RES";
+	const unit = String(host ?? "").trim().toUpperCase() || "NONE";
 	return `${unit}-${String(hash(slug) % 1000).padStart(3, "0")}`;
 }
 
@@ -583,7 +583,6 @@ export function rosterView(agents, now) {
 			clanker: harnessOf(c.harness),
 			model: c.model ?? "",
 			effort: c.effort ?? "",
-			avatar: c.avatar ?? "",
 			instructions: c.instructions ?? "",
 			problems: Array.isArray(c.problems) ? c.problems : [],
 			status: st,
@@ -596,12 +595,12 @@ export function rosterView(agents, now) {
 			batteryAccount: hasLevel && b.account ? String(b.account) : "",
 			batteryTone: batteryTone,
 			specLine: spec,
-			// The enlistment card's words: service number and unit (its host), loadout without the harness the
-			// model already names, the status stamp (none when idle), energy with its reset, and a text gauge.
+			// The clanker card's words: its ID and host, its model and effort without the harness the model already
+			// names (loadout), the status stamp (none when idle), quota with its reset (energy), and a text gauge.
 			serviceNo: serviceNo(c.host, c.slug ?? String(idx)),
 			unit: c.host ?? "",
 			loadout: loadout(c.harness, c.model, c.effort),
-			stamp: st === "idle" ? "" : statusLabel === "WORKING" || busy ? "ON DUTY" : statusLabel,
+			stamp: st === "idle" ? "" : statusLabel === "WORKING" || busy ? "WORKING" : statusLabel,
 			energyText: stale ? `${batteryLevel}% · read ${age !== "" ? age + " ago" : "earlier"}` : hasLevel ? `${batteryLevel}% · resets ${resetWord}` : b ? quotaWhy(b.reason) : "",
 			batteryStale: stale,
 			// The whole of why, for the card's own page, each account named once.

@@ -304,8 +304,8 @@ private fun AgentsBoardPage(link: Link, decisions: Decisions, modifier: Modifier
         LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    BackLink(if (amend) "card" else "roster", back, Modifier.weight(1f))
-                    if (!rosterEditing && card != null) PressTab("amend card", { rosterEditing = true }, small = true)
+                    BackLink(if (amend) "card" else "clankers", back, Modifier.weight(1f))
+                    if (!rosterEditing && card != null) PressTab("edit card", { rosterEditing = true }, small = true)
                 }
             }
             item {
@@ -314,12 +314,12 @@ private fun AgentsBoardPage(link: Link, decisions: Decisions, modifier: Modifier
                         card, rosterHosts, colours, link.rosterBusy, link.rosterNotice,
                         onSave = { e ->
                             val payload = JSONObject().put("action", "save").put("name", e.name).put("host", e.host).put("harness", e.harness)
-                                .put("model", e.model).put("effort", e.effort).put("avatar", e.avatar).put("instructions", e.instructions)
+                                .put("model", e.model).put("effort", e.effort).put("instructions", e.instructions)
                             if (card != null) payload.put("original", card.optString("slug"))
                             link.editRoster(payload)
                         },
                         onDischarge = { card?.let { link.editRoster(JSONObject().put("action", "delete").put("slug", it.optString("slug"))) } },
-                    ) else if (card == null) Text("That clanker is no longer in ROSTER.org.", style = p.type.lettering.copy(color = p.muted))
+                    ) else if (card == null) Text("That clanker is gone.", style = p.type.lettering.copy(color = p.muted))
                     else EnlistmentCard(card, colours)
                 }
             }
@@ -329,7 +329,7 @@ private fun AgentsBoardPage(link: Link, decisions: Decisions, modifier: Modifier
     }
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Masthead("agents", v?.optString("summary") ?: "asking hc…", listOf("activity" to "activity", "squad" to "roster" + if (roster.isNotEmpty()) " · ${roster.size}" else ""), mode) { mode = it }
+            Masthead("agents", v?.optString("summary") ?: "asking hc…", listOf("activity" to "activity", "squad" to "clankers" + if (roster.isNotEmpty()) " · ${roster.size}" else ""), mode) { mode = it }
         }
         if (v != null && colours != null && mode == "squad") {
             val canRank = v.optBoolean("rosterHasStats")

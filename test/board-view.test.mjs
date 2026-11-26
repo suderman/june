@@ -98,14 +98,14 @@ test("the roster shapes each card with its battery tone, status label, spec line
 		["broken", "INVALID", false, -1, "unknown", "no login", ""],
 	]);
 	assert.deepEqual(rv.cards.map((c) => [c.stamp, c.loadout, c.energyText, c.gauge]), [
-		["ON DUTY", "opus-4-7 · high", "78% · resets 2d", "[########--]"],
+		["WORKING", "opus-4-7 · high", "78% · resets 2d", "[########--]"],
 		["", "medium", "40% · resets 10h", "[####------]"],
 		["", "", "12% · resets 3h", "[#---------]"],
 		["INVALID", "", "quota unread", ""],
 	]);
 	assert.match(rv.cards[0].serviceNo, /^KIT-\d{3}$/);
 	assert.equal(rv.cards[0].serviceNo, serviceNo("kit", "bolt"), "a service number is steady for its slug");
-	assert.match(rv.cards[3].serviceNo, /^RES-\d{3}$/, "a clanker with no host is in reserve");
+	assert.match(rv.cards[3].serviceNo, /^NONE-\d{3}$/, "a clanker with no host says so in its ID");
 	const av = agentsView(agents, 0, "2026-11-21", "Alex");
 	assert.equal(av.roster.length, 4);
 	assert.equal(av.rosterHasStats, true);
@@ -293,7 +293,7 @@ test("a task's page offers the states its state flows to, and a protected file's
 	assert.deepEqual(taskDetail(task("id:x", { state: "HOLD" }), "Alex", "2026-11-21").next, ["TODO", "PROG", "AUTO", "DONE"]);
 });
 
-test("enlistment words: resets, loadouts, docket numbers", () => {
+test("clanker card words: resets, loadouts, docket numbers", () => {
 	assert.deepEqual([resetIn(0.4), resetIn(0.001), resetIn(1), resetIn(47), resetIn(72), resetIn(undefined)], ["24m", "1m", "1h", "47h", "3d", ""]);
 	assert.equal(loadout("claude", "claude-opus-5-5", "high"), "opus-5-5 · high");
 	assert.equal(loadout("pi", "gpt-6.2-sol", ""), "gpt-6.2-sol");
@@ -373,7 +373,7 @@ test("agentsView names a worker by its clanker from terminal match or rosterAgen
 		],
 	};
 	const av = agentsView(agents, 0, "2026-11-25", "Alex");
-	assert.equal(av.roster[0].stamp, "ON DUTY");
+	assert.equal(av.roster[0].stamp, "WORKING");
 	assert.equal(av.roster[1].stamp, "");
 	assert.equal(av.working[0].name, "Bolt");
 	assert.equal(av.working[0].where, "Bolt · claude · kit/t2");

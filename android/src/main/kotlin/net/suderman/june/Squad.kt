@@ -103,8 +103,8 @@ internal fun Clanker(harness: String, colours: Colours, size: Int = 40, mark: St
     }
 }
 
-/** A status stamp's colour: on duty in the in-progress colour, an invalid card in the alarm's, the rest muted. */
-private fun Look.Palette.statusTone(stamp: String) = when (stamp) { "ON DUTY" -> tone("PROG"); "INVALID" -> tone("TODO"); else -> muted }
+/** A status stamp's colour: working in the in-progress colour, an invalid card in the alarm's, the rest muted. */
+private fun Look.Palette.statusTone(stamp: String) = when (stamp) { "WORKING" -> tone("PROG"); "INVALID" -> tone("TODO"); else -> muted }
 
 /**
  * The clanker's portrait window: a frame in its harness colour over a screentone wash of the same, the clanker in
@@ -248,12 +248,12 @@ internal fun FieldValue(text: String, muted: Boolean = false, mono: Boolean = fa
     Text(text, style = (if (mono) p.type.number else p.type.value).copy(color = if (muted) p.surfaceMuted else p.surfaceInk), maxLines = 2, overflow = TextOverflow.Ellipsis)
 }
 
-/** The clanker's full enlistment card: portrait, name, class, unit, loadout, energy, standing orders, service record. */
+/** The clanker's full card: portrait, name, host, harness, model, quota, directives, history. */
 @Composable
 internal fun EnlistmentCard(card: JSONObject, colours: Colours) {
     val p = LocalPalette.current
     Column(Modifier.fillMaxWidth().inked(lift = 4.dp)) {
-        Band("Enlistment card", card.optString("serviceNo"))
+        Band("Clanker card", card.optString("serviceNo"))
         Column(Modifier.padding(12.dp)) {
             if (p.console) Text("(o)  ${card.optString("stamp").ifEmpty { "idle" }.lowercase()}", style = p.type.number.copy(color = p.muted))
             else Portrait(card.optString("clanker"), colours, card.optString("stamp"), Modifier.fillMaxWidth().height(172.dp), 116)
@@ -262,11 +262,11 @@ internal fun EnlistmentCard(card: JSONObject, colours: Colours) {
             ClassLine(card)
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(p.rule))
-        FieldRow("Unit") { FieldValue(card.optString("unit").ifEmpty { "reserve" }, muted = card.optString("unit").isEmpty()) }
-        FieldRow("Class") { FieldValue(card.optString("harness").ifEmpty { "none" }) }
-        FieldRow("Loadout") { FieldValue(listOf(card.optString("model").ifEmpty { "harness default" }, card.optString("effort").ifEmpty { "default effort" }).joinToString(" · ")) }
+        FieldRow("Host") { FieldValue(card.optString("unit").ifEmpty { "none" }, muted = card.optString("unit").isEmpty()) }
+        FieldRow("Harness") { FieldValue(card.optString("harness").ifEmpty { "none" }) }
+        FieldRow("Model") { FieldValue(listOf(card.optString("model").ifEmpty { "harness default" }, card.optString("effort").ifEmpty { "default effort" }).joinToString(" · ")) }
         val energy = card.optString("energyText")
-        FieldRow("Energy", last = card.optString("terminal").isEmpty() && card.optString("avatar").isEmpty()) {
+        FieldRow("Quota", last = card.optString("terminal").isEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 EnergyGauge(card.optInt("batteryLevel", -1), card.optString("batteryTone", "unknown"), card.optString("gauge"))
                 val account = card.optString("batteryAccount")
@@ -276,22 +276,20 @@ internal fun EnlistmentCard(card: JSONObject, colours: Colours) {
             }
         }
         val term = card.optString("terminal")
-        if (term.isNotEmpty()) FieldRow("Post", last = card.optString("avatar").isEmpty()) { FieldValue(term, mono = true) }
-        val avatar = card.optString("avatar")
-        if (avatar.isNotEmpty()) FieldRow("Avatar", last = true) { FieldValue(avatar, mono = true) }
+        if (term.isNotEmpty()) FieldRow("Terminal", last = true) { FieldValue(term, mono = true) }
         val problems = card.optJSONArray("problems").strings()
         if (problems.isNotEmpty()) Text(problems.joinToString("; "), Modifier.padding(12.dp), style = p.type.meta.copy(color = p.tone("TODO"), fontWeight = FontWeight.Bold))
     }
     Spacer(Modifier.height(4.dp))
-    SectionRule("STANDING ORDERS")
+    SectionRule("DIRECTIVES")
     val orders = card.optString("instructions")
     Text(
-        orders.ifEmpty { "No standing orders." },
+        orders.ifEmpty { "No directives." },
         Modifier.fillMaxWidth().inked(lift = 2.dp).padding(horizontal = 12.dp, vertical = 10.dp),
         style = (if (orders.length > 280) p.type.body else p.type.lettering).copy(color = if (orders.isEmpty()) p.surfaceMuted else p.surfaceInk),
     )
     if (card.optInt("runs", 0) > 0) {
-        SectionRule("SERVICE RECORD")
+        SectionRule("HISTORY")
         Column(Modifier.fillMaxWidth().inked(lift = 2.dp).padding(vertical = 4.dp)) {
             val parts = listOf(card.optString("statsLine")) +
                 listOfNotNull(card.optInt("handoffs", 0).takeIf { it > 0 }?.let { "$it handed off" }, card.optInt("parked", 0).takeIf { it > 0 }?.let { "$it parked" })
@@ -309,12 +307,12 @@ internal fun EnlistmentCard(card: JSONObject, colours: Colours) {
     }
 }
 
-/** What the enlistment form sends: the roster card's fields, as Link.editRoster's "save" takes them. */
-internal data class Enlistment(val name: String, val host: String, val harness: String, val model: String, val effort: String, val avatar: String, val instructions: String)
+/** What the clanker form sends: the card's fields, as Link.editRoster's "save" takes them. */
+internal data class Enlistment(val name: String, val host: String, val harness: String, val model: String, val effort: String, val instructions: String)
 
 /**
- * A blank enlistment card to fill in, or a clanker's card to amend: name, unit, class and effort as stamp rows,
- * loadout, avatar and standing orders. Discharging asks once more before it removes the card.
+ * A blank clanker card to fill in, or a clanker's card to edit: name, host, harness and effort as stamp rows, model and
+ * directives. Destroying asks once more before it archives the clanker's folder.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -326,55 +324,54 @@ internal fun EnlistForm(card: JSONObject?, hosts: List<String>, colours: Colours
     var harness by remember(key) { mutableStateOf(card?.optString("harness")?.takeIf { it in colours.harnesses } ?: "claude") }
     var model by remember(key) { mutableStateOf(card?.optString("model") ?: "") }
     var effort by remember(key) { mutableStateOf(card?.optString("effort") ?: if (card == null) "high" else "") }
-    var avatar by remember(key) { mutableStateOf(card?.optString("avatar") ?: "") }
     var orders by remember(key) { mutableStateOf(card?.optString("instructions") ?: "") }
     var discharging by remember(key) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().inked(lift = 4.dp)) {
-        Band(if (card == null) "Enlistment card · blank" else "Enlistment card · amend", card?.optString("serviceNo") ?: "")
+        Band(if (card == null) "Clanker card · new" else "Clanker card · edit", card?.optString("serviceNo") ?: "")
         Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (!p.console) Portrait(harness, colours, "", Modifier.size(64.dp), 50)
             Column(Modifier.weight(1f)) {
-                RuledField(name, { name = it }, "Name", placeholder = "e.g. Bolt")
+                RuledField(name, { name = it }, "Name", placeholder = "e.g. pax")
             }
         }
-        FieldRow("Unit") {
+        FieldRow("Host") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { for (h in hosts) Stamp(h, p.line, on = host == h, tilt = 0f) { host = h } }
         }
-        if (host !in hosts) Box(Modifier.padding(horizontal = 12.dp)) { RuledField(host, { host = it }, "Other unit", placeholder = "host name", mono = true) }
-        FieldRow("Class") {
+        if (host !in hosts) Box(Modifier.padding(horizontal = 12.dp)) { RuledField(host, { host = it }, "Other host", placeholder = "host name", mono = true) }
+        FieldRow("Harness") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { for (h in colours.harnesses) Stamp(h, p.harness(h), on = harness == h, tilt = 0f) { harness = h } }
         }
-        Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) { RuledField(model, { model = it }, "Loadout · model", placeholder = "harness default", mono = true) }
+        Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) { RuledField(model, { model = it }, "Model", placeholder = "harness default", mono = true) }
         FieldRow("Effort") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { for (e in colours.efforts) Stamp(e.ifEmpty { "default" }, p.line, on = effort == e, tilt = 0f) { effort = e } }
         }
-        Box(Modifier.padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp)) { RuledField(avatar, { avatar = it }, "Avatar", placeholder = "optional path beside ROSTER.org", mono = true) }
+        Spacer(Modifier.height(8.dp))
     }
-    SectionRule("STANDING ORDERS")
+    SectionRule("DIRECTIVES")
     MemoField(orders, { orders = it }, "Role, skills, voice…", lines = 4)
     if (busy || notice.isNotEmpty()) Text(
         if (busy) "saving…" else notice, Modifier.padding(top = 8.dp),
         style = p.type.meta.copy(color = if (busy || notice == "saved") p.muted else p.accent, fontWeight = FontWeight.Bold),
     )
     FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        PressTab(if (card == null) "Enlist" else "Save card", { onSave(Enlistment(name, host, harness, model, effort, avatar, orders)) }, kind = Press.Primary, enabled = !busy)
-        if (card != null && !discharging) PressTab("Discharge", { discharging = true }, kind = Press.Danger, enabled = !busy)
+        PressTab(if (card == null) "Create" else "Save card", { onSave(Enlistment(name, host, harness, model, effort, orders)) }, kind = Press.Primary, enabled = !busy)
+        if (card != null && !discharging) PressTab("Destroy", { discharging = true }, kind = Press.Danger, enabled = !busy)
         if (card != null && discharging) {
-            PressTab("Confirm discharge", onDischarge, kind = Press.Danger, enabled = !busy)
+            PressTab("Confirm destroy", onDischarge, kind = Press.Danger, enabled = !busy)
             PressTab("Keep", { discharging = false }, kind = Press.Quiet)
         }
     }
 }
 
-/** The roster list itself (ROSTER.org's cards): the count of enlisted clankers, enlist, the service record order, and each card. */
+/** The clankers list (each clankers/<slug>/CARD.org): the count, create, the history order, and each card. */
 @Composable
 internal fun SquadList(cards: List<JSONObject>, ranked: Boolean, canRank: Boolean, colours: Colours, onRank: () -> Unit, onEnlist: () -> Unit, onOpen: (JSONObject) -> Unit) {
     val p = LocalPalette.current
-    SectionRule((if (ranked) "SERVICE RECORD" else "ROSTER") + " · ${cards.size}") {
+    SectionRule((if (ranked) "HISTORY" else "CLANKERS") + " · ${cards.size}") {
         // The console's brackets make the words wider, so its labels are shorter.
-        if (canRank) PressTab(if (ranked) (if (p.console) "order" else "roster order") else (if (p.console) "record" else "service record"), onRank, kind = Press.Quiet, small = true)
-        PressTab("+ enlist", onEnlist, small = true)
+        if (canRank) PressTab(if (ranked) (if (p.console) "name" else "by name") else (if (p.console) "history" else "by history"), onRank, kind = Press.Quiet, small = true)
+        PressTab("+ create", onEnlist, small = true)
     }
-    if (cards.isEmpty()) Text("No clankers enlisted in ROSTER.org yet.", style = p.type.lettering.copy(color = p.muted))
+    if (cards.isEmpty()) Text("No clankers yet.", style = p.type.lettering.copy(color = p.muted))
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { for (c in cards) EnlistCard(c, colours) { onOpen(c) } }
 }

@@ -1,9 +1,10 @@
-// The roster (ROSTER.org beside SOUL.org): named agents, one heading each, whose properties fix the host they work on,
-// the harness, model and effort, and an avatar, and whose text is the instructions added to the harness's own. An agent
-// works one task at a time: it is busy while a live herdr terminal carries its june.agent label. Accounts are not on the
-// card; the harness's plain name picks one from quota on the agent's host (src/accounts.ts).
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+// The clankers (clankers/ beside SOUL.org): named agents, one folder each. Its CARD.org is the user's: one heading whose
+// properties fix the host it works on, the harness, model and effort, and whose text is its directives, added to the
+// harness's instructions. Its MEMORY.org is the clanker's own: lessons it adds as it works, given back to it at each
+// launch. A clanker works one task at a time: it is busy while a live herdr terminal carries its june.agent label.
+// Accounts are not on the card; the harness's plain name picks one from quota on the clanker's host (src/accounts.ts).
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { HARNESSES as HARNESS_TABLE } from "../desktop/harnesses.mjs";
 import { HARNESSES, type HarnessName, type Quota, rank, type SlotStatus } from "./accounts.ts";
 import type { AgentSummary } from "./tools/herdr.ts";
@@ -18,8 +19,10 @@ export type Card = {
 	harness?: HarnessName;
 	model?: string;
 	effort?: string;
-	avatar?: string;
+	/** The card's directives. */
 	instructions: string;
+	/** Its folder, clankers/<slug>/, when read from one; MEMORY.org lives there. */
+	dir?: string;
 	/** What keeps the card from launching; empty for a usable card. */
 	problems: string[];
 };
@@ -30,7 +33,7 @@ export const slugOf = (name: string) =>
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-|-$/g, "");
 
-/** Every first-level heading of ROSTER.org as a card. Child headings belong to the card's instructions. */
+/** Every first-level heading of TEXT as a card. Child headings belong to the card's directives. */
 export function parseRoster(text: string): Card[] {
 	const cards: Card[] = [];
 	const sections = text.split(/^(?=\* )/m).filter((s) => s.startsWith("* "));
@@ -64,7 +67,6 @@ export function parseRoster(text: string): Card[] {
 			...(harness && harness in HARNESSES ? { harness: harness as HarnessName } : {}),
 			...(props.MODEL ? { model: props.MODEL } : {}),
 			...(effort ? { effort } : {}),
-			...(props.AVATAR ? { avatar: props.AVATAR } : {}),
 			instructions: body.trim(),
 			problems,
 		});
@@ -75,6 +77,57 @@ export function parseRoster(text: string): Card[] {
 /** The card named NAME, by its name or slug, ignoring case. */
 export const findCard = (cards: readonly Card[], name: string) => cards.find((c) => c.slug === slugOf(name));
 
+export const clankersDir = (dataDir: string) => join(dataDir, "clankers");
+
+/**
+ * Every clanker in DATADIR's clankers/, in folder order. The folder is the slug and its CARD.org's first heading the card.
+ * Dot folders, such as .destroyed, are skipped.
+ */
+export function readClankers(dataDir: string): Card[] {
+	const root = clankersDir(dataDir);
+	let folders: string[];
+	try {
+		folders = readdirSync(root, { withFileTypes: true })
+			.filter((d) => d.isDirectory() && !d.name.startsWith("."))
+			.map((d) => d.name)
+			.sort();
+	} catch {
+		return [];
+	}
+	return folders.map((folder): Card => {
+		const dir = join(root, folder);
+		let text = "";
+		try {
+			text = readFileSync(join(dir, "CARD.org"), "utf8");
+		} catch {}
+		const card = parseRoster(text)[0] ?? { name: folder, slug: folder, instructions: "", problems: ["CARD.org has no heading"] };
+		const problems = [...card.problems];
+		if (card.slug !== folder && !problems.length) problems.push(`its heading names ${card.name}, but its folder is ${folder}`);
+		return { ...card, slug: folder, dir, problems };
+	});
+}
+
+/** How much of MEMORY.org goes into a clanker's instructions: the newest end, where lessons are added. */
+export const MEMORY_CHARS = 8000;
+
+/** A clanker's instructions at launch: its directives, then its memory and how to add to it. A card without a folder has only its directives. */
+export function launchInstructions(card: Card): string {
+	if (!card.dir) return card.instructions;
+	const file = join(card.dir, "MEMORY.org");
+	let memory = "";
+	try {
+		memory = readFileSync(file, "utf8").trim();
+	} catch {}
+	if (memory.length > MEMORY_CHARS) memory = `[older lessons left out; the file has them]\n${memory.slice(-MEMORY_CHARS).replace(/^[^\n]*\n/, "")}`;
+	return [
+		card.instructions,
+		memory ? `Your memory, ${file}, holds what you learned in earlier sessions:\n\n${memory}` : `Your memory is ${file}. It holds nothing yet.`,
+		'Before you finish, add each lesson worth keeping for later sessions to the end of that file as a one-line Org list item ("- "). Keep a lesson general and short, and leave out what the task\'s Org record already holds.',
+	]
+		.filter(Boolean)
+		.join("\n\n");
+}
+
 /**
  * The arguments that start `card`'s harness as the card says, with PROMPT as its first message. Harnesses without an
  * instructions flag prepend the card's instructions to the prompt, and an interactive start without a prompt goes without them.
@@ -82,7 +135,8 @@ export const findCard = (cards: readonly Card[], name: string) => cards.find((c)
 export function launchArgs(card: Card, prompt?: string): string[] {
 	if (!card.harness || !(card.harness in HARNESS_TABLE)) throw new Error(`${card.name} has no harness`);
 	const { cli } = HARNESS_TABLE[card.harness];
-	const { model, effort, instructions: text } = card;
+	const { model, effort } = card;
+	const text = launchInstructions(card);
 	const args: string[] = [];
 	if (model) args.push(cli.modelFlag, cli.modelPrefix && !model.includes("/") ? `${cli.modelPrefix}${model}` : model);
 	if (effort && cli.effort) {
@@ -166,9 +220,9 @@ export type RosterEntry = {
 	recentRuns?: RosterRecentRun[];
 };
 
-/** An edit of ROSTER.org from a client: save (add or update) one card, or delete one by slug. */
+/** A clanker edit from a client: save (create or update) one card, or delete (destroy, archiving its folder) one by slug. */
 export type RosterEdit =
-	| { action: "save"; original?: string; name: string; host: string; harness: string; model?: string; effort?: string; avatar?: string; instructions?: string }
+	| { action: "save"; original?: string; name: string; host: string; harness: string; model?: string; effort?: string; instructions?: string }
 	| { action: "delete"; slug: string };
 
 /** Whether the dispatcher on this host has an active run of task ID, from its receipt in ~/.local/state/org-dispatch. */
@@ -252,8 +306,8 @@ const oneLine = (value: unknown, field: string): string => {
 	return s;
 };
 
-/** Format one roster card as an Org first-level heading with a PROPERTIES drawer and instructions body. */
-export function formatCard(fields: { name: string; host: string; harness: string; model?: string; effort?: string; avatar?: string; instructions?: string }): string {
+/** Format one card as an Org first-level heading with a PROPERTIES drawer and its directives. */
+export function formatCard(fields: { name: string; host: string; harness: string; model?: string; effort?: string; instructions?: string }): string {
 	const lines = [
 		`* ${fields.name}`,
 		":PROPERTIES:",
@@ -261,33 +315,41 @@ export function formatCard(fields: { name: string; host: string; harness: string
 		`:HARNESS: ${fields.harness}`,
 		...(fields.model ? [`:MODEL: ${fields.model}`] : []),
 		...(fields.effort ? [`:EFFORT: ${fields.effort}`] : []),
-		...(fields.avatar ? [`:AVATAR: ${fields.avatar}`] : []),
 		":END:",
 	];
 	if (fields.instructions) lines.push(fields.instructions);
 	return lines.join("\n");
 }
 
-/**
- * Apply one edit to ROSTER.org text, preserving the file's preamble and every untouched card verbatim. Returns the new
- * Org text and, for a save, the saved card's slug.
- */
-export function applyRosterEdit(text: string, edit: RosterEdit): { text: string; slug?: string } {
-	const first = /^\* /m.exec(text);
-	const preamble = (first ? text.slice(0, first.index) : text).trimEnd() || "#+TITLE: Roster";
-	const rawSections = first ? text.slice(first.index).split(/^(?=\* )/m).filter((s) => s.startsWith("* ")).map((s) => s.trimEnd()) : [];
-	const parsed = rawSections.map((raw) => ({ raw, card: parseRoster(raw)[0]! }));
+const writeAtomic = (file: string, text: string) => {
+	const tmp = `${file}.june-tmp`;
+	writeFileSync(tmp, text, "utf8");
+	renameSync(tmp, file);
+};
 
+const localDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/**
+ * Apply one edit to DATADIR's clankers. A save writes clankers/<slug>/CARD.org, keeping any text above its heading,
+ * renames the folder (and so its memory) when the name changes, and starts an empty MEMORY.org for a new clanker. A
+ * delete moves the folder to clankers/.destroyed/<slug>-<day>/; nothing is removed. Returns a save's slug.
+ */
+export function editClanker(dataDir: string, edit: RosterEdit, now = new Date()): { slug?: string } {
+	const root = clankersDir(dataDir);
+	const slugs = readClankers(dataDir).map((c) => c.slug);
 	if (edit.action === "delete") {
 		const target = slugOf(typeof edit.slug === "string" ? edit.slug : "");
-		if (!target) throw new Error("delete needs an agent slug");
-		const idx = parsed.findIndex((p) => p.card.slug === target);
-		if (idx < 0) throw new Error(`no agent called ${edit.slug}`);
-		const kept = parsed.filter((_, i) => i !== idx).map((p) => p.raw);
-		return { text: [preamble, ...kept].join("\n\n") + "\n" };
+		if (!target) throw new Error("destroy needs a clanker's slug");
+		if (!slugs.includes(target)) throw new Error(`no clanker called ${edit.slug}`);
+		const archive = join(root, ".destroyed");
+		mkdirSync(archive, { recursive: true });
+		let to = join(archive, `${target}-${localDay(now)}`);
+		for (let n = 2; existsSync(to); n++) to = join(archive, `${target}-${localDay(now)}-${n}`);
+		renameSync(join(root, target), to);
+		return {};
 	}
 
-	if (edit.action !== "save") throw new Error(`unknown roster action ${String((edit as { action?: unknown }).action)}`);
+	if (edit.action !== "save") throw new Error(`unknown clanker action ${String((edit as { action?: unknown }).action)}`);
 	const name = oneLine(edit.name, "name").replace(/\s+:[\w@#%:]+:\s*$/, "").trim();
 	const slug = slugOf(name);
 	if (!slug) throw new Error("name is required");
@@ -298,29 +360,23 @@ export function applyRosterEdit(text: string, edit: RosterEdit): { text: string;
 	const model = oneLine(edit.model ?? "", "model");
 	const effort = oneLine(edit.effort ?? "", "effort").toLowerCase();
 	if (effort && !(EFFORTS as readonly string[]).includes(effort)) throw new Error(`effort must be one of ${EFFORTS.join(", ")}`);
-	const avatar = oneLine(edit.avatar ?? "", "avatar");
 	const instructions = typeof edit.instructions === "string" ? edit.instructions.replace(/\r\n/g, "\n").trim() : "";
-	if (/^\* /m.test(instructions)) throw new Error("instructions cannot contain top-level '* ' headings (use '** ' instead)");
+	if (/^\* /m.test(instructions)) throw new Error("directives cannot contain top-level '* ' headings (use '** ' instead)");
 
 	const original = typeof edit.original === "string" && edit.original.trim() !== "" ? slugOf(edit.original) : "";
-	const idx = original ? parsed.findIndex((p) => p.card.slug === original) : -1;
-	if (original && idx < 0) throw new Error(`no agent called ${edit.original}`);
-	if (parsed.some((p, i) => i !== idx && p.card.slug === slug)) throw new Error(`another agent is already called ${name}`);
+	if (original && !slugs.includes(original)) throw new Error(`no clanker called ${edit.original}`);
+	if (slug !== original && (slugs.includes(slug) || existsSync(join(root, slug)))) throw new Error(`another clanker is already called ${name}`);
 
-	const formatted = formatCard({ name, host, harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(avatar ? { avatar } : {}), ...(instructions ? { instructions } : {}) });
-	const next = parsed.map((p) => p.raw);
-	if (idx >= 0) next[idx] = formatted;
-	else next.push(formatted);
-	return { text: [preamble, ...next].join("\n\n") + "\n", slug };
-}
-
-/** Read, edit and atomically rewrite ROSTER.org. */
-export function editRosterFile(file: string, edit: RosterEdit): { slug?: string } {
+	const dir = join(root, slug);
+	if (original && original !== slug) renameSync(join(root, original), dir);
+	mkdirSync(dir, { recursive: true });
+	const file = join(dir, "CARD.org");
 	const current = existsSync(file) ? readFileSync(file, "utf8") : "";
-	const { text, slug } = applyRosterEdit(current, edit);
-	mkdirSync(dirname(file), { recursive: true });
-	const tmp = `${file}.june-tmp`;
-	writeFileSync(tmp, text, "utf8");
-	renameSync(tmp, file);
-	return { ...(slug ? { slug } : {}) };
+	const first = /^\* /m.exec(current);
+	const preamble = (first ? current.slice(0, first.index) : current).trimEnd();
+	const card = formatCard({ name, host, harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(instructions ? { instructions } : {}) });
+	writeAtomic(file, `${preamble ? `${preamble}\n\n` : ""}${card}\n`);
+	const memory = join(dir, "MEMORY.org");
+	if (!existsSync(memory)) writeAtomic(memory, `#+TITLE: ${name}'s memory\n\nLessons ${name} learned, one list item each, newest last. ${name} adds to this file; edit or prune it freely.\n`);
+	return { slug };
 }

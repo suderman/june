@@ -8,7 +8,7 @@ import { accountsConfig, parseAccountsOrg, sharedQuotas, status as accountStatus
 import { type Config, protectedOf, shortHostname } from "./config.ts";
 import type { Logger } from "./runtime.ts";
 import { type OrgWorker, OrgWorkerDown } from "./org-worker.ts";
-import { assignRosterAgents, computeStanding, dispatchActive, parseRoster, type RosterEntry } from "./roster.ts";
+import { assignRosterAgents, computeStanding, dispatchActive, readClankers, type RosterEntry } from "./roster.ts";
 import { activeRunsByTask, statsByAgent } from "./runs.ts";
 import { type AgentSummary, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { orgTime } from "./tools/org.ts";
@@ -510,9 +510,10 @@ export class Boards {
 		this.#agentTimers.push(setInterval(() => void this.#refreshWorkers().catch(() => {}), this.#o.agentsMs));
 		if (this.#o.dataDir && !this.#rosterWatch) {
 			try {
-				this.#rosterWatch = watch(this.#o.dataDir, (_event, name) => {
+				// ACCOUNTS.org, and any clanker's card or folder; not the clankers' own MEMORY.org.
+				this.#rosterWatch = watch(this.#o.dataDir, { recursive: true }, (_event, name) => {
 					const file = name?.toString() ?? "";
-					if (file === "ROSTER.org" || file === "ACCOUNTS.org") {
+					if (file === "ACCOUNTS.org" || (file.startsWith("clankers") && !file.endsWith("MEMORY.org") && !file.endsWith(".june-tmp"))) {
 						clearTimeout(this.#rosterDebounce);
 						this.#rosterDebounce = setTimeout(() => void this.refreshRoster().catch(() => {}), 500);
 					}
@@ -642,8 +643,7 @@ export class Boards {
 	#readRoster(agenda: Agenda): { roster?: RosterEntry[]; workers: AgentSummary[] } {
 		const rawWorkers = this.#workers!.workers;
 		if (!this.#o.dataDir) return { workers: rawWorkers };
-		const file = join(this.#o.dataDir, "ROSTER.org");
-		const cards = parseRoster(existsSync(file) ? readFileSync(file, "utf8") : "");
+		const cards = readClankers(this.#o.dataDir);
 		const byId = new Map<string, Task>();
 		const bySession = new Map<string, Task>();
 		for (const task of Object.values(agenda.tasks)) {
