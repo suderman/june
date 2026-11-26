@@ -42,11 +42,18 @@ class AgendaWidget : AppWidgetProvider() {
             AgendaJob.now(context)
             return
         }
+        if (intent.action == SWITCH) {
+            val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+            val view = intent.getStringExtra("view")
+            if (id != AppWidgetManager.INVALID_APPWIDGET_ID && view != null) setView(context, id, view)
+            return
+        }
         super.onReceive(context, intent)
     }
 
     companion object {
         private const val REFRESH = "net.suderman.june.AGENDA_REFRESH"
+        private const val SWITCH = "net.suderman.june.AGENDA_VIEW"
         /** Past this, the header says when the copy was last fresh. */
         private const val STALE_MS = 45 * 60 * 1000L
 
@@ -130,6 +137,38 @@ class AgendaWidget : AppWidgetProvider() {
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             views.setOnClickPendingIntent(R.id.agenda_refresh, PendingIntent.getBroadcast(context, 2, Intent(context, AgendaWidget::class.java).setAction(REFRESH), PendingIntent.FLAG_IMMUTABLE))
             views.setOnClickPendingIntent(R.id.agenda_add, PendingIntent.getActivity(context, 4, Intent(context, QuickAddActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE))
+            // Quick-view chips right under the header: Agenda plus the five Org task states, switching in place on one tap.
+            val chips = listOf(
+                Triple(R.id.agenda_chip_agenda, "agenda", null),
+                Triple(R.id.agenda_chip_todo, "todo", "TODO"),
+                Triple(R.id.agenda_chip_prog, "prog", "PROG"),
+                Triple(R.id.agenda_chip_eval, "eval", "EVAL"),
+                Triple(R.id.agenda_chip_hold, "hold", "HOLD"),
+                Triple(R.id.agenda_chip_auto, "auto", "AUTO"),
+            )
+            chips.forEachIndexed { idx, (chipId, viewId, stateKey) ->
+                val active = view.id == viewId
+                val pill = stateKey?.let { PILLS[it] }
+                val bg = when {
+                    !active -> R.drawable.agenda_chip_off
+                    pill != null -> pill.first
+                    else -> R.drawable.agenda_chip_on
+                }
+                val ink = when {
+                    !active -> R.color.agenda_muted
+                    pill != null -> pill.second
+                    else -> R.color.agenda_paper
+                }
+                views.setInt(chipId, "setBackgroundResource", bg)
+                views.setColorStateList(chipId, "setTextColor", ink)
+                val switchIntent = Intent(context, AgendaWidget::class.java).setAction(SWITCH)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widget)
+                    .putExtra("view", viewId)
+                views.setOnClickPendingIntent(
+                    chipId,
+                    PendingIntent.getBroadcast(context, 200 + widget * 10 + idx, switchIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT),
+                )
+            }
             // Bottom shortcuts matching June's tab bar: Terminal, Agents, Chat, Projects, Editor.
             fun openView(code: Int, host: String) = PendingIntent.getActivity(
                 context, code,
