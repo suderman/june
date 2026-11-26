@@ -632,7 +632,7 @@ export function rosterView(agents, now) {
  * `user` signs the user's Dialog entries.
  */
 export function agentsView(agents, now, today, user, pending) {
-	if (!agents) return { summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], roster: [], rosterLeaderboard: [], rosterHasStats: false, rosterHosts: ["kit", "cog"] };
+	if (!agents) return { summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], hosts: [], roster: [], rosterLeaderboard: [], rosterHasStats: false, rosterHosts: ["kit", "cog"] };
 	agents = withPending(agents, pending, user);
 	const rv = rosterView(agents, now);
 	const tasks = agents.tasks;
@@ -670,7 +670,7 @@ export function agentsView(agents, now, today, user, pending) {
 		const place = String(w.cwd ?? "").split("/").filter((s) => s !== "");
 		const card = clankerAt(w);
 		return {
-			key: `${w.host}|${w.terminal}`, task: w.taskKey ?? "", harness: harnessOf(w.agent), status: w.status,
+			key: `${w.host}|${w.terminal}`, host: w.host, task: w.taskKey ?? "", harness: harnessOf(w.agent), status: w.status,
 			title: task?.title ?? w.title ?? (place.length ? place[place.length - 1] : w.terminal),
 			name: card ? card.name : "",
 			where: `${card ? card.name + " · " : ""}${w.agent} · ${w.host}/${w.terminal}`, link: w.herdrLink ?? null,
@@ -694,8 +694,18 @@ export function agentsView(agents, now, today, user, pending) {
 	const hosts = agents.hosts.filter((h) => h.ok).map((h) => h.host);
 	const summary = `${working.length} at work${hosts.length ? ` · ${hosts.join(", ")} online` : ""}`;
 	const down = agents.hosts.filter((h) => !h.ok).map((h) => h.host);
+	// Each host work goes to, as the hosts tab lists it: reachable or not, its sessions, and the clankers that work there.
+	const hostRows = agents.hosts.map((h) => {
+		const sessions = [...working, ...idle].filter((w) => w.host === h.host);
+		const busy = sessions.filter((w) => w.status === "working").length;
+		const clankers = rv.cards.filter((c) => c.host === h.host).map((c) => c.name);
+		const meta = h.ok
+			? [`${busy} working`, `${sessions.length} session${sessions.length === 1 ? "" : "s"}`, ...(clankers.length ? [clankers.join(", ")] : [])].join(" · ")
+			: "offline";
+		return { key: h.host, host: h.host, ok: h.ok, error: h.ok ? "" : String(h.error ?? ""), working: busy, sessions, clankers, meta };
+	});
 	for (const list of [needs, working, idle, queued, reviewing, recent]) uniqueKeys(list);
-	return { summary, needs, working, idle, queued, reviewing, recent, down, roster: rv.cards, rosterLeaderboard: rv.leaderboard, rosterHasStats: rv.hasStats, rosterHosts: rv.hosts };
+	return { summary, needs, working, idle, queued, reviewing, recent, down, hosts: hostRows, roster: rv.cards, rosterLeaderboard: rv.leaderboard, rosterHasStats: rv.hasStats, rosterHosts: rv.hosts };
 }
 
 /** Who wrote a Dialog entry, for how it is drawn: the user, June, the dispatcher, or an agent. */

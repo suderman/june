@@ -411,7 +411,9 @@ Item {
   }
 
   // The back link at the top of the page.
+  // None in a sheet (backLabel ""), which closes the page itself.
   component BackLink: PressTab {
+    visible: page.backLabel !== ""
     text: (Theme.consoleLook ? "< " : "‹  ") + page.backLabel
     kind: "quiet"
     small: true

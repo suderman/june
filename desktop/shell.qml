@@ -876,9 +876,20 @@ ShellRoot {
       }
     }
 
-    // Esc closes a preview first, then hides from anywhere in the desktop client, even after a click put the focus in a balloon
-    // to select its words.
-    Shortcut { sequence: "Escape"; onActivated: preview.open ? preview.close() : root.hide() }
+    // Esc closes a preview first, then the sheet open on the board under the pointer, then hides from anywhere in the
+    // desktop client, even after a click put the focus in a balloon to select its words.
+    function dismissHoveredSheet() {
+      for (const b of [overlayAgents, overlayProjects, wideAgents, wideProjects])
+        if (b.visible && b.hovered && b.dismissSheet()) return true;
+      return false;
+    }
+    Shortcut {
+      sequence: "Escape"
+      onActivated: {
+        if (preview.open) preview.close();
+        else if (!window.dismissHoveredSheet()) root.hide();
+      }
+    }
     // The arrow keys turn a PDF's pages in the preview, then step through what the message brought.
     Shortcut { sequences: ["Right", "PgDown"]; enabled: preview.paging || preview.stepping; onActivated: preview.next() }
     Shortcut { sequences: ["Left", "PgUp"]; enabled: preview.paging || preview.stepping; onActivated: preview.previous() }
@@ -1126,6 +1137,7 @@ ShellRoot {
         anchors.topMargin: 16
         spacing: Board.GAP
         AgentsBoard {
+          id: wideAgents
           width: boardsPaper.layout.side
           height: parent.height
           view: root.agentsView
@@ -1145,6 +1157,7 @@ ShellRoot {
           onOpen: link => { if (root.openLink(link)) root.hide(); }
         }
         ProjectsBoard {
+          id: wideProjects
           width: boardsPaper.layout.side
           height: parent.height
           view: root.agendaView

@@ -150,6 +150,10 @@ test("the agents board puts what needs the user first, in its own words, and lin
 	assert.deepEqual(v.recent.map((r) => [r.title, r.when]), [["Report", "2 h"]]);
 	assert.equal(v.summary, "1 at work · kit online");
 	assert.deepEqual(v.down, ["cog"]);
+	assert.deepEqual(v.hosts.map((h) => [h.host, h.ok, h.meta, h.error, h.sessions.map((w) => w.key)]), [
+		["kit", true, "1 working · 2 sessions", "", ["kit|t9", "kit|t2"]],
+		["cog", false, "offline", "down", []],
+	], "each host with its sessions; a blocked worker is a need, not one of them");
 });
 
 test("a task's page names who works it, what it waits on, and draws its Dialog by who wrote each entry", () => {

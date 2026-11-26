@@ -65,13 +65,15 @@ Item {
       width: parent.width - 6
       spacing: 10
 
-      // Back to the clankers (or the card, while editing it), and edit.
+      // Back to the card while editing it, and edit; the sheet it sits in closes the page.
       Item {
+        visible: backLink.visible || editLink.visible
         width: parent.width
         height: backLink.height
         PressTab {
           id: backLink
-          text: (Theme.consoleLook ? "< " : "‹  ") + (page.editing && !page.creating ? "card" : "clankers")
+          visible: page.editing && !page.creating
+          text: (Theme.consoleLook ? "< " : "‹  ") + "card"
           kind: "quiet"; small: true
           onClicked: {
             if (page.editing && !page.creating) { page.editing = false; page.confirmingDelete = false; }
@@ -79,6 +81,7 @@ Item {
           }
         }
         PressTab {
+          id: editLink
           visible: !page.editing && page.card !== null
           anchors.right: parent.right
           text: "edit card"; small: true

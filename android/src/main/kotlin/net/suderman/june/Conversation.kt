@@ -237,18 +237,20 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     val links = remember(leave, link) { Links.Handler(context, leave, link::openMoment) }
     // The calendar and search, in place of the strip while open (Browse.kt).
     var browsing by remember { mutableStateOf(false) }
-    // The full screen's pages, side by side: the agents board on the left, the strip in the middle, the projects board
-    // on the right (Boards.kt). A swipe moves the strip aside to show one; the assistant sheet keeps the strip alone.
-    // When agent terminals open in June, the Terminal page comes first, left of the agents board, as its tab does
-    // (see "Navigation" under "Embedded terminal" in docs/interfaces.org); FIRST is the agents board's page.
-    // The pager keeps its page across Android remaking the screen, and each board its place.
+    // The full screen's pages, side by side: the agents board's three pages on the left (hosts, clankers, then activity
+    // beside the strip), the strip in the middle, the projects board on the right (Boards.kt). A swipe moves the strip
+    // aside to show one; the assistant sheet keeps the strip alone. When agent terminals open in June, the Terminal page
+    // comes first, left of hosts, as its tab does (see "Navigation" under "Embedded terminal" in docs/interfaces.org);
+    // FIRST is the hosts page. The pager keeps its page across Android remaking the screen, and each board its place.
     val first = if (Terminals.embedded(context)) 1 else 0
-    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = first + 1) { first + 3 }
+    val sections = AgentsSections.size
+    val chatPage = sections
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = first + chatPage) { first + sections + 2 }
     var prevFirst by remember { androidx.compose.runtime.mutableIntStateOf(first) }
     LaunchedEffect(first) {
         val delta = first - prevFirst
         prevFirst = first
-        if (delta != 0) pager.scrollToPage((pager.currentPage + delta).coerceIn(0, first + 2))
+        if (delta != 0) pager.scrollToPage((pager.currentPage + delta).coerceIn(0, first + sections + 1))
     }
     val board = pager.currentPage - first
     // The board Back returns to from the Terminal page: the last one settled on.
@@ -263,13 +265,13 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     // A link asked for a view (the agenda widget, a reminder): jump there; a plain tab jump clears itself so tapping it again works.
     LaunchedEffect(link.requested) {
         val r = link.requested ?: return@LaunchedEffect
-        pager.scrollToPage(first + when (r.first) { "agents" -> 0; "chat" -> 1; else -> 2 })
+        pager.scrollToPage(first + when (r.first) { "agents" -> chatPage - 1; "chat" -> chatPage; else -> chatPage + 1 })
         if (r.second.isEmpty()) link.requested = null
     }
     // Summoned again while this shows: back to the chat, whose field then takes focus. Only a change since this
     // screen opened counts, and each only once.
     var answered by remember { androidx.compose.runtime.mutableIntStateOf(summoned) }
-    LaunchedEffect(summoned) { if (summoned != answered) pager.scrollToPage(first + 1) }
+    LaunchedEffect(summoned) { if (summoned != answered) pager.scrollToPage(first + chatPage) }
     // Bumped when the user taps an already-open tab in the bottom bar to jump back to its default subsection.
     var agentsReset by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var projectsReset by remember { androidx.compose.runtime.mutableIntStateOf(0) }
@@ -291,9 +293,9 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                 ) { page ->
                     if (board == page) {
                         when (page) {
-                            0 -> agentsReset++
-                            1 -> { browsing = false; link.backToToday() }
-                            2 -> projectsReset++
+                            chatPage - 1 -> agentsReset++
+                            chatPage -> { browsing = false; link.backToToday() }
+                            chatPage + 1 -> projectsReset++
                         }
                     } else pages.launch { pager.animateScrollToPage(first + page) }
                 }
@@ -380,7 +382,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
             }
         }
         // The words to send belong to the chat alone. Leaving it, or putting the keyboard away, lets go of the field.
-        val chat = !boards || board == 1
+        val chat = !boards || board == chatPage
         val focus = androidx.compose.ui.platform.LocalFocusManager.current
         val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
         val typing = androidx.compose.foundation.layout.WindowInsets.isImeVisible
@@ -414,8 +416,12 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                                 Text("No agent terminals listed yet", color = palette.muted, fontSize = 14.sp)
                             }
                         }
-                        0 -> AgentsBoard(link, ready!!, palette, inset, reset = agentsReset)
-                        2 -> ProjectsBoard(link, ready!!, palette, inset, reset = projectsReset)
+                        in AgentsSections.indices -> AgentsBoard(
+                            link, ready!!, palette, AgentsSections[page - first],
+                            onSection = { s -> pages.launch { pager.animateScrollToPage(first + AgentsSections.indexOf(s)) } },
+                            inset, reset = agentsReset,
+                        )
+                        chatPage + 1 -> ProjectsBoard(link, ready!!, palette, inset, reset = projectsReset)
                         else -> stripPage(inset)
                     }
                 }

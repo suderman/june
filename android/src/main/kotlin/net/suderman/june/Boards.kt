@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -33,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -75,14 +77,15 @@ import org.json.JSONObject
 
 /**
  * The bar of icons along the bottom, as Muse has it: Herdr's terminal, the agents, the chat (the strip), the projects
- * and Emacs, left to right. The three middle ones are the pager's pages, in the same order; the outer two open the
- * apps where the work is watched and edited. Agents counts what needs the user.
+ * and Emacs, left to right. The three middle ones are the pager's pages, in the same order: the agents take three
+ * (hosts, clankers, activity; AgentsSections), and their tab goes to activity, beside the strip. The outer two open
+ * the apps where the work is watched and edited. Agents counts what needs the user.
  */
 private enum class Tab(val label: String, val page: Int?, val slot: Swipes.AppSlot?) {
     Terminal("terminal", null, Swipes.AppSlot.Terminal),
-    Agents("agents", 0, null),
-    Chat("chat", 1, null),
-    Projects("projects", 2, null),
+    Agents("agents", AgentsSections.size - 1, null),
+    Chat("chat", AgentsSections.size, null),
+    Projects("projects", AgentsSections.size + 1, null),
     Editor("editor", null, Swipes.AppSlot.Editor),
 }
 
@@ -94,7 +97,7 @@ fun Tabs(page: Int, needs: Int, palette: Look.Palette, terminal: Boolean = false
     val context = androidx.compose.ui.platform.LocalContext.current
     Row(Modifier.fillMaxWidth().height(TabsHeight).padding(top = 2.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         for (tab in Tab.entries) {
-            val on = if (terminal) tab == Tab.Terminal else tab.page == page
+            val on = if (terminal) tab == Tab.Terminal else tab.page == page || (tab == Tab.Agents && page in AgentsSections.indices)
             Box(
                 Modifier.weight(1f).height(52.dp)
                     .clickable(
@@ -203,9 +206,9 @@ private fun recruits(agents: JSONObject?, hosts: List<String>): List<Recruit> =
         if (ok) Recruit(c.optString("slug"), c.optString("name").ifEmpty { c.optString("slug") }, host, c.optString("harness")) else null
     }
 
-/** One task's page (board.mjs taskDetail) as a docket, in place of the board until its back link or system back. */
+/** One task's page (board.mjs taskDetail) as a docket, in the sheet risen over its board. */
 @Composable
-private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, key: String, back: String, close: () -> Unit, modifier: Modifier) {
+private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, key: String, modifier: Modifier) {
     val detail by produceState<JSONObject?>(null, key, link.agents, link.agenda, link.pending) {
         val task = link.task(key)
         val held = task?.let { link.pending.optJSONObject(it.optString("key")) } ?: link.pending.optJSONObject(key)
@@ -213,7 +216,6 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, key: St
             JSONObject(decisions.call("board.taskDetail", task, link.agents?.optString("user") ?: "", link.agenda?.optString("today") ?: "", System.currentTimeMillis(), held))
         }.getOrNull()
     }
-    androidx.activity.compose.BackHandler(onBack = close)
     val open = LocalUriHandler.current
     val d = detail
     val dispatch = link.agents?.optJSONObject("dispatch")
@@ -221,7 +223,7 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, key: St
     val k = d?.optString("key")?.ifEmpty { key } ?: key
     val (noticeKey, noticeText) = link.taskNotice
     TaskDocket(
-        d = d, gone = link.task(key) == null, colours = colours, back = back, onBack = close,
+        d = d, gone = link.task(key) == null, colours = colours,
         agents = dispatch?.optJSONArray("agents").strings().ifEmpty { listOf("pi", "claude") },
         clankers = recruits(link.agents, dispatch?.optJSONArray("hosts").strings() ?: emptyList()),
         hosts = dispatch?.optJSONArray("hosts").strings(), defaultHost = dispatch?.optString("host") ?: "",
@@ -235,113 +237,82 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, key: St
     )
 }
 
-@Composable
-fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifier: Modifier = Modifier, reset: Int = 0) {
-    CompositionLocalProvider(LocalPalette provides palette) { AgentsBoardPage(link, decisions, modifier, reset) }
-}
+/** The agents section's tabs, left to right, each a page of the pager (Conversation.kt); activity, beside the strip, is the default. */
+val AgentsSections = listOf("hosts", "clankers", "activity")
 
 @Composable
-private fun AgentsBoardPage(link: Link, decisions: Decisions, modifier: Modifier, reset: Int = 0) {
-    val p = LocalPalette.current
+fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, section: String, onSection: (String) -> Unit, modifier: Modifier = Modifier, reset: Int = 0) {
+    CompositionLocalProvider(LocalPalette provides palette) {
+        when (section) {
+            "hosts" -> HostsPage(link, decisions, onSection, modifier, reset)
+            "clankers" -> ClankersPage(link, decisions, onSection, modifier, reset)
+            else -> ActivityPage(link, decisions, onSection, modifier, reset)
+        }
+    }
+}
+
+/** The agents board as board.mjs agentsView shapes it, moving with the minute. */
+@Composable
+private fun rememberAgentsView(link: Link, decisions: Decisions): JSONObject? {
     LaunchedEffect(Unit) { link.wantBoards() }
     val now = minute()
-    val colours = rememberColours(decisions)
     val view by produceState<JSONObject?>(null, link.agents, link.agenda, now, link.pending) {
         val agents = link.agents
         value = if (agents == null) null else runCatching {
             JSONObject(decisions.call("board.agentsView", agents, now, link.agenda?.optString("today") ?: "", agents.optString("user"), link.pending))
         }.getOrNull()
     }
+    return view
+}
+
+/** The section's masthead on each of its pages, the tabs turning the pager. */
+@Composable
+private fun AgentsMasthead(v: JSONObject?, section: String, onSection: (String) -> Unit) {
+    val roster = v?.optJSONArray("roster").objects()
+    val tabs = listOf("hosts" to "hosts", "clankers" to "clankers" + if (roster.isNotEmpty()) " · ${roster.size}" else "", "activity" to "activity")
+    Masthead("agents", v?.optString("summary") ?: "asking hc…", tabs, section, onSection)
+}
+
+/** RESET changing (the Agents tab tapped again) runs ACTION, which puts away what the page has open. */
+@Composable
+private fun OnReset(reset: Int, action: () -> Unit) {
+    var seen by remember { mutableStateOf(reset) }
+    LaunchedEffect(reset) { if (reset != seen) { seen = reset; action() } }
+}
+
+/** What a sheet shows: KEY while it is open, else the last one, so the sheet keeps its page while it slides away. */
+@Composable
+private fun keptWhileClosing(key: String): String {
+    var last by remember { mutableStateOf(key) }
+    SideEffect { if (key.isNotEmpty()) last = key }
+    return key.ifEmpty { last }
+}
+
+@Composable
+private fun ActivityPage(link: Link, decisions: Decisions, onSection: (String) -> Unit, modifier: Modifier, reset: Int) {
+    val p = LocalPalette.current
+    val v = rememberAgentsView(link, decisions)
+    val colours = rememberColours(decisions)
     val open = LocalUriHandler.current
-    var mode by rememberSaveable { mutableStateOf("activity") }
-    var ranked by rememberSaveable { mutableStateOf(false) }
     var idleOpen by rememberSaveable { mutableStateOf(false) }
     var queueOpen by rememberSaveable { mutableStateOf(false) }
     var page by rememberSaveable { mutableStateOf("") }
-    var rosterSlug by rememberSaveable { mutableStateOf("") }
-    var rosterCreating by rememberSaveable { mutableStateOf(false) }
-    var rosterEditing by rememberSaveable { mutableStateOf(false) }
-    var seenReset by remember { mutableStateOf(reset) }
-    LaunchedEffect(reset) {
-        if (reset != seenReset) {
-            seenReset = reset
-            mode = "activity"
-            page = ""
-            rosterSlug = ""
-            rosterCreating = false
-            rosterEditing = false
-        }
-    }
-    var seenRosterDone by remember { mutableStateOf(link.rosterDone.first) }
-    LaunchedEffect(link.rosterDone) {
-        val (seq, slug) = link.rosterDone
-        if (seq != seenRosterDone) {
-            seenRosterDone = seq
-            rosterCreating = false
-            rosterEditing = false
-            rosterSlug = slug
-        }
-    }
+    OnReset(reset) { page = "" }
+    // A rename moves a task without an ID to a new key; its page follows.
+    LaunchedEffect(link.taskMoved) { if (link.taskMoved.first == page && page.isNotEmpty()) page = link.taskMoved.second }
     // A row with a task opens its page; one without opens where it can.
     val show: (String, String) -> Unit = { task, target ->
         if (task.isNotEmpty() && link.task(task) != null) {
             page = task
             // Opening a page counts as seeing a task's review or question, on every device.
-            if (view?.optJSONArray("needs").objects().any { it.optString("task") == task && it.optString("kind") != "blocked" }) link.markSeen(task)
+            if (v?.optJSONArray("needs").objects().any { it.optString("task") == task && it.optString("kind") != "blocked" }) link.markSeen(task)
         } else if (target.isNotEmpty() && target != "null") open.openUri(target)
     }
-    // A rename moves a task without an ID to a new key; its page follows.
-    LaunchedEffect(link.taskMoved) { if (link.taskMoved.first == page && page.isNotEmpty()) page = link.taskMoved.second }
-    if (page.isNotEmpty() && colours != null) { TaskPage(link, decisions, colours, page, "agents", { page = "" }, modifier); return }
-    val v = view
-    val roster = v?.optJSONArray("roster").objects()
-    val rosterHosts = v?.optJSONArray("rosterHosts").strings().ifEmpty { listOf("kit", "cog") }
-    if ((rosterCreating || rosterSlug.isNotEmpty()) && colours != null) {
-        val card = if (rosterCreating) null else roster.firstOrNull { it.optString("slug") == rosterSlug }
-        val amend = rosterEditing && !rosterCreating
-        val back = { if (amend) rosterEditing = false else { rosterCreating = false; rosterEditing = false; rosterSlug = "" } }
-        androidx.activity.compose.BackHandler(onBack = back)
-        LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    BackLink(if (amend) "card" else "clankers", back, Modifier.weight(1f))
-                    if (!rosterEditing && card != null) PressTab("edit card", { rosterEditing = true }, small = true)
-                }
-            }
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (rosterEditing) EnlistForm(
-                        card, rosterHosts, colours, link.rosterBusy, link.rosterNotice,
-                        onSave = { e ->
-                            val payload = JSONObject().put("action", "save").put("name", e.name).put("host", e.host).put("harness", e.harness)
-                                .put("model", e.model).put("effort", e.effort).put("instructions", e.instructions)
-                            if (card != null) payload.put("original", card.optString("slug"))
-                            link.editRoster(payload)
-                        },
-                        onDischarge = { card?.let { link.editRoster(JSONObject().put("action", "delete").put("slug", it.optString("slug"))) } },
-                    ) else if (card == null) Text("That clanker is gone.", style = p.type.lettering.copy(color = p.muted))
-                    else EnlistmentCard(card, colours)
-                }
-            }
-            item { Spacer(Modifier.height(16.dp)) }
-        }
-        return
-    }
-    LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            Masthead("agents", v?.optString("summary") ?: "asking hc…", listOf("activity" to "activity", "squad" to "clankers" + if (roster.isNotEmpty()) " · ${roster.size}" else ""), mode) { mode = it }
-        }
-        if (v != null && colours != null && mode == "squad") {
-            val canRank = v.optBoolean("rosterHasStats")
-            val cards = if (ranked && canRank) v.optJSONArray("rosterLeaderboard").objects() else roster
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SquadList(cards, ranked && canRank, canRank, colours, onRank = { ranked = !ranked },
-                        onEnlist = { rosterSlug = ""; rosterCreating = true; rosterEditing = true },
-                        onOpen = { c -> rosterCreating = false; rosterEditing = false; rosterSlug = c.optString("slug") })
-                }
-            }
-        } else if (v != null && colours != null) {
+    val shown = keptWhileClosing(page)
+    Box(modifier) {
+        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item { AgentsMasthead(v, "activity", onSection) }
+            if (v != null && colours != null) {
             val needs = v.optJSONArray("needs").objects()
             if (needs.isNotEmpty()) item { SectionRule("NEEDS YOU · ${needs.size}", alert = true) }
             else item { Text("Nothing needs you.", Modifier.padding(top = 6.dp), style = p.type.lettering.copy(color = p.muted)) }
@@ -396,7 +367,151 @@ private fun AgentsBoardPage(link: Link, decisions: Decisions, modifier: Modifier
             }
             val down = v.optJSONArray("down").strings()
             if (down.isNotEmpty()) item { Text("Out of reach: " + down.joinToString(", "), style = p.type.meta.copy(color = p.muted)) }
+            }
+            item { Spacer(Modifier.height(16.dp)) }
         }
+        if (colours != null) DetailSheet(page.isNotEmpty(), { page = "" }) {
+            if (shown.isNotEmpty()) TaskPage(link, decisions, colours, shown, Modifier.fillMaxSize())
+        }
+    }
+}
+
+@Composable
+private fun ClankersPage(link: Link, decisions: Decisions, onSection: (String) -> Unit, modifier: Modifier, reset: Int) {
+    val p = LocalPalette.current
+    val v = rememberAgentsView(link, decisions)
+    val colours = rememberColours(decisions)
+    var ranked by rememberSaveable { mutableStateOf(false) }
+    var rosterSlug by rememberSaveable { mutableStateOf("") }
+    var rosterCreating by rememberSaveable { mutableStateOf(false) }
+    var rosterEditing by rememberSaveable { mutableStateOf(false) }
+    val close = { rosterCreating = false; rosterEditing = false; rosterSlug = "" }
+    OnReset(reset, close)
+    var seenRosterDone by remember { mutableStateOf(link.rosterDone.first) }
+    LaunchedEffect(link.rosterDone) {
+        val (seq, slug) = link.rosterDone
+        if (seq != seenRosterDone) {
+            seenRosterDone = seq
+            rosterCreating = false
+            rosterEditing = false
+            rosterSlug = slug
+        }
+    }
+    val roster = v?.optJSONArray("roster").objects()
+    val rosterHosts = v?.optJSONArray("rosterHosts").strings().ifEmpty { listOf("kit", "cog") }
+    val opened = rosterCreating || rosterSlug.isNotEmpty()
+    // The sheet keeps the card it showed while it slides away: "+" while creating, else its slug.
+    val shown = keptWhileClosing(if (rosterCreating) "+" else rosterSlug)
+    Box(modifier) {
+        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item { AgentsMasthead(v, "clankers", onSection) }
+            if (v != null && colours != null) {
+                val canRank = v.optBoolean("rosterHasStats")
+                val cards = if (ranked && canRank) v.optJSONArray("rosterLeaderboard").objects() else roster
+                item {
+                    SquadList(cards, ranked && canRank, canRank, colours, onRank = { ranked = !ranked },
+                        onEnlist = { rosterSlug = ""; rosterCreating = true; rosterEditing = true },
+                        onOpen = { c -> rosterCreating = false; rosterEditing = false; rosterSlug = c.optString("slug") })
+                }
+            }
+            item { Spacer(Modifier.height(16.dp)) }
+        }
+        if (colours != null) DetailSheet(opened, close) {
+            val creating = shown == "+"
+            val card = if (creating) null else roster.firstOrNull { it.optString("slug") == shown }
+            val amend = rosterEditing && !creating
+            // While editing a card, Back returns to the card; otherwise it puts the sheet away.
+            androidx.activity.compose.BackHandler(enabled = opened && amend) { rosterEditing = false }
+            LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (amend || (!rosterEditing && card != null)) item {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        if (amend) BackLink("card", { rosterEditing = false }, Modifier.weight(1f)) else Spacer(Modifier.weight(1f))
+                        if (!rosterEditing && card != null) PressTab("edit card", { rosterEditing = true }, small = true)
+                    }
+                }
+                item {
+                    if (rosterEditing) EnlistForm(
+                        card, rosterHosts, colours, link.rosterBusy, link.rosterNotice,
+                        onSave = { e ->
+                            val payload = JSONObject().put("action", "save").put("name", e.name).put("host", e.host).put("harness", e.harness)
+                                .put("model", e.model).put("effort", e.effort).put("instructions", e.instructions)
+                            if (card != null) payload.put("original", card.optString("slug"))
+                            link.editRoster(payload)
+                        },
+                        onDischarge = { card?.let { link.editRoster(JSONObject().put("action", "delete").put("slug", it.optString("slug"))) } },
+                    ) else if (card == null) Text("That clanker is gone.", style = p.type.lettering.copy(color = p.muted))
+                    else EnlistmentCard(card, colours)
+                }
+                item { Spacer(Modifier.height(16.dp)) }
+            }
+        }
+    }
+}
+
+/** The hosts work goes to (board.mjs agentsView hosts): reachable or not, their sessions, the clankers that work there. */
+@Composable
+private fun HostsPage(link: Link, decisions: Decisions, onSection: (String) -> Unit, modifier: Modifier, reset: Int) {
+    val p = LocalPalette.current
+    val v = rememberAgentsView(link, decisions)
+    val colours = rememberColours(decisions)
+    val open = LocalUriHandler.current
+    var hostKey by rememberSaveable { mutableStateOf("") }
+    OnReset(reset) { hostKey = "" }
+    val hosts = v?.optJSONArray("hosts").objects()
+    val shown = keptWhileClosing(hostKey)
+    Box(modifier) {
+        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item { AgentsMasthead(v, "hosts", onSection) }
+            if (v != null && colours != null) {
+                item { SectionRule("HOSTS · ${hosts.size}") }
+                if (hosts.isEmpty()) item { Text("No hosts reported yet.", style = p.type.lettering.copy(color = p.muted)) }
+                else item(key = "hosts") {
+                    Pad {
+                        hosts.forEachIndexed { i, h ->
+                            StubRow(h.optString("host"), h.optString("meta"), stamp = if (h.optBoolean("ok")) "" else "OFFLINE", first = i == 0) { hostKey = h.optString("host") }
+                        }
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(16.dp)) }
+        }
+        if (colours != null) DetailSheet(hostKey.isNotEmpty(), { hostKey = "" }) {
+            val h = hosts.firstOrNull { it.optString("host") == shown }
+            if (h == null) Text("That host is no longer on the board.", style = p.type.lettering.copy(color = p.muted))
+            else HostDetail(h, colours) { url -> open.openUri(url) }
+        }
+    }
+}
+
+/** One host's page in its sheet: whether it answers, its sessions (each opens where it runs), and its clankers. */
+@Composable
+private fun HostDetail(h: JSONObject, colours: Colours, open: (String) -> Unit) {
+    val p = LocalPalette.current
+    val ok = h.optBoolean("ok")
+    val sessions = h.optJSONArray("sessions").objects()
+    val clankers = h.optJSONArray("clankers").strings()
+    LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            Column {
+                Text(h.optString("host"), style = p.type.masthead.copy(color = p.pageInk))
+                Text(if (ok) "online · ${h.optInt("working")} working" else "offline", style = p.type.meta.copy(color = if (ok) p.muted else p.tone("TODO")))
+                val error = h.optString("error")
+                if (error.isNotEmpty()) Text(error, style = p.type.meta.copy(color = p.muted), maxLines = 4, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        item { SectionRule("SESSIONS · ${sessions.size}") }
+        if (sessions.isEmpty()) item { Text(if (ok) "No sessions." else "Out of reach.", style = p.type.lettering.copy(color = p.muted)) }
+        else item(key = "sessions") {
+            Pad {
+                sessions.forEachIndexed { i, w ->
+                    StubRow(w.optString("title"), w.optString("where") + " · " + w.optString("status"), first = i == 0,
+                        art = { Clanker(w.optString("harness"), colours, 26, claws = w.optString("status") == "working") },
+                        onClick = w.optString("link").takeIf { it.isNotEmpty() && it != "null" }?.let { l -> { open(l) } })
+                }
+            }
+        }
+        item { SectionRule("CLANKERS · ${clankers.size}") }
+        item { Text(clankers.joinToString(", ").ifEmpty { "None work here." }, style = p.type.lettering.copy(color = if (clankers.isEmpty()) p.muted else p.pageInk)) }
         item { Spacer(Modifier.height(16.dp)) }
     }
 }
@@ -444,11 +559,12 @@ private fun ProjectsBoardPage(link: Link, decisions: Decisions, modifier: Modifi
             link.requested = null
         }
     }
-    if (page.isNotEmpty() && colours != null) { TaskPage(link, decisions, colours, page, if (mode == "state") listTitle(drill).lowercase() else if (mode == "projects") "by project" else mode, { page = "" }, modifier); return }
     androidx.activity.compose.BackHandler(enabled = mode == "state") { mode = "tasks"; drill = "" }
     val show: (JSONObject) -> Unit = { e -> val task = e.optString("task"); if (task.isNotEmpty() && link.task(task) != null) page = task else e.optString("link").takeIf { it.isNotEmpty() && it != "null" }?.let { open.openUri(it) } }
     val v = view
-    LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val shown = keptWhileClosing(page)
+    Box(modifier) {
+    LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             val counts = v?.optJSONArray("counts").objects()
             val projects = v?.optJSONArray("projects").objects()
@@ -518,6 +634,10 @@ private fun ProjectsBoardPage(link: Link, decisions: Decisions, modifier: Modifi
             }
         }
         item { Spacer(Modifier.height(16.dp)) }
+    }
+    if (colours != null) DetailSheet(page.isNotEmpty(), { page = "" }) {
+        if (shown.isNotEmpty()) TaskPage(link, decisions, colours, shown, Modifier.fillMaxSize())
+    }
     }
 }
 

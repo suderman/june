@@ -18,6 +18,9 @@ Item {
   property string drill: ""
   property string user: ""
   property string detailKey: ""
+  // The page the task sheet shows: the open one, else the last, while the sheet slides away.
+  property string shownTask: ""
+  onDetailKeyChanged: if (detailKey !== "") shownTask = detailKey
   signal open(string link)
   // An edit from a task's page, and what the last one said for the task on show.
   signal edit(string key, var change)
@@ -34,6 +37,17 @@ Item {
   property bool showLaunch: false
   signal launchEditor()
 
+  // The pointer is over the board, so Esc puts its sheet away (shell.qml).
+  readonly property bool hovered: hover.hovered
+  HoverHandler { id: hover }
+
+  // Put away the open task page, if there is one; whether there was.
+  function dismissSheet() {
+    if (detailKey === "") return false;
+    detailKey = "";
+    return true;
+  }
+
   // Return to the default subsection (agenda) and close any open detail or state drill-down.
   function resetHome() {
     mode = "agenda";
@@ -44,20 +58,25 @@ Item {
   readonly property var drillRows: mode === "state" ? Board.stateRows(agenda, drill, pending, user) : []
   readonly property int openCount: view.counts.reduce((n, c) => n + c.n, 0)
 
-  TaskDetail {
+  Sheet {
     anchors.fill: parent
-    visible: board.detailKey !== ""
-    backLabel: board.mode === "state" ? (Board.LISTS.find(l => l[0] === board.drill)?.[1] ?? board.drill).toLowerCase() : board.mode === "projects" ? "by project" : board.mode
-    id: detailPage
-    detail: board.detailKey !== "" ? Board.taskPage(board.agenda?.tasks, board.detailKey, board.pending, board.user, board.agenda?.today ?? "", Date.now()) : null
-    today: board.agenda?.today ?? ""
-    undo: board.notice.key === board.detailKey || board.notice.key === (detailPage.detail?.key ?? "") ? (board.notice.undo ?? null) : null
-    dispatch: board.dispatch
-    roster: board.roster
-    onBack: board.detailKey = ""
-    onOpen: link => board.open(link)
-    notice: board.notice.key === board.detailKey || board.notice.key === (detailPage.detail?.key ?? "") ? board.notice.text : ""
-    onEdit: change => board.edit(detailPage.detail?.key ?? board.detailKey, change)
+    z: 2
+    open: board.detailKey !== ""
+    onDismissed: board.detailKey = ""
+    TaskDetail {
+      anchors.fill: parent
+      backLabel: ""
+      id: detailPage
+      detail: board.shownTask !== "" ? Board.taskPage(board.agenda?.tasks, board.shownTask, board.pending, board.user, board.agenda?.today ?? "", Date.now()) : null
+      today: board.agenda?.today ?? ""
+      undo: board.notice.key === board.shownTask || board.notice.key === (detailPage.detail?.key ?? "") ? (board.notice.undo ?? null) : null
+      dispatch: board.dispatch
+      roster: board.roster
+      onBack: board.detailKey = ""
+      onOpen: link => board.open(link)
+      notice: board.notice.key === board.shownTask || board.notice.key === (detailPage.detail?.key ?? "") ? board.notice.text : ""
+      onEdit: change => board.edit(detailPage.detail?.key ?? board.shownTask, change)
+    }
   }
 
   // A row with a task opens its page; one without opens where it can.
@@ -67,7 +86,6 @@ Item {
   }
 
   Flickable {
-    visible: board.detailKey === ""
     anchors.fill: parent
     contentHeight: column.implicitHeight + 16
     clip: true

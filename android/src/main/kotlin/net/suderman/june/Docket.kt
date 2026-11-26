@@ -89,7 +89,7 @@ private fun BandLink(glyph: Glyph, name: String, onClick: () -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun TaskDocket(
-    d: JSONObject?, gone: Boolean, colours: Colours, back: String, onBack: () -> Unit,
+    d: JSONObject?, gone: Boolean, colours: Colours,
     agents: List<String>, clankers: List<Recruit>, hosts: List<String>, defaultHost: String, notice: String, canUndo: Boolean,
     actions: DocketActions, modifier: Modifier = Modifier,
 ) {
@@ -117,7 +117,6 @@ internal fun TaskDocket(
         )
     }
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { BackLink(back, onBack) }
         if (d == null && gone) item { Text("That task is no longer on the boards.", style = t.lettering.copy(color = p.muted)) }
         if (d == null) return@LazyColumn
         val state = d.optString("state")
