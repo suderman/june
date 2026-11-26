@@ -210,6 +210,7 @@ FloatingWindow {
     }
     ProjectsBoard {
       id: narrowProjects
+      compact: true
       visible: !win.layout.columns && win.tab === "projects"
       anchors.top: toggles.bottom
       anchors.bottom: tabBar.top

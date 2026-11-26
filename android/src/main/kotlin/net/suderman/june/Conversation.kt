@@ -245,12 +245,14 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     val first = if (Terminals.embedded(context)) 1 else 0
     val sections = AgentsSections.size
     val chatPage = sections
-    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = first + chatPage) { first + sections + 2 }
+    // The projects board's pages follow the strip: agenda, tasks, by project.
+    val projectPages = (chatPage + 1) until (chatPage + 1 + ProjectsSections.size)
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = first + chatPage) { first + sections + 1 + ProjectsSections.size }
     var prevFirst by remember { androidx.compose.runtime.mutableIntStateOf(first) }
     LaunchedEffect(first) {
         val delta = first - prevFirst
         prevFirst = first
-        if (delta != 0) pager.scrollToPage((pager.currentPage + delta).coerceIn(0, first + sections + 1))
+        if (delta != 0) pager.scrollToPage((pager.currentPage + delta).coerceIn(0, first + sections + ProjectsSections.size))
     }
     val board = pager.currentPage - first
     // The board Back returns to from the Terminal page: the last one settled on.
@@ -419,7 +421,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                             }
                         }
                         in AgentsSections.indices -> AgentsBoard(link, ready!!, palette, AgentsSections[page - first], boardArea, reset = agentsReset)
-                        chatPage + 1 -> ProjectsBoard(link, ready!!, palette, boardArea, reset = projectsReset)
+                        in projectPages -> ProjectsBoard(link, ready!!, palette, ProjectsSections[page - first - projectPages.first], boardArea, reset = projectsReset)
                         else -> stripPage(inset)
                     }
                 }
@@ -442,6 +444,11 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                 palette, badges = mapOf(AgentsSections.indexOf("activity") to needs),
             ) { i -> if (board == i) agentsReset++ else pages.launch { pager.animateScrollToPage(first + i) } }
         }
+        if (boards && board in projectPages && !typing) SectionBar(
+            ProjectsLabels,
+            (pager.currentPage + pager.currentPageOffsetFraction - first - projectPages.first).coerceIn(0f, (ProjectsSections.size - 1).toFloat()),
+            palette,
+        ) { i -> if (board == projectPages.first + i) projectsReset++ else pages.launch { pager.animateScrollToPage(first + projectPages.first + i) } }
         if (chat) {
         // The screen she was summoned over, offered for the next message: off until Jon adds it, since most messages do
         // not need the picture's tokens; gone once sent.

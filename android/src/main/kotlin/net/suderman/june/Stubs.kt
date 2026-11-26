@@ -61,17 +61,6 @@ internal fun NeedDocket(n: JSONObject, colours: Colours, page: () -> Unit, open:
     }
 }
 
-/** The board's masthead: its name, its summary, and its pages as folder tabs on the rule. */
-@Composable
-internal fun Masthead(title: String, summary: String, tabs: List<Pair<String, String>>, current: String, onPick: (String) -> Unit) {
-    val p = LocalPalette.current
-    Column(Modifier.fillMaxWidth()) {
-        Text(if (p.console) "$ $title" else title, style = p.type.masthead.copy(color = p.pageInk))
-        Text(summary, style = p.type.meta.copy(color = p.muted), maxLines = 2, overflow = TextOverflow.Ellipsis)
-        FolderTabs(tabs, current, onPick, Modifier.padding(top = 2.dp))
-    }
-}
-
 /** A list on ruled paper: one pad, its rows ruled off. */
 @Composable
 internal fun Pad(content: @Composable ColumnScope.() -> Unit) {

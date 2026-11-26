@@ -98,7 +98,8 @@ fun Tabs(page: Int, needs: Int, palette: Look.Palette, terminal: Boolean = false
     val context = androidx.compose.ui.platform.LocalContext.current
     Row(Modifier.fillMaxWidth().height(TabsHeight).padding(top = 2.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         for (tab in Tab.entries) {
-            val on = if (terminal) tab == Tab.Terminal else tab.page == page || (tab == Tab.Agents && page in AgentsSections.indices)
+            val on = if (terminal) tab == Tab.Terminal else tab.page == page || (tab == Tab.Agents && page in AgentsSections.indices) ||
+                (tab == Tab.Projects && page in Tab.Projects.page!! until Tab.Projects.page + ProjectsSections.size)
             Box(
                 Modifier.weight(1f).height(52.dp)
                     .clickable(
@@ -240,6 +241,10 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, key: St
 
 /** The boards' side margins inside their pages; a sheet spans the page, edge to edge. */
 val BoardMargin = 16.dp
+
+/** The projects board's sections, left to right, each a page of the pager right of the strip; agenda, beside it, is the default. */
+val ProjectsSections = listOf("agenda", "tasks", "projects")
+val ProjectsLabels = listOf("agenda", "tasks", "by project")
 
 /** The agents section's tabs, left to right, each a page of the pager (Conversation.kt); activity, beside the strip, is the default. */
 val AgentsSections = listOf("hosts", "clankers", "activity")
@@ -521,19 +526,19 @@ private fun HostDetail(h: JSONObject, colours: Colours, open: (String) -> Unit) 
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ProjectsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifier: Modifier = Modifier, reset: Int = 0) {
-    CompositionLocalProvider(LocalPalette provides palette) { ProjectsBoardPage(link, decisions, modifier, reset) }
+fun ProjectsBoard(link: Link, decisions: Decisions, palette: Look.Palette, section: String, modifier: Modifier = Modifier, reset: Int = 0) {
+    CompositionLocalProvider(LocalPalette provides palette) { ProjectsBoardPage(link, decisions, section, modifier, reset) }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ProjectsBoardPage(link: Link, decisions: Decisions, modifier: Modifier, reset: Int = 0) {
+private fun ProjectsBoardPage(link: Link, decisions: Decisions, section: String, modifier: Modifier, reset: Int = 0) {
     val p = LocalPalette.current
     LaunchedEffect(Unit) { link.wantBoards() }
     val colours = rememberColours(decisions)
-    // agenda, tasks, one state's tasks, or by project.
-    var mode by rememberSaveable { mutableStateOf("agenda") }
+    // The tasks page drills into one state's tasks; the page shows agenda, tasks, that state, or by project.
     var drill by rememberSaveable { mutableStateOf("") }
+    val mode = if (section == "tasks" && drill.isNotEmpty()) "state" else section
     val user = link.agents?.optString("user") ?: ""
     val view by produceState<JSONObject?>(null, link.agenda, link.pending) {
         val agenda = link.agenda
@@ -549,33 +554,26 @@ private fun ProjectsBoardPage(link: Link, decisions: Decisions, modifier: Modifi
     LaunchedEffect(reset) {
         if (reset != seenReset) {
             seenReset = reset
-            mode = "agenda"
             drill = ""
             page = ""
         }
     }
     LaunchedEffect(link.taskMoved) { if (link.taskMoved.first == page && page.isNotEmpty()) page = link.taskMoved.second }
-    // The agenda widget or a reminder asked for this task's page, or for the agenda.
-    LaunchedEffect(link.requested) {
+    // The agenda widget or a reminder asked for this task's page, or for the agenda: the agenda page answers.
+    if (section == "agenda") LaunchedEffect(link.requested) {
         link.requested?.takeIf { it.first == "projects" }?.let { (_, key) ->
-            if (key.isNotEmpty()) page = key else { page = ""; mode = "agenda"; drill = "" }
+            page = key
             link.requested = null
         }
     }
-    androidx.activity.compose.BackHandler(enabled = mode == "state") { mode = "tasks"; drill = "" }
+    androidx.activity.compose.BackHandler(enabled = mode == "state") { drill = "" }
     val show: (JSONObject) -> Unit = { e -> val task = e.optString("task"); if (task.isNotEmpty() && link.task(task) != null) page = task else e.optString("link").takeIf { it.isNotEmpty() && it != "null" }?.let { open.openUri(it) } }
     val v = view
     val shown = keptWhileClosing(page)
     Box(modifier.clipToBounds()) {
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = BoardMargin), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            val counts = v?.optJSONArray("counts").objects()
-            val projects = v?.optJSONArray("projects").objects()
-            Masthead(
-                "projects", if (v == null) "asking Emacs…" else "${counts.sumOf { it.optInt("n") }} open in ${projects.size} projects",
-                listOf("agenda" to "agenda", "tasks" to "tasks", "projects" to "by project"), if (mode == "state") "tasks" else mode,
-            ) { mode = it; drill = "" }
-        }
+        // The sections are named in the bar below; only the wait for the board shows up here.
+        if (v == null) item { Text("asking Emacs…", Modifier.padding(top = 6.dp), style = p.type.meta.copy(color = p.muted)) }
         if (v != null && colours != null) when (mode) {
             "agenda" -> {
                 for (section in v.optJSONArray("sections").objects()) {
@@ -597,18 +595,18 @@ private fun ProjectsBoardPage(link: Link, decisions: Decisions, modifier: Modifi
             "tasks" -> {
                 for (l in v.optJSONArray("lists").objects()) {
                     val state = l.optString("state")
-                    item(key = "l|$state") { SectionRule("${l.optString("title")} · ${l.optInt("n")}", onClick = { drill = state; mode = "state" }) }
+                    item(key = "l|$state") { SectionRule("${l.optString("title")} · ${l.optInt("n")}", onClick = { drill = state }) }
                     item(key = "l|$state|rows") {
                         Column(horizontalAlignment = Alignment.End) {
                             Pad { l.optJSONArray("rows").objects().forEachIndexed { i, e -> StubRow(e.optString("title"), e.optString("meta"), overdue = e.optBoolean("overdue"), first = i == 0) { show(e) } } }
-                            if (l.optInt("more") > 0) PressTab("all ${l.optInt("n")} ›", { drill = state; mode = "state" }, kind = Press.Quiet, small = true)
+                            if (l.optInt("more") > 0) PressTab("all ${l.optInt("n")} ›", { drill = state }, kind = Press.Quiet, small = true)
                         }
                     }
                 }
                 if (v.optInt("queued") > 0) item { Text("${v.optInt("queued")} queued for agents, on the agents board", style = p.type.meta.copy(color = p.muted)) }
             }
             "state" -> {
-                item { BackLink("tasks", { mode = "tasks"; drill = "" }) }
+                item { BackLink("tasks", { drill = "" }) }
                 item { SectionRule("${listTitle(drill)} · ${rows.size}") }
                 if (rows.isNotEmpty()) item(key = "d|rows") { Pad { rows.forEachIndexed { i, e -> StubRow(e.optString("title"), e.optString("meta"), overdue = e.optBoolean("overdue"), first = i == 0) { show(e) } } } }
             }

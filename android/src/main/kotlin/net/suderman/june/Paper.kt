@@ -237,41 +237,6 @@ fun PressTab(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, k
 }
 
 /**
- * The board's pages as folder tabs standing on the rule under the masthead: the current one lifted and filled.
- * TABS are (id, label) pairs.
- */
-@Composable
-fun FolderTabs(tabs: List<Pair<String, String>>, current: String, onPick: (String) -> Unit, modifier: Modifier = Modifier) {
-    val p = LocalPalette.current
-    Column(modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (p.console) 12.dp else 5.dp), verticalAlignment = Alignment.Bottom) {
-            for ((id, label) in tabs) {
-                val on = id == current
-                Box(
-                    Modifier.height(48.dp).semantics { role = Role.Tab; selected = on }.clickable { onPick(id) },
-                    contentAlignment = Alignment.BottomStart,
-                ) {
-                    if (p.console) Text(
-                        if (on) "[$label]" else " $label ", style = p.type.button.copy(color = if (on) p.page else p.muted),
-                        modifier = Modifier.padding(bottom = 6.dp).then(if (on) Modifier.background(p.pageInk) else Modifier),
-                    ) else {
-                        val shape = RoundedCornerShape(topStart = 7.dp, topEnd = 7.dp)
-                        val edge = if (p.neon && on) p.accent else if (p.neon) p.rule else p.line
-                        Text(
-                            label, style = p.type.button.copy(color = if (on) (if (p.neon) p.accent else p.surface) else if (p.neon) p.muted else p.pageInk),
-                            modifier = Modifier.height(if (on) 40.dp else 34.dp)
-                                .inked(shape, edge, if (on) (if (p.neon) p.surface else p.line) else p.page, lift = 0.dp, width = 2.dp)
-                                .padding(horizontal = 14.dp, vertical = if (on) 10.dp else 7.dp),
-                        )
-                    }
-                }
-            }
-        }
-        Box(Modifier.fillMaxWidth().height(if (p.console) 1.dp else 2.5.dp).background(if (p.neon) p.accent else if (p.console) p.line else p.line))
-    }
-}
-
-/**
  * A section's rule: its title in small caps and a thin line running on to the right edge; the console draws
  * "── TITLE ──". With ONCLICK the title gets a chevron and the whole rule is a 48 dp target. TRAILING sits at the end.
  */

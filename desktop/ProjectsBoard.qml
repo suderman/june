@@ -63,7 +63,7 @@ Item {
 
   Sheet {
     id: taskSheet
-    anchors.fill: parent
+    anchors { left: parent.left; right: parent.right; top: parent.top; bottom: sections.top; bottomMargin: 8 }
     z: 2
     open: board.detailKey !== ""
     onDismissed: board.detailKey = ""
@@ -89,9 +89,29 @@ Item {
     else if ((entry.link ?? "") !== "") board.open(entry.link);
   }
 
+  // The sections, at the bottom as the phone has them in the compose bar's place.
+  SectionBar {
+    id: sections
+    anchors { left: parent.left; right: parent.right; bottom: parent.bottom; rightMargin: 4 }
+    sections: [{ id: "agenda", label: "agenda" }, { id: "tasks", label: "tasks" }, { id: "projects", label: "by project" }]
+    current: board.mode === "state" ? "tasks" : board.mode
+    onPicked: id => { if (id === (board.mode === "state" ? "tasks" : board.mode)) board.resetSection(); else { board.mode = id; board.drill = ""; } }
+  }
+
+  // The showing section again: put its sheet and drill-down away and go back to its top.
+  function resetSection() {
+    detailKey = "";
+    if (mode === "state") { mode = "tasks"; drill = ""; }
+    flick.contentY = 0;
+  }
+
+  // In the narrow layout a tab bar names the board, so it shows no masthead, as on the phone.
+  property bool compact: false
+
   Flickable {
+    id: flick
     visible: !taskSheet.covers
-    anchors.fill: parent
+    anchors { left: parent.left; right: parent.right; top: parent.top; bottom: sections.top; bottomMargin: 8 }
     contentHeight: column.implicitHeight + 16
     clip: true
     boundsBehavior: Flickable.StopAtBounds
@@ -101,8 +121,9 @@ Item {
       width: parent.width - 4
       spacing: 10
 
-      // The masthead: the board's name, its summary, and its pages as folder tabs on the rule.
+      // The masthead: the board's name and its summary; the sections are in the bar below.
       Item {
+        visible: !board.compact
         width: parent.width
         height: mastheadText.implicitHeight + summary.implicitHeight + 2
         Words { id: mastheadText; role: "masthead"; text: (Theme.consoleLook ? "$ " : "") + "projects"; color: Theme.pageInk }
@@ -126,11 +147,6 @@ Item {
           TabIcon { anchors.centerIn: parent; width: 20; height: 20; kind: "editor"; on: false; ink: editorHover.containsMouse ? Theme.pageInk : Theme.muted; paper: Theme.paper }
           MouseArea { id: editorHover; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: board.launchEditor() }
         }
-      }
-      FolderTabs {
-        tabs: [{ id: "agenda", label: "agenda" }, { id: "tasks", label: "tasks" }, { id: "projects", label: "by project" }]
-        current: board.mode === "state" ? "tasks" : board.mode
-        onPicked: id => { board.mode = id; board.drill = ""; }
       }
 
       // The agenda: overdue, today, then a section a day.

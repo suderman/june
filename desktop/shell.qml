@@ -998,6 +998,7 @@ ShellRoot {
 
           ProjectsBoard {
             id: overlayProjects
+            compact: true
             visible: !boardsPaper.fits && root.overlayTab === "projects"
             anchors.top: masthead.bottom
             anchors.bottom: overlayTabBar.top
