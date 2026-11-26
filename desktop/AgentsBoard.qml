@@ -58,6 +58,14 @@ Item {
   // Opening a page counts as seeing a task's review or question, on every device.
   signal seen(string key)
 
+  // Return to the default subsection (activity) and close any open detail or roster card.
+  function resetHome() {
+    mode = "activity";
+    detailKey = "";
+    rosterSlug = "";
+    rosterNew = false;
+  }
+
   // A row with a task opens its page; one without opens where it can.
   function show(task, link) {
     if (task !== "" && Board.findTask(board.tasks, task) !== null) {

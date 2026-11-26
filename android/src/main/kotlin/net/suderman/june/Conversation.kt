@@ -270,6 +270,9 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     // screen opened counts, and each only once.
     var answered by remember { androidx.compose.runtime.mutableIntStateOf(summoned) }
     LaunchedEffect(summoned) { if (summoned != answered) pager.scrollToPage(first + 1) }
+    // Bumped when the user taps an already-open tab in the bottom bar to jump back to its default subsection.
+    var agentsReset by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var projectsReset by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val ready = decisions
     // The boards stay while the link comes back after June was in the background, so their place is kept.
     val boards = !fromSheet && ready != null && (link.status is LinkStatus.Linked || link.agenda != null || link.agents != null)
@@ -285,7 +288,15 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                     board, needs, palette, terminal = board < 0,
                     // The Terminal tab, when terminals open in June: its page, left of the agents board.
                     onTerminal = { if (first == 1) pages.launch { pager.animateScrollToPage(0) } },
-                ) { page -> pages.launch { pager.animateScrollToPage(first + page) } }
+                ) { page ->
+                    if (board == page) {
+                        when (page) {
+                            0 -> agentsReset++
+                            1 -> { browsing = false; link.backToToday() }
+                            2 -> projectsReset++
+                        }
+                    } else pages.launch { pager.animateScrollToPage(first + page) }
+                }
             }
         }
         Column(
@@ -403,8 +414,8 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                                 Text("No agent terminals listed yet", color = palette.muted, fontSize = 14.sp)
                             }
                         }
-                        0 -> AgentsBoard(link, ready!!, palette, inset)
-                        2 -> ProjectsBoard(link, ready!!, palette, inset)
+                        0 -> AgentsBoard(link, ready!!, palette, inset, reset = agentsReset)
+                        2 -> ProjectsBoard(link, ready!!, palette, inset, reset = projectsReset)
                         else -> stripPage(inset)
                     }
                 }

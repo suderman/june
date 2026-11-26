@@ -34,6 +34,13 @@ Item {
   property bool showLaunch: false
   signal launchEditor()
 
+  // Return to the default subsection (agenda) and close any open detail or state drill-down.
+  function resetHome() {
+    mode = "agenda";
+    drill = "";
+    detailKey = "";
+  }
+
   readonly property var drillRows: mode === "state" ? Board.stateRows(agenda, drill, pending, user) : []
   readonly property int openCount: view.counts.reduce((n, c) => n + c.n, 0)
 

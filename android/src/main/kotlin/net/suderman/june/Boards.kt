@@ -236,12 +236,12 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, key: St
 }
 
 @Composable
-fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifier: Modifier = Modifier) {
-    CompositionLocalProvider(LocalPalette provides palette) { AgentsBoardPage(link, decisions, modifier) }
+fun AgentsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifier: Modifier = Modifier, reset: Int = 0) {
+    CompositionLocalProvider(LocalPalette provides palette) { AgentsBoardPage(link, decisions, modifier, reset) }
 }
 
 @Composable
-private fun AgentsBoardPage(link: Link, decisions: Decisions, modifier: Modifier) {
+private fun AgentsBoardPage(link: Link, decisions: Decisions, modifier: Modifier, reset: Int = 0) {
     val p = LocalPalette.current
     LaunchedEffect(Unit) { link.wantBoards() }
     val now = minute()
@@ -261,6 +261,17 @@ private fun AgentsBoardPage(link: Link, decisions: Decisions, modifier: Modifier
     var rosterSlug by rememberSaveable { mutableStateOf("") }
     var rosterCreating by rememberSaveable { mutableStateOf(false) }
     var rosterEditing by rememberSaveable { mutableStateOf(false) }
+    var seenReset by remember { mutableStateOf(reset) }
+    LaunchedEffect(reset) {
+        if (reset != seenReset) {
+            seenReset = reset
+            mode = "activity"
+            page = ""
+            rosterSlug = ""
+            rosterCreating = false
+            rosterEditing = false
+        }
+    }
     var seenRosterDone by remember { mutableStateOf(link.rosterDone.first) }
     LaunchedEffect(link.rosterDone) {
         val (seq, slug) = link.rosterDone
@@ -392,13 +403,13 @@ private fun AgentsBoardPage(link: Link, decisions: Decisions, modifier: Modifier
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ProjectsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifier: Modifier = Modifier) {
-    CompositionLocalProvider(LocalPalette provides palette) { ProjectsBoardPage(link, decisions, modifier) }
+fun ProjectsBoard(link: Link, decisions: Decisions, palette: Look.Palette, modifier: Modifier = Modifier, reset: Int = 0) {
+    CompositionLocalProvider(LocalPalette provides palette) { ProjectsBoardPage(link, decisions, modifier, reset) }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ProjectsBoardPage(link: Link, decisions: Decisions, modifier: Modifier) {
+private fun ProjectsBoardPage(link: Link, decisions: Decisions, modifier: Modifier, reset: Int = 0) {
     val p = LocalPalette.current
     LaunchedEffect(Unit) { link.wantBoards() }
     val colours = rememberColours(decisions)
@@ -416,6 +427,15 @@ private fun ProjectsBoardPage(link: Link, decisions: Decisions, modifier: Modifi
     }
     val open = LocalUriHandler.current
     var page by rememberSaveable { mutableStateOf("") }
+    var seenReset by remember { mutableStateOf(reset) }
+    LaunchedEffect(reset) {
+        if (reset != seenReset) {
+            seenReset = reset
+            mode = "agenda"
+            drill = ""
+            page = ""
+        }
+    }
     LaunchedEffect(link.taskMoved) { if (link.taskMoved.first == page && page.isNotEmpty()) page = link.taskMoved.second }
     // The agenda widget or a reminder asked for this task's page, or for the agenda.
     LaunchedEffect(link.requested) {

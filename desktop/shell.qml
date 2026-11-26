@@ -961,6 +961,7 @@ ShellRoot {
           }
 
           AgentsBoard {
+            id: overlayAgents
             visible: !boardsPaper.fits && root.overlayTab === "agents"
             anchors.top: masthead.bottom
             anchors.bottom: overlayTabBar.top
@@ -984,6 +985,7 @@ ShellRoot {
           }
 
           ProjectsBoard {
+            id: overlayProjects
             visible: !boardsPaper.fits && root.overlayTab === "projects"
             anchors.top: masthead.bottom
             anchors.bottom: overlayTabBar.top
@@ -1053,7 +1055,13 @@ ShellRoot {
             height: 46
             tab: root.overlayTab
             needs: root.agentsView.needs.length
-            onChooseTab: name => root.overlayTab = name
+            onChooseTab: name => {
+              if (root.overlayTab === name) {
+                if (name === "agents") overlayAgents.resetHome();
+                else if (name === "projects") overlayProjects.resetHome();
+                else if (name === "chat") root.backToToday();
+              } else root.overlayTab = name;
+            }
             onLaunch: app => { if (root.openApp(app)) root.hide(); }
           }
         }

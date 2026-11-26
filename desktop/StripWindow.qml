@@ -173,6 +173,7 @@ FloatingWindow {
     }
 
     AgentsBoard {
+      id: narrowAgents
       visible: !win.layout.columns && win.tab === "agents"
       anchors.top: toggles.bottom
       anchors.bottom: tabBar.top
@@ -197,6 +198,7 @@ FloatingWindow {
       onOpen: link => win.shell.openLink(link)
     }
     ProjectsBoard {
+      id: narrowProjects
       visible: !win.layout.columns && win.tab === "projects"
       anchors.top: toggles.bottom
       anchors.bottom: tabBar.top
@@ -283,7 +285,13 @@ FloatingWindow {
       anchors.bottomMargin: 6
       tab: win.tab
       needs: win.shell.agentsView.needs.length
-      onChooseTab: name => win.shell.windowTab = name
+      onChooseTab: name => {
+        if (win.tab === name) {
+          if (name === "agents") narrowAgents.resetHome();
+          else if (name === "projects") narrowProjects.resetHome();
+          else if (name === "chat") win.shell.backToToday();
+        } else win.shell.windowTab = name;
+      }
       onLaunch: app => win.shell.openApp(app)
     }
     // A picker for +, inside this window: a dialog needs a window to open in.
