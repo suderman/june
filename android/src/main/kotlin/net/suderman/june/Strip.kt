@@ -197,7 +197,7 @@ class Avatar(private val context: Context) {
  * and the layout engine places them. See "What the phone shares with the desktop" in docs/interfaces.org.
  */
 @Composable
-fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier = Modifier) {
+fun Strip(link: Link, decisions: Decisions, avatar: Avatar, palette: Look.Palette = Look.palette(console = false, dark = false), modifier: Modifier = Modifier) {
     val art = rememberArt(link, decisions, avatar)
     val ready = art > 0
     val panels by produceState(JSONArray(), art, link.shownItems, link.shownState) {
@@ -228,8 +228,8 @@ fun Strip(link: Link, decisions: Decisions, avatar: Avatar, modifier: Modifier =
             LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 items(count, key = { shown.getJSONObject(count - 1 - it).getString("id") }) { i ->
                     val panel = shown.getJSONObject(count - 1 - i)
-                    Box(if (panel.getString("id") == marked) Modifier.border(4.dp, Look.accent) else Modifier) {
-                        PanelView(panel, newest = i == 0, width.value, m, decisions, avatar, now, sky, link)
+                    Box(if (panel.getString("id") == marked) Modifier.border(4.dp, palette.accent) else Modifier) {
+                        PanelView(panel, newest = i == 0, width.value, m, decisions, avatar, now, sky, link, palette)
                     }
                 }
             }
@@ -493,7 +493,7 @@ private fun PreviewButton(label: String, enabled: Boolean = true, onClick: () ->
  * first card sits, as the note's measure left room for them.
  */
 @Composable
-private fun FileCards(item: JSONObject, el: JSONObject, files: org.json.JSONArray, noteW: Float, top: Float) {
+private fun FileCards(item: JSONObject, el: JSONObject, files: org.json.JSONArray, noteW: Float, top: Float, palette: Look.Palette) {
     val pictures = LocalPictures.current
     for (i in 0 until files.length()) {
         val file = files.getJSONObject(i)
@@ -505,19 +505,19 @@ private fun FileCards(item: JSONObject, el: JSONObject, files: org.json.JSONArra
                 .alpha(if (expired) 0.5f else 1f)
                 .clickable(enabled = !expired && path != null) { pictures?.open(brought(item, el), el.optInt("pictures") + i) },
         ) {
-            Box(Modifier.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(3.dp)).border(1.5.dp, Look.ink, RoundedCornerShape(3.dp)))
+            Box(Modifier.fillMaxSize().background(palette.fileCardFill, RoundedCornerShape(3.dp)).border(1.5.dp, palette.fileCardLine, RoundedCornerShape(3.dp)))
             Canvas(Modifier.offset(8.dp, 4.dp).size(14.dp, 18.dp)) {
                 scale(density, density, pivot = Offset.Zero) {
                     val page = path("M 0 0 L 9 0 L 14 5 L 14 18 L 0 18 Z")
-                    drawPath(page, Color.White)
-                    drawPath(page, Look.ink, style = Stroke(1.5f, join = androidx.compose.ui.graphics.StrokeJoin.Round))
-                    drawPath(path("M 9 0 L 9 5 L 14 5"), Look.ink, style = Stroke(1.5f, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                    drawPath(page, palette.fileCardPage)
+                    drawPath(page, palette.fileCardLine, style = Stroke(1.5f, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                    drawPath(path("M 9 0 L 9 5 L 14 5"), palette.fileCardLine, style = Stroke(1.5f, join = androidx.compose.ui.graphics.StrokeJoin.Round))
                 }
             }
             Row(Modifier.fillMaxSize().padding(start = 28.dp, end = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Text(name, style = noteBody.copy(fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
+                Text(name, style = noteBody.copy(fontSize = 14.sp, color = palette.noteInk), maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
                 Spacer(Modifier.width(8.dp))
-                Text(if (expired) "expired" else file.optString("size"), style = noteBody.copy(fontSize = 12.sp, color = Look.noteLine), maxLines = 1)
+                Text(if (expired) "expired" else file.optString("size"), style = noteBody.copy(fontSize = 12.sp, color = palette.noteLine), maxLines = 1)
             }
         }
     }
@@ -528,7 +528,7 @@ private fun FileCards(item: JSONObject, el: JSONObject, files: org.json.JSONArra
  * rest as document cards below, loose with no container, each opening the preview over all of them, as the desktop client does.
  */
 @Composable
-private fun Shown(el: JSONObject, w: Float) {
+private fun Shown(el: JSONObject, w: Float, palette: Look.Palette) {
     val pictures = LocalPictures.current
     val files = el.optJSONArray("files") ?: JSONArray()
     val all = (0 until files.length()).map { files.getJSONObject(it) }
@@ -550,7 +550,7 @@ private fun Shown(el: JSONObject, w: Float) {
     }
     val pictureCount = all.count { it.optString("preview") == "picture" }
     if (pictureCount > 3) Text(
-        "+${pictureCount - 3}", style = noteBody.copy(fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+        "+${pictureCount - 3}", style = noteBody.copy(fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = palette.noteInk),
         modifier = Modifier.offset((14 + 62 + 2 * 16 + 10).dp, 40.dp).clickable { pictures?.open(set, all.indices.filter { all[it].optString("preview") == "picture" }[3]) },
     )
     val top = if (shots.isNotEmpty()) 96f else 12f
@@ -560,11 +560,11 @@ private fun Shown(el: JSONObject, w: Float) {
             Modifier.offset(14.dp, (top + row * 32).dp).size((w - 28).dp, 26.dp).rotate(if (file.optInt("n") % 2 == 0) -1f else 1f)
                 .clickable(enabled = pictures?.path != null) { pictures?.open(set, at) },
         ) {
-            Box(Modifier.fillMaxSize().background(Color(0xFFFBF8F1), RoundedCornerShape(3.dp)).border(1.5.dp, Look.ink, RoundedCornerShape(3.dp)))
+            Box(Modifier.fillMaxSize().background(palette.fileCardFill, RoundedCornerShape(3.dp)).border(1.5.dp, palette.fileCardLine, RoundedCornerShape(3.dp)))
             Row(Modifier.fillMaxSize().padding(start = 10.dp, end = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Text("▤ " + file.optString("name"), style = noteBody.copy(fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
+                Text("▤ " + file.optString("name"), style = noteBody.copy(fontSize = 14.sp, color = palette.noteInk), maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
                 Spacer(Modifier.width(8.dp))
-                Text(file.optString("size"), style = noteBody.copy(fontSize = 12.sp, color = Look.noteLine), maxLines = 1)
+                Text(file.optString("size"), style = noteBody.copy(fontSize = 12.sp, color = palette.noteLine), maxLines = 1)
             }
         }
     }
@@ -618,7 +618,7 @@ private class Measured(val kind: String, val w: Float, val h: Float, val element
 
 private val SOURCES = mapOf("tui" to "terminal", "kitty" to "terminal", "apk" to "phone", "telegram" to "telegram", "cli" to "command line")
 
-private fun balloonStyle(newest: Boolean) = TextStyle(fontFamily = Look.lettering, fontWeight = FontWeight.Medium, fontSize = (if (newest) 19 else 17).sp, color = Look.ink)
+private fun balloonStyle(newest: Boolean, color: Color = Look.ink) = TextStyle(fontFamily = Look.lettering, fontWeight = FontWeight.Medium, fontSize = (if (newest) 19 else 17).sp, color = color)
 private val noteMarker = TextStyle(fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Look.noteLine)
 private val noteBody = TextStyle(fontFamily = Look.caption, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = Look.noteInk)
 private val chipStyle = TextStyle(fontFamily = Look.caption, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Look.chipInk)
@@ -629,10 +629,10 @@ private val burstStyle = TextStyle(fontFamily = Look.lettering, fontWeight = Fon
 
 private fun kindOf(e: JSONObject) = if (e.optString("kind") == "tools") (if (e.getJSONArray("items").length() > 1) "card" else "chip") else e.optString("kind")
 
-private fun juneText(e: JSONObject): AnnotatedString = buildAnnotatedString {
+private fun juneText(e: JSONObject, palette: Look.Palette = Look.palette(console = false, dark = false)): AnnotatedString = buildAnnotatedString {
     // Paths and commands read as a terminal, as the tool card does: smaller, light on dark.
-    append(orgText(e.optString("text"), code = Look.chipInk, stress = SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold, background = Look.highlight), terminal = SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 0.8.em, color = Look.cardInk, background = Look.cardFill)))
-    if (e.optBoolean("streaming")) withStyle(SpanStyle(color = Look.accent)) { append(" ▍") }
+    append(orgText(e.optString("text"), code = palette.chipInk, stress = SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold, background = palette.balloonHighlight), link = palette.noteLine, terminal = SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 0.8.em, color = Look.cardInk, background = palette.codeFill)))
+    if (e.optBoolean("streaming")) withStyle(SpanStyle(color = palette.accent)) { append(" ▍") }
 }
 
 private fun noteMarkerText(item: JSONObject): String {
@@ -734,7 +734,7 @@ private fun path(d: String): Path = PathParser().parsePathString(d).toPath()
 
 /** One panel: its ground, June framed into her clip, the words where the layout put them, and the frame over all. */
 @Composable
-private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONObject, decisions: Decisions, avatar: Avatar, now: Long, sky: JSONObject?, link: Link) {
+private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONObject, decisions: Decisions, avatar: Avatar, now: Long, sky: JSONObject?, link: Link, palette: Look.Palette) {
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val textWidth = m.getDouble("textWidth").toFloat()
@@ -745,8 +745,8 @@ private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONO
     }
     val sizes = JSONArray(measured.map { JSONObject().put("kind", it.kind).put("w", it.w.toDouble()).put("h", it.h.toDouble()) })
     val skyText = sky?.toString()
-    val layout by produceState<JSONObject?>(null, key, width, sizes.toString(), now / 60_000, skyText) {
-        value = runCatching { JSONObject(decisions.call("layout", panel, width.toDouble(), sizes, now.toDouble(), -1, sky)) }
+    val layout by produceState<JSONObject?>(null, key, width, sizes.toString(), now / 60_000, skyText, palette.neon) {
+        value = runCatching { JSONObject(decisions.call("layout", panel, width.toDouble(), sizes, now.toDouble(), -1, sky, palette.neon)) }
             .onFailure { android.util.Log.w(TAG, "layout failed: $it") }.getOrNull()
     }
     val l = layout
@@ -807,7 +807,7 @@ private fun PanelView(panel: JSONObject, newest: Boolean, width: Float, m: JSONO
         for (i in measured.indices) {
             val box = boxes.optJSONObject(i) ?: continue
             Box(Modifier.offset(box.getDouble("x").dp, box.getDouble("y").dp).size(measured[i].w.dp, measured[i].h.dp)) {
-                ElementView(measured[i], box, newest)
+                ElementView(measured[i], box, newest, palette)
             }
         }
         Box(Modifier.matchParentSize().border(3.dp, Look.ink))
@@ -945,43 +945,43 @@ private fun MarksView(marks: JSONArray, shapes: JSONObject?) {
 }
 
 @Composable
-private fun Outline(d: String, fill: Color, stroke: Float) {
+private fun Outline(d: String, fill: Color, stroke: Float, line: Color = Look.ink) {
     val shape = remember(d) { path(d) }
     Canvas(Modifier.fillMaxSize()) {
         scale(density, density, pivot = Offset.Zero) {
             drawPath(shape, fill)
-            drawPath(shape, Look.ink, style = Stroke(width = stroke))
+            drawPath(shape, line, style = Stroke(width = stroke))
         }
     }
 }
 
 @Composable
-private fun ElementView(e: Measured, box: JSONObject, newest: Boolean) {
+private fun ElementView(e: Measured, box: JSONObject, newest: Boolean, palette: Look.Palette) {
     val el = e.element
     when (e.kind) {
         "june" -> {
             val artifact = el.optJSONObject("artifact")
             if (artifact != null) ArtifactBalloon(artifact, Modifier.fillMaxSize())
             else {
-                Outline(box.optString("path"), Look.balloon, if (newest) 3f else 2.5f)
-                Box(Modifier.offset(max((e.w - e.textW) / 2, 22f).dp, 14.dp).width(e.textW.dp)) { Text(juneText(el), style = balloonStyle(newest)) }
+                Outline(box.optString("path"), palette.balloon, if (newest) 3f else 2.5f, palette.balloonLine)
+                Box(Modifier.offset(max((e.w - e.textW) / 2, 22f).dp, 14.dp).width(e.textW.dp)) { Text(juneText(el, palette), style = balloonStyle(newest, palette.balloonInk)) }
             }
         }
         "user" -> {
             val item = el.getJSONObject("item")
-            Box(Modifier.fillMaxSize().background(Look.noteFill, RoundedCornerShape(14.dp)).border(2.dp, Look.noteLine, RoundedCornerShape(14.dp)))
-            Text(noteMarkerText(item), style = noteMarker, modifier = Modifier.offset(14.dp, 10.dp))
-            Text(el.optString("text", item.optString("text")), style = noteBody, modifier = Modifier.offset((14 + e.markerW + 8).dp, 10.dp).width(e.textW.dp))
+            Box(Modifier.fillMaxSize().background(palette.noteFill, RoundedCornerShape(14.dp)).border(2.dp, palette.noteLine, RoundedCornerShape(14.dp)))
+            Text(noteMarkerText(item), style = noteMarker.copy(color = palette.noteLine), modifier = Modifier.offset(14.dp, 10.dp))
+            Text(el.optString("text", item.optString("text")), style = noteBody.copy(color = palette.noteInk), modifier = Modifier.offset((14 + e.markerW + 8).dp, 10.dp).width(e.textW.dp))
             Polaroids(item, el, min(el.optInt("pictures"), 3), e.w)
-            el.optJSONArray("files")?.takeIf { it.length() > 0 }?.let { files -> FileCards(item, el, files, e.w, e.h - 4 - files.length() * 32) }
+            el.optJSONArray("files")?.takeIf { it.length() > 0 }?.let { files -> FileCards(item, el, files, e.w, e.h - 4 - files.length() * 32, palette) }
         }
         // Loose on her side, with no container: it says nothing itself.
-        "shown" -> Shown(el, e.w)
+        "shown" -> Shown(el, e.w, palette)
         "chip" -> {
             val call = calls(el)[0]
             val failed = call.optString("status") == "error"
-            Box(Modifier.fillMaxSize().background(if (failed) Look.burstFill else Look.chipFill, RoundedCornerShape(50)).border(1.5.dp, Look.chipInk.copy(alpha = 0.3f), RoundedCornerShape(50)))
-            Text("∴ " + call.optString("caption") + if (call.optString("status") == "running") " …" else "", style = chipStyle, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.offset(12.dp, 5.dp).width(e.textW.dp))
+            Box(Modifier.fillMaxSize().background(if (failed) palette.burstFill else palette.chipFill, RoundedCornerShape(50)).border(1.5.dp, if (failed) palette.burstLine else palette.chipLine, RoundedCornerShape(50)))
+            Text("∴ " + call.optString("caption") + if (call.optString("status") == "running") " …" else "", style = chipStyle.copy(color = if (failed) palette.burstInk else palette.chipInk), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.offset(12.dp, 5.dp).width(e.textW.dp))
         }
         "card" -> {
             val all = calls(el)
@@ -998,8 +998,8 @@ private fun ElementView(e: Measured, box: JSONObject, newest: Boolean) {
             }
         }
         "thought" -> {
-            Outline(box.optString("path"), Look.balloon, 2f)
-            Text(el.getJSONObject("item").optString("text"), style = thoughtStyle, modifier = Modifier.offset(23.dp, 17.dp).width(e.textW.dp))
+            Outline(box.optString("path"), palette.balloon, 2f, palette.balloonLine)
+            Text(el.getJSONObject("item").optString("text"), style = thoughtStyle.copy(color = palette.thoughtInk), modifier = Modifier.offset(23.dp, 17.dp).width(e.textW.dp))
             val trail = box.optJSONObject("trail")
             val dots = box.optJSONArray("trailDots")
             if (trail != null && dots != null) Canvas(Modifier.fillMaxSize()) {
@@ -1008,15 +1008,15 @@ private fun ElementView(e: Measured, box: JSONObject, newest: Boolean) {
                     val at = dot.getDouble("at").toFloat()
                     val size = dot.getDouble("size").toFloat()
                     val c = Offset((trail.getDouble("x").toFloat() + trail.getDouble("dx").toFloat() * at) * density, (trail.getDouble("y").toFloat() + trail.getDouble("dy").toFloat() * at) * density)
-                    drawCircle(Look.balloon, size / 2 * density, c)
-                    drawCircle(Look.ink, size / 2 * density, c, style = Stroke(2f * density))
+                    drawCircle(palette.balloon, size / 2 * density, c)
+                    drawCircle(palette.balloonLine, size / 2 * density, c, style = Stroke(2f * density))
                 }
             }
         }
         "burst" -> {
-            Outline(box.optString("path"), Look.burstFill, 2.5f)
+            Outline(box.optString("path"), palette.burstFill, 2.5f, palette.burstLine)
             val item = el.getJSONObject("item")
-            Text(item.optString("error").ifEmpty { item.optString("text") }, style = burstStyle, modifier = Modifier.offset(23.dp, 23.dp).width(e.textW.dp))
+            Text(item.optString("error").ifEmpty { item.optString("text") }, style = burstStyle.copy(color = palette.burstInk), modifier = Modifier.offset(23.dp, 23.dp).width(e.textW.dp))
         }
     }
 }

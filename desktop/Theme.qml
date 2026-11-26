@@ -1,8 +1,8 @@
 // The strip's design tokens, until the theme system serves them (see "Themes" in docs/interfaces.org). Two looks, each
 // light or dark, set by the shell: the comic strip, and the console (`consoleLook`), a terminal style for when June
 // should look professional; `dark` follows the desktop's colour scheme unless the device holds to one. In the comic's
-// dark (late night neon, `neon`) the page goes indigo-black while panels and balloons stay printed, so text set on the
-// page uses `pageInk`. Components draw from these tokens, so most follow the look without knowing it. The boards' own
+// dark (late night neon, `neon`) the page goes indigo-black and panels, balloons, notes and bursts darken to match,
+// while `ink` stays dark for printed art details; text set on the page uses `pageInk`. Components draw from these tokens, so most follow the look without knowing it. The boards' own
 // tokens (surface, rule, shadow, a colour per state and harness, the type scale) match the phone's Look.kt.
 pragma Singleton
 import QtQuick
@@ -26,25 +26,37 @@ Singleton {
   readonly property color backdrop: pick("#b80a0c14", "#cc05070a", "#cc05070a", "#990a0c14")
   readonly property color accent: pick("#bf3a27", "#ff4fa3", "#ff8f80", "#cf222e")
 
-  // June's balloons: warm cream with ink outlines; stressed words in bold on a highlighter stroke.
-  readonly property color balloon: pick("#fffcf5", "#fffcf5", "#1a1d23", "#ffffff")
-  readonly property color highlight: pick("#ffe27a", "#ffe27a", "#3a4150", "#dde3ea")
-  // The user's notes: light blue, tailless, from outside the frame.
-  readonly property color noteFill: pick("#dbe7ff", "#dbe7ff", "#1a1d23", "#ffffff")
-  readonly property color noteLine: pick("#5470b8", "#5470b8", "#6d8fd6", "#0969da")
-  readonly property color noteInk: pick("#1c2a52", "#1c2a52", "#c9d7f5", "#0a3069")
+  // June's balloons: warm cream with ink outlines in light; deep indigo with soft neon edges in dark.
+  readonly property color balloon: pick("#fffcf5", "#1e1a33", "#1a1d23", "#ffffff")
+  readonly property color balloonInk: pick("#1b1a1f", "#f4eeff", "#d7dbe3", "#24292f")
+  readonly property color balloonLine: pick("#1b1a1f", "#9d7bff", "#5c6577", "#818b95")
+  readonly property color highlight: pick("#ffe27a", "#5a2d6b", "#3a4150", "#dde3ea")
+  readonly property color thoughtInk: pick("#4a4750", "#c4b9e6", "#8a93a5", "#636c76")
+  // The user's notes: light blue in light, deep midnight cobalt in dark, tailless, from outside the frame.
+  readonly property color noteFill: pick("#dbe7ff", "#162642", "#1a1d23", "#ffffff")
+  readonly property color noteLine: pick("#5470b8", "#72b8ff", "#6d8fd6", "#0969da")
+  readonly property color noteInk: pick("#1c2a52", "#e3efff", "#c9d7f5", "#0a3069")
   // Tools: one call as a lavender chip, several as a terminal status card.
-  readonly property color chipFill: "#ebe5ff"
-  readonly property color chipInk: "#3d3466"
+  readonly property color chipFill: pick("#ebe5ff", "#2b214d", "#262a33", "#eef0f3")
+  readonly property color chipLine: pick("#b0a4d8", "#8f6fd6", "#5c6577", "#818b95")
+  readonly property color chipInk: pick("#3d3466", "#decfff", "#d7dbe3", "#24292f")
   readonly property color cardFill: "#1f2433"
+  readonly property color codeFill: neon ? "#101322" : cardFill
   readonly property color cardLine: "#5b6683"
   readonly property color cardInk: "#e4e8f2"
   readonly property color cardOk: "#86e08f"
   readonly property color cardFail: "#ff8f80"
   readonly property color cardBusy: "#ffd36b"
-  readonly property color burstFill: "#ffd6cf"
-  // Captions and toasts: a pale yellow box, as a comic's narration.
-  readonly property color captionFill: pick("#fff3c4", "#fff3c4", "#262a33", "#eef0f3")
+  readonly property color burstFill: pick("#ffd6cf", "#3d1828", "#262a33", "#eef0f3")
+  readonly property color burstLine: pick("#1b1a1f", "#ff5c7a", "#ff8f80", "#cf222e")
+  readonly property color burstInk: pick("#1b1a1f", "#ffd8e0", "#ff8f80", "#cf222e")
+  // Captions and toasts: a pale yellow box in light, deep warm amber in dark.
+  readonly property color captionFill: pick("#fff3c4", "#332815", "#262a33", "#eef0f3")
+  readonly property color captionInk: pick("#1b1a1f", "#ffecb3", "#d7dbe3", "#24292f")
+  // File cards clipped to user notes.
+  readonly property color fileCardFill: pick("#fbf8f1", "#1d2c4a", "#1a1d23", "#ffffff")
+  readonly property color fileCardLine: pick("#1b1a1f", "#72b8ff", "#5c6577", "#818b95")
+  readonly property color fileCardPage: pick("#ffffff", "#283c63", "#262a33", "#ffffff")
   // The console's own: her name, the user's prompt, and a tool line's status.
   readonly property color consoleJune: dark ? "#e9c46a" : "#9a6700"
   readonly property color consoleUser: dark ? "#8fb4ff" : "#0550ae"
@@ -52,8 +64,10 @@ Singleton {
   readonly property color consoleFail: dark ? "#ff8f80" : "#cf222e"
   readonly property color consoleBusy: dark ? "#ffd36b" : "#9a6700"
 
-  // Panel grounds, picked per panel so neighbours differ: dusk lilac, peach, sky, sage, sand.
-  readonly property var tints: ["#e6d7ea", "#f6dccb", "#d7e4f2", "#dfead6", "#f2e3c8"]
+  // Panel grounds, picked per panel so neighbours differ: dusk lilac, peach, sky, sage, sand (deepened in dark neon).
+  readonly property var tints: neon
+    ? ["#272038", "#34242d", "#1d293b", "#1f302a", "#332a1f"]
+    : ["#e6d7ea", "#f6dccb", "#d7e4f2", "#dfead6", "#f2e3c8"]
 
   // ---- The boards: dockets, stubs and clanker cards, in paper and ink, neon, or the console. ----
   readonly property bool neon: !consoleLook && dark

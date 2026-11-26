@@ -15,12 +15,12 @@ Item {
   height: 26
   rotation: file.n % 2 === 0 ? -1 : 1
   opacity: file.expired ? 0.5 : 1
-  Rectangle { anchors.fill: parent; color: "#fbf8f1"; border.color: Theme.ink; border.width: 1.5; radius: 3 }
+  Rectangle { anchors.fill: parent; color: Theme.fileCardFill; border.color: Theme.fileCardLine; border.width: 1.5; radius: 3 }
   Shape {
     x: 8; y: 4; width: 14; height: 18
     preferredRendererType: Shape.CurveRenderer
     ShapePath {
-      strokeColor: Theme.ink; strokeWidth: 1.5; fillColor: "#ffffff"; joinStyle: ShapePath.RoundJoin
+      strokeColor: Theme.fileCardLine; strokeWidth: 1.5; fillColor: Theme.fileCardPage; joinStyle: ShapePath.RoundJoin
       PathSvg { path: "M 0 0 L 9 0 L 14 5 L 14 18 L 0 18 Z M 9 0 L 9 5 L 14 5" }
     }
   }

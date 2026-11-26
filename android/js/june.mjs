@@ -58,12 +58,14 @@ export function panels(items, state, holding) {
 	return composed;
 }
 
-/** The panel ground's tint, as Theme.qml picks it, so neighbours differ. */
+/** The panel ground's tint, as Theme.qml picks it, so neighbours differ (deepened in dark neon). */
 const TINTS = ["#e6d7ea", "#f6dccb", "#d7e4f2", "#dfead6", "#f2e3c8"];
-function tint(id) {
+const DARK_TINTS = ["#272038", "#34242d", "#1d293b", "#1f302a", "#332a1f"];
+function tint(id, dark) {
 	let h = 0;
 	for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
-	return TINTS[Math.abs(h) % TINTS.length];
+	const list = dark ? DARK_TINTS : TINTS;
+	return list[Math.abs(h) % list.length];
 }
 
 /**
@@ -71,7 +73,7 @@ function tint(id) {
  * framed, each element's outline as SVG path text (a balloon with its tail, a thought cloud, a burst), and the scene
  * behind her (`scene`, below) at `now` under the daemon's `sky`.
  */
-export function layout(panel, width, sizes, now, hourOverride, sky) {
+export function layout(panel, width, sizes, now, hourOverride, sky, dark) {
 	const laid = compose.panelLayout({ panel, width, sizes });
 	const elements = laid.layout.elements.map((e, i) => {
 		const kind = sizes[i] ? sizes[i].kind : "";
@@ -81,8 +83,8 @@ export function layout(panel, width, sizes, now, hourOverride, sky) {
 		if (kind === "burst") return Object.assign({}, e, { path: compose.jagged(e.w, e.h, 9) });
 		return e;
 	});
-	const out = Object.assign({}, laid.layout, { elements, pose: laid.pose, tint: tint(panel.id), markShapes: compose.MARK_SHAPES });
-	out.scene = scene(panel, out, laid.pose, sizes, width, now ?? Date.now(), hourOverride ?? -1, sky ?? null);
+	const out = Object.assign({}, laid.layout, { elements, pose: laid.pose, tint: tint(panel.id, dark === true), markShapes: compose.MARK_SHAPES });
+	out.scene = scene(panel, out, laid.pose, sizes, width, now ?? Date.now(), hourOverride ?? -1, sky ?? null, dark === true);
 	return out;
 }
 
@@ -91,13 +93,13 @@ export function layout(panel, width, sizes, now, hourOverride, sky) {
  * pattern, her room with the window's sky, sun, stars, weather, view, and props, how far out of focus it is, the
  * lamp, and how she is graded and lit; or a cutaway's panes, chain, or drawers while she works.
  */
-function scene(panel, laid, pose, sizes, width, now, hourOverride, sky) {
+function scene(panel, laid, pose, sizes, width, now, hourOverride, sky, dark) {
 	const sc = scenery.panelScene({ panel, layout: laid, pose, sizes, width, now, hourOverride, sky, scenery: rooms });
 	const L = sc.light;
 	const g = (c) => (c === "transparent" ? c : light.graded(c, L));
 	const back = sc.backdrop;
 	const pattern = back.kind === "abstract" ? light.PATTERNS[back.pattern] : null;
-	const ground = back.kind === "cutaway" ? light.cutaway(back, width, laid.height, sc.seed, sc.clear).ground : g(back.kind === "calm" ? light.CALM_GROUND : pattern ? pattern.ground : tint(panel.id));
+	const ground = back.kind === "cutaway" ? light.cutaway(back, width, laid.height, sc.seed, sc.clear).ground : g(back.kind === "calm" ? light.CALM_GROUND : pattern ? pattern.ground : tint(panel.id, dark));
 	const win = sc.roomPlace ? sc.roomPlace.window : null;
 	return {
 		kind: back.kind,

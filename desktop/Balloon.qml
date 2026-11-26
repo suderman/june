@@ -31,7 +31,7 @@ Item {
     height: balloon.h
     preferredRendererType: Shape.CurveRenderer
     ShapePath {
-      strokeColor: Theme.ink
+      strokeColor: Theme.balloonLine
       strokeWidth: balloon.weight
       fillColor: Theme.balloon
       joinStyle: ShapePath.RoundJoin
@@ -61,9 +61,9 @@ Item {
     font.family: Theme.lettering
     font.weight: Font.Medium
     font.pixelSize: balloon.pixelSize
-    color: Theme.ink
+    color: Theme.balloonInk
     selectionColor: Theme.highlight
-    selectedTextColor: Theme.ink
+    selectedTextColor: Theme.balloonInk
     onLinkActivated: url => balloon.link(url)
     HoverHandler { cursorShape: words.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor }
   }

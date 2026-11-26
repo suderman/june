@@ -138,7 +138,7 @@ PanelWindow {
         font.weight: Font.Medium
         font.pixelSize: 16
         color: Theme.noteInk
-        placeholderTextColor: Theme.consoleLook ? Theme.muted : "#7b88ad"
+        placeholderTextColor: Theme.consoleLook || Theme.neon ? Theme.muted : "#7b88ad"
         background: null
         Keys.onPressed: event => {
           if (event.key === Qt.Key_Escape) { win.dismissed(); event.accepted = true; return; }

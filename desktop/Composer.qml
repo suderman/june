@@ -27,7 +27,7 @@ Rectangle {
   height: Math.min(input.contentHeight + 34, 220) + shelf
   radius: Theme.consoleLook ? 6 : Math.min(height / 2, 30)
   color: Theme.balloon
-  border.color: Theme.consoleLook ? Theme.muted : Theme.ink
+  border.color: Theme.consoleLook ? Theme.muted : Theme.balloonLine
   border.width: Theme.consoleLook ? 1.5 : 3
   clip: true
 
@@ -95,8 +95,8 @@ Rectangle {
       wrapMode: TextEdit.Wrap
       font.family: Theme.lettering
       font.pixelSize: Theme.consoleLook ? 15 : 19
-      color: Theme.ink
-      placeholderTextColor: Theme.consoleLook ? Theme.muted : "#9a958a"
+      color: Theme.balloonInk
+      placeholderTextColor: Theme.consoleLook || Theme.neon ? Theme.muted : "#9a958a"
       background: null
       Keys.onPressed: event => {
         if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier) && input.selectedText === "") {

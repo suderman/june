@@ -422,7 +422,7 @@ Item {
         x: 14 + 62 + 2 * 16 + 10
         y: 40
         text: "+" + (shownBox.pictures.length - 3)
-        font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 15; color: Theme.ink
+        font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 15; color: Theme.balloonInk
         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: panel.preview(shownBox.opened(shownBox.pictures[3])) }
       }
       Repeater {
@@ -579,7 +579,7 @@ Item {
       tail: box ? (box.tail ?? null) : null
       onLink: url => panel.link(url)
       // Paths and commands read as a terminal, as the tool card does: smaller, light on dark.
-      text: element ? Strip.markup(element.text, { stress: "font-weight:800; background-color:" + Theme.highlight, code: "font-family:monospace; font-size:" + Math.round(pixelSize * 0.8) + "px; color:" + Theme.cardInk + "; background-color:" + Theme.cardFill, codePad: true, link: "color:" + Theme.noteLine }) + (element.streaming ? "<span style='color:" + Theme.accent + "'> ▍</span>" : "") : ""
+      text: element ? Strip.markup(element.text, { stress: "font-weight:800; background-color:" + Theme.highlight, code: "font-family:monospace; font-size:" + Math.round(pixelSize * 0.8) + "px; color:" + Theme.cardInk + "; background-color:" + Theme.codeFill, codePad: true, link: "color:" + Theme.noteLine }) + (element.streaming ? "<span style='color:" + Theme.accent + "'> ▍</span>" : "") : ""
       transformOrigin: panel.p.side === "left" ? Item.Left : Item.Right
       NumberAnimation on scale { id: pop; running: false; from: 0.9; to: 1; duration: 220; easing.type: Easing.OutBack }
       Component.onCompleted: if (panel.newest) pop.start()
@@ -607,7 +607,7 @@ Item {
         height: thoughtBox.h
         preferredRendererType: Shape.CurveRenderer
         ShapePath {
-          strokeColor: Theme.ink
+          strokeColor: Theme.balloonLine
           strokeWidth: 2
           fillColor: Theme.balloon
           joinStyle: ShapePath.RoundJoin
@@ -625,7 +625,7 @@ Item {
         font.family: Theme.lettering
         font.italic: true
         font.pixelSize: 14
-        color: "#4a4750"
+        color: Theme.thoughtInk
       }
       Repeater {
         model: thoughtBox.trail ? Compose.TRAIL : []
@@ -637,7 +637,7 @@ Item {
           height: modelData.size
           radius: modelData.size / 2
           color: Theme.balloon
-          border.color: Theme.ink
+          border.color: Theme.balloonLine
           border.width: 2
         }
       }
@@ -659,7 +659,7 @@ Item {
       height: h
       radius: open ? 12 : h / 2
       color: call && call.status === "error" ? Theme.burstFill : Theme.chipFill
-      border.color: Qt.darker(color, 1.25)
+      border.color: call && call.status === "error" ? Theme.burstLine : Theme.chipLine
       border.width: 1.5
       Text {
         id: label
@@ -672,7 +672,7 @@ Item {
         font.family: Theme.caption
         font.weight: Font.Bold
         font.pixelSize: 13
-        color: Theme.chipInk
+        color: call && call.status === "error" ? Theme.burstInk : Theme.chipInk
       }
       MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: chipBox.open = !chipBox.open }
     }
@@ -750,7 +750,7 @@ Item {
       Shape {
         width: burstItem.w; height: burstItem.h
         ShapePath {
-          strokeColor: Theme.ink; strokeWidth: Theme.line; fillColor: Theme.burstFill
+          strokeColor: Theme.burstLine; strokeWidth: Theme.line; fillColor: Theme.burstFill
           joinStyle: ShapePath.MiterJoin
           PathSvg { path: Compose.jagged(burstItem.w, burstItem.h, burstItem.spike) }
         }
@@ -766,7 +766,7 @@ Item {
         font.family: Theme.lettering
         font.weight: Font.Bold
         font.pixelSize: 15
-        color: Theme.ink
+        color: Theme.burstInk
       }
     }
   }

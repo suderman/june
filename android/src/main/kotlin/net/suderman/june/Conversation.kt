@@ -349,7 +349,7 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                 } else if (ready != null && LookChoice.console) {
                     ConsoleStrip(link, ready, palette, Modifier.weight(1f).fillMaxWidth())
                 } else if (ready != null && avatar != null) {
-                    Strip(link, ready, avatar, Modifier.weight(1f).fillMaxWidth())
+                    Strip(link, ready, avatar, palette, Modifier.weight(1f).fillMaxWidth())
                 } else {
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(shown, key = { it.id }) { ItemRow(it) }

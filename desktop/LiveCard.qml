@@ -21,8 +21,8 @@ Rectangle {
   width: 150
   height: 150
   radius: Theme.consoleLook ? 10 : 22
-  color: Theme.consoleLook ? Theme.balloon : liveState === "offline" ? "#e7e2d6" : busy ? Theme.noteFill : "#f6dccb"
-  border.color: Theme.ink
+  color: Theme.consoleLook ? Theme.balloon : liveState === "offline" ? (Theme.neon ? "#252038" : "#e7e2d6") : busy ? Theme.noteFill : (Theme.neon ? "#34242d" : "#f6dccb")
+  border.color: Theme.balloonLine
   border.width: Theme.consoleLook ? 1.5 : 3
   clip: true
 

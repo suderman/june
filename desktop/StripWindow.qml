@@ -166,7 +166,7 @@ FloatingWindow {
           height: 18
           radius: 9
           color: Theme.balloon
-          border.color: Theme.ink
+          border.color: Theme.balloonLine
           border.width: 2
         }
       }

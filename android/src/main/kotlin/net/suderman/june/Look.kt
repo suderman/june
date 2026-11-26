@@ -55,6 +55,13 @@ object Look {
         val surface: Color = field, val surfaceInk: Color = pageInk, val surfaceMuted: Color = muted,
         val line: Color = pageInk, val rule: Color = muted, val shadow: Color = pageInk,
         val tones: Map<String, Color> = emptyMap(), val harnesses: Map<String, Color> = emptyMap(),
+        // Comic strip balloons and elements: light printed paper by default, inverted/darkened in late night neon.
+        val balloon: Color = Look.balloon, val balloonInk: Color = Look.ink, val balloonLine: Color = Look.ink,
+        val balloonHighlight: Color = Look.highlight, val thoughtInk: Color = Look.thoughtInk, val codeFill: Color = Look.cardFill,
+        val noteFill: Color = Look.noteFill, val noteLine: Color = Look.noteLine, val noteInk: Color = Look.noteInk,
+        val chipFill: Color = Look.chipFill, val chipLine: Color = Color(0xFFB0A4D8), val chipInk: Color = Look.chipInk,
+        val burstFill: Color = Look.burstFill, val burstLine: Color = Look.ink, val burstInk: Color = Look.ink,
+        val fileCardFill: Color = Color(0xFFFBF8F1), val fileCardLine: Color = Look.ink, val fileCardPage: Color = Color.White,
     ) {
         val console get() = kind == Kind.Console
         val neon get() = kind == Kind.Neon
@@ -89,6 +96,12 @@ object Look {
             line = Color(0xFF9D7BFF), rule = Color(0xFF3A3258), shadow = Color(0xFFFF4FA3),
             tones = mapOf("TODO" to Color(0xFFFF5C7A), "PROG" to Color(0xFF3FE0F0), "EVAL" to Color(0xFFB48CFF), "HOLD" to Color(0xFFFFC247), "AUTO" to Color(0xFF4FF0C8), "DONE" to Color(0xFFA8F05A)),
             harnesses = mapOf("pi" to Color(0xFF2EE6D2), "claude" to Color(0xFFFF9A4D), "codex" to Color(0xFF6FA8FF), "agy" to Color(0xFFB48CFF), "opencode" to Color(0xFF7CE38B), "other" to Color(0xFFFFD84D)),
+            balloon = Color(0xFF1E1A33), balloonInk = Color(0xFFF4EEFF), balloonLine = Color(0xFF9D7BFF),
+            balloonHighlight = Color(0xFF5A2D6B), thoughtInk = Color(0xFFC4B9E6), codeFill = Color(0xFF101322),
+            noteFill = Color(0xFF162642), noteLine = Color(0xFF72B8FF), noteInk = Color(0xFFE3EFFF),
+            chipFill = Color(0xFF2B214D), chipLine = Color(0xFF8F6FD6), chipInk = Color(0xFFDECFFF),
+            burstFill = Color(0xFF3D1828), burstLine = Color(0xFFFF5C7A), burstInk = Color(0xFFFFD8E0),
+            fileCardFill = Color(0xFF1D2C4A), fileCardLine = Color(0xFF72B8FF), fileCardPage = Color(0xFF283C63),
         )
         else -> Palette(
             Color(0xFFF6F1E7), Color(0xFF1B1A1F), Color(0xFF66636C), Color(0xFFFFFCF5), Color(0xFF1B1A1F), Color(0xFFBF3A27),

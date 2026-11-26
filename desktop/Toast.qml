@@ -9,7 +9,7 @@ Rectangle {
   width: Math.min(toastText.implicitWidth + 28, (parent ? parent.width : 400) - 48)
   height: toastText.height + 14
   color: Theme.captionFill
-  border.color: Theme.ink
+  border.color: Theme.balloonLine
   border.width: 2
   Text {
     id: toastText
@@ -18,6 +18,6 @@ Rectangle {
     wrapMode: Text.Wrap
     text: toast.text
     font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
-    color: Theme.ink
+    color: Theme.captionInk
   }
 }
