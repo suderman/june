@@ -20,6 +20,7 @@ class AttachActivity : ComponentActivity() {
     private val photos = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(Outbox.MAX_PICTURES)) { done(it) }
     private val documents = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { done(it) }
     private val camera = registerForActivityResult(ActivityResultContracts.TakePicture()) { taken -> done(if (taken) listOf(shot()) else emptyList(), photo = true) }
+    private val galleryPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { back() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -29,6 +30,7 @@ class AttachActivity : ComponentActivity() {
             "photos" -> photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             "files" -> documents.launch(arrayOf("*/*"))
             "camera" -> camera.launch(FileProvider.getUriForFile(this, "$packageName.files", photoFile(this).also { it.delete() }))
+            "gallery" -> galleryPermission.launch(android.Manifest.permission.READ_MEDIA_IMAGES)
             else -> finish()
         }
     }

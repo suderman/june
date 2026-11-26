@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.MediaStore
+import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -89,10 +90,15 @@ fun ComposeBar(
     attachMenu: @Composable (dismiss: () -> Unit) -> Unit,
 ) {
     val context = LocalContext.current
+    val leave = LocalLeave.current
     var menuOpen by remember { mutableStateOf(false) }
-    val askPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) onRecentImage()
-    }
+    // The assistant sheet (JuneSession) is a VoiceInteractionSession, not a ComponentActivity, so it has no
+    // ActivityResultRegistryOwner; route a missing permission through AttachActivity instead of crashing composition.
+    val askPermission = if (LocalActivityResultRegistryOwner.current != null) {
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) onRecentImage()
+        }
+    } else null
     val ink = palette.pageInk
     val muted = palette.muted
     val pillBg = when {
@@ -130,8 +136,11 @@ fun ComposeBar(
             Modifier.size(36.dp).clickable {
                 if (RecentGallery.hasPermission(context) || RecentGallery.nextImage(context, emptySet()) != null) {
                     onRecentImage()
-                } else {
+                } else if (askPermission != null) {
                     askPermission.launch(Manifest.permission.READ_MEDIA_IMAGES)
+                } else {
+                    AttachActivity.open(context, "gallery", fromSheet = true)
+                    leave()
                 }
             },
             contentAlignment = Alignment.Center,
