@@ -271,7 +271,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Box {
-                BarIcon(SwitchIcon, "Switch pane", muted) { picking = true }
+                BarIcon(SwitchIcon, "Switch pane", ink, fill = Color(0xFF313244)) { picking = true }
                 DropdownMenu(picking, onDismissRequest = { picking = false }) {
                     if (agents.isEmpty()) DropdownMenuItem(text = { Text("No agents listed yet") }, onClick = { picking = false })
                     for (a in agents) DropdownMenuItem(
@@ -459,9 +459,9 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
 }
 
 @Composable
-private fun BarIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: Color, onClick: () -> Unit) {
+private fun BarIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: Color, fill: Color? = null, onClick: () -> Unit) {
     Box(
-        Modifier.size(36.dp).clickable(onClick = onClick),
+        Modifier.size(36.dp).then(if (fill != null) Modifier.background(fill, CircleShape) else Modifier).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { androidx.compose.material3.Icon(icon, label, Modifier.size(20.dp), tint = tint) }
 }
@@ -510,10 +510,10 @@ private fun CopySheet(
             Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Select to copy", Modifier.weight(1f), color = muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (canKill) {
-                    BarIcon(TrashIcon, "Close pane", Color(0xFFF38BA8), onKill)
+                    BarIcon(TrashIcon, "Close pane", Color(0xFFF38BA8)) { onKill() }
                     androidx.compose.foundation.layout.Spacer(Modifier.width(10.dp))
                 }
-                if (kotlin.math.abs(view.fontSp - TerminalView.DEFAULT_SP) > 0.3f) BarIcon(ResetZoomIcon, "Reset zoom", action, resetZoom)
+                if (kotlin.math.abs(view.fontSp - TerminalView.DEFAULT_SP) > 0.3f) BarIcon(ResetZoomIcon, "Reset zoom", action) { resetZoom() }
                 val item = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
                 // A copied image or file goes to the agent as a file; anything else pastes as text.
                 val uri = item?.uri?.takeIf { it.scheme == "content" }
@@ -521,7 +521,7 @@ private fun CopySheet(
                 if (uri != null) BarIcon(AttachIcon, "Paste file", action) { pasteFile(uri) }
                 else if (!clip.isNullOrEmpty()) BarIcon(PasteIcon, "Paste", action) { paste(clip) }
                 BarIcon(CopyIcon, "Copy all", action) { clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text)); close() }
-                BarIcon(CloseIcon, "Close", muted, close)
+                BarIcon(CloseIcon, "Close", muted) { close() }
             }
             // Scrolled from the bottom, so the latest lines stay in view whatever the sheet's height.
             Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll, reverseScrolling = true), contentAlignment = Alignment.TopCenter) {
