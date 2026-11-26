@@ -233,15 +233,28 @@ class AgendaWidget : AppWidgetProvider() {
                 v.setColorStateList(R.id.agenda_section, "setTextColor", if (alert) R.color.agenda_accent else R.color.agenda_ink)
                 items.addItem(n++, v)
             }
-            fun row(entry: JSONObject, overdueRow: Boolean, time: String = entry.optString("time"), what: String = label(entry)) {
+            fun row(
+                entry: JSONObject,
+                overdueRow: Boolean,
+                time: String = entry.optString("time"),
+                what: String = label(entry),
+                showTime: Boolean = true,
+                includeProject: Boolean = true,
+            ) {
                 val key = entry.optString("task")
                 val task = tasks.optJSONObject(key)
                 val v = RemoteViews(context.packageName, R.layout.agenda_row)
-                v.setTextViewText(R.id.agenda_time, time)
+                v.setViewVisibility(R.id.agenda_time, if (showTime) View.VISIBLE else View.GONE)
+                if (showTime) v.setTextViewText(R.id.agenda_time, time)
                 v.setTextViewText(R.id.agenda_title, task?.optString("title") ?: key)
-                val meta = listOf(what, task?.optString("project") ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
-                v.setTextViewText(R.id.agenda_meta, meta)
-                v.setColorStateList(R.id.agenda_meta, "setTextColor", if (overdueRow) R.color.agenda_accent else R.color.agenda_muted)
+                val meta = listOf(what, if (includeProject) task?.optString("project") ?: "" else "").filter { it.isNotEmpty() }.joinToString(" · ")
+                if (meta.isEmpty()) {
+                    v.setViewVisibility(R.id.agenda_meta, View.GONE)
+                } else {
+                    v.setViewVisibility(R.id.agenda_meta, View.VISIBLE)
+                    v.setTextViewText(R.id.agenda_meta, meta)
+                    v.setColorStateList(R.id.agenda_meta, "setTextColor", if (overdueRow) R.color.agenda_accent else R.color.agenda_muted)
+                }
                 if (key.isNotEmpty()) v.setOnClickFillInIntent(R.id.agenda_row, Intent().setData(taskUri(key)).putExtra("action", "open"))
                 // A task's state as a pill in its colours, which opens the state picker; a state just picked shows at
                 // once, until the daemon's agenda has it or refuses. An event has none.
@@ -259,13 +272,27 @@ class AgendaWidget : AppWidgetProvider() {
                 items.addItem(n++, v)
             }
             if (listed != null) {
-                // A list of open tasks: each with its dates, if any, in the small print.
-                section("${view.name.uppercase()} · ${listed.size}", alert = false)
+                // Group open tasks under one header per project (keeping newest-touched project order), omitting the
+                // empty time column and redundant project name on each row.
+                val groups = LinkedHashMap<String, MutableList<JSONObject>>()
                 for (t in listed.take(150)) {
-                    val due = stampDay(t.optString("deadline"))
-                    val start = stampDay(t.optString("scheduled"))
-                    row(JSONObject().put("task", t.optString("key")), overdueRow = false, time = "",
-                        what = listOfNotNull(due?.let { "due $it" }, start?.let { "scheduled $it" }).joinToString(" · "))
+                    val proj = (tasks.optJSONObject(t.optString("key"))?.optString("project") ?: t.optString("project")).ifEmpty { "Other" }
+                    groups.getOrPut(proj) { mutableListOf() }.add(t)
+                }
+                for ((proj, group) in groups) {
+                    section("${proj.uppercase()} · ${group.size}", alert = false)
+                    for (t in group) {
+                        val due = stampDay(t.optString("deadline"))
+                        val start = stampDay(t.optString("scheduled"))
+                        row(
+                            JSONObject().put("task", t.optString("key")),
+                            overdueRow = false,
+                            time = "",
+                            what = listOfNotNull(due?.let { "due $it" }, start?.let { "scheduled $it" }).joinToString(" · "),
+                            showTime = false,
+                            includeProject = false,
+                        )
+                    }
                 }
                 views.setRemoteAdapter(R.id.agenda_list, items.build())
                 return views
