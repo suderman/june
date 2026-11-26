@@ -131,6 +131,16 @@ export class Herdr {
 		return rows.map((row: any, i: number) => summarize(host, prefix, row, full[i]));
 	}
 
+	/** HOST's /proc/stat and /proc/meminfo, for its load: read here, through hc on a machine it has added, else over SSH. */
+	async load(host: string): Promise<string> {
+		const files = ["/proc/stat", "/proc/meminfo"];
+		if (host === this.#config.host) return this.#run(["cat", ...files], 5_000);
+		if (await this.#native(host)) return this.#run(["hc", "exec", "--on", host, "--timeout", "5", "cat", ...files], 10_000);
+		const remote = this.#config.hosts[host];
+		if (remote === undefined) throw new Error(`Unknown host ${host}; known: ${this.hosts().join(", ")}`);
+		return this.#run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", remote.ssh ?? host, "cat", ...files], 10_000);
+	}
+
 	async read(host: string, target: string, lines: number): Promise<string> {
 		const { argv } = await this.#argv(host, ["read", await this.#address(host, target), "--lines", String(lines)]);
 		return this.#run(argv, 15_000);

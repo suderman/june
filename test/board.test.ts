@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { fauxProvider } from "@earendil-works/pi-ai";
-import { type Agenda, Boards, loadAgenda, parseDialog, reviewKey, shapeAgenda, shapeAgents, type Task } from "../src/board.ts";
+import { Boards, loadAgenda, parseDialog, parseLoad, reviewKey, shapeAgenda, shapeAgents, type Agenda, type Task } from "../src/board.ts";
 import { Client } from "../src/protocol.ts";
 import { recordRunEnd, recordRunStart } from "../src/runs.ts";
 import { createLogger } from "../src/runtime.ts";
@@ -324,4 +324,13 @@ test("the agents board serves clanker cards and the roster request creates, edit
 
 	const bad = await client.request({ op: "roster", requestId: randomUUID(), edit: { action: "save", name: "", host: "kit", harness: "claude" } });
 	assert.equal(bad.type, "error");
+});
+
+test("a host's load is the CPU it spent since the last look and the memory in use, rounded", () => {
+	const text = (user: number, idle: number) => `cpu  ${user} 0 100 ${idle} 50 0 0 0 0 0\ncpu0 1 2 3 4\nMemTotal:       32000000 kB\nMemFree:  1 kB\nMemAvailable:   20000000 kB\n`;
+	const first = parseLoad(text(1000, 8000));
+	assert.deepEqual(first.load, { mem: 11.4, memTotal: 30.5 }, "no CPU on the first look");
+	const second = parseLoad(text(1300, 8600), first.sample);
+	assert.deepEqual(second.load, { cpu: 35, mem: 11.4, memTotal: 30.5 }, "300 of 900 ticks busy is 33%, shown as 35");
+	assert.deepEqual(parseLoad("nonsense"), {});
 });

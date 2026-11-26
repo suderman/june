@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { HARNESSES as HARNESS_TABLE, HARNESS_NAMES, LAUNCHABLE_HARNESSES } from "../desktop/harnesses.mjs";
 import { HARNESSES as ACCOUNT_HARNESSES } from "../src/accounts.ts";
-import { assignRosterAgents, choose, computeStanding, editClanker, familyOf, findCard, formatCard, launchArgs, launchInstructions, MEMORY_CHARS, parseRoster, readClankers } from "../src/roster.ts";
+import { assignRosterAgents, batteryOf, choose, computeStanding, editClanker, familyOf, findCard, formatCard, harnessBatteries, launchArgs, launchInstructions, MEMORY_CHARS, parseRoster, readClankers } from "../src/roster.ts";
 import { LAUNCHABLE } from "../src/tools/dispatch.ts";
 import { activeRunsByTask, leaderboard, listRuns, recordRunEnd, recordRunStart, statsByAgent } from "../src/runs.ts";
 import { tempDir } from "./helpers.ts";
@@ -322,4 +322,19 @@ test("assignRosterAgents and activeRunsByTask link unlabelled dispatched workers
 	assert.deepEqual(bySlug.get("bolt"), ["busy (working)", "kit/t1"]);
 	assert.deepEqual(bySlug.get("rivet-jr"), ["busy (working)", "kit/t2"]);
 	assert.deepEqual(bySlug.get("cogbot"), ["idle", undefined]);
+});
+
+test("each harness with a login gets the battery a raw session would spend, in the shared table's order", () => {
+	const now = Date.UTC(2026, 10, 23, 12);
+	const logins = [
+		{ name: "codex1", harness: "codex" as const, provider: "openai" as const, number: 1, label: "home", loggedIn: true, problems: [] },
+		{ name: "claude1", harness: "claude" as const, provider: "anthropic" as const, number: 1, label: "home", loggedIn: true, problems: [] },
+		{ name: "pi1", harness: "pi" as const, provider: "openai" as const, number: 2, label: "home", loggedIn: false, problems: [] },
+	];
+	const quotas = [{ provider: "anthropic" as const, number: 1, fetched: Math.floor(now / 1000), windows: [{ name: "weekly", remaining: 75, resetAt: Math.floor((now + 7_200_000) / 1000) }] }];
+	const rows = harnessBatteries(logins, quotas, now);
+	assert.deepEqual(rows.map((r) => r.harness), ["claude", "codex"], "signed-in harnesses only, claude first as the table lists it");
+	assert.deepEqual("account" in rows[0]!.battery ? [rows[0]!.battery.account, rows[0]!.battery.weekly] : rows[0]!.battery, ["claude1", 75]);
+	assert.ok("reason" in rows[1]!.battery, "a harness whose quota is unread says why");
+	assert.deepEqual(batteryOf("agy", logins, quotas, now), { reason: "no agy login here" });
 });

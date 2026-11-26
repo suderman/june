@@ -262,7 +262,14 @@ internal fun EnlistmentCard(card: JSONObject, colours: Colours) {
             ClassLine(card)
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(p.rule))
-        FieldRow("Host") { FieldValue(card.optString("unit").ifEmpty { "none" }, muted = card.optString("unit").isEmpty()) }
+        FieldRow("Host") {
+            Column {
+                FieldValue(card.optString("unit").ifEmpty { "none" }, muted = card.optString("unit").isEmpty())
+                // Its host's load, as the hosts tab shows it.
+                val load = card.optString("hostLoad")
+                if (load.isNotEmpty()) Text(load, style = p.type.meta.copy(color = p.surfaceMuted))
+            }
+        }
         FieldRow("Harness") { FieldValue(card.optString("harness").ifEmpty { "none" }) }
         FieldRow("Model") { FieldValue(listOf(card.optString("model").ifEmpty { "harness default" }, card.optString("effort").ifEmpty { "default effort" }).joinToString(" · ")) }
         val energy = card.optString("energyText")

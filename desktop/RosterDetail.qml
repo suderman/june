@@ -137,7 +137,15 @@ Item {
               }
             }
             Rectangle { width: parent.width; height: 1; color: Theme.rule }
-            FieldRow { label: "Host"; Words { width: parent.width; role: "value"; text: (page.card?.unit ?? "") !== "" ? page.card.unit : "none"; color: (page.card?.unit ?? "") !== "" ? Theme.surfaceInk : Theme.surfaceMuted } }
+            FieldRow {
+              label: "Host"
+              Column {
+                width: parent.width
+                Words { width: parent.width; role: "value"; text: (page.card?.unit ?? "") !== "" ? page.card.unit : "none"; color: (page.card?.unit ?? "") !== "" ? Theme.surfaceInk : Theme.surfaceMuted }
+                // Its host's load, as the hosts tab shows it.
+                Words { visible: (page.card?.hostLoad ?? "") !== ""; width: parent.width; role: "meta"; text: page.card?.hostLoad ?? ""; color: Theme.surfaceMuted }
+              }
+            }
             FieldRow { label: "Harness"; Words { width: parent.width; role: "value"; text: (page.card?.harness ?? "") !== "" ? page.card.harness : "none" } }
             FieldRow { label: "Model"; Words { width: parent.width; role: "value"; wrapMode: Text.Wrap; text: ((page.card?.model ?? "") !== "" ? page.card.model : "harness default") + " · " + ((page.card?.effort ?? "") !== "" ? page.card.effort : "default effort") } }
             FieldRow {

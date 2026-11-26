@@ -287,17 +287,31 @@ export function computeStanding(
 		// review or resume without keeping the agent from its next task. A session started by hand holds it while open.
 		const busy = terminals.find((t) => t.rosterAgent === card.slug && (!t.task || active(t.task, card.host, t.status)));
 		if (busy) return { card, status: `busy (${busy.status})`, terminal: `${card.host}/${busy.terminal}` };
-		const mine = logins.filter((r) => r.harness === card.harness && r.loggedIn && !r.problems.length);
-		if (!mine.length) return { card, status: "idle", battery: { reason: `no ${card.harness} login here` } };
-		const ranked = rank(mine.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })), now, card.model);
-		const best = ranked.find((r) => r.usable);
-		if (!best?.budget) return { card, status: "idle", battery: { reason: ranked.map((r) => `${r.slot}: ${r.reason}`).join("; ") } };
-		const { weekly, hours, rate } = best.budget;
-		const login = mine.find((s) => s.name === best.slot);
-		const row = login && quotas.find((q) => q.provider === login.provider && q.number === login.number);
-		const stale = row?.stale ? { stale: true, ...(row.fetched ? { fetched: row.fetched } : {}) } : {};
-		return { card, status: "idle", battery: { account: best.slot, weekly: weekly!, hours: hours!, rate, ...stale } };
+		return { card, status: "idle", battery: batteryOf(card.harness!, logins, quotas, now, card.model) };
 	});
+}
+
+/**
+ * HARNESS's battery from the daemon's readings: the binding weekly window left on the account it would pick now for
+ * MODEL (any, without one), or why there is none. The same accounts are signed in on every host.
+ */
+export function batteryOf(harness: string, logins: readonly SlotStatus[], quotas: readonly Quota[], now = Date.now(), model?: string): RosterBattery {
+	const mine = logins.filter((r) => r.harness === harness && r.loggedIn && !r.problems.length);
+	if (!mine.length) return { reason: `no ${harness} login here` };
+	const ranked = rank(mine.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })), now, model);
+	const best = ranked.find((r) => r.usable);
+	if (!best?.budget) return { reason: ranked.map((r) => `${r.slot}: ${r.reason}`).join("; ") };
+	const { weekly, hours, rate } = best.budget;
+	const login = mine.find((s) => s.name === best.slot);
+	const row = login && quotas.find((q) => q.provider === login.provider && q.number === login.number);
+	const stale = row?.stale ? { stale: true, ...(row.fetched ? { fetched: row.fetched } : {}) } : {};
+	return { account: best.slot, weekly: weekly!, hours: hours!, rate, ...stale };
+}
+
+/** Each harness with a login, in the shared table's order, and its battery: what a raw session on any host would spend. */
+export function harnessBatteries(logins: readonly SlotStatus[], quotas: readonly Quota[], now = Date.now()): { harness: string; battery: RosterBattery }[] {
+	const signed = new Set(logins.filter((r) => r.loggedIn).map((r) => r.harness as string));
+	return Object.keys(HARNESS_TABLE).filter((h) => signed.has(h)).map((harness) => ({ harness, battery: batteryOf(harness, logins, quotas, now) }));
 }
 
 const oneLine = (value: unknown, field: string): string => {

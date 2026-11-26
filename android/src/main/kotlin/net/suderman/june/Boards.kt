@@ -491,7 +491,8 @@ private fun HostsPage(link: Link, decisions: Decisions, modifier: Modifier, rese
     }
 }
 
-/** One host's page in its sheet: whether it answers, its sessions (each opens where it runs), and its clankers. */
+/** One host's page in its sheet: whether it answers and its load, its harnesses with the quota each would spend, its
+ * sessions (each opens where it runs), and its clankers. */
 @Composable
 private fun HostDetail(h: JSONObject, colours: Colours, open: (String) -> Unit) {
     val p = LocalPalette.current
@@ -503,8 +504,30 @@ private fun HostDetail(h: JSONObject, colours: Colours, open: (String) -> Unit) 
             Column {
                 Text(h.optString("host"), style = p.type.masthead.copy(color = p.pageInk))
                 Text(if (ok) "online · ${h.optInt("working")} working" else "offline", style = p.type.meta.copy(color = if (ok) p.muted else p.tone("TODO")))
+                val load = h.optString("loadText")
+                if (load.isNotEmpty()) Text(load, style = p.type.number.copy(color = p.pageInk))
                 val error = h.optString("error")
                 if (error.isNotEmpty()) Text(error, style = p.type.meta.copy(color = p.muted), maxLines = 4, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        val harnesses = h.optJSONArray("harnesses").objects()
+        if (harnesses.isNotEmpty()) {
+            item { SectionRule("HARNESSES · ${harnesses.size}") }
+            item(key = "harnesses") {
+                Pad {
+                    harnesses.forEachIndexed { i, x ->
+                        if (i > 0) Box(Modifier.padding(horizontal = 12.dp).fillMaxWidth().height(1.dp).background(p.rule))
+                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Clanker(x.optString("clanker"), colours, 26, claws = false)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(x.optString("harness"), style = p.type.row.copy(color = p.surfaceInk))
+                                EnergyGauge(x.optInt("batteryLevel", -1), x.optString("batteryTone", "unknown"), x.optString("gauge"))
+                                val account = x.optString("batteryAccount")
+                                Text(x.optString("energyText").ifEmpty { "unknown" } + if (account.isNotEmpty()) " · $account" else "", style = p.type.meta.copy(color = p.surfaceMuted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
             }
         }
         item { SectionRule("SESSIONS · ${sessions.size}") }

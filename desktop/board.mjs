@@ -516,6 +516,44 @@ export function dialogBlocks(text) {
  * The roster cards from the agents board, shaped for both clients: status, drawn battery level and label, harness
  * colours, leaderboard stats and recent runs, and the list of known hosts for the editor.
  */
+/**
+ * A battery (src/roster.ts RosterBattery) as the boards draw it: its level (-1 unread), tone, words with its reset,
+ * the whole of why when unread, and a text gauge. A level kept from the last good read, because the newest failed, is
+ * greyed with its age.
+ */
+export function batteryView(b, now) {
+	const hasLevel = !!b && typeof b.weekly === "number";
+	const level = hasLevel ? Math.max(0, Math.min(100, Math.round(b.weekly))) : -1;
+	const resetWord = hasLevel ? resetIn(b.hours) : "";
+	const stale = hasLevel && b.stale === true;
+	const age = stale && typeof b.fetched === "number" ? since(b.fetched * 1000, now ?? Date.now()) : "";
+	const cells = hasLevel ? Math.round(level / 10) : 0;
+	return {
+		batteryLevel: level,
+		batteryText: hasLevel ? `${level}% · ${resetWord}` : (b && b.reason ? String(b.reason) : ""),
+		batteryAccount: hasLevel && b.account ? String(b.account) : "",
+		batteryTone: !hasLevel ? "unknown" : stale ? "stale" : level >= 50 ? "high" : level >= 20 ? "mid" : "low",
+		energyText: stale ? `${level}% · read ${age !== "" ? age + " ago" : "earlier"}` : hasLevel ? `${level}% · resets ${resetWord}` : b ? quotaWhy(b.reason) : "",
+		batteryStale: stale,
+		// The whole of why, for a card's own page, each account named once.
+		energyDetail: hasLevel ? "" : String(b?.reason ?? "").replace(/(\b[a-z]+\d+): \1: /g, "$1: "),
+		gauge: hasLevel ? `[${"#".repeat(cells)}${"-".repeat(10 - cells)}]` : "",
+	};
+}
+
+/** HOST's load from the agents board, or undefined. */
+function hostLoadOf(agents, host) {
+	const h = (agents?.hosts ?? []).find((x) => x.host === host);
+	return h && h.ok ? h.load : undefined;
+}
+
+/** A host's load in a few words, "cpu 15% · 10.7 of 31.1 GB"; "" when unread. */
+export function loadText(load) {
+	if (!load || typeof load.mem !== "number") return "";
+	const cpu = typeof load.cpu === "number" ? `cpu ${load.cpu}% · ` : "";
+	return `${cpu}${load.mem} of ${load.memTotal} GB`;
+}
+
 export function rosterView(agents, now) {
 	const list = agents && Array.isArray(agents.roster) ? agents.roster : [];
 	const hostSet = {};
@@ -541,18 +579,10 @@ export function rosterView(agents, now) {
 		const busy = st.indexOf("busy") === 0;
 		const b = entry.battery;
 		const hasLevel = b && typeof b.weekly === "number";
-		const batteryLevel = hasLevel ? Math.max(0, Math.min(100, Math.round(b.weekly))) : -1;
-		const resetWord = hasLevel ? resetIn(b.hours) : "";
-		const batteryText = hasLevel ? `${batteryLevel}% · ${resetWord}` : (b && b.reason ? String(b.reason) : "");
-		// A level kept from the last good read, because the newest failed, is shown greyed with its age.
-		const stale = hasLevel && b.stale === true;
-		const age = stale && typeof b.fetched === "number" ? since(b.fetched * 1000, now ?? Date.now()) : "";
-		const batteryTone = !hasLevel ? "unknown" : stale ? "stale" : batteryLevel >= 50 ? "high" : batteryLevel >= 20 ? "mid" : "low";
 		const remoteQuota = b && typeof b.reason === "string" && b.reason.indexOf("quota is read on") === 0;
 		const available = st === "idle" && (hasLevel || remoteQuota || !b);
 		const statusLabel = st === "idle" ? "IDLE" : st.indexOf("working") >= 0 ? "WORKING" : busy ? "BUSY" : st === "invalid" ? "INVALID" : "OFFLINE";
 		const spec = [c.host ?? "", c.harness ?? "", c.model ?? "", c.effort ?? ""].filter((s) => s !== "").join(" · ");
-		const cells = hasLevel ? Math.round(batteryLevel / 10) : 0;
 		const s = entry.stats;
 		const runs = s && typeof s.runs === "number" ? s.runs : 0;
 		const rank = s && typeof s.rank === "number" && runs > 0 ? s.rank : 0;
@@ -575,7 +605,7 @@ export function rosterView(agents, now) {
 			outcome: r.outcome ?? "",
 			duration: typeof r.durationMs === "number" ? formatDuration(r.durationMs) : (r.outcome === "running" ? "live" : ""),
 		})) : [];
-		return {
+		return Object.assign({
 			slug: c.slug ?? "",
 			name: c.name ?? "",
 			host: c.host ?? "",
@@ -590,10 +620,6 @@ export function rosterView(agents, now) {
 			busy: busy,
 			available: available,
 			terminal: entry.terminal ?? "",
-			batteryLevel: batteryLevel,
-			batteryText: batteryText,
-			batteryAccount: hasLevel && b.account ? String(b.account) : "",
-			batteryTone: batteryTone,
 			specLine: spec,
 			// The clanker card's words: its ID and host, its model and effort without the harness the model already
 			// names (loadout), the status stamp (none when idle), quota with its reset (energy), and a text gauge.
@@ -601,11 +627,8 @@ export function rosterView(agents, now) {
 			unit: c.host ?? "",
 			loadout: loadout(c.harness, c.model, c.effort),
 			stamp: st === "idle" ? "" : statusLabel === "WORKING" || busy ? "WORKING" : statusLabel,
-			energyText: stale ? `${batteryLevel}% · read ${age !== "" ? age + " ago" : "earlier"}` : hasLevel ? `${batteryLevel}% · resets ${resetWord}` : b ? quotaWhy(b.reason) : "",
-			batteryStale: stale,
-			// The whole of why, for the card's own page, each account named once.
-			energyDetail: hasLevel ? "" : String(b?.reason ?? "").replace(/(\b[a-z]+\d+): \1: /g, "$1: "),
-			gauge: hasLevel ? `[${"#".repeat(cells)}${"-".repeat(10 - cells)}]` : "",
+			// Its host's load, as the hosts tab shows it, beside its quota.
+			hostLoad: loadText(hostLoadOf(agents, c.host)),
 			rank: rank,
 			runs: runs,
 			completed: completed,
@@ -615,7 +638,7 @@ export function rosterView(agents, now) {
 			statsLine: statsParts.join(" · "),
 			recentRuns: recentRuns,
 			order: idx,
-		};
+		}, batteryView(b, now));
 	});
 	const leaderboard = cards.slice().sort((a, b) => {
 		const ar = a.rank > 0 ? a.rank : 999999;
@@ -699,10 +722,16 @@ export function agentsView(agents, now, today, user, pending) {
 		const sessions = [...working, ...idle].filter((w) => w.host === h.host);
 		const busy = sessions.filter((w) => w.status === "working").length;
 		const clankers = rv.cards.filter((c) => c.host === h.host).map((c) => c.name);
+		const load = h.ok ? h.load : undefined;
 		const meta = h.ok
-			? [`${busy} working`, `${sessions.length} session${sessions.length === 1 ? "" : "s"}`, ...(clankers.length ? [clankers.join(", ")] : [])].join(" · ")
+			? [`${busy} working`, `${sessions.length} session${sessions.length === 1 ? "" : "s"}`, ...(typeof load?.cpu === "number" ? [`cpu ${load.cpu}%`] : [])].join(" · ")
 			: "offline";
-		return { key: h.host, host: h.host, ok: h.ok, error: h.ok ? "" : String(h.error ?? ""), working: busy, sessions, clankers, meta };
+		// The harnesses a raw session there could run, each with the quota it would spend: the same accounts on every host.
+		const harnesses = h.ok ? (agents.harnesses ?? []).map((x) => Object.assign({ key: `${h.host}|${x.harness}`, harness: x.harness, clanker: harnessOf(x.harness) }, batteryView(x.battery, now))) : [];
+		return {
+			key: h.host, host: h.host, ok: h.ok, error: h.ok ? "" : String(h.error ?? ""), working: busy, sessions, clankers, meta, harnesses,
+			cpu: typeof load?.cpu === "number" ? load.cpu : -1, mem: load ? load.mem : -1, memTotal: load ? load.memTotal : -1, loadText: loadText(load),
+		};
 	});
 	for (const list of [needs, working, idle, queued, reviewing, recent]) uniqueKeys(list);
 	return { summary, needs, working, idle, queued, reviewing, recent, down, hosts: hostRows, roster: rv.cards, rosterLeaderboard: rv.leaderboard, rosterHasStats: rv.hasStats, rosterHosts: rv.hosts };

@@ -1,5 +1,6 @@
-// One host's page in its sheet (board.mjs agentsView hosts), as the phone's HostDetail draws it: whether it answers,
-// its sessions (each opens where it runs), and the clankers that work there.
+// One host's page in its sheet (board.mjs agentsView hosts), as the phone's HostDetail draws it: whether it answers
+// and its load, its harnesses with the quota each would spend, its sessions (each opens where it runs), and the
+// clankers that work there.
 import QtQuick
 
 Item {
@@ -10,6 +11,7 @@ Item {
   readonly property bool ok: host?.ok ?? false
   readonly property var sessions: host?.sessions ?? []
   readonly property var clankers: host?.clankers ?? []
+  readonly property var harnesses: host?.harnesses ?? []
 
   Words {
     visible: page.host === null
@@ -40,6 +42,7 @@ Item {
           text: page.ok ? "online · " + (page.host?.working ?? 0) + " working" : "offline"
           color: page.ok ? Theme.muted : Theme.tone("TODO")
         }
+        Words { visible: (page.host?.loadText ?? "") !== ""; role: "number"; text: page.host?.loadText ?? ""; color: Theme.pageInk }
         Words {
           visible: (page.host?.error ?? "") !== ""
           width: parent.width
@@ -49,6 +52,38 @@ Item {
           elide: Text.ElideRight
           text: page.host?.error ?? ""
           color: Theme.muted
+        }
+      }
+
+      SectionRule { visible: page.harnesses.length > 0; text: "HARNESSES · " + page.harnesses.length }
+      Pad {
+        visible: page.harnesses.length > 0
+        Repeater {
+          model: page.harnesses
+          delegate: Item {
+            id: harnessRow
+            required property var modelData
+            required property int index
+            width: parent ? parent.width : 0
+            height: Math.max(48, harnessText.implicitHeight + 16)
+            Rectangle { visible: harnessRow.index > 0; x: 12; width: parent.width - 24; height: 1; color: Theme.rule }
+            Clanker { id: harnessArt; x: 12; anchors.verticalCenter: parent.verticalCenter; harness: harnessRow.modelData.clanker; size: 26; claws: false }
+            Column {
+              id: harnessText
+              anchors.left: harnessArt.right; anchors.leftMargin: 10; anchors.right: parent.right; anchors.rightMargin: 12
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: 3
+              Words { role: "row"; text: harnessRow.modelData.harness; color: Theme.surfaceInk }
+              EnergyGauge { level: harnessRow.modelData.batteryLevel; tone: harnessRow.modelData.batteryTone; gauge: harnessRow.modelData.gauge }
+              Words {
+                width: parent.width
+                role: "meta"
+                elide: Text.ElideRight
+                text: (harnessRow.modelData.energyText || "unknown") + (harnessRow.modelData.batteryAccount ? " · " + harnessRow.modelData.batteryAccount : "")
+                color: Theme.surfaceMuted
+              }
+            }
+          }
         }
       }
 

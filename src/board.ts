@@ -8,7 +8,7 @@ import { accountsConfig, parseAccountsOrg, sharedQuotas, status as accountStatus
 import { type Config, protectedOf, shortHostname } from "./config.ts";
 import type { Logger } from "./runtime.ts";
 import { type OrgWorker, OrgWorkerDown } from "./org-worker.ts";
-import { assignRosterAgents, computeStanding, dispatchActive, readClankers, type RosterEntry } from "./roster.ts";
+import { assignRosterAgents, computeStanding, dispatchActive, harnessBatteries, readClankers, type RosterBattery, type RosterEntry } from "./roster.ts";
 import { activeRunsByTask, statsByAgent } from "./runs.ts";
 import { type AgentSummary, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { orgTime } from "./tools/org.ts";
@@ -97,7 +97,7 @@ export type Agents = {
 	generatedAt: number;
 	/** How the user signs their Dialog entries, so clients quote the others. */
 	user: string;
-	hosts: { host: string; ok: boolean; error?: string }[];
+	hosts: Host[];
 	workers: Worker[];
 	needs: Need[];
 	/** AUTO tasks by start time, soonest first. */
@@ -110,9 +110,35 @@ export type Agents = {
 	tasks: Record<string, Task>;
 	/** Who a task can be handed to from the boards, and where by default (the dispatch config). */
 	dispatch?: { hosts: string[]; host?: string; agents: string[] };
-	/** Named agents from ROSTER.org, with live busy state and provider battery. */
+	/** Named agents from clankers/, with live busy state and provider battery. */
 	roster?: RosterEntry[];
+	/** Each harness with a login and its battery, for a raw session on any host: the same accounts are on every host. */
+	harnesses?: { harness: string; battery: RosterBattery }[];
 };
+
+/** A host work goes to: whether hc answered, and its load when it could be read. */
+export type Host = { host: string; ok: boolean; error?: string; load?: Load };
+
+/** CPU busy since the last look, in percent (none on the first); memory in use and in all, in GiB. Rounded, so a board
+ * does not change for every flicker: CPU to 5%, memory to a tenth. */
+export type Load = { cpu?: number; mem: number; memTotal: number };
+
+/** The CPU counters of /proc/stat's first line: all time, and idle time (idle and iowait). */
+export type CpuSample = { total: number; idle: number };
+
+/** A host's load from its /proc/stat and /proc/meminfo, CPU against PREV, its earlier sample. */
+export function parseLoad(text: string, prev?: CpuSample): { sample?: CpuSample; load?: Load } {
+	const cpu = /^cpu\s+(.+)$/m.exec(text)?.[1]?.trim().split(/\s+/).map(Number);
+	const kb = (name: string) => Number(new RegExp(`^${name}:\\s+(\\d+)`, "m").exec(text)?.[1]);
+	const total = kb("MemTotal");
+	const available = kb("MemAvailable");
+	const sample = cpu && cpu.length >= 4 && cpu.every(Number.isFinite) ? { total: cpu.slice(0, 8).reduce((a, b) => a + b, 0), idle: cpu[3]! + (cpu[4] ?? 0) } : undefined;
+	if (!Number.isFinite(total) || !Number.isFinite(available) || total <= 0) return { ...(sample ? { sample } : {}) };
+	const gib = (k: number) => Math.round(k / 1024 / 1024 * 10) / 10;
+	const spent = sample && prev && sample.total > prev.total ? 1 - (sample.idle - prev.idle) / (sample.total - prev.total) : undefined;
+	const load: Load = { ...(spent !== undefined ? { cpu: Math.max(0, Math.min(100, Math.round(spent * 20) * 5)) } : {}), mem: gib(total - available), memTotal: gib(total) };
+	return { ...(sample ? { sample } : {}), load };
+}
 
 /** The JSON june-agenda.el prints, before it is shaped for clients. */
 type Raw = { today: string; days: { date: string; entries: AgendaEntry[] }[]; tasks: Record<string, any> };
@@ -392,6 +418,8 @@ export class Boards {
 	#agenda?: Held<Agenda>;
 	#agents?: Held<Agents>;
 	#workers?: { workers: AgentSummary[]; hosts: Agents["hosts"] };
+	/** Each host's last CPU counters, so its load is CPU spent since the last look. */
+	#cpu = new Map<string, CpuSample>();
 	#roster?: { logins: SlotStatus[]; quotas: Quota[] };
 	#agendaRun?: Promise<Held<Agenda>>;
 	#workersRun?: Promise<void>;
@@ -595,14 +623,17 @@ export class Boards {
 				const herdr = this.#o.herdr;
 				const results = await Promise.all(herdr.hosts().map(async (host) => {
 					try {
-						return { host, ok: true, workers: await herdr.agents(host) };
+						const [workers, text] = await Promise.all([herdr.agents(host), herdr.load(host).catch(() => undefined)]);
+						const { sample, load } = text === undefined ? {} : parseLoad(text, this.#cpu.get(host));
+						if (sample) this.#cpu.set(host, sample);
+						return { host, ok: true, workers, ...(load ? { load } : {}) };
 					} catch (error) {
 						return { host, ok: false, error: (error as Error).message.slice(0, 200), workers: [] as AgentSummary[] };
 					}
 				}));
 				this.#workers = {
 					workers: results.flatMap((r) => r.workers),
-					hosts: results.map((r) => ({ host: r.host, ok: r.ok, ...(r.error ? { error: r.error } : {}) })),
+					hosts: results.map((r) => ({ host: r.host, ok: r.ok, ...("error" in r && r.error ? { error: r.error } : {}), ...("load" in r && r.load ? { load: r.load } : {}) })),
 				};
 				await this.#loadAccountState().catch(() => {});
 				this.#recompute();
@@ -725,7 +756,8 @@ export class Boards {
 			const { hosts, host, agent, agents } = this.#o.config.dispatch;
 			const dispatch = { hosts: [...hosts], ...(host ?? hosts[0] ? { host: host ?? hosts[0] } : {}), agents: [...(agents ?? [agent ?? "pi"])] };
 			const { roster, workers } = this.#readRoster(agenda);
-			const value = { ...shapeAgents({ workers, hosts: this.#workers.hosts, agenda, seen: this.#seen.marks(), user: this.#o.config.user.name ?? "" }), dispatch, ...(roster !== undefined ? { roster } : {}) };
+			const harnesses = this.#roster ? harnessBatteries(this.#roster.logins, this.#roster.quotas) : [];
+			const value = { ...shapeAgents({ workers, hosts: this.#workers.hosts, agenda, seen: this.#seen.marks(), user: this.#o.config.user.name ?? "" }), dispatch, ...(roster !== undefined ? { roster } : {}), ...(harnesses.length ? { harnesses } : {}) };
 			this.#agents = hold(value, this.#agents);
 		}
 		const after = this.revisions();

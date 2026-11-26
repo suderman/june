@@ -116,7 +116,8 @@ test("the roster shapes each card with its battery tone, status label, spec line
 test("the agents board puts what needs the user first, in its own words, and links each card where it opens", () => {
 	const now = Date.UTC(2026, 10, 21, 8);
 	const agents = {
-		generatedAt: now, hosts: [{ host: "kit", ok: true }, { host: "cog", ok: false, error: "down" }],
+		generatedAt: now, hosts: [{ host: "kit", ok: true, load: { cpu: 15, mem: 10.7, memTotal: 31.1 } }, { host: "cog", ok: false, error: "down" }],
+		harnesses: [{ harness: "claude", battery: { account: "claude1", weekly: 80, hours: 30, rate: 1 } }],
 		workers: [
 			{ host: "kit", terminal: "t7", agent: "pi", status: "blocked", cwd: "/w", title: "Allow: systemctl stop?", herdrLink: "herdr:kit/pi:s@t7", taskKey: "id:run" },
 			{ host: "kit", terminal: "t9", agent: "claude", status: "working", cwd: "/home/jon/src/demo", taskKey: "id:build" },
@@ -151,9 +152,12 @@ test("the agents board puts what needs the user first, in its own words, and lin
 	assert.equal(v.summary, "1 at work · kit online");
 	assert.deepEqual(v.down, ["cog"]);
 	assert.deepEqual(v.hosts.map((h) => [h.host, h.ok, h.meta, h.error, h.sessions.map((w) => w.key)]), [
-		["kit", true, "1 working · 2 sessions", "", ["kit|t9", "kit|t2"]],
+		["kit", true, "1 working · 2 sessions · cpu 15%", "", ["kit|t9", "kit|t2"]],
 		["cog", false, "offline", "down", []],
 	], "each host with its sessions; a blocked worker is a need, not one of them");
+	assert.equal(v.hosts[0].loadText, "cpu 15% · 10.7 of 31.1 GB");
+	assert.deepEqual(v.hosts[0].harnesses.map((x) => [x.harness, x.batteryLevel, x.energyText]), [["claude", 80, "80% · resets 30h"]]);
+	assert.deepEqual([v.hosts[1].harnesses, v.hosts[1].cpu, v.hosts[1].loadText], [[], -1, ""], "an offline host has no load or harnesses");
 });
 
 test("a task's page names who works it, what it waits on, and draws its Dialog by who wrote each entry", () => {
