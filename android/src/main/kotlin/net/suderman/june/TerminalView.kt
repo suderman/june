@@ -66,7 +66,10 @@ class TerminalView(context: Context) : View(context) {
             field = value
             postInvalidateOnAnimation()
         }
-    var cellWidth = ceil(paint.measureText("M")).toInt()
+    private val glyphAdvance = paint.measureText("M")
+    private val runSpacing = (ceil(glyphAdvance) - glyphAdvance) / paint.textSize
+    private var runChars = CharArray(256)
+    var cellWidth = ceil(glyphAdvance).toInt()
         private set
     var cellHeight = ceil(paint.fontMetrics.let { it.descent - it.ascent }).toInt()
         private set
@@ -169,33 +172,103 @@ class TerminalView(context: Context) : View(context) {
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fill)
         val left = (paddingLeft + offsetX).toFloat()
         val top = paddingTop.toFloat()
+        val selectedBg = Color.parseColor("#3B4F7A")
+        if (runChars.size < cs) runChars = CharArray(cs)
+        // Style flags that affect glyph rendering: bold, italic, strikethrough, underline.
+        val styleMask = 1 or 2 or (1 shl 5) or (1 shl 7)
         for (y in 0 until rs) {
+            val py = top + y * cellHeight
+            val baseY = py + baseline
+            val rowPos = b.position()
+            // Pass 1: coalesce contiguous non-default background runs across the row.
+            var bgColor = defaultBg
+            var bgStart = -1
+            var cellsRead = 0
             for (x in 0 until cs) {
-                if (b.remaining() < 12) return
-                val fg = b.int
+                if (b.remaining() < 12) break
+                b.int // fg
                 val bg = b.int
                 val flags = b.short.toInt()
                 val len = b.short.toInt() and 0xFFFF
-                val px = left + x * cellWidth
-                val py = top + y * cellHeight
-                val selected = flags and (1 shl 8) != 0
-                if (bg != defaultBg || selected) {
-                    fill.color = if (selected) Color.parseColor("#3B4F7A") else bg
-                    canvas.drawRect(px, py, px + cellWidth, py + cellHeight, fill)
-                }
-                if (len > 0) {
-                    val text = String(bytes, b.position(), len, Charsets.UTF_8)
-                    b.position(b.position() + len)
-                    if (flags and (1 shl 4) != 0 || text == " ") continue
-                    paint.color = fg
-                    paint.typeface = faces.of(flags and 1 != 0)
-                    // Italic slants the upright face: the APK carries only regular and bold (2.4 MB each with Nerd Font icons).
-                    paint.textSkewX = if (flags and 2 != 0) -0.2f else 0f
-                    paint.isUnderlineText = flags and (1 shl 7) != 0
-                    paint.isStrikeThruText = flags and (1 shl 5) != 0
-                    canvas.drawText(text, px, py + baseline, paint)
+                if (b.remaining() < len) break
+                b.position(b.position() + len)
+                cellsRead = x + 1
+                val cellBg = if (flags and (1 shl 8) != 0) selectedBg else bg
+                if (cellBg != defaultBg) {
+                    if (bgStart < 0) { bgColor = cellBg; bgStart = x }
+                    else if (bgColor != cellBg) {
+                        fill.color = bgColor
+                        canvas.drawRect(left + bgStart * cellWidth, py, left + x * cellWidth, py + cellHeight, fill)
+                        bgColor = cellBg
+                        bgStart = x
+                    }
+                } else if (bgStart >= 0) {
+                    fill.color = bgColor
+                    canvas.drawRect(left + bgStart * cellWidth, py, left + x * cellWidth, py + cellHeight, fill)
+                    bgStart = -1
                 }
             }
+            if (bgStart >= 0) {
+                fill.color = bgColor
+                canvas.drawRect(left + bgStart * cellWidth, py, left + cellsRead * cellWidth, py + cellHeight, fill)
+            }
+            // Pass 2: coalesce contiguous ASCII runs of matching style; draw non-ASCII graphemes at exact cells.
+            val rowEnd = b.position()
+            b.position(rowPos)
+            var runLen = 0
+            var runStart = 0
+            var runFg = 0
+            var runStyle = -1
+            fun flushRun() {
+                if (runLen == 0) return
+                paint.color = runFg
+                paint.typeface = faces.of(runStyle and 1 != 0)
+                // Italic slants the upright face: the APK carries only regular and bold (2.4 MB each with Nerd Font icons).
+                paint.textSkewX = if (runStyle and 2 != 0) -0.2f else 0f
+                paint.isUnderlineText = runStyle and (1 shl 7) != 0
+                paint.isStrikeThruText = runStyle and (1 shl 5) != 0
+                paint.letterSpacing = runSpacing
+                canvas.drawText(runChars, 0, runLen, left + runStart * cellWidth, baseY, paint)
+                paint.letterSpacing = 0f
+                runLen = 0
+            }
+            for (x in 0 until cellsRead) {
+                val fg = b.int
+                b.int // bg
+                val flags = b.short.toInt()
+                val len = b.short.toInt() and 0xFFFF
+                val pos = b.position()
+                b.position(pos + len)
+                if (len == 0 || flags and (1 shl 4) != 0) {
+                    flushRun()
+                    continue
+                }
+                val ch = if (len == 1) bytes[pos].toInt() and 0xFF else -1
+                val style = flags and styleMask
+                if (ch == 0x20 && (style and ((1 shl 5) or (1 shl 7))) == 0) {
+                    if (runLen > 0) runChars[runLen++] = ' '
+                    continue
+                }
+                if (ch in 0x21..0x7E) {
+                    if (runLen > 0 && (fg != runFg || style != runStyle || runStart + runLen != x)) flushRun()
+                    if (runLen == 0) { runStart = x; runFg = fg; runStyle = style }
+                    runChars[runLen++] = ch.toChar()
+                } else {
+                    flushRun()
+                    if (ch == 0x20) continue
+                    val text = String(bytes, pos, len, Charsets.UTF_8)
+                    paint.color = fg
+                    paint.typeface = faces.of(style and 1 != 0)
+                    paint.textSkewX = if (style and 2 != 0) -0.2f else 0f
+                    paint.isUnderlineText = style and (1 shl 7) != 0
+                    paint.isStrikeThruText = style and (1 shl 5) != 0
+                    paint.letterSpacing = 0f
+                    canvas.drawText(text, left + x * cellWidth, baseY, paint)
+                }
+            }
+            flushRun()
+            b.position(rowEnd)
+            if (cellsRead < cs) return
         }
         if (composing.isNotEmpty() && cx < cs && cy < rs) {
             // The word the keyboard is still composing, over the cursor, underlined as keyboards mark it.

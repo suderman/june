@@ -244,6 +244,12 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     // The pager keeps its page across Android remaking the screen, and each board its place.
     val first = if (Terminals.embedded(context)) 1 else 0
     val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = first + 1) { first + 3 }
+    var prevFirst by remember { androidx.compose.runtime.mutableIntStateOf(first) }
+    LaunchedEffect(first) {
+        val delta = first - prevFirst
+        prevFirst = first
+        if (delta != 0) pager.scrollToPage((pager.currentPage + delta).coerceIn(0, first + 2))
+    }
     val board = pager.currentPage - first
     // The board Back returns to from the Terminal page: the last one settled on.
     var lastBoard by remember { androidx.compose.runtime.mutableIntStateOf(first) }

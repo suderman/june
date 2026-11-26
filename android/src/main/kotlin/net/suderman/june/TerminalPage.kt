@@ -54,14 +54,29 @@ import org.json.JSONObject
  */
 object Terminals {
     private fun prefs(context: Context) = context.getSharedPreferences("terminal", Context.MODE_PRIVATE)
+    /** Bumped when a setting changes so open screens recompose without restarting June. */
+    var version by mutableIntStateOf(0)
+        private set
 
     /** Agent terminals open inside June; otherwise the Terminal app and Termux open them, as before. */
-    fun embedded(context: Context): Boolean = prefs(context).getBoolean("embedded", false)
-    fun setEmbedded(context: Context, on: Boolean) = prefs(context).edit().putBoolean("embedded", on).apply()
+    fun embedded(context: Context): Boolean {
+        version
+        return prefs(context).getBoolean("embedded", false)
+    }
+    fun setEmbedded(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("embedded", on).apply()
+        version++
+    }
 
     /** A row of Esc, Ctrl, Alt, Tab and arrows over the keyboard, for keyboards that lack them. */
-    fun keyRow(context: Context): Boolean = prefs(context).getBoolean("keyRow", false)
-    fun setKeyRow(context: Context, on: Boolean) = prefs(context).edit().putBoolean("keyRow", on).apply()
+    fun keyRow(context: Context): Boolean {
+        version
+        return prefs(context).getBoolean("keyRow", false)
+    }
+    fun setKeyRow(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("keyRow", on).apply()
+        version++
+    }
 
     /** What is written in each terminal's compose box and not yet sent, while the app runs. */
     val drafts = HashMap<String, String>()
@@ -136,21 +151,28 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
     }
     val lifecycle = (context as? androidx.lifecycle.LifecycleOwner)?.lifecycle
     // Attached only while the page is the one on show and the app is started: a page drawn beside the agents board
-    // during a swipe must not take the terminal's size from the desktop.
+    // during a swipe must not take the terminal's size from the desktop. Leaving for another board releases focus at
+    // once and waits a few seconds before detaching, so peeking at a board and swiping back keeps the live stream.
     val shown by androidx.compose.runtime.rememberUpdatedState(active)
     LaunchedEffect(active) {
-        if (active && (lifecycle == null || lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))) stream.start()
-        else if (!active) {
-            stream.stop()
+        if (active) {
+            if (lifecycle == null || lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                stream.start()
+                stream.focus(true)
+            }
+        } else {
+            stream.focus(false)
             view.hideKeyboard()
             view.clearFocus()
+            delay(5_000)
+            stream.stop()
         }
     }
     DisposableEffect(lifecycle, target) {
         if (lifecycle == null) return@DisposableEffect onDispose {}
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> if (shown) stream.start()
+                Lifecycle.Event.ON_START -> if (shown) { stream.start(); stream.focus(true) }
                 Lifecycle.Event.ON_STOP -> stream.stop()
                 else -> {}
             }
@@ -220,7 +242,7 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
     // Whether the compose box has the keyboard; a tap on the terminal takes it back.
     var composing by remember { mutableStateOf(false) }
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
-    LaunchedEffect(view) { view.onTap = { focus.clearFocus(true) } }
+    LaunchedEffect(view) { view.onTap = { focus.clearFocus(true); stream.focus(true) } }
     // A pointer target over its whole area, so no tap falls through to the board beneath.
     Box(modifier) {
     Column(Modifier.fillMaxSize().background(Color(0xFF1E1E2E)).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {

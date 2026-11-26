@@ -1,6 +1,8 @@
 package net.suderman.june
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Handler
 import android.os.Looper
 import okhttp3.OkHttpClient
@@ -13,6 +15,7 @@ import okio.ByteString.Companion.toByteString
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /** Which agent terminal to show: a herdr: session link, or a host and terminal address. */
 data class TerminalTarget(val host: String, val terminal: String = "", val link: String = "") {
@@ -49,8 +52,12 @@ class TerminalStream(
     private var attached = false
     private var automatic = false
     private var running = false
+    private var focused = false
     private var cols = 0
     private var rows = 0
+    private var backoffMs = 1_000L
+    private var retryTask: Runnable? = null
+    private var netCallback: ConnectivityManager.NetworkCallback? = null
     // Files sent with put, by request id, until the daemon says where each landed. Main thread only.
     private val puts = HashMap<String, (String?, String?) -> Unit>()
     private var nextPut = 0
@@ -59,9 +66,49 @@ class TerminalStream(
         view.onInput = { bytes, auto -> send(bytes, auto) }
     }
 
+    private fun cancelRetry() {
+        retryTask?.let { main.removeCallbacks(it) }
+        retryTask = null
+    }
+
+    private fun watchNetwork() {
+        if (netCallback != null) return
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                main.post {
+                    if (running && socket == null && retryTask != null) {
+                        cancelRetry()
+                        backoffMs = 1_000L
+                        start(resumed = true)
+                    }
+                }
+            }
+        }
+        if (runCatching { cm.registerDefaultNetworkCallback(cb) }.isSuccess) netCallback = cb
+    }
+
+    private fun unwatchNetwork() {
+        val cb = netCallback ?: return
+        netCallback = null
+        runCatching { context.getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) }
+    }
+
+    private fun scheduleReconnect(delayMs: Long) {
+        cancelRetry()
+        val task = Runnable {
+            retryTask = null
+            if (running && socket == null) start(resumed = true)
+        }
+        retryTask = task
+        main.postDelayed(task, delayMs)
+    }
+
     /** Attach at the view's size; RESUMED after a drop, so the size is taken only once the user types or resizes. */
     fun start(resumed: Boolean = false) {
         running = true
+        cancelRetry()
+        watchNetwork()
         if (socket != null || view.cols == 0) return
         val pairing = Pairing.load(context) ?: return onState(State.Closed("June is not paired"))
         view.reset()
@@ -86,12 +133,21 @@ class TerminalStream(
                         automatic = m.optBoolean("automaticInput")
                         attached = true
                         main.post {
+                            if (socket !== webSocket) return@post
+                            backoffMs = 1_000L
                             onState(State.Attached(m.optString("host"), m.optString("terminal"), m.optString("agent")))
+                            if (focused) webSocket.send(JSONObject().put("op", "focus").put("on", true).toString())
                             // The view may have changed size while attaching.
                             if (view.cols != cols || view.rows != rows) resize(view.cols, view.rows)
                         }
                     }
-                    "closed" -> main.post { onState(State.Closed(m.optString("reason"))) }
+                    "closed" -> main.post {
+                        if (socket !== webSocket) return@post
+                        running = false
+                        cancelRetry()
+                        unwatchNetwork()
+                        onState(State.Closed(m.optString("reason")))
+                    }
                     "put" -> main.post {
                         val path = m.optString("path").takeIf { it.isNotEmpty() }
                         puts.remove(m.optString("id"))?.invoke(path, if (path == null) m.optString("error", "not sent") else null)
@@ -121,14 +177,19 @@ class TerminalStream(
                     // 4409: the terminal is between programs (a kept terminal restarting); try again shortly.
                     if (code == 4409 && running) {
                         onState(State.Dropped(reason))
-                        main.postDelayed({ if (running && socket == null) start(true) }, 3_000)
-                    } else if (code != 1000 || reason != "closed by client") {
-                        onState(State.Closed(when (code) {
-                            4401 -> "June refused this phone's token"
-                            4404 -> reason.ifEmpty { "not found" }
-                            4429 -> "too many terminals open"
-                            else -> reason.ifEmpty { "closed" }
-                        }))
+                        scheduleReconnect(3_000L)
+                    } else {
+                        running = false
+                        cancelRetry()
+                        unwatchNetwork()
+                        if (code != 1000 || reason != "closed by client") {
+                            onState(State.Closed(when (code) {
+                                4401 -> "June refused this phone's token"
+                                4404 -> reason.ifEmpty { "not found" }
+                                4429 -> "too many terminals open"
+                                else -> reason.ifEmpty { "closed" }
+                            }))
+                        }
                     }
                 }
             }
@@ -141,10 +202,18 @@ class TerminalStream(
                     failPuts()
                     if (!running) return@post
                     onState(State.Dropped(t.message ?: "connection lost"))
-                    main.postDelayed({ if (running && socket == null) start(true) }, 2_000)
+                    val wait = backoffMs
+                    backoffMs = (backoffMs * 2).coerceAtMost(15_000L)
+                    scheduleReconnect(wait)
                 }
             }
         })
+    }
+
+    /** Tell herdr-core whether this phone view currently holds focus. */
+    fun focus(on: Boolean) {
+        focused = on
+        if (attached) socket?.send(JSONObject().put("op", "focus").put("on", on).toString())
     }
 
     /**
@@ -172,7 +241,11 @@ class TerminalStream(
     /** Detach; the agent keeps running. */
     fun stop() {
         running = false
+        focused = false
         attached = false
+        backoffMs = 1_000L
+        cancelRetry()
+        unwatchNetwork()
         failPuts()
         socket?.let { s ->
             socket = null
@@ -191,7 +264,7 @@ class TerminalStream(
         this.cols = cols
         this.rows = rows
         if (attached) socket?.send(JSONObject().put("op", "resize").put("cols", cols).put("rows", rows).toString())
-        else if (running && socket == null) start()
+        else if (running && socket == null && retryTask == null) start()
     }
 
     private fun send(bytes: ByteArray, auto: Boolean) {
@@ -205,6 +278,6 @@ class TerminalStream(
     private fun hex(c: Int) = String.format("#%06x", c and 0xFFFFFF)
 
     companion object {
-        private val client by lazy { OkHttpClient.Builder().build() }
+        private val client by lazy { OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build() }
     }
 }
