@@ -61,6 +61,7 @@ class TerminalStream(
     // Files sent with put, by request id, until the daemon says where each landed. Main thread only.
     private val puts = HashMap<String, (String?, String?) -> Unit>()
     private var nextPut = 0
+    private var onKilled: ((String?) -> Unit)? = null
 
     init {
         view.onInput = { bytes, auto -> send(bytes, auto) }
@@ -152,6 +153,17 @@ class TerminalStream(
                         val path = m.optString("path").takeIf { it.isNotEmpty() }
                         puts.remove(m.optString("id"))?.invoke(path, if (path == null) m.optString("error", "not sent") else null)
                     }
+                    "killed" -> main.post {
+                        val cb = onKilled
+                        onKilled = null
+                        val err = m.optString("error").takeIf { it.isNotEmpty() }
+                        if (err == null) {
+                            running = false
+                            cancelRetry()
+                            unwatchNetwork()
+                        }
+                        cb?.invoke(err)
+                    }
                 }
             }
 
@@ -232,10 +244,24 @@ class TerminalStream(
         }.start()
     }
 
+    /** End the terminal's program and remove the pane on its host (terminal.kill + terminal.rm). */
+    fun kill(done: (error: String?) -> Unit) {
+        val s = socket
+        if (!attached || s == null) return done("not attached")
+        onKilled = done
+        if (!s.send(JSONObject().put("op", "kill").toString())) {
+            onKilled = null
+            done("connection lost")
+        }
+    }
+
     private fun failPuts() {
         val waiting = puts.values.toList()
         puts.clear()
         waiting.forEach { it(null, "connection lost") }
+        val k = onKilled
+        onKilled = null
+        k?.invoke("connection lost")
     }
 
     /** Detach; the agent keeps running. */

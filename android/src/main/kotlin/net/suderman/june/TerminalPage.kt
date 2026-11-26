@@ -59,10 +59,10 @@ object Terminals {
     var version by mutableIntStateOf(0)
         private set
 
-    /** Agent terminals open inside June; otherwise the Terminal app and Termux open them, as before. */
+    /** Agent terminals open inside June by default; otherwise the Terminal app and Termux open them. */
     fun embedded(context: Context): Boolean {
         version
-        return prefs(context).getBoolean("embedded", false)
+        return prefs(context).getBoolean("embedded", true)
     }
     fun setEmbedded(context: Context, on: Boolean) {
         prefs(context).edit().putBoolean("embedded", on).apply()
@@ -79,6 +79,10 @@ object Terminals {
         version++
     }
 
+    /** Terminal font size in sp, adjusted by pinch-to-zoom. */
+    fun fontSize(context: Context): Float = prefs(context).getFloat("fontSp", TerminalView.DEFAULT_SP).coerceIn(TerminalView.MIN_SP, TerminalView.MAX_SP)
+    fun setFontSize(context: Context, sp: Float) = prefs(context).edit().putFloat("fontSp", sp.coerceIn(TerminalView.MIN_SP, TerminalView.MAX_SP)).apply()
+
     /** What is written in each terminal's compose box and not yet sent, while the app runs. */
     val drafts = HashMap<String, String>()
 
@@ -90,6 +94,9 @@ object Terminals {
 
     fun remember(context: Context, t: TerminalTarget) =
         prefs(context).edit().putString("host", t.host).putString("terminal", t.terminal).putString("link", t.link).apply()
+
+    fun clearLast(context: Context) =
+        prefs(context).edit().remove("host").remove("terminal").remove("link").apply()
 }
 
 /** The agents the board lists, as the switcher offers them. */
@@ -133,12 +140,15 @@ private fun Agent.matches(t: TerminalTarget): Boolean =
 fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, active: Boolean, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var state by remember(target) { mutableStateOf<TerminalStream.State>(TerminalStream.State.Connecting) }
-    val view = remember(target) { TerminalView(context) }
+    val view = remember(target) { TerminalView(context, Terminals.fontSize(context)) }
     val stream = remember(target) { TerminalStream(context, target, view) { state = it } }
     var grid by remember(target) { mutableIntStateOf(0) }
+    var zoomingSp by remember(target) { mutableStateOf<Float?>(null) }
     DisposableEffect(target) {
         Terminals.remember(context, target)
         view.onGrid = { c, r, _, _ -> grid = c * 10_000 + r }
+        view.onFontSize = { sp -> Terminals.setFontSize(context, sp) }
+        view.onZooming = { sp -> zoomingSp = sp }
         onDispose {
             stream.release()
             view.release()
@@ -240,6 +250,8 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
     val muted = Color(0xFF9399B2)
     val action = Color(0xFF89B4FA)
     var attaching by remember { mutableStateOf(false) }
+    var confirmClose by remember(target) { mutableStateOf(false) }
+    var closing by remember(target) { mutableStateOf(false) }
     // Whether the compose box has the keyboard; a tap on the terminal takes it back.
     var composing by remember { mutableStateOf(false) }
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
@@ -279,6 +291,12 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
                     )
                 }
             }
+            if (attached) Text(
+                "✕",
+                Modifier.clickable(enabled = !closing) { confirmClose = true }.padding(start = 12.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
+                color = muted,
+                fontSize = 13.sp,
+            )
         }
         // Files another app shared, waiting for Jon to send them here or switch first; and how sending is going.
         val shared = Drops.shared
@@ -304,6 +322,15 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
         Box(Modifier.weight(1f).fillMaxWidth()) {
             Box(Modifier.fillMaxSize().padding(bottom = oneLineBarDp)) {
                 AndroidView({ view }, Modifier.fillMaxSize().clipToBounds())
+                zoomingSp?.let { sp ->
+                    Text(
+                        "%.1f sp".format(sp),
+                        Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
+                            .background(Color(0xDD181825), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        color = ink, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                    )
+                }
                 val s = state
                 if (s !is TerminalStream.State.Attached) Column(
                     Modifier.align(Alignment.Center).padding(24.dp).background(Color(0xEE181825), RoundedCornerShape(10.dp)).padding(16.dp),
@@ -382,12 +409,52 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
             }
         }
     }
+    if (confirmClose) {
+        val busy = here?.status == "working" || here?.worker?.optString("task")?.isNotEmpty() == true
+        val label = here?.let { "${it.name} (${it.detail})" } ?: target.key.removePrefix("herdr:")
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmClose = false },
+            title = { Text("Close pane?") },
+            text = {
+                Text(
+                    if (busy) "$label is ${if (here?.status == "working") "currently working" else "linked to a task"}. Closing kills its terminal and removes the pane without changing Org task state."
+                    else "End the terminal program and remove $label from Herdr?",
+                )
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmClose = false }) { Text("Cancel") } },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        confirmClose = false
+                        closing = true
+                        note = "closing pane…"
+                        val next = agents.firstOrNull { !it.matches(target) }?.target
+                        stream.kill { err ->
+                            closing = false
+                            if (err != null) {
+                                note = "close failed: $err"
+                            } else {
+                                Terminals.drafts.remove(target.key)
+                                if (next != null) link.openTerminal(next)
+                                else {
+                                    Terminals.clearLast(context)
+                                    link.terminal = null
+                                    link.wantBoards()
+                                }
+                            }
+                        }
+                    },
+                ) { Text("Close pane", color = Color(0xFFF38BA8)) }
+            },
+        )
+    }
     // Over the page itself rather than in a window of its own, so it grows with the page as the keyboard goes down.
     copying?.let { text ->
         androidx.activity.compose.BackHandler { copying = null }
         CopySheet(
             text, view, Modifier.matchParentSize(), close = { copying = null }, paste = { view.paste(it); copying = null },
             pasteFile = { uri -> take { Drops.read(context, listOf(uri)) }; copying = null },
+            resetZoom = { view.setFontSize(TerminalView.DEFAULT_SP); copying = null },
         )
     }
     }
@@ -398,12 +465,12 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
  * its size, cell width and line height, so each line sits as it did on the terminal.
  */
 @Composable
-private fun CopySheet(text: String, view: TerminalView, modifier: Modifier, close: () -> Unit, paste: (String) -> Unit, pasteFile: (android.net.Uri) -> Unit) {
+private fun CopySheet(text: String, view: TerminalView, modifier: Modifier, close: () -> Unit, paste: (String) -> Unit, pasteFile: (android.net.Uri) -> Unit, resetZoom: () -> Unit) {
     val context = LocalContext.current
     val density = androidx.compose.ui.platform.LocalDensity.current
     val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
     val scroll = androidx.compose.foundation.rememberScrollState()
-    val style = remember(view) {
+    val style = remember(view, view.textSize) {
         val advance = android.graphics.Paint().apply { typeface = view.face; textSize = view.textSize }.measureText("M")
         with(density) {
             androidx.compose.ui.text.TextStyle(
@@ -422,7 +489,7 @@ private fun CopySheet(text: String, view: TerminalView, modifier: Modifier, clos
     val width = with(density) { (view.cols.coerceAtLeast(1) * view.cellWidth + view.cellWidth / 2).toDp() }
     run {
         Column(modifier.background(Color(0xFF1E1E2E)).pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
-            Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Select to copy", Modifier.weight(1f), color = Color(0xFF9399B2), fontSize = 13.sp)
                 val item = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
                 // A copied image or file goes to the agent as a file; anything else pastes as text.
@@ -430,6 +497,7 @@ private fun CopySheet(text: String, view: TerminalView, modifier: Modifier, clos
                 val clip = if (uri == null) item?.coerceToText(context)?.toString() else null
                 if (uri != null) Text("paste file", Modifier.clickable { pasteFile(uri) }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
                 else if (!clip.isNullOrEmpty()) Text("paste", Modifier.clickable { paste(clip) }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
+                if (kotlin.math.abs(view.fontSp - TerminalView.DEFAULT_SP) > 0.3f) Text("reset zoom", Modifier.clickable(onClick = resetZoom).padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
                 Text("copy all", Modifier.clickable { clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text)); close() }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
                 Text("close", Modifier.clickable(onClick = close).padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
             }

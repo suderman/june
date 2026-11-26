@@ -336,7 +336,7 @@ Built on 2026-11-24 at Jon's request (=TerminalDrops.kt=, =put= in =TerminalStre
 - Worker rows open a terminal only through their session link, so a worker without an =org.session= label is reached through the switcher.
 
 ** Settings and fallbacks
-Settings has "Agent terminals": "In June" or "Terminal app and Termux". The second is the default until the embedded terminal has passed the hardening task, and it keeps today's behaviour exactly: the Terminal tab opens the chosen Terminal app (the Herdr app by default) and =herdr:= links open Termux with =ssh-unlock ssh -t HOST herdr-link attach=. The Herdr app takes no session links, so it only opens at its launcher entry.
+Settings has "Agent terminals": "In June" (the default since 2026-11-25) or "Terminal app and Termux". The fallback keeps the external behaviour: the Terminal tab opens the chosen Terminal app (the Herdr app by default) and =herdr:= links open Termux with =ssh-unlock ssh -t HOST herdr-link attach=. The Herdr app takes no session links, so it only opens at its launcher entry.
 
 ** Build
 - =android/terminal.nix= builds the native library offline: Ghostty at tag =vt-1.0.1= (=fetchFromGitHub=), Zig 0.17.0's release binary by hash (nixpkgs has 0.16 at most), Ghostty's own =deps/packages.nix= for the Zig packages, and NDK r29 from =androidenv=, with =-Dsimd=false=. No patch was needed: 1.0.1 already aligns Android segments to 16 KiB.

@@ -1,8 +1,9 @@
 // Terminal streams: a paired client watching and typing into an agent's herdr-core terminal through the daemon (see
 // "Terminal streams" in docs/architecture.org). The daemon only relays: for each stream it starts `hc connect` (or
 // `ssh HOST hc connect` for a host this core has not added), attaches to one terminal the agents board lists, and maps
-// the client's WebSocket frames onto the attach channel's frames. It never parses terminal output, never starts, resumes
-// or kills a program, and offers one other hc method: terminal.put, a file from the client beside that same terminal.
+// the client's WebSocket frames onto the attach channel's frames. It never parses terminal output or starts programs,
+// and offers two scoped hc methods on that same terminal: terminal.put (upload a file) and terminal.kill + terminal.rm
+// (close the pane on explicit user request).
 import { type ChildProcess, spawn } from "node:child_process";
 import type { AgentSummary } from "./tools/herdr.ts";
 import type { Logger } from "./runtime.ts";
@@ -78,6 +79,11 @@ export function openTerminal(hello: Record<string, unknown>, device: string, soc
 	let channel: number | undefined;
 	let auto = false;
 	let canPut = false;
+	let canKill = false;
+	let canRm = false;
+	let killing = false;
+	let killRid: number | undefined;
+	let rmRid: number | undefined;
 	let done = false;
 	let address = "";
 	// terminal.put requests in flight: the core's request id -> the client's.
@@ -123,7 +129,31 @@ export function openTerminal(hello: Record<string, unknown>, device: string, soc
 				return finish(UNAVAILABLE, message.error?.message ?? "herdr-core cannot attach");
 			auto = r.features.includes("automatic_input");
 			canPut = r.methods.includes("terminal.put");
+			canKill = r.methods.includes("terminal.kill");
+			canRm = r.methods.includes("terminal.rm");
 			return;
+		}
+		if (killRid !== undefined && message.id === killRid) {
+			killRid = undefined;
+			const kind = message.error?.data?.kind;
+			if (message.error && kind !== "finished" && kind !== "not_found") {
+				killing = false;
+				return socket.text({ type: "killed", error: String(message.error.message ?? "could not close terminal") });
+			}
+			if (canRm) {
+				rmRid = nextPut++;
+				write(rpc(rmRid, "terminal.rm", { terminal: address }));
+				return;
+			}
+			log.info("terminal_killed", { device, terminal: where });
+			socket.text({ type: "killed", ok: true });
+			return finish(1000, "killed");
+		}
+		if (rmRid !== undefined && message.id === rmRid) {
+			rmRid = undefined;
+			log.info("terminal_killed", { device, terminal: where });
+			socket.text({ type: "killed", ok: true });
+			return finish(1000, "killed");
 		}
 		if (puts.has(message.id)) {
 			const id = puts.get(message.id);
@@ -165,6 +195,7 @@ export function openTerminal(hello: Record<string, unknown>, device: string, soc
 			payload.copy(out, 1);
 			socket.binary(out);
 		} else if (kind === CLOSE) {
+			if (killing) return;
 			let reason: any = {};
 			try {
 				reason = payload.length > 0 ? JSON.parse(payload.toString("utf8")) : {};
@@ -270,6 +301,13 @@ export function openTerminal(hello: Record<string, unknown>, device: string, soc
 				const rid = nextPut++;
 				puts.set(rid, id);
 				write(rpc(rid, "terminal.put", { terminal: address, name: op.name.split(/[\\/]/).pop() || "file", data: op.data }));
+			} else if (op?.op === "kill") {
+				if (channel === undefined) return socket.text({ type: "killed", error: "not attached yet" });
+				if (!canKill) return socket.text({ type: "killed", error: "this herdr-core cannot close terminals" });
+				if (killing) return;
+				killing = true;
+				killRid = nextPut++;
+				write(rpc(killRid, "terminal.kill", { terminal: address }));
 			} else if (op?.op === "close") finish(1000, "closed by client");
 		},
 		close() {

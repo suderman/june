@@ -33,6 +33,8 @@ function fakeCore(options: { features?: string[]; methods?: string[]; attach?: (
 	const frames: Frame[] = [];
 	const attaches: any[] = [];
 	const puts: any[] = [];
+	const kills: any[] = [];
+	const rms: any[] = [];
 	let stdout!: PassThrough;
 	let child!: ChildProcess;
 	const spawn = (a: string[]) => {
@@ -51,7 +53,7 @@ function fakeCore(options: { features?: string[]; methods?: string[]; attach?: (
 				buffer = buffer.subarray(nl + 1);
 				framed = true;
 				const features = options.features ?? ["framed", "attach", "automatic_input"];
-				stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: hello.id, result: { generation: 1, version: "0.1.22", core: { id: "x", name: "kit" }, framed: true, methods: options.methods ?? ["hello", "terminal.attach", "terminal.put"], features } })}\n`);
+				stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: hello.id, result: { generation: 1, version: "0.1.22", core: { id: "x", name: "kit" }, framed: true, methods: options.methods ?? ["hello", "terminal.attach", "terminal.put", "terminal.kill", "terminal.rm"], features } })}\n`);
 			}
 			while (buffer.length >= 9) {
 				const len = buffer.readUInt32LE(5);
@@ -70,13 +72,20 @@ function fakeCore(options: { features?: string[]; methods?: string[]; attach?: (
 						const bytes = Buffer.from(m.params.data, "base64").length;
 						const answer = m.params.name === "gone.png" ? { error: { code: -32000, message: "finished", data: { kind: "finished" } } } : { result: { path: `/core/files/${m.params.terminal}/${m.params.name}`, bytes } };
 						stdout.write(frame(0, 0, Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: m.id, ...answer }))));
+					} else if (m.method === "terminal.kill") {
+						kills.push(m.params);
+						stdout.write(frame(5, 2, Buffer.from(JSON.stringify({ reason: "killed" }))));
+						stdout.write(frame(0, 0, Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { ok: true } }))));
+					} else if (m.method === "terminal.rm") {
+						rms.push(m.params);
+						stdout.write(frame(0, 0, Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { ok: true } }))));
 					}
 				} else frames.push(f);
 			}
 		});
 		return child;
 	};
-	return { spawn, argv, frames, attaches, puts, core: () => stdout, exit: () => child.emit("exit", 0) };
+	return { spawn, argv, frames, attaches, puts, kills, rms, core: () => stdout, exit: () => child.emit("exit", 0) };
 }
 
 function client() {
@@ -266,4 +275,28 @@ test("a file from the client lands beside the stream's own terminal, and the cli
 	await until(() => o.texts.some((t) => t.type === "put"));
 	assert.deepEqual(o.texts.at(-1), { type: "put", id: 1, error: "this herdr-core cannot take files" });
 	assert.equal(old.puts.length, 0);
+});
+
+test("kill ends and removes only the stream's own terminal, waiting past channel CLOSE", async () => {
+	const core = fakeCore();
+	const c = client();
+	const stream = openTerminal({ host: "cog", terminal: "t3", cols: 56, rows: 29 }, "gem", c.socket, options(core.spawn));
+	stream.message(Buffer.from(JSON.stringify({ op: "kill" })), false);
+	await until(() => c.texts.some((t) => t.type === "attached"));
+	assert.deepEqual(c.texts[0], { type: "killed", error: "not attached yet" });
+	stream.message(Buffer.from(JSON.stringify({ op: "kill", terminal: "t1" })), false);
+	await until(() => c.ended() !== undefined);
+	assert.deepEqual(core.kills, [{ terminal: "cog/t3" }]);
+	assert.deepEqual(core.rms, [{ terminal: "cog/t3" }]);
+	assert.deepEqual(c.texts.at(-1), { type: "killed", ok: true });
+	assert.deepEqual(c.ended(), { code: 1000, reason: "killed" });
+
+	const old = fakeCore({ methods: ["hello", "terminal.attach"] });
+	const o = client();
+	const s2 = openTerminal({ host: "kit", terminal: "t7", cols: 80, rows: 24 }, "gem", o.socket, options(old.spawn));
+	await until(() => o.texts.some((t) => t.type === "attached"));
+	s2.message(Buffer.from(JSON.stringify({ op: "kill" })), false);
+	await until(() => o.texts.some((t) => t.type === "killed"));
+	assert.deepEqual(o.texts.at(-1), { type: "killed", error: "this herdr-core cannot close terminals" });
+	assert.equal(old.kills.length, 0);
 });

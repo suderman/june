@@ -27,11 +27,15 @@ import kotlin.math.floor
  * current keyboard modes. The view is also the keyboard's target, through its own input connection. The grid follows
  * the view's size, reported through [onGrid]. The drawing and input handling follow T3 Code's Android terminal (MIT).
  */
-class TerminalView(context: Context) : View(context) {
+class TerminalView(context: Context, initialSp: Float = DEFAULT_SP) : View(context) {
     /** Bytes for the program; AUTO marks the emulator's own replies rather than typing. */
     var onInput: (ByteArray, Boolean) -> Unit = { _, _ -> }
     /** The grid fits the view: columns and rows, and the cell size in pixels. */
     var onGrid: (Int, Int, Int, Int) -> Unit = { _, _, _, _ -> }
+    /** Font size settled after a pinch-to-zoom or reset, in sp. */
+    var onFontSize: (Float) -> Unit = {}
+    /** Live font size during a pinch gesture, or null once the pinch ends. */
+    var onZooming: (Float?) -> Unit = {}
 
     /** Sticky modifiers from the accessory row, applied to the next key or character. */
     var ctrl = false
@@ -56,7 +60,6 @@ class TerminalView(context: Context) : View(context) {
     private val faces = Faces.load(context)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = faces.regular
-        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12.5f, context.resources.displayMetrics)
     }
     private val fill = Paint()
 
@@ -66,14 +69,16 @@ class TerminalView(context: Context) : View(context) {
             field = value
             postInvalidateOnAnimation()
         }
-    private val glyphAdvance = paint.measureText("M")
-    private val runSpacing = (ceil(glyphAdvance) - glyphAdvance) / paint.textSize
+    var fontSp = initialSp.coerceIn(MIN_SP, MAX_SP)
+        private set
+    private var glyphAdvance = 1f
+    private var runSpacing = 0f
     private var runChars = CharArray(256)
-    var cellWidth = ceil(glyphAdvance).toInt()
+    var cellWidth = 1
         private set
-    var cellHeight = ceil(paint.fontMetrics.let { it.descent - it.ascent }).toInt()
+    var cellHeight = 1
         private set
-    private val baseline = -paint.fontMetrics.ascent
+    private var baseline = 0f
     private var handle = 0L
     private val lock = Any()
     var cols = 0
@@ -85,7 +90,44 @@ class TerminalView(context: Context) : View(context) {
     val textSize get() = paint.textSize
     val face: Typeface get() = faces.regular
 
+    private fun updateMetrics(sp: Float) {
+        fontSp = sp.coerceIn(MIN_SP, MAX_SP)
+        paint.textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, fontSp, context.resources.displayMetrics)
+        glyphAdvance = paint.measureText("M")
+        cellWidth = ceil(glyphAdvance).toInt().coerceAtLeast(1)
+        runSpacing = (cellWidth - glyphAdvance) / paint.textSize
+        cellHeight = ceil(paint.fontMetrics.let { it.descent - it.ascent }).toInt().coerceAtLeast(1)
+        baseline = -paint.fontMetrics.ascent
+    }
+
+    private fun recalcGrid() {
+        val availW = width - paddingLeft - paddingRight
+        val availH = height - paddingTop - paddingBottom
+        if (availW <= 0 || availH <= 0) return
+        val c = maxOf(1, availW / cellWidth)
+        val r = maxOf(1, availH / cellHeight)
+        // The grid centred: what is left over after whole cells splits evenly between the sides.
+        offsetX = ((availW - c * cellWidth) / 2).coerceAtLeast(0)
+        if (c == cols && r == rows) return
+        cols = c
+        rows = r
+        synchronized(lock) {
+            if (handle == 0L) handle = TerminalBridge.nativeCreate(cols, rows, cellWidth, cellHeight, foreground, background, cursorColor, palette)
+            else TerminalBridge.nativeResize(handle, cols, rows, cellWidth, cellHeight)
+        }
+        onGrid(cols, rows, cellWidth, cellHeight)
+    }
+
+    /** Change the terminal's font size and resize the grid immediately. */
+    fun setFontSize(sp: Float) {
+        updateMetrics(sp)
+        recalcGrid()
+        onFontSize(fontSp)
+        postInvalidateOnAnimation()
+    }
+
     init {
+        updateMetrics(initialSp)
         isFocusable = true
         isFocusableInTouchMode = true
         setBackgroundColor(background)
@@ -138,18 +180,7 @@ class TerminalView(context: Context) : View(context) {
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        val c = maxOf(1, (w - paddingLeft - paddingRight) / cellWidth)
-        val r = maxOf(1, (h - paddingTop - paddingBottom) / cellHeight)
-        // The grid centred: what is left over after whole cells splits evenly between the sides.
-        offsetX = ((w - paddingLeft - paddingRight - c * cellWidth) / 2).coerceAtLeast(0)
-        if (c == cols && r == rows) return
-        cols = c
-        rows = r
-        synchronized(lock) {
-            if (handle == 0L) handle = TerminalBridge.nativeCreate(cols, rows, cellWidth, cellHeight, foreground, background, cursorColor, palette)
-            else TerminalBridge.nativeResize(handle, cols, rows, cellWidth, cellHeight)
-        }
-        onGrid(cols, rows, cellWidth, cellHeight)
+        recalcGrid()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -302,17 +333,47 @@ class TerminalView(context: Context) : View(context) {
         }
     }
 
-    // Touch: a tap shows the keyboard; a vertical drag scrolls the history, and a fling keeps it going, slowing to a stop.
+    // Touch: a tap shows the keyboard; a vertical drag scrolls the history, a fling keeps it going, and a two-finger
+    // pinch scales font size smoothly and resizes the grid once the pinch ends.
     private var downY = 0f
     private var lastY = 0f
     private var lastX = 0f
     private var dragging = false
+    private var scaling = false
     private var scrollRemainder = 0f
     private var pressed = false
     private val longPress = Runnable { pressed = true; parent?.requestDisallowInterceptTouchEvent(true); performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); onLongPress() }
     private val flinger = android.widget.OverScroller(context)
     private var flingY = 0
     private var velocity: android.view.VelocityTracker? = null
+    private val scaleDetector = android.view.ScaleGestureDetector(context, object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScaleBegin(detector: android.view.ScaleGestureDetector): Boolean {
+            scaling = true
+            dragging = false
+            removeCallbacks(longPress)
+            flinger.forceFinished(true)
+            parent?.requestDisallowInterceptTouchEvent(true)
+            onZooming(fontSp)
+            return true
+        }
+
+        override fun onScale(detector: android.view.ScaleGestureDetector): Boolean {
+            val next = (fontSp * detector.scaleFactor).coerceIn(MIN_SP, MAX_SP)
+            if (abs(next - fontSp) >= 0.05f) {
+                updateMetrics(next)
+                onZooming(fontSp)
+                invalidate()
+            }
+            return true
+        }
+
+        override fun onScaleEnd(detector: android.view.ScaleGestureDetector) {
+            recalcGrid()
+            onFontSize(fontSp)
+            onZooming(null)
+            invalidate()
+        }
+    })
 
     /** Scroll by DY pixels of finger travel at X, Y: whole rows go to the program or the history, the rest waits. */
     private fun scrollBy(dy: Float, x: Float, y: Float) {
@@ -337,6 +398,22 @@ class TerminalView(context: Context) : View(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        scaleDetector.onTouchEvent(event)
+        if (event.pointerCount > 1 || scaleDetector.isInProgress) {
+            scaling = true
+            dragging = false
+            removeCallbacks(longPress)
+            flinger.forceFinished(true)
+            parent?.requestDisallowInterceptTouchEvent(true)
+            return true
+        }
+        if (scaling) {
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                scaling = false
+                velocity?.recycle(); velocity = null
+            }
+            return true
+        }
         val tracker = velocity ?: android.view.VelocityTracker.obtain().also { velocity = it }
         tracker.addMovement(event)
         when (event.actionMasked) {
@@ -534,6 +611,12 @@ class TerminalView(context: Context) : View(context) {
                 type(s)
             }
         }
+    }
+
+    companion object {
+        const val DEFAULT_SP = 12.5f
+        const val MIN_SP = 8.5f
+        const val MAX_SP = 22f
     }
 }
 
