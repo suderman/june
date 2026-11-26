@@ -331,7 +331,24 @@ private fun DialogNote(e: JSONObject, harness: String, colours: Colours, task: S
     val kind = e.optString("kind")
     val who = e.optString("who").lowercase() + e.optString("at").let { if (it.isEmpty()) "" else " · $it" }
     if (kind == "dispatcher") {
-        Text("${if (p.console) "#" else "▸"} $who — ${e.optString("text")}", style = t.meta.copy(color = p.muted))
+        var open by androidx.compose.runtime.saveable.rememberSaveable(task, e.optString("key")) { mutableStateOf(false) }
+        var more by remember(task, e.optString("key")) { mutableStateOf(false) }
+        val glyph = if (p.console) "#" else if (open) "▾" else "▸"
+        val body = if (open) e.optString("text") else e.optString("text").replace('\n', ' ')
+        Column(Modifier.fillMaxWidth().then(if (more || open) Modifier.semantics { role = Role.Button }.clickable { open = !open } else Modifier)) {
+            Text(
+                "$glyph $who — $body",
+                style = t.meta.copy(color = p.muted),
+                maxLines = if (open) Int.MAX_VALUE else 3,
+                overflow = TextOverflow.Ellipsis,
+                onTextLayout = { if (!open && it.hasVisualOverflow) more = true },
+            )
+            if (more) Text(
+                if (open) (if (p.console) "[less]" else "less ▴") else (if (p.console) "[more]" else "more ▾"),
+                Modifier.align(Alignment.End),
+                style = t.label.copy(color = p.muted),
+            )
+        }
         return
     }
     val long = e.optString("text").length > 280

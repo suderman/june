@@ -209,6 +209,14 @@ REVIEW may be inherited, so a project file's #+PROPERTY can set it."
 
 (define-error 'org-dispatch-hc "hc failed")
 
+(defun org-dispatch--hc-brief (args)
+  "Short label for an hc invocation ARGS, omitting flags and multi-line prompts."
+  (let ((cmd (car args))
+        (arg (cadr args)))
+    (if (and arg (not (string-prefix-p "-" arg)) (not (string-search "\n" arg)) (< (length arg) 40))
+        (format "hc %s %s" cmd arg)
+      (format "hc %s" cmd))))
+
 (defun org-dispatch--hc (&rest args)
   "Run hc ARGS with JSON output and return the parsed result.
 Failures signal `org-dispatch-hc' with hc's error kind, such as not_found."
@@ -227,7 +235,7 @@ Failures signal `org-dispatch-hc' with hc's error kind, such as not_found."
                      (err (alist-get 'error json)))
                 (signal 'org-dispatch-hc
                         (list (or (alist-get 'kind err) "failed")
-                              (format "hc %s: %s" (string-join args " ")
+                              (format "%s: %s" (org-dispatch--hc-brief args)
                                       (or (alist-get 'message err) text))))))
             (goto-char (point-min))
             (unless (eobp)

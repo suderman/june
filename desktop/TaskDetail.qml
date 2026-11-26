@@ -451,16 +451,38 @@ Item {
     readonly property bool more: foldedProbe.truncated
     readonly property color noteInk: mine && !Theme.neon && !Theme.consoleLook ? Theme.noteInk : Theme.surfaceInk
     readonly property real cap: mine ? width * 0.86 : narration ? width : width - (agentNote ? 36 : 0)
-    height: narration ? caption.implicitHeight : box.height + (agentNote ? 6 : 0) + 2
+    height: narration ? captionCol.implicitHeight : box.height + (agentNote ? 6 : 0) + 2
 
-    Words {
-      id: caption
+    readonly property string captionText: (Theme.consoleLook ? "# " : (e.open ? "▾ " : "▸ ")) + (e.entry?.who ?? "").toLowerCase() + ((e.entry?.at ?? "") !== "" ? " · " + e.entry.at : "") + " — " + (e.open ? (e.entry?.text ?? "") : (e.entry?.text ?? "").replace(/\n+/g, " "))
+    Words { id: captionProbe; visible: false; width: e.width; role: "meta"; wrapMode: Text.Wrap; maximumLineCount: 3; text: (Theme.consoleLook ? "# " : "▸ ") + (e.entry?.who ?? "").toLowerCase() + ((e.entry?.at ?? "") !== "" ? " · " + e.entry.at : "") + " — " + (e.entry?.text ?? "").replace(/\n+/g, " ") }
+    Column {
+      id: captionCol
       visible: e.narration
       width: e.width
-      role: "meta"
-      wrapMode: Text.Wrap
-      text: (Theme.consoleLook ? "# " : "▸ ") + (e.entry?.who ?? "").toLowerCase() + ((e.entry?.at ?? "") !== "" ? " · " + e.entry.at : "") + " — " + (e.entry?.text ?? "")
-      color: Theme.muted
+      spacing: 2
+      Words {
+        id: caption
+        width: parent.width
+        role: "meta"
+        wrapMode: Text.Wrap
+        maximumLineCount: e.open ? 2147483647 : 3
+        elide: e.open ? Text.ElideNone : Text.ElideRight
+        text: e.captionText
+        color: Theme.muted
+      }
+      Words {
+        visible: captionProbe.truncated
+        anchors.right: parent.right
+        role: "label"
+        text: e.open ? (Theme.consoleLook ? "[less]" : "less ▴") : (Theme.consoleLook ? "[more]" : "more ▾")
+        color: Theme.muted
+      }
+    }
+    MouseArea {
+      visible: e.narration && (captionProbe.truncated || e.open)
+      anchors.fill: captionCol
+      cursorShape: Qt.PointingHandCursor
+      onClicked: e.open = !e.open
     }
     Clanker {
       visible: e.agentNote
