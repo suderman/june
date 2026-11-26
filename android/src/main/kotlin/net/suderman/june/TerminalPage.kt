@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -295,77 +296,89 @@ fun TerminalPage(link: Link, target: TerminalTarget, palette: Look.Palette, acti
             val said = listOf(Drops.notice, note).filter { it.isNotEmpty() }.joinToString("; ")
             if (said.isNotEmpty()) Text(said, Modifier.clickable { Drops.notice = ""; note = "" }.padding(vertical = 2.dp), color = muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
+        // Keep the terminal sized for a one-line compose bar: when a long message wraps to 2..6 lines, the compose
+        // bar expands upward over the bottom of the terminal instead of resizing the grid and forcing the agent to redraw.
+        var oneLineBarPx by remember { mutableIntStateOf(0) }
+        val oneLineBarDp = with(androidx.compose.ui.platform.LocalDensity.current) { oneLineBarPx.toDp() }
+        var draft by remember(target) { mutableStateOf(Terminals.drafts[target.key] ?: "") }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            AndroidView({ view }, Modifier.fillMaxSize().clipToBounds())
-            val s = state
-            if (s !is TerminalStream.State.Attached) Column(
-                Modifier.align(Alignment.Center).padding(24.dp).background(Color(0xEE181825), RoundedCornerShape(10.dp)).padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    when (s) {
-                        is TerminalStream.State.Connecting -> "Attaching…"
-                        is TerminalStream.State.Dropped -> "Reconnecting: ${s.reason}"
-                        is TerminalStream.State.Closed -> s.reason
-                        else -> ""
-                    },
-                    color = ink, fontSize = 14.sp,
-                )
-                // When June cannot show it (a session that ended, an old link), Termux can still attach or resume it.
-                if (s is TerminalStream.State.Closed && target.link.isNotEmpty()) Text(
-                    "open in Termux", Modifier.clickable { Links.termux(context, target.link) }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp,
-                )
-                if (s is TerminalStream.State.Closed) Text("try again", Modifier.clickable { stream.start() }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
-            }
-        }
-        if (Terminals.keyRow(context) && WindowInsets.isImeVisible && !composing) KeyRow(view)
-        // The compose bar, by the keyboard: + attaches, and the box writes a message with the keyboard's full help
-        // (autocorrect, moving the cursor, selecting), sent as one paste and then Enter. Tapping the terminal types
-        // into it directly, for keys and shortcuts.
-        Row(
-            Modifier.fillMaxWidth().background(Color(0xFF181825)).padding(horizontal = 4.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Box {
-                Box(
-                    Modifier.padding(start = 2.dp, end = 6.dp, bottom = 4.dp).size(40.dp).background(Color(0xFF313244), CircleShape)
-                        .clickable { attaching = true },
-                    contentAlignment = Alignment.Center,
-                ) { androidx.compose.material3.Icon(AttachIcon, "Attach", Modifier.size(20.dp), tint = ink) }
-                DropdownMenu(attaching, onDismissRequest = { attaching = false }) {
-                    DropdownMenuItem(text = { Text("Photos and screenshots") }, onClick = {
-                        attaching = false
-                        photos.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    })
-                    DropdownMenuItem(text = { Text("Files") }, onClick = { attaching = false; files.launch(arrayOf("*/*")) })
+            Box(Modifier.fillMaxSize().padding(bottom = oneLineBarDp)) {
+                AndroidView({ view }, Modifier.fillMaxSize().clipToBounds())
+                val s = state
+                if (s !is TerminalStream.State.Attached) Column(
+                    Modifier.align(Alignment.Center).padding(24.dp).background(Color(0xEE181825), RoundedCornerShape(10.dp)).padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        when (s) {
+                            is TerminalStream.State.Connecting -> "Attaching…"
+                            is TerminalStream.State.Dropped -> "Reconnecting: ${s.reason}"
+                            is TerminalStream.State.Closed -> s.reason
+                            else -> ""
+                        },
+                        color = ink, fontSize = 14.sp,
+                    )
+                    // When June cannot show it (a session that ended, an old link), Termux can still attach or resume it.
+                    if (s is TerminalStream.State.Closed && target.link.isNotEmpty()) Text(
+                        "open in Termux", Modifier.clickable { Links.termux(context, target.link) }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp,
+                    )
+                    if (s is TerminalStream.State.Closed) Text("try again", Modifier.clickable { stream.start() }.padding(6.dp), color = Color(0xFF89B4FA), fontSize = 14.sp)
                 }
             }
-            var draft by remember(target) { mutableStateOf(Terminals.drafts[target.key] ?: "") }
-            val fieldStyle = androidx.compose.ui.text.TextStyle(color = ink, fontSize = 15.sp, lineHeight = 20.sp)
-            androidx.compose.foundation.text.BasicTextField(
-                draft, { draft = it; Terminals.drafts[target.key] = it },
-                Modifier.weight(1f).padding(vertical = 4.dp).background(Color(0xFF1E1E2E), RoundedCornerShape(18.dp))
-                    .padding(horizontal = 14.dp, vertical = 9.dp).onFocusChanged { composing = it.isFocused },
-                textStyle = fieldStyle,
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(ink),
-                maxLines = 6,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
-                // The hint in the field's own style: a taller one would change the bar's height, and so the terminal's
-                // rows, with the first letter typed or the last one deleted, making the program redraw.
-                decorationBox = { field -> Box { if (draft.isEmpty()) androidx.compose.foundation.text.BasicText("Message the agent", style = fieldStyle.copy(color = muted)); field() } },
-            )
-            val ready = draft.isNotBlank() && attached
-            Box(
-                Modifier.padding(start = 6.dp, end = 2.dp, bottom = 4.dp).size(40.dp)
-                    .background(if (ready) action else Color(0xFF313244), CircleShape)
-                    .clickable(enabled = ready) {
-                        view.send(draft.trimEnd())
-                        draft = ""
-                        Terminals.drafts.remove(target.key)
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                androidx.compose.material3.Icon(SendIcon, "Send", Modifier.size(20.dp), tint = if (ready) Color(0xFF1E1E2E) else muted)
+            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                if (Terminals.keyRow(context) && WindowInsets.isImeVisible && !composing) KeyRow(view)
+                // Subtle top hairline so an expanded multi-line compose bar separates cleanly from the terminal behind it.
+                Box(Modifier.fillMaxWidth().heightIn(min = 1.dp, max = 1.dp).background(Color(0xFF313244)))
+                // The compose bar, by the keyboard: + attaches, and the box writes a message with the keyboard's full help
+                // (autocorrect, moving the cursor, selecting), sent as one paste and then Enter. Tapping the terminal types
+                // into it directly, for keys and shortcuts.
+                Row(
+                    Modifier.fillMaxWidth().background(Color(0xFF181825)).onSizeChanged { size ->
+                        if (draft.isEmpty() || oneLineBarPx == 0 || size.height < oneLineBarPx) oneLineBarPx = size.height
+                    }.padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    Box {
+                        Box(
+                            Modifier.padding(start = 2.dp, end = 6.dp, bottom = 4.dp).size(40.dp).background(Color(0xFF313244), CircleShape)
+                                .clickable { attaching = true },
+                            contentAlignment = Alignment.Center,
+                        ) { androidx.compose.material3.Icon(AttachIcon, "Attach", Modifier.size(20.dp), tint = ink) }
+                        DropdownMenu(attaching, onDismissRequest = { attaching = false }) {
+                            DropdownMenuItem(text = { Text("Photos and screenshots") }, onClick = {
+                                attaching = false
+                                photos.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            })
+                            DropdownMenuItem(text = { Text("Files") }, onClick = { attaching = false; files.launch(arrayOf("*/*")) })
+                        }
+                    }
+                    val fieldStyle = androidx.compose.ui.text.TextStyle(color = ink, fontSize = 15.sp, lineHeight = 20.sp)
+                    androidx.compose.foundation.text.BasicTextField(
+                        draft, { draft = it; Terminals.drafts[target.key] = it },
+                        Modifier.weight(1f).padding(vertical = 4.dp).background(Color(0xFF1E1E2E), RoundedCornerShape(18.dp))
+                            .padding(horizontal = 14.dp, vertical = 9.dp).onFocusChanged { composing = it.isFocused },
+                        textStyle = fieldStyle,
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(ink),
+                        maxLines = 6,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
+                        // The hint in the field's own style: a taller one would change the bar's height, and so the terminal's
+                        // rows, with the first letter typed or the last one deleted, making the program redraw.
+                        decorationBox = { field -> Box { if (draft.isEmpty()) androidx.compose.foundation.text.BasicText("Message the agent", style = fieldStyle.copy(color = muted)); field() } },
+                    )
+                    val ready = draft.isNotBlank() && attached
+                    Box(
+                        Modifier.padding(start = 6.dp, end = 2.dp, bottom = 4.dp).size(40.dp)
+                            .background(if (ready) action else Color(0xFF313244), CircleShape)
+                            .clickable(enabled = ready) {
+                                view.send(draft.trimEnd())
+                                draft = ""
+                                Terminals.drafts.remove(target.key)
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        androidx.compose.material3.Icon(SendIcon, "Send", Modifier.size(20.dp), tint = if (ready) Color(0xFF1E1E2E) else muted)
+                    }
+                }
             }
         }
     }
