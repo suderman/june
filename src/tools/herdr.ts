@@ -142,7 +142,13 @@ export class Herdr {
 		const local = host === this.#config.host;
 		const args = ["hc", "run", "--json", "--bg", "--no-parent", "--name", options.name, ...(local ? [] : ["--on", host]), ...(options.dir ? ["--cwd", options.dir] : [])];
 		for (const [k, v] of Object.entries(options.labels ?? {})) args.push("--label", `${k}=${v}`);
-		const out = await this.#run([...args, "--", ...argv], 30_000);
+		const out = await this.#run([...args, "--", ...argv], 30_000).catch((error: Error & { stderr?: string }) => {
+			// hc says why it could not start the program as JSON; say it plainly, with where.
+			const said = (() => { try { return JSON.parse(/\{[\s\S]*\}/.exec(error.stderr || error.message)?.[0] ?? ""); } catch { return undefined; } })();
+			const why = String(said?.error?.message ?? "").replace(/^cannot start "[^"]*": /, "");
+			if (why) throw new Error(`Could not start ${argv[0]} on ${host}${options.dir ? ` in ${options.dir}` : ""}: ${why}`);
+			throw error;
+		});
 		const address = String(JSON.parse(out).address ?? "");
 		if (!address) throw new Error(`hc run on ${host} returned no terminal`);
 		return local ? address : address.replace(new RegExp(`^${host}/`), "");

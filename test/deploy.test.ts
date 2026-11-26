@@ -83,3 +83,13 @@ test("a session that ends at once is an error with its last words", async (t) =>
 	});
 	await assert.rejects(deploy(herdr, tmp.dir, { host: "kit", harness: "pi", dir: "/nope" }, { waitMs: 0 }), /ended at once: hc: no such directory: \/nope/);
 });
+
+test("a program hc cannot start, as in a folder that is not there, is said plainly with where", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const herdr = new Herdr({ host: "kit", hosts: {}, allowPrompt: false }, async (argv) => {
+		if (argv[1] === "run") throw new Error('hc run --json --bg: {"error":{"hint":"check the program name and cwd","kind":"spawn_failed","message":"cannot start \\"pi\\": No such file or directory (os error 2)"}}');
+		return "";
+	});
+	await assert.rejects(deploy(herdr, tmp.dir, { host: "kit", harness: "pi", dir: "/nope" }, { waitMs: 0 }), /^Error: Could not start pi on kit in \/nope: No such file or directory \(os error 2\)$/);
+});
