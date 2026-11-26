@@ -418,8 +418,8 @@ export class Boards {
 	#agenda?: Held<Agenda>;
 	#agents?: Held<Agents>;
 	#workers?: { workers: AgentSummary[]; hosts: Agents["hosts"] };
-	/** Each host's last CPU counters, so its load is CPU spent since the last look. */
-	#cpu = new Map<string, CpuSample>();
+	/** Each host's last CPU counters and when they were read, so its load is CPU spent since the last look. */
+	#cpu = new Map<string, CpuSample & { at: number }>();
 	#roster?: { logins: SlotStatus[]; quotas: Quota[] };
 	#agendaRun?: Promise<Held<Agenda>>;
 	#workersRun?: Promise<void>;
@@ -623,9 +623,7 @@ export class Boards {
 				const herdr = this.#o.herdr;
 				const results = await Promise.all(herdr.hosts().map(async (host) => {
 					try {
-						const [workers, text] = await Promise.all([herdr.agents(host), herdr.load(host).catch(() => undefined)]);
-						const { sample, load } = text === undefined ? {} : parseLoad(text, this.#cpu.get(host));
-						if (sample) this.#cpu.set(host, sample);
+						const [workers, load] = await Promise.all([herdr.agents(host), this.#load(host).catch(() => undefined)]);
 						return { host, ok: true, workers, ...(load ? { load } : {}) };
 					} catch (error) {
 						return { host, ok: false, error: (error as Error).message.slice(0, 200), workers: [] as AgentSummary[] };
@@ -641,6 +639,22 @@ export class Boards {
 				this.#workersRun = undefined;
 			}
 		})());
+	}
+
+	/** HOST's load. Without a sample from the last minute, as on a first look, it reads twice a second apart for its CPU. */
+	async #load(host: string): Promise<Load | undefined> {
+		const herdr = this.#o.herdr;
+		let prev = this.#cpu.get(host);
+		if (!prev || Date.now() - prev.at > 60_000) {
+			const first = parseLoad(await herdr.load(host)).sample;
+			if (first) {
+				await new Promise((resolve) => setTimeout(resolve, 1_000));
+				prev = { ...first, at: Date.now() };
+			}
+		}
+		const { sample, load } = parseLoad(await herdr.load(host), prev);
+		if (sample) this.#cpu.set(host, { ...sample, at: Date.now() });
+		return load;
 	}
 
 	async #loadAccountState(): Promise<void> {
