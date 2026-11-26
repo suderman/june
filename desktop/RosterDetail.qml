@@ -243,7 +243,7 @@ Item {
                 x: Theme.consoleLook ? 10 : formPortrait.x + formPortrait.width + 10
                 y: 10
                 width: parent.width - x - 10
-                label: "Name"; placeholder: "e.g. Bolt"
+                label: "Name"; placeholder: "e.g. pax"
                 onEdited: text => page.fName = text
               }
             }
