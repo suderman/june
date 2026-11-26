@@ -300,6 +300,26 @@ export function leaderboard(dbPath: string, opts: { sinceMs?: number } = {}): Ag
 	}
 }
 
+/** Newest running run per task_id, for matching active dispatched workers to their roster clanker. */
+export function activeRunsByTask(dbPath: string): Map<string, AgentRun> {
+	const map = new Map<string, AgentRun>();
+	const db = openReadable(dbPath);
+	if (!db) return map;
+	try {
+		const rows = db
+			.prepare(
+				"SELECT id, task_id, task_title, agent, harness, host, model, started_at, ended_at, outcome, switches, note FROM agent_runs WHERE outcome = 'running' ORDER BY started_at DESC",
+			)
+			.all() as RawRow[];
+		for (const r of rows) {
+			if (!map.has(r.task_id)) map.set(r.task_id, mapRow(r));
+		}
+		return map;
+	} finally {
+		db.close();
+	}
+}
+
 /** Stats and recent runs keyed by agent slug, for the agents board. */
 export function statsByAgent(dbPath: string, recentLimit = 5): { stats: Map<string, AgentStats>; recent: Map<string, AgentRun[]> } {
 	const stats = new Map<string, AgentStats>();

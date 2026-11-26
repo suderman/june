@@ -337,3 +337,26 @@ test("board harness colours and roster list come from desktop/harnesses.mjs", ()
 		assert.equal(HARNESS_TONES.neon[name], HARNESS_TABLE[name].colours.neon);
 	}
 });
+
+test("agentsView names a worker by its clanker from terminal match or rosterAgent even once idle", () => {
+	const agents = {
+		generatedAt: 0,
+		hosts: [{ host: "kit", ok: true }],
+		workers: [
+			{ host: "kit", terminal: "t2", agent: "claude", status: "working", cwd: "/w", rosterAgent: "bolt" },
+			{ host: "kit", terminal: "t9", agent: "codex", status: "idle", cwd: "/w", rosterAgent: "rivet" },
+		],
+		needs: [], queued: [], reviewing: [], recent: [], tasks: {},
+		roster: [
+			{ card: { slug: "bolt", name: "Bolt", host: "kit", harness: "claude", problems: [] }, status: "busy (working)", terminal: "kit/t2" },
+			{ card: { slug: "rivet", name: "Rivet", host: "kit", harness: "codex", problems: [] }, status: "idle" },
+		],
+	};
+	const av = agentsView(agents, 0, "2026-11-25", "Alex");
+	assert.equal(av.roster[0].stamp, "ON DUTY");
+	assert.equal(av.roster[1].stamp, "");
+	assert.equal(av.working[0].name, "Bolt");
+	assert.equal(av.working[0].where, "Bolt · claude · kit/t2");
+	assert.equal(av.idle[0].name, "Rivet");
+	assert.equal(av.idle[0].where, "Rivet · codex · kit/t9");
+});

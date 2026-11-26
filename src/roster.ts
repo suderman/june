@@ -183,7 +183,36 @@ export function dispatchActive(id: string): boolean {
 }
 
 /**
- * Each roster card with whether it is busy (a live terminal carries its june.agent label) and, on this host, its
+ * Fill in `rosterAgent` on live workers that belong to a roster card on their host, from their `june.agent` label,
+ * else their linked task's assigned `:AGENT:`, else an active run record. Unnamed harness workers stay unnamed.
+ */
+export function assignRosterAgents(
+	cards: readonly Card[],
+	workers: readonly AgentSummary[],
+	resolve: { taskAgent?: (w: AgentSummary) => string | undefined; runAgent?: (taskId: string) => string | undefined } = {},
+): AgentSummary[] {
+	const byHost = new Map<string, Set<string>>();
+	for (const c of cards) {
+		if (c.problems.length || !c.host) continue;
+		let set = byHost.get(c.host);
+		if (!set) {
+			set = new Set();
+			byHost.set(c.host, set);
+		}
+		set.add(c.slug);
+	}
+	return workers.map((w) => {
+		if (w.rosterAgent) return w;
+		const slugs = byHost.get(w.host);
+		if (!slugs) return w;
+		const candidate = resolve.taskAgent?.(w)?.trim().toLowerCase() || (w.task ? resolve.runAgent?.(w.task)?.trim().toLowerCase() : undefined);
+		if (candidate && slugs.has(candidate)) return { ...w, rosterAgent: candidate };
+		return w;
+	});
+}
+
+/**
+ * Each roster card with whether it is busy (a live terminal carries its roster slug) and, on this host, its
  * battery: the binding weekly window left on the account its harness would pick now.
  */
 export function computeStanding(
@@ -192,7 +221,7 @@ export function computeStanding(
 	logins: readonly SlotStatus[],
 	quotas: readonly Quota[],
 	here: string,
-	active: (id: string) => boolean = dispatchActive,
+	active: (id: string, host?: string, status?: string) => boolean = (id, host, status) => (host && host !== here ? status === "working" : dispatchActive(id)),
 	now = Date.now(),
 ): RosterEntry[] {
 	return cards.map((card): RosterEntry => {
@@ -201,7 +230,7 @@ export function computeStanding(
 		if (!terminals) return { card, status: `${card.host} unreachable` };
 		// A dispatched worker holds its agent only while its run is active; a finished one's terminal stays open for
 		// review or resume without keeping the agent from its next task. A session started by hand holds it while open.
-		const busy = terminals.find((t) => t.rosterAgent === card.slug && (!t.task || card.host !== here || active(t.task)));
+		const busy = terminals.find((t) => t.rosterAgent === card.slug && (!t.task || active(t.task, card.host, t.status)));
 		if (busy) return { card, status: `busy (${busy.status})`, terminal: `${card.host}/${busy.terminal}` };
 		if (card.host !== here) return { card, status: "idle", battery: { reason: `quota is read on ${card.host}` } };
 		const mine = logins.filter((r) => r.harness === card.harness && r.loggedIn && !r.problems.length);

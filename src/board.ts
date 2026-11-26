@@ -8,8 +8,8 @@ import { accountsConfig, parseAccountsOrg, sharedQuotas, status as accountStatus
 import { type Config, protectedOf, shortHostname } from "./config.ts";
 import type { Logger } from "./runtime.ts";
 import { type OrgWorker, OrgWorkerDown } from "./org-worker.ts";
-import { computeStanding, parseRoster, type RosterEntry } from "./roster.ts";
-import { statsByAgent } from "./runs.ts";
+import { assignRosterAgents, computeStanding, dispatchActive, parseRoster, type RosterEntry } from "./roster.ts";
+import { activeRunsByTask, statsByAgent } from "./runs.ts";
 import { type AgentSummary, Herdr, type Run, runProcess } from "./tools/herdr.ts";
 import { orgTime } from "./tools/org.ts";
 
@@ -639,18 +639,49 @@ export class Boards {
 		}
 	}
 
-	#readRoster(): RosterEntry[] | undefined {
-		if (!this.#o.dataDir || !this.#workers) return undefined;
+	#readRoster(agenda: Agenda): { roster?: RosterEntry[]; workers: AgentSummary[] } {
+		const rawWorkers = this.#workers!.workers;
+		if (!this.#o.dataDir) return { workers: rawWorkers };
 		const file = join(this.#o.dataDir, "ROSTER.org");
 		const cards = parseRoster(existsSync(file) ? readFileSync(file, "utf8") : "");
-		const byHost = new Map<string, AgentSummary[] | undefined>();
-		for (const h of this.#workers.hosts) byHost.set(h.host, h.ok ? [] : undefined);
-		for (const w of this.#workers.workers) {
-			const list = byHost.get(w.host);
-			if (list) list.push(w);
+		const byId = new Map<string, Task>();
+		const bySession = new Map<string, Task>();
+		for (const task of Object.values(agenda.tasks)) {
+			if (task.id) byId.set(task.id, task);
+			for (const link of task.sessions) {
+				const session = /:([0-9a-f-]{36})/.exec(link)?.[1];
+				if (session) bySession.set(session, task);
+			}
 		}
-		const entries = computeStanding(cards, byHost, this.#roster?.logins ?? [], this.#roster?.quotas ?? [], this.#o.here);
-		if (!this.#o.stateDir) return entries;
+		let runningByTask = new Map<string, { agent: string }>();
+		if (this.#o.stateDir) {
+			try {
+				runningByTask = activeRunsByTask(join(this.#o.stateDir, "june.sqlite"));
+			} catch {
+				// Run history is optional; a busy or missing database never blocks the board.
+			}
+		}
+		const taskOf = (w: AgentSummary) => (w.task ? byId.get(w.task) : undefined) ?? (w.session ? bySession.get(w.session) : undefined);
+		const workers = assignRosterAgents(cards, rawWorkers, {
+			taskAgent: (w) => taskOf(w)?.agent,
+			runAgent: (taskId) => runningByTask.get(taskId)?.agent,
+		});
+		const byHost = new Map<string, AgentSummary[] | undefined>();
+		for (const h of this.#workers!.hosts) byHost.set(h.host, h.ok ? [] : undefined);
+		for (const w of workers) {
+			const list = byHost.get(w.host);
+			if (!list) continue;
+			// Attach the linked task's id when matched only by session, so finished task sessions do not hold a clanker busy.
+			const task = !w.task ? taskOf(w) : undefined;
+			list.push(task?.id ? { ...w, task: task.id } : w);
+		}
+		const active = (id: string, host?: string, status?: string) => {
+			const task = byId.get(id);
+			if (host === this.#o.here) return dispatchActive(id) || task?.state === "PROG";
+			return task ? task.state === "PROG" : status === "working";
+		};
+		const entries = computeStanding(cards, byHost, this.#roster?.logins ?? [], this.#roster?.quotas ?? [], this.#o.here, active);
+		if (!this.#o.stateDir) return { roster: entries, workers };
 		try {
 			const { stats, recent } = statsByAgent(join(this.#o.stateDir, "june.sqlite"));
 			for (const entry of entries) {
@@ -680,7 +711,7 @@ export class Boards {
 		} catch {
 			// Run history is optional; a busy or missing database never blocks the board.
 		}
-		return entries;
+		return { roster: entries, workers };
 	}
 
 	/** Join the latest agenda and workers into the agents board, and tell listeners when either board changed. */
@@ -693,8 +724,8 @@ export class Boards {
 		if (this.#workers) {
 			const { hosts, host, agent, agents } = this.#o.config.dispatch;
 			const dispatch = { hosts: [...hosts], ...(host ?? hosts[0] ? { host: host ?? hosts[0] } : {}), agents: [...(agents ?? [agent ?? "pi"])] };
-			const roster = this.#readRoster();
-			const value = { ...shapeAgents({ ...this.#workers, agenda, seen: this.#seen.marks(), user: this.#o.config.user.name ?? "" }), dispatch, ...(roster !== undefined ? { roster } : {}) };
+			const { roster, workers } = this.#readRoster(agenda);
+			const value = { ...shapeAgents({ workers, hosts: this.#workers.hosts, agenda, seen: this.#seen.marks(), user: this.#o.config.user.name ?? "" }), dispatch, ...(roster !== undefined ? { roster } : {}) };
 			this.#agents = hold(value, this.#agents);
 		}
 		const after = this.revisions();

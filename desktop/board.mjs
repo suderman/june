@@ -643,8 +643,10 @@ export function agentsView(agents, now, today, user, pending) {
 		};
 	});
 	const blocked = new Set(needs.filter((n) => n.kind === "blocked").map((n) => n.key));
-	// A worker in a roster clanker's terminal is that clanker, by name.
-	const clankerAt = (w) => rv.cards.find((c) => c.terminal !== "" && c.terminal === `${w.host}/${w.terminal}`);
+	// A worker in a roster clanker's terminal, or labelled with its slug, is that clanker by name.
+	const clankerAt = (w) =>
+		rv.cards.find((c) => c.terminal !== "" && c.terminal === `${w.host}/${w.terminal}`) ??
+		(w.rosterAgent ? rv.cards.find((c) => c.slug === w.rosterAgent) : undefined);
 	const worker = (w) => {
 		const task = w.taskKey ? tasks[w.taskKey] : undefined;
 		const place = String(w.cwd ?? "").split("/").filter((s) => s !== "");

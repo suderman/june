@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { HARNESSES as HARNESS_TABLE, HARNESS_NAMES, LAUNCHABLE_HARNESSES } from "../desktop/harnesses.mjs";
 import { HARNESSES as ACCOUNT_HARNESSES } from "../src/accounts.ts";
-import { applyRosterEdit, choose, computeStanding, editRosterFile, familyOf, findCard, formatCard, launchArgs, parseRoster } from "../src/roster.ts";
+import { applyRosterEdit, assignRosterAgents, choose, computeStanding, editRosterFile, familyOf, findCard, formatCard, launchArgs, parseRoster } from "../src/roster.ts";
 import { LAUNCHABLE } from "../src/tools/dispatch.ts";
-import { leaderboard, listRuns, recordRunEnd, recordRunStart, statsByAgent } from "../src/runs.ts";
+import { activeRunsByTask, leaderboard, listRuns, recordRunEnd, recordRunStart, statsByAgent } from "../src/runs.ts";
 import { tempDir } from "./helpers.ts";
 
 const ROSTER = `#+TITLE: Roster
@@ -249,4 +249,43 @@ test("desktop/harnesses.mjs is valid strict JSON for Emacs and drives accounts a
 	assert.deepEqual(JSON.parse(m[1]!), HARNESS_TABLE);
 	assert.deepEqual(Object.keys(ACCOUNT_HARNESSES), HARNESS_NAMES);
 	assert.deepEqual(LAUNCHABLE, LAUNCHABLE_HARNESSES);
+});
+
+test("assignRosterAgents and activeRunsByTask link unlabelled dispatched workers without claiming plain harness runs", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const db = join(tmp.dir, "june.sqlite");
+	recordRunStart(db, { run: "r1", taskId: "task-bolt", taskTitle: "Fix auth", agent: "bolt", harness: "claude", host: "kit", startedAt: 1000 });
+	recordRunStart(db, { run: "r2", taskId: "task-done", taskTitle: "Old task", agent: "rivet-jr", harness: "codex", host: "kit", startedAt: 2000 });
+	recordRunEnd(db, { run: "r2", outcome: "done", endedAt: 3000 });
+	const running = activeRunsByTask(db);
+	assert.equal(running.get("task-bolt")?.agent, "bolt");
+	assert.equal(running.get("task-done"), undefined);
+
+	const cards = parseRoster(`${ROSTER}\n* CogBot\n:PROPERTIES:\n:HOST: cog\n:HARNESS: pi\n:END:\n`);
+	const workers = [
+		{ host: "kit", terminal: "t1", agent: "claude", status: "working", cwd: "/w", task: "task-bolt" },
+		{ host: "kit", terminal: "t2", agent: "codex", status: "working", cwd: "/w", task: "task-rivet" },
+		{ host: "kit", terminal: "t3", agent: "pi", status: "working", cwd: "/w", task: "task-plain" },
+		{ host: "cog", terminal: "t4", agent: "claude", status: "working", cwd: "/w", task: "task-bolt" },
+		{ host: "cog", terminal: "t5", agent: "pi", status: "done", cwd: "/w", task: "task-cog", rosterAgent: "cogbot" },
+	];
+	const enriched = assignRosterAgents(cards, workers, {
+		taskAgent: (w) => (w.task === "task-rivet" ? "rivet-jr" : w.task === "task-plain" ? "pi" : undefined),
+		runAgent: (id) => running.get(id)?.agent,
+	});
+	assert.deepEqual(enriched.map((w) => [w.terminal, w.rosterAgent]), [
+		["t1", "bolt"],
+		["t2", "rivet-jr"],
+		["t3", undefined],
+		["t4", undefined],
+		["t5", "cogbot"],
+	]);
+	// On a remote host (cog), a finished terminal (status "done") does not keep CogBot ON DUTY.
+	const byHost = new Map([["kit", enriched.filter((w) => w.host === "kit")], ["cog", enriched.filter((w) => w.host === "cog")]]);
+	const standing = computeStanding(cards, byHost, [], [], "kit", (id, host, status) => (host === "kit" ? id === "task-bolt" || id === "task-rivet" : status === "working"));
+	const bySlug = new Map(standing.map((s) => [s.card.slug, [s.status, s.terminal]]));
+	assert.deepEqual(bySlug.get("bolt"), ["busy (working)", "kit/t1"]);
+	assert.deepEqual(bySlug.get("rivet-jr"), ["busy (working)", "kit/t2"]);
+	assert.deepEqual(bySlug.get("cogbot"), ["idle", undefined]);
 });

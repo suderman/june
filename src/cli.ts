@@ -889,7 +889,8 @@ async function quotaCommand(p: ReturnType<typeof paths>, args: string[], json: b
 /** Each roster card with whether it is busy (a live terminal carries its june.agent label) and, on this host, its battery:
  * the tightest window left on the account its harness would pick now. */
 async function rosterStanding(p: ReturnType<typeof paths>): Promise<import("./roster.ts").RosterEntry[]> {
-	const { computeStanding, parseRoster } = await import("./roster.ts");
+	const { assignRosterAgents, computeStanding, parseRoster } = await import("./roster.ts");
+	const { activeRunsByTask } = await import("./runs.ts");
 	const a = await import("./accounts.ts");
 	const { Herdr } = await import("./tools/herdr.ts");
 	const file = `${p.data}/ROSTER.org`;
@@ -897,8 +898,15 @@ async function rosterStanding(p: ReturnType<typeof paths>): Promise<import("./ro
 	const config = loadConfig(p);
 	const herdr = new Herdr(config.herdr);
 	const here = shortHostname();
+	let running = new Map<string, { agent: string }>();
+	try {
+		running = activeRunsByTask(p.database);
+	} catch {}
 	const hosts = new Map<string, Awaited<ReturnType<typeof herdr.agents>> | undefined>();
-	for (const host of new Set(cards.flatMap((c) => (c.host ? [c.host] : [])))) hosts.set(host, await herdr.agents(host).catch(() => undefined));
+	for (const host of new Set(cards.flatMap((c) => (c.host ? [c.host] : [])))) {
+		const found = await herdr.agents(host).catch(() => undefined);
+		hosts.set(host, found ? assignRosterAgents(cards, found, { runAgent: (taskId) => running.get(taskId)?.agent }) : undefined);
+	}
 	const accounts = a.accountsConfig(readConfigFile(p).accounts);
 	const logins = await a.status(accounts, people(p, a.parseAccountsOrg));
 	const quotas = logins.length ? await currentQuotas(a, accounts, p) : [];
