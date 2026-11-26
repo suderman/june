@@ -85,6 +85,9 @@ Item {
     hostKey = "";
   }
 
+  // Whether a sheet is open, so Esc has something to put away.
+  readonly property bool sheetOpen: detailKey !== "" || rosterSlug !== "" || rosterNew || hostKey !== ""
+
   // Put away the open sheet, if there is one; whether there was.
   function dismissSheet() {
     if (detailKey !== "") detailKey = "";
@@ -103,6 +106,7 @@ Item {
   }
 
   Sheet {
+    id: taskSheet
     anchors.fill: parent
     z: 2
     open: board.detailKey !== ""
@@ -124,6 +128,7 @@ Item {
   }
 
   Sheet {
+    id: clankerSheet
     anchors.fill: parent
     z: 2
     open: board.rosterSlug !== "" || board.rosterNew
@@ -141,6 +146,7 @@ Item {
   }
 
   Sheet {
+    id: hostSheet
     anchors.fill: parent
     z: 2
     open: board.hostKey !== ""
@@ -149,6 +155,7 @@ Item {
   }
 
   Flickable {
+    visible: !(taskSheet.covers || clankerSheet.covers || hostSheet.covers)
     anchors.fill: parent
     contentHeight: column.implicitHeight + 16
     clip: true

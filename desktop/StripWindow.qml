@@ -48,7 +48,17 @@ FloatingWindow {
   Shortcut { sequence: "Alt+3"; enabled: !win.layout.columns; onActivated: win.shell.windowTab = "chat" }
   Shortcut { sequence: "Alt+4"; enabled: !win.layout.columns; onActivated: win.shell.windowTab = "projects" }
   Shortcut { sequence: "Alt+5"; onActivated: win.shell.openApp("editor") }
-  Shortcut { sequence: "Escape"; enabled: preview.open; onActivated: preview.close() }
+  // Esc closes a preview first, then the sheet open on the board under the pointer; the window stays.
+  function dismissHoveredSheet() {
+    for (const b of [narrowAgents, narrowProjects, wideAgents, wideProjects])
+      if (b.visible && b.hovered && b.dismissSheet()) return true;
+    return false;
+  }
+  Shortcut {
+    sequence: "Escape"
+    enabled: preview.open || [narrowAgents, narrowProjects, wideAgents, wideProjects].some(b => b.visible && b.hovered && b.sheetOpen)
+    onActivated: if (preview.open) preview.close(); else win.dismissHoveredSheet()
+  }
   Shortcut { sequences: ["Right", "PgDown"]; enabled: preview.paging || preview.stepping; onActivated: preview.next() }
   Shortcut { sequences: ["Left", "PgUp"]; enabled: preview.paging || preview.stepping; onActivated: preview.previous() }
 
@@ -311,6 +321,7 @@ FloatingWindow {
 
   // Wide, the boards take the margins on either side of the strip.
   AgentsBoard {
+    id: wideAgents
     visible: win.layout.columns
     anchors.top: parent.top
     anchors.bottom: parent.bottom
@@ -336,6 +347,7 @@ FloatingWindow {
     onOpen: link => win.shell.openLink(link)
   }
   ProjectsBoard {
+    id: wideProjects
     visible: win.layout.columns
     anchors.top: parent.top
     anchors.bottom: parent.bottom

@@ -405,6 +405,8 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxSize().then(edgeToEdge), beyondViewportPageCount = 1) { page ->
                     val inset = Modifier.fillMaxSize().padding(top = headerDp, start = 16.dp, end = 16.dp)
+                    // The boards span their page, keeping the margins inside, so a sheet over them reaches both edges.
+                    val boardArea = Modifier.fillMaxSize().padding(top = headerDp)
                     when (page - first) {
                         -1 -> {
                             // The terminal asked for, else the last one shown, else the first agent the board lists.
@@ -419,9 +421,9 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                         in AgentsSections.indices -> AgentsBoard(
                             link, ready!!, palette, AgentsSections[page - first],
                             onSection = { s -> pages.launch { pager.animateScrollToPage(first + AgentsSections.indexOf(s)) } },
-                            inset, reset = agentsReset,
+                            boardArea, reset = agentsReset,
                         )
-                        chatPage + 1 -> ProjectsBoard(link, ready!!, palette, inset, reset = projectsReset)
+                        chatPage + 1 -> ProjectsBoard(link, ready!!, palette, boardArea, reset = projectsReset)
                         else -> stripPage(inset)
                     }
                 }

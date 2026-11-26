@@ -44,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
@@ -237,6 +238,9 @@ private fun TaskPage(link: Link, decisions: Decisions, colours: Colours, key: St
     )
 }
 
+/** The boards' side margins inside their pages; a sheet spans the page, edge to edge. */
+val BoardMargin = 16.dp
+
 /** The agents section's tabs, left to right, each a page of the pager (Conversation.kt); activity, beside the strip, is the default. */
 val AgentsSections = listOf("hosts", "clankers", "activity")
 
@@ -309,8 +313,8 @@ private fun ActivityPage(link: Link, decisions: Decisions, onSection: (String) -
         } else if (target.isNotEmpty() && target != "null") open.openUri(target)
     }
     val shown = keptWhileClosing(page)
-    Box(modifier) {
-        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Box(modifier.clipToBounds()) {
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = BoardMargin), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { AgentsMasthead(v, "activity", onSection) }
             if (v != null && colours != null) {
             val needs = v.optJSONArray("needs").objects()
@@ -402,8 +406,8 @@ private fun ClankersPage(link: Link, decisions: Decisions, onSection: (String) -
     val opened = rosterCreating || rosterSlug.isNotEmpty()
     // The sheet keeps the card it showed while it slides away: "+" while creating, else its slug.
     val shown = keptWhileClosing(if (rosterCreating) "+" else rosterSlug)
-    Box(modifier) {
-        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Box(modifier.clipToBounds()) {
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = BoardMargin), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { AgentsMasthead(v, "clankers", onSection) }
             if (v != null && colours != null) {
                 val canRank = v.optBoolean("rosterHasStats")
@@ -459,8 +463,8 @@ private fun HostsPage(link: Link, decisions: Decisions, onSection: (String) -> U
     OnReset(reset) { hostKey = "" }
     val hosts = v?.optJSONArray("hosts").objects()
     val shown = keptWhileClosing(hostKey)
-    Box(modifier) {
-        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Box(modifier.clipToBounds()) {
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = BoardMargin), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { AgentsMasthead(v, "hosts", onSection) }
             if (v != null && colours != null) {
                 item { SectionRule("HOSTS · ${hosts.size}") }
@@ -563,8 +567,8 @@ private fun ProjectsBoardPage(link: Link, decisions: Decisions, modifier: Modifi
     val show: (JSONObject) -> Unit = { e -> val task = e.optString("task"); if (task.isNotEmpty() && link.task(task) != null) page = task else e.optString("link").takeIf { it.isNotEmpty() && it != "null" }?.let { open.openUri(it) } }
     val v = view
     val shown = keptWhileClosing(page)
-    Box(modifier) {
-    LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Box(modifier.clipToBounds()) {
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = BoardMargin), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             val counts = v?.optJSONArray("counts").objects()
             val projects = v?.optJSONArray("projects").objects()

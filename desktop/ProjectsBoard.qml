@@ -41,6 +41,9 @@ Item {
   readonly property bool hovered: hover.hovered
   HoverHandler { id: hover }
 
+  // Whether a sheet is open, so Esc has something to put away.
+  readonly property bool sheetOpen: detailKey !== ""
+
   // Put away the open task page, if there is one; whether there was.
   function dismissSheet() {
     if (detailKey === "") return false;
@@ -59,6 +62,7 @@ Item {
   readonly property int openCount: view.counts.reduce((n, c) => n + c.n, 0)
 
   Sheet {
+    id: taskSheet
     anchors.fill: parent
     z: 2
     open: board.detailKey !== ""
@@ -86,6 +90,7 @@ Item {
   }
 
   Flickable {
+    visible: !taskSheet.covers
     anchors.fill: parent
     contentHeight: column.implicitHeight + 16
     clip: true

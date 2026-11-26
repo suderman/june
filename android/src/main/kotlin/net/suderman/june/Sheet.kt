@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
@@ -100,10 +101,18 @@ internal fun DetailSheet(open: Boolean, onDismiss: () -> Unit, content: @Composa
                 }
             }
             val shape = if (p.console) RectangleShape else RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
+            val edge = 1.5.dp
             Column(
                 Modifier.fillMaxSize().padding(top = 10.dp).offset { IntOffset(0, pulled.roundToInt()) }
+                    // Wider than the page by its border, so only the top edge and its corners show a line.
+                    .layout { measurable, constraints ->
+                        val px = edge.roundToPx()
+                        val w = constraints.maxWidth + 2 * px
+                        val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
+                        layout(constraints.maxWidth, placeable.height) { placeable.place(-px, 0) }
+                    }
                     .nestedScroll(pull)
-                    .background(p.page, shape).border(1.5.dp, p.pageInk, shape)
+                    .background(p.page, shape).border(edge, p.pageInk, shape)
                     // Taps on the sheet stay on it, not the board behind.
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
             ) {
@@ -116,9 +125,9 @@ internal fun DetailSheet(open: Boolean, onDismiss: () -> Unit, content: @Composa
                     ),
                 ) {
                     if (!p.console) Box(Modifier.align(Alignment.Center).size(width = 40.dp, height = 4.dp).background(p.muted.copy(alpha = 0.6f), RoundedCornerShape(2.dp)))
-                    PressTab("close", onDismiss, Modifier.align(Alignment.CenterEnd).padding(end = 8.dp), kind = Press.Quiet, small = true)
+                    PressTab("close", onDismiss, Modifier.align(Alignment.CenterEnd).padding(end = BoardMargin - 4.dp), kind = Press.Quiet, small = true)
                 }
-                Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp)) { content() }
+                Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = BoardMargin)) { content() }
             }
         }
     }
