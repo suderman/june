@@ -4,20 +4,39 @@
 import { HARNESSES as HARNESS_TABLE, HARNESS_ALIASES, HARNESS_NAMES, HARNESS_TONES, OTHER_HARNESS_COLOURS } from "./harnesses.mjs";
 export { HARNESS_TONES };
 
-/** The side columns' width and the gaps around them, and the strip's narrowest and widest. */
-export const SIDE = 268;
+/** The side columns' narrowest and widest widths, the gaps around them, and the strip's narrowest and widest. */
+export const MIN_SIDE = 368;
+export const MAX_SIDE = 460;
+export const SIDE = MIN_SIDE;
 export const GAP = 20;
-export const MIN_STRIP = 680;
+export const MIN_STRIP = 480;
 export const MAX_STRIP = 820;
 
 /**
- * How a window `width` wide lays out: three columns (agents, the strip, projects) while the strip keeps at least
- * MIN_STRIP, giving up some of its width first; otherwise tabs, the strip as wide as fits.
+ * How a window `width` wide lays out: three columns (agents, the strip, projects) once each side column keeps at least
+ * MIN_SIDE and the strip keeps at least MIN_STRIP. At that minimum the three columns are balanced; as the window widens
+ * both the strip and the side columns grow proportionally until each reaches its cap (MAX_STRIP and MAX_SIDE), after
+ * which the three columns stay centred without stretching the sidebars further. Narrower windows use tabs.
  */
 export function boardLayout(width) {
-	const strip = Math.min(MAX_STRIP, width - 2 * (SIDE + GAP) - 2 * GAP);
-	if (strip >= MIN_STRIP) return { columns: true, side: SIDE, gap: GAP, strip: strip };
-	return { columns: false, side: 0, gap: GAP, strip: Math.min(MAX_STRIP, width) };
+	const inner = width - 4 * GAP;
+	const minInner = 2 * MIN_SIDE + MIN_STRIP;
+	if (inner < minInner) return { columns: false, side: 0, gap: GAP, strip: Math.min(MAX_STRIP, width) };
+	const maxInner = 2 * MAX_SIDE + MAX_STRIP;
+	const t = Math.min(1, (inner - minInner) / (maxInner - minInner));
+	const side = Math.floor(MIN_SIDE + t * (MAX_SIDE - MIN_SIDE));
+	const strip = Math.floor(MIN_STRIP + t * (MAX_STRIP - MIN_STRIP));
+	return { columns: true, side, gap: GAP, strip };
+}
+
+/**
+ * Width for each side board in the desktop overlay's `boardsPaper` given the screen space left of the strip (`avail`),
+ * leaving 40 px of dimmed backdrop and three GAP gutters. Fits once each board gets at least MIN_SIDE, capped at MAX_SIDE.
+ */
+export function overlayBoards(avail) {
+	const side = Math.min(MAX_SIDE, Math.floor((avail - 40 - 3 * GAP) / 2));
+	if (side < MIN_SIDE) return { fits: false, side: 0, width: 0 };
+	return { fits: true, side, width: 2 * side + 3 * GAP };
 }
 
 /** Each state's chip: fill and ink, ink also the outline; both pass 4.5:1. */

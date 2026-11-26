@@ -1107,12 +1107,13 @@ ShellRoot {
     // "Agents and projects" in docs/interfaces.org). What a board opens takes the desktop client away, as a link does.
     Rectangle {
       id: boardsPaper
-      readonly property bool fits: window.width - page.width >= 2 * Board.SIDE + 3 * Board.GAP + 40
+      readonly property var layout: Board.overlayBoards(window.width - page.width)
+      readonly property bool fits: layout.fits
       visible: fits && page.stripPhase > 0
       anchors.right: page.left
       anchors.top: parent.top
       anchors.bottom: parent.bottom
-      width: 2 * Board.SIDE + 3 * Board.GAP
+      width: layout.width
       color: Theme.paper
       opacity: page.stripPhase
       transform: Translate { y: (1 - page.stripPhase) * 56 }
@@ -1125,7 +1126,7 @@ ShellRoot {
         anchors.topMargin: 16
         spacing: Board.GAP
         AgentsBoard {
-          width: Board.SIDE
+          width: boardsPaper.layout.side
           height: parent.height
           view: root.agentsView
     onSeen: key => root.markSeen(key)
@@ -1144,7 +1145,7 @@ ShellRoot {
           onOpen: link => { if (root.openLink(link)) root.hide(); }
         }
         ProjectsBoard {
-          width: Board.SIDE
+          width: boardsPaper.layout.side
           height: parent.height
           view: root.agendaView
     notice: root.taskNotice

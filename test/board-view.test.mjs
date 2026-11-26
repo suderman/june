@@ -1,15 +1,35 @@
 // The boards as the clients draw them (desktop/board.mjs), shared by the desktop client and the phone.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { HARNESS, HARNESS_TONES, ROSTER_HARNESSES, agendaView, agentsView, boardLayout, dayHeading, dayWord, dialogBlocks, dialogKind, docketNo, entryMeta, findTask, harnessOf, loadout, monthDays, pendingTask, pickerStart, quickDays, resetIn, rosterView, serviceNo, stampOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink, undoOf, quotaWhy } from "../desktop/board.mjs";
+import { HARNESS, HARNESS_TONES, ROSTER_HARNESSES, agendaView, agentsView, boardLayout, overlayBoards, dayHeading, dayWord, dialogBlocks, dialogKind, docketNo, entryMeta, findTask, harnessOf, loadout, monthDays, pendingTask, pickerStart, quickDays, resetIn, rosterView, serviceNo, stampOf, stampShort, startOf, startsAt, stateRows, taskDetail, taskLink, undoOf, quotaWhy } from "../desktop/board.mjs";
 import { HARNESSES as HARNESS_TABLE, HARNESS_NAMES } from "../desktop/harnesses.mjs";
 
-test("three columns fit a 1400 px window with the strip a little narrower, and tabs take over below about 1300", () => {
-	assert.deepEqual(boardLayout(1400), { columns: true, side: 268, gap: 20, strip: 784 });
-	assert.equal(boardLayout(1700).strip, 820, "never wider than the strip's own width");
-	assert.equal(boardLayout(1296).columns, true);
+test("three columns start balanced at 1296 px, grow together toward comfortable caps, and fall back to tabs below", () => {
+	assert.deepEqual(boardLayout(1296), { columns: true, side: 368, gap: 20, strip: 480 });
 	assert.deepEqual(boardLayout(1295), { columns: false, side: 0, gap: 20, strip: 820 });
 	assert.equal(boardLayout(390).strip, 390);
+	// Vertical monitor (1400 px) and laptop wide (1660 px) grow both the strip and the side columns.
+	const at1400 = boardLayout(1400);
+	assert.equal(at1400.columns, true);
+	assert.ok(at1400.side > 368 && at1400.side < 460);
+	assert.ok(at1400.strip > 480 && at1400.strip < 820);
+	assert.ok(2 * at1400.side + at1400.strip + 4 * at1400.gap <= 1400);
+	// Wide windows cap both the strip (820) and side columns (460) so sidebars never stretch too wide.
+	assert.deepEqual(boardLayout(1820), { columns: true, side: 460, gap: 20, strip: 820 });
+	assert.deepEqual(boardLayout(2560), { columns: true, side: 460, gap: 20, strip: 820 });
+	// Monotonic growth without overflow across the full transition range.
+	let prev = boardLayout(1296);
+	for (let w = 1297; w <= 2200; w++) {
+		const cur = boardLayout(w);
+		assert.ok(cur.side >= prev.side && cur.strip >= prev.strip, `monotonic at ${w}`);
+		assert.ok(2 * cur.side + cur.strip + 4 * cur.gap <= w, `fits within ${w}`);
+		prev = cur;
+	}
+	// Overlay side boards also scale between MIN_SIDE and MAX_SIDE.
+	assert.deepEqual(overlayBoards(835), { fits: false, side: 0, width: 0 });
+	assert.deepEqual(overlayBoards(836), { fits: true, side: 368, width: 796 });
+	assert.deepEqual(overlayBoards(872), { fits: true, side: 386, width: 832 });
+	assert.deepEqual(overlayBoards(1740), { fits: true, side: 460, width: 980 });
 });
 
 const task = (key, extra = {}) => ({ key, file: "work/demo/demo.org", line: 7, level: 1, title: key, tags: [], path: [], project: "Demo", sessions: [], ...extra });
