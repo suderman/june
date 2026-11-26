@@ -162,11 +162,14 @@ test("computeStanding combines roster cards, live workers, and account battery",
 		{ provider: "anthropic" as const, number: 1, fetched: Math.floor(now / 1000), windows: [{ name: "weekly", remaining: 75, resetAt: Math.floor((now + 7_200_000) / 1000) }] },
 		{ provider: "openai" as const, number: 1, fetched: Math.floor(now / 1000), windows: [{ name: "weekly", remaining: 40, resetAt: Math.floor((now + 36_000_000) / 1000) }] },
 	];
-	const standing = computeStanding([bolt!, rivet!], hosts, logins, quotas, "kit", () => true, now);
+	const cid = { ...bolt!, name: "cid", slug: "cid", host: "cog" };
+	hosts.set("cog", []);
+	const standing = computeStanding([bolt!, rivet!, cid], hosts, logins, quotas, "kit", () => true, now);
 	assert.deepEqual(standing.map((s) => [s.card.slug, s.status, s.terminal, s.battery && "account" in s.battery ? [s.battery.account, s.battery.weekly] : undefined]), [
 		["bolt", "busy (working)", "kit/t3", undefined],
 		["rivet-jr", "idle", undefined, ["codex1", 40]],
-	]);
+		["cid", "idle", undefined, ["claude1", 75]],
+	], "a clanker on another host shows the daemon's reading of the same accounts");
 });
 
 test("computeStanding shares Antigravity pools across same-group specialists and isolates Antigravity Claude from native Claude", () => {

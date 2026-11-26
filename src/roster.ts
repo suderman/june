@@ -266,8 +266,9 @@ export function assignRosterAgents(
 }
 
 /**
- * Each roster card with whether it is busy (a live terminal carries its roster slug) and, on this host, its
- * battery: the binding weekly window left on the account its harness would pick now.
+ * Each roster card with whether it is busy (a live terminal carries its roster slug) and its battery: the binding
+ * weekly window left on the account its harness would pick now. The same accounts are signed in on every host and only
+ * the daemon's host reads providers, so a clanker on another host takes its battery from these readings too.
  */
 export function computeStanding(
 	cards: readonly Card[],
@@ -286,7 +287,6 @@ export function computeStanding(
 		// review or resume without keeping the agent from its next task. A session started by hand holds it while open.
 		const busy = terminals.find((t) => t.rosterAgent === card.slug && (!t.task || active(t.task, card.host, t.status)));
 		if (busy) return { card, status: `busy (${busy.status})`, terminal: `${card.host}/${busy.terminal}` };
-		if (card.host !== here) return { card, status: "idle", battery: { reason: `quota is read on ${card.host}` } };
 		const mine = logins.filter((r) => r.harness === card.harness && r.loggedIn && !r.problems.length);
 		if (!mine.length) return { card, status: "idle", battery: { reason: `no ${card.harness} login here` } };
 		const ranked = rank(mine.map((slot) => ({ slot, quota: quotas.find((q) => q.provider === slot.provider && q.number === slot.number) })), now, card.model);
