@@ -7,6 +7,12 @@ plugins {
 
 android {
     namespace = "net.suderman.june"
+    // No lint in the release build: it downloads the Play SDK Index snapshot and Google Maven's indexes whatever checks
+    // are enabled, and Google rewrites them in place, while the Nix build pins every fetch by hash (deps.json), so each
+    // rewrite broke the build on any host without the old copy.
+    lint {
+        checkReleaseBuilds = false
+    }
     compileSdk = 37
     buildToolsVersion = "37.0.0"
 
