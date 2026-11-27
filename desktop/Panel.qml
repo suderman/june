@@ -652,7 +652,8 @@ Item {
       property var element
       property var box
       property bool open: false
-      readonly property var call: element ? element.items[0] : null
+      // items too: the slot's Binding can hand over its next element, of another kind, a moment before its when turns.
+      readonly property var call: element && element.items ? element.items[0] : null
       readonly property real w: Math.ceil(Math.min(label.implicitWidth + 24, panel.m.textWidth))
       readonly property real h: Math.ceil(label.height + 10)
       width: w
@@ -687,7 +688,7 @@ Item {
       property var element
       property var box
       property bool open: false
-      readonly property var calls: element ? element.items : []
+      readonly property var calls: element && element.items ? element.items : []
       readonly property real limit: Math.min(open ? 560 : 460, panel.m.textWidth)
       readonly property real w: Math.ceil(Math.min(Math.max(lines.implicitWidth + 28, 180), limit))
       readonly property real h: Math.ceil(lines.implicitHeight + 24)
