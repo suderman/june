@@ -7,10 +7,14 @@ Canvas {
   property color tint: Theme.neon ? Theme.accent : Theme.edge
   property real density: 0.16
   property real pitch: 3.5
+  // A colour painted under the dots, for a tone on a known surface: with it the canvas has no unpainted pixels, which
+  // Hyprland showed as holes through the desktop overlay's transparent window (Jon, 2026-11-26).
+  property color base: "transparent"
   visible: !Theme.consoleLook
   onPaint: {
     const ctx = getContext("2d");
     ctx.reset();
+    if (tone.base.a > 0) { ctx.fillStyle = tone.base; ctx.fillRect(0, 0, width, height); }
     ctx.fillStyle = tone.tint;
     ctx.globalAlpha = tone.density;
     const p = tone.pitch, r = p * 0.3;
@@ -23,4 +27,5 @@ Canvas {
   onHeightChanged: requestPaint()
   onTintChanged: requestPaint()
   onDensityChanged: requestPaint()
+  onBaseChanged: requestPaint()
 }

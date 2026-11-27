@@ -45,11 +45,16 @@ PanelWindow {
   property int dock: 22
   readonly property int gap: 8
 
-  // Rising from below the edge, and sinking back before the window goes.
+  // Rising from below the edge, and sinking back before the window goes; INSTANT skips it, when she trades places
+  // with the full strip (shell.qml miniBridge).
   property real rise: 0
-  Behavior on rise { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+  property bool instant: false
+  Behavior on rise { enabled: !win.instant; NumberAnimation { duration: 190; easing.type: Easing.OutCubic } }
   visible: shown || rise > 0.001
-  onShownChanged: rise = shown ? 1 : 0
+  onShownChanged: {
+    rise = shown ? 1 : 0;
+    if (shown && inputShown) Qt.callLater(() => composer.focusInput());
+  }
 
   anchors { bottom: true }
   implicitWidth: Math.min(Theme.stripWidth, (win.screen ? win.screen.width : Theme.stripWidth + 32) - 32)

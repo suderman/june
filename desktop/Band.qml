@@ -10,12 +10,8 @@ Item {
   width: parent ? parent.width : 0
   height: 32
 
-  Item {
-    anchors.fill: parent
-    anchors.margins: Theme.consoleLook ? 0 : 2
-    clip: true
-    Screentone { anchors.fill: parent; density: 0.13 }
-  }
+  // On its card's surface (Inked's fill), painted under the dots, and unclipped: the canvas keeps to its own size.
+  Screentone { anchors.fill: parent; anchors.margins: Theme.consoleLook ? 0 : 2; density: 0.13; base: Theme.surface }
   Words {
     anchors.left: parent.left
     anchors.leftMargin: 10

@@ -394,15 +394,22 @@ ShellRoot {
   property real unfold: 0
   // The compose bar stays put through the unfold when it is already on screen, coming from live June.
   property bool cardSteady: false
+  // Between live June and the full strip both show for the length of the unfold, her panel and compose bar where the
+  // strip's are, so nothing blinks: she goes once the strip has grown around her, and comes at once as it shrinks.
+  property bool miniBridge: false
   NumberAnimation {
     id: unfolding
     target: root
     property: "unfold"
-    duration: 320
+    duration: 220
     easing.type: Easing.OutQuart
     onFinished: {
-      if (root.unfold > 0.001) return;
+      if (root.unfold > 0.001) {
+        if (root.miniBridge) { root.miniBridge = false; live.instant = true; root.hideMini(); Qt.callLater(() => live.instant = false); }
+        return;
+      }
       root.shown = false;
+      if (root.miniBridge) { root.miniBridge = false; Qt.callLater(() => live.instant = false); }
     }
   }
   function unfoldTo(target) {
@@ -415,9 +422,10 @@ ShellRoot {
     const fromMini = miniShown;
     targetScreen = fromMini ? miniScreen : focusedScreen();
     cardSteady = fromMini;
-    // A draft started in the corner carries on in the strip.
+    // A draft started in live June carries on in the strip.
     if (fromMini && live.draft !== "") { composer.text = live.draft; live.draft = ""; }
-    hideMini();
+    if (fromMini) miniBridge = true;
+    else hideMini();
     shown = true;
     list.landOnNewest();
     unfoldTo(1);
@@ -425,6 +433,21 @@ ShellRoot {
   function hide() {
     if (!shown) return;
     cardSteady = false;
+    miniBridge = false;
+    unfoldTo(0);
+  }
+  // Tab in the strip's compose bar: shrink back into live June, her compose bar open with any draft.
+  function toMini() {
+    if (!shown) return;
+    if (!liveEnabled) { hide(); return; }
+    miniScreen = targetScreen;
+    if (composer.text !== "") { live.draft = composer.text; composer.clear(); }
+    live.instant = true;
+    miniShown = true;
+    miniSummoned = true;
+    miniInput = true;
+    miniBridge = true;
+    cardSteady = true;
     unfoldTo(0);
   }
 
@@ -566,7 +589,7 @@ ShellRoot {
   LiveWindow {
     id: live
     screen: root.miniScreen
-    shown: root.miniShown && !root.shown && root.liveEnabled
+    shown: root.miniShown && (!root.shown || root.miniBridge) && root.liveEnabled
     panelJson: root.newestPanel
     activity: root.activity
     poses: root.poses
@@ -1105,6 +1128,7 @@ ShellRoot {
         unattach: index => root.unattach(index)
         paste: fallback => root.pasteInto(fallback)
         pick: () => filePicker.open()
+        tabAction: () => root.toMini()
       }
     }
 
