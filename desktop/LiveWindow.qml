@@ -63,7 +63,15 @@ PanelWindow {
   color: "transparent"
   WlrLayershell.layer: WlrLayer.Overlay
   WlrLayershell.namespace: "june-live"
-  WlrLayershell.keyboardFocus: inputShown ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+  WlrLayershell.keyboardFocus: inputShown && !regrab ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+  // Ask for the keyboard again, as when the full strip, which held it, has just gone: Hyprland does not hand it on to a
+  // layer that asked while another held it (Jon, 2026-11-26: the third Tab went nowhere).
+  property bool regrab: false
+  function refocus() {
+    if (!inputShown) return;
+    regrab = true;
+    Qt.callLater(() => { regrab = false; composer.focusInput(); });
+  }
   // Only what is drawn takes the mouse; the rest lets clicks through to the desktop.
   mask: Region { item: drawn }
 

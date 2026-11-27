@@ -409,7 +409,7 @@ ShellRoot {
         return;
       }
       root.shown = false;
-      if (root.miniBridge) { root.miniBridge = false; Qt.callLater(() => live.instant = false); }
+      if (root.miniBridge) { root.miniBridge = false; live.refocus(); Qt.callLater(() => live.instant = false); }
     }
   }
   function unfoldTo(target) {
