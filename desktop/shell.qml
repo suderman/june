@@ -132,7 +132,7 @@ ShellRoot {
       const req = Desktop.focusWindowDispatch(state.address, Boolean(Hyprland.usingLua));
       if (req !== "") Hyprland.dispatch(req);
     }
-    stripWindow.focusComposer();
+    stripWindow.focusComposer(true);
   }
   onQuietChanged: if (quiet && miniShown && !miniSummoned) hideMini()
   onWindowVisibleChanged: if (windowVisible && miniShown && !miniSummoned) hideMini()

@@ -32,8 +32,10 @@ FloatingWindow {
   readonly property var layout: Board.boardLayout(width)
   // True only while this window is both shown and the compositor's active window (Window.active can stay true while hidden).
   readonly property bool focused: visible && column.Window.active
-  function focusComposer() {
-    if (win.layout.columns || win.tab === "chat") composer.focusInput();
+  function focusComposer(flash) {
+    if (!win.layout.columns && win.tab !== "chat") win.shell.windowTab = "chat";
+    composer.focusInput();
+    if (flash) composer.flash();
   }
   // In a narrow window, which of chat and the two boards shows (the shell keeps it, for `june-desktop tab`).
   readonly property string tab: shell.windowTab

@@ -26,6 +26,21 @@ Rectangle {
   function clear() { input.clear(); }
   function focusInput() { input.forceActiveFocus(); }
   function blurInput() { input.focus = false; }
+  // Quick accent flash + micro-pop when Left Alt routes focus to an already-visible June window.
+  property real flashStrength: 0
+  function flash() { focusFlash.restart(); }
+  SequentialAnimation {
+    id: focusFlash
+    NumberAnimation { target: composer; property: "flashStrength"; from: 0; to: 1; duration: 70; easing.type: Easing.OutCubic }
+    PauseAnimation { duration: 60 }
+    NumberAnimation { target: composer; property: "flashStrength"; from: 1; to: 0; duration: 380; easing.type: Easing.OutCubic }
+  }
+  transform: Scale {
+    origin.x: composer.width / 2
+    origin.y: composer.height / 2
+    xScale: 1 + 0.018 * composer.flashStrength
+    yScale: 1 + 0.06 * composer.flashStrength
+  }
 
   readonly property real shelf: attachments.length > 0 ? 54 : 0
   // The phone's compose bar: Theme.barHeight for a line, as tall as the boards' section bars beside it, growing with
@@ -130,5 +145,16 @@ Rectangle {
         event.accepted = true;
       }
     }
+  }
+
+  // Eye-catching beacon rim and wash drawn over the bar during focusFlash.
+  Rectangle {
+    anchors.fill: parent
+    radius: composer.radius
+    visible: composer.flashStrength > 0.001
+    color: Qt.alpha(Theme.accent, 0.28 * composer.flashStrength)
+    border.color: Qt.alpha(Theme.accent, 0.95 * composer.flashStrength)
+    border.width: 2.5
+    z: 2
   }
 }
