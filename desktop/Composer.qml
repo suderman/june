@@ -18,6 +18,10 @@ Rectangle {
   property var unattach: (index) => {}
   property var paste: (fallback) => fallback()
   property var pick: () => {}
+  // Tab and Esc in the text box, when the place it sits in gives them a meaning (minimised June: open the strip, put
+  // her away); without one, Tab moves focus as usual and Esc goes to the window.
+  property var tabAction: null
+  property var escAction: null
 
   function clear() { input.clear(); }
   function focusInput() { input.forceActiveFocus(); }
@@ -99,6 +103,8 @@ Rectangle {
       placeholderTextColor: Theme.consoleLook || Theme.neon ? Theme.muted : "#9a958a"
       background: null
       Keys.onPressed: event => {
+        if (event.key === Qt.Key_Tab && composer.tabAction) { composer.tabAction(); event.accepted = true; return; }
+        if (event.key === Qt.Key_Escape && composer.escAction) { composer.escAction(); event.accepted = true; return; }
         if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier) && input.selectedText === "") {
           composer.stop();
           event.accepted = true;

@@ -1,158 +1,197 @@
-// Live June: the desktop client's minimised form, at the middle of the focused screen's bottom, as wide as the strip
-// with her card where the strip's is, so neither she nor the input moves when the strip unfolds around them. Her card
-// shows what she is doing right now; it grows leftward to hold her latest reply or the user's input. It takes the keyboard only while the
-// input is open, and only where it draws does it take the mouse. The shell decides the state (see live.mjs) and when
-// she shows; see "Live June" in docs/interfaces.org.
+// Live June: the desktop client's minimised form, the bottom of the strip on its own (see "Live June, the minimised
+// form" in docs/interfaces.org). Her newest panel, the strip's own at the strip's width, sits at the middle of the focused
+// screen's bottom; summoned, the strip's compose bar is under it, where the strip has it, so neither moves when the full
+// strip grows up out of them. Above the panel, a shelf holds one small clanker for each session at work. She rises from
+// below the screen's edge when she shows and sinks back into it. Only what is drawn takes the mouse; the keyboard only
+// while the compose bar is open, where Tab opens the full strip. The shell decides when she shows (see live.mjs).
 import QtQuick
-import QtQuick.Controls
 import Quickshell
 import Quickshell.Wayland
-import "compose.mjs" as Compose
 
 PanelWindow {
   id: win
 
   property bool shown: false
-  property string liveState: "sipping"
-  property var art: null
-  property var reaction: null
-  property string face: ":)"
-  property string status: ""
-  property string message: ""
-  property bool messageShown: false
+  // The strip's newest panel (shell.qml strip.get(0).json), and what Panel draws it with.
+  property string panelJson: ""
+  property string activity: ""
+  property var poses: []
+  property real now: Date.now()
+  property real hourOverride: -1
+  property var scenery: ({ rooms: [], plates: [], props: [] })
+  property var sky: null
+  property string attached: ""
+  // Each working session, as the agents board lists it (board.mjs agentsView working): its harness, title and HOST|TERMINAL key.
+  property var shelf: []
   property bool inputShown: false
+  // The compose bar's hooks, as the strip's has them.
+  property var send: (text, followUp) => true
+  property var stop: () => {}
+  property var attachments: []
+  property var unattach: (index) => {}
+  property var paste: (fallback) => fallback()
+  property var pick: () => {}
   readonly property bool hovered: hover.hovered
-  // The note's text, so a draft can move to the strip's input and back.
-  property alias draft: field.text
+  // The draft, so it moves to the strip's compose bar and back.
+  property alias draft: composer.text
 
   signal openStrip()
-  signal submitted(string text, bool followUp)
-  signal wantInput()
+  signal visit(string host, string terminal)
   signal dismissed()
 
-  readonly property bool busy: cardBox.busy
-  readonly property int card: 150
-  readonly property int reach: 340
+  // The strip's measures (shell.qml page): its width, its side margins, and the compose bar's place at the bottom.
+  readonly property int margin: 16
+  // 22, or above the tab bar where the strip has one (a screen too narrow for the boards beside it).
+  property int dock: 22
+  readonly property int gap: 8
 
-  visible: shown
-  // Anchored to the bottom alone, the window sits at its middle; it is the strip's width (shell.qml page).
+  // Rising from below the edge, and sinking back before the window goes.
+  property real rise: 0
+  Behavior on rise { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+  visible: shown || rise > 0.001
+  onShownChanged: rise = shown ? 1 : 0
+
   anchors { bottom: true }
   implicitWidth: Math.min(Theme.stripWidth, (win.screen ? win.screen.width : Theme.stripWidth + 32) - 32)
-  implicitHeight: card + 190 + 22
+  implicitHeight: Math.min((win.screen ? win.screen.height : 900) - 40, content.implicitHeight)
   exclusionMode: ExclusionMode.Ignore
   color: "transparent"
   WlrLayershell.layer: WlrLayer.Overlay
   WlrLayershell.namespace: "june-live"
   WlrLayershell.keyboardFocus: inputShown ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
-  // Only what is drawn takes the mouse; the empty rest of the window lets clicks through to the desktop.
-  mask: Region { item: hitArea }
+  // Only what is drawn takes the mouse; the rest lets clicks through to the desktop.
+  mask: Region { item: drawn }
 
-  // The span of what is drawn: her card and status, and her reply or the user's note when one shows.
-  Item {
-    id: hitArea
-    readonly property real spanLeft: balloon.visible ? balloon.x : note.visible ? note.x : cardBox.x
-    readonly property real spanTop: Math.min(statusPill.visible ? statusPill.y : cardBox.y, balloon.visible ? balloon.y : cardBox.y, note.visible ? note.y : cardBox.y)
-    x: spanLeft
-    y: spanTop
-    width: cardBox.x + cardBox.width - spanLeft
-    height: cardBox.y + cardBox.height - spanTop
-  }
-
-  onInputShownChanged: if (inputShown) field.forceActiveFocus()
+  onInputShownChanged: if (inputShown) composer.focusInput()
 
   HoverHandler { id: hover }
 
-  // What she is doing, in a word, above her card.
-  Rectangle {
-    id: statusPill
-    visible: win.status !== ""
-    anchors.right: cardBox.right
-    anchors.bottom: cardBox.top
-    anchors.bottomMargin: 8
-    width: statusText.implicitWidth + 20
-    height: 24
-    radius: 6
-    color: Theme.cardFill
-    border.color: Theme.cardLine
-    border.width: 1.5
-    Text { id: statusText; anchors.centerIn: parent; text: win.status; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: Theme.cardBusy }
-  }
+  Item {
+    id: content
+    width: parent.width
+    height: parent.height
+    implicitHeight: shelfRow.height + win.gap + panel.height + (win.inputShown ? win.gap + composer.height : 0) + win.dock
+    transform: Translate { y: (1 - win.rise) * (content.implicitHeight + 24) }
 
-  // Her card: the same card the strip shows in this corner, so she does not move between the two.
-  LiveCard {
-    id: cardBox
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    anchors.rightMargin: 22
-    anchors.bottomMargin: 22
-    width: win.card
-    height: win.card
-    liveState: win.liveState
-    art: win.art
-    reaction: win.reaction
-    face: win.face
-    running: win.shown
-    onClicked: win.openStrip()
-  }
+    // The span of what is drawn, for the mask.
+    Item {
+      id: drawn
+      x: win.margin
+      y: shelfRow.y
+      width: parent.width - 2 * win.margin
+      height: (win.inputShown ? composer.y + composer.height : panel.y + panel.height) - shelfRow.y
+    }
 
-  // Her latest reply, growing out of her card, its tail toward her; above the user's note while they answer it. A click
-  // answers it.
-  Balloon {
-    id: balloon
-    visible: win.messageShown && win.message !== ""
-    anchors.right: cardBox.left
-    anchors.rightMargin: 18
-    anchors.bottom: note.visible ? note.top : cardBox.bottom
-    anchors.bottomMargin: note.visible ? 14 : 26
-    maxWidth: Math.min(win.reach + 180, cardBox.x - 16 - 18)
-    pixelSize: 16
-    rich: false
-    text: win.message
-    // From the bottom edge near her, pointing right at her card; a one-line balloon has no straight side to spare.
-    tail: ({ edge: "bottom", at: w - 26 - 11, base: 22, tip: { x: w + 16, y: h + 2 } })
-    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: win.wantInput() }
-  }
-
-  // The user's note to her, without the strip, where the strip's input is: from its left edge to her card. Enter
-  // steers, Shift+Enter queues, Esc puts her away.
-  Rectangle {
-    id: note
-    visible: win.inputShown
-    anchors.left: parent.left
-    anchors.leftMargin: 16
-    anchors.right: cardBox.left
-    anchors.rightMargin: 14
-    anchors.bottom: cardBox.bottom
-    anchors.bottomMargin: 16
-    height: Math.min(field.contentHeight + 26, 160)
-    radius: 14
-    color: Theme.noteFill
-    border.color: Theme.noteLine
-    border.width: 2
-    Text { id: marker; x: 14; y: 12; text: "›"; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 16; color: Theme.noteLine }
-    ScrollView {
-      x: marker.x + marker.width + 8
-      y: 8
-      width: note.width - x - 12
-      height: note.height - 14
-      TextArea {
-        id: field
-        placeholderText: "to june…"
-        wrapMode: TextEdit.Wrap
-        font.family: Theme.caption
-        font.weight: Font.Medium
-        font.pixelSize: 16
-        color: Theme.noteInk
-        placeholderTextColor: Theme.consoleLook || Theme.neon ? Theme.muted : "#7b88ad"
-        background: null
-        Keys.onPressed: event => {
-          if (event.key === Qt.Key_Escape) { win.dismissed(); event.accepted = true; return; }
-          if (event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter) return;
-          if (event.modifiers & Qt.AltModifier) { field.insert(field.cursorPosition, "\n"); event.accepted = true; return; }
-          if (field.text.trim() !== "") { win.submitted(field.text, (event.modifiers & Qt.ShiftModifier) !== 0); field.clear(); }
-          event.accepted = true;
+    // Who is working: a clanker each, bobbing gently; hover names its task, a click visits it.
+    Row {
+      id: shelfRow
+      x: win.margin + 10
+      anchors.bottom: panel.top
+      anchors.bottomMargin: win.gap
+      spacing: 12
+      height: win.shelf.length > 0 ? 52 : 0
+      Repeater {
+        model: win.shelf
+        delegate: Item {
+          id: bot
+          required property var modelData
+          required property int index
+          width: 34
+          height: 52
+          Clanker {
+            id: art
+            harness: bot.modelData.harness ?? "other"
+            size: 30
+            claws: true
+            x: 2
+            SequentialAnimation on y {
+              running: win.visible
+              loops: Animation.Infinite
+              PauseAnimation { duration: (bot.index * 370) % 900 }
+              NumberAnimation { from: 6; to: 0; duration: 1300; easing.type: Easing.InOutSine }
+              NumberAnimation { from: 0; to: 6; duration: 1300; easing.type: Easing.InOutSine }
+            }
+          }
+          Rectangle {
+            visible: botHover.hovered
+            anchors.bottom: art.top
+            anchors.left: parent.left
+            width: botLabel.implicitWidth + 14
+            height: 22
+            radius: 6
+            color: Theme.cardFill
+            border.color: Theme.cardLine
+            border.width: 1.5
+            Text { id: botLabel; anchors.centerIn: parent; text: bot.modelData.title ?? ""; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: Theme.cardBusy }
+          }
+          HoverHandler { id: botHover; cursorShape: Qt.PointingHandCursor }
+          TapHandler {
+            onTapped: {
+              const at = String(bot.modelData.key ?? "").split("|");
+              if (at.length === 2) win.visit(at[0], at[1]);
+            }
+          }
         }
       }
+    }
+
+    // Her newest panel, the strip's own; a click opens the full strip around it.
+    Item {
+      id: panel
+      x: win.margin
+      width: parent.width - 2 * win.margin
+      height: cell.item ? cell.item.height : 0
+      anchors.bottom: win.inputShown ? composer.top : parent.bottom
+      anchors.bottomMargin: win.inputShown ? win.gap : win.dock
+      Loader {
+        id: cell
+        width: parent.width
+        active: win.panelJson !== ""
+        sourceComponent: Theme.consoleLook ? consoleCell : comicCell
+      }
+      Component {
+        id: comicCell
+        Panel {
+          json: win.panelJson
+          width: panel.width
+          newest: true
+          activity: win.activity
+          poses: win.poses
+          now: win.now
+          hourOverride: win.hourOverride
+          scenery: win.scenery
+          sky: win.sky
+          attached: win.attached
+        }
+      }
+      Component {
+        id: consoleCell
+        ConsolePanel {
+          json: win.panelJson
+          width: panel.width
+          newest: true
+          activity: win.activity
+        }
+      }
+      TapHandler { onTapped: win.openStrip() }
+    }
+
+    // The strip's compose bar, where the strip has it. Tab opens the strip; Esc puts her away.
+    Composer {
+      id: composer
+      visible: win.inputShown
+      x: win.margin
+      width: parent.width - 2 * win.margin
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: win.dock
+      send: win.send
+      stop: win.stop
+      attachments: win.attachments
+      unattach: win.unattach
+      paste: win.paste
+      pick: win.pick
+      tabAction: () => win.openStrip()
+      escAction: () => win.dismissed()
     }
   }
 }

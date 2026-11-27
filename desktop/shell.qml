@@ -323,9 +323,6 @@ ShellRoot {
   property var artSources: ({})
   property var poses: []
   // Live June's art by state, the first set winning.
-  property var liveArt: ({})
-  // Live June's chibi reactions by expression, the first set winning.
-  property var chibiArt: ({})
   // Rooms, window views, and props from every set, the first set winning a shared id.
   property var scenery: ({ rooms: [], plates: [], props: [] })
 
@@ -367,16 +364,11 @@ ShellRoot {
     const sources = Object.assign({}, artSources);
     try {
       const manifest = JSON.parse(text);
-      sources[order] = { poses: Compose.readPoses(manifest, base), live: Live.readLive(manifest, base), chibi: Live.readChibi(manifest, base), scenery: Scenery.readScenery(manifest, base) };
+      sources[order] = { poses: Compose.readPoses(manifest, base), scenery: Scenery.readScenery(manifest, base) };
     }
-    catch (e) { console.warn("june desktop: no usable avatar set at", base); sources[order] = { poses: [], live: {}, chibi: {}, scenery: null }; }
+    catch (e) { console.warn("june desktop: no usable avatar set at", base); sources[order] = { poses: [], scenery: null }; }
     artSources = sources;
     const ordered = Object.keys(sources).map(Number).sort((a, b) => a - b).map(k => sources[k]);
-    const art = {};
-    const chibi = {};
-    for (let i = ordered.length - 1; i >= 0; i--) { Object.assign(art, ordered[i].live); Object.assign(chibi, ordered[i].chibi); }
-    liveArt = art;
-    chibiArt = chibi;
     scenery = Scenery.mergeScenery(ordered.map(s => s.scenery));
     // Real art only, once there is any: the base set's drawn placeholders are left out (Compose.mergePoses).
     poses = Compose.mergePoses(ordered.map(s => s.poses));
@@ -390,16 +382,18 @@ ShellRoot {
   FontLoader { source: root.fonts ? "file://" + root.fonts + "/ZenKakuGothicNew-Regular.ttf" : "" }
 
   ListModel { id: strip } // newest panel first, so the list grows upward from the input
+  // The newest panel's JSON, which live June shows on its own (a ListModel's rows do not notify a binding).
+  property string newestPanel: ""
 
   function focusedScreen() {
     const name = Hyprland.focusedMonitor?.name;
     return Quickshell.screens.find(s => s.name === name) || Quickshell.screens[0];
   }
-  // The unfold: 0 is her card alone in the corner, 1 the full strip at the right edge. About a quarter second either way.
+  // The unfold: 0 is live June alone (her newest panel and compose bar), 1 the full strip around them. About a quarter
+  // second either way.
   property real unfold: 0
-  // Her card stays put through the unfold when it is already on screen (from min mode, or back to it).
+  // The compose bar stays put through the unfold when it is already on screen, coming from live June.
   property bool cardSteady: false
-  property bool toMiniAfter: false
   NumberAnimation {
     id: unfolding
     target: root
@@ -409,12 +403,6 @@ ShellRoot {
     onFinished: {
       if (root.unfold > 0.001) return;
       root.shown = false;
-      if (root.toMiniAfter) {
-        root.toMiniAfter = false;
-        root.miniShown = true;
-        root.miniSummoned = true;
-        root.miniInput = true;
-      }
     }
   }
   function unfoldTo(target) {
@@ -430,25 +418,16 @@ ShellRoot {
     // A draft started in the corner carries on in the strip.
     if (fromMini && live.draft !== "") { composer.text = live.draft; live.draft = ""; }
     hideMini();
-    toMiniAfter = false;
     shown = true;
     list.landOnNewest();
     unfoldTo(1);
   }
   function hide() {
     if (!shown) return;
-    if (!toMiniAfter) cardSteady = false;
+    cardSteady = false;
     unfoldTo(0);
   }
-  // Shrink the strip back into her card, the note open with any draft.
-  function toMini() {
-    if (!liveEnabled) { hide(); return; }
-    miniScreen = targetScreen;
-    if (composer.text !== "") { live.draft = composer.text; composer.clear(); }
-    toMiniAfter = true;
-    cardSteady = true;
-    hide();
-  }
+
 
   // Live June, the minimised form. Summoned by the first Alt tap, she opens with the user's note ready; she also pops
   // up by herself with a reply that finishes while the strip is hidden, and tucks herself away after a while.
@@ -468,14 +447,7 @@ ShellRoot {
   property real now: Date.now()
   // An hour that lights every panel, set through the `light` IPC call to preview the day; -1 for each panel's own.
   property real lightHour: -1
-  // Her latest picked face, for the console's text face.
-  readonly property string faceExpression: {
-    for (let i = view.items.length - 1; i >= 0; i--) if (view.items[i].kind === "assistant" && view.items[i].expression) return view.items[i].expression;
-    return "idle";
-  }
-  readonly property string liveFace: Console.liveFace(liveState, faceExpression)
   readonly property string liveState: Live.liveState({ view: view, linked: linked, now: new Date(now), idleSince: idleSince, once: oneShot })
-  readonly property var liveWords: ({ typing: "writing", thinking: "thinking", digging: "digging", delegating: "delegating", watching: "watching", tidying: "tidying up", listening: "listening", speaking: "speaking", offline: "offline" })
 
   Timer { interval: 30000; running: true; repeat: true; onTriggered: root.now = Date.now() }
   Timer { id: oneShotEnd; onTriggered: { root.oneShot = null; root.now = Date.now(); } }
@@ -499,6 +471,7 @@ ShellRoot {
   function showMini() {
     if (shown) return;
     if (!liveEnabled) { show(); return; }
+    wantBoards();
     miniScreen = focusedScreen();
     if (liveState === "snoozing") playOnce("waking", 1500);
     miniShown = true;
@@ -530,34 +503,13 @@ ShellRoot {
     tuckAway.interval = Live.readingTime(miniText);
     tuckAway.restart();
   }
-  // Live June's reaction: when a reply's face is picked, she shows its chibi for a moment, then goes back to her loop.
-  property var reaction: null
-  property var seenFace: null
-  Timer { id: reactionEnd; interval: Live.REACTION_MS; onTriggered: root.reaction = null }
-  function react(expression) {
-    const art = Live.reactionArt(chibiArt, Compose.chain(expression));
-    if (!art) return;
-    reaction = { url: art.url, plain: ["serious", "gentle"].includes(expression) };
-    reactionEnd.restart();
-  }
-
-  // After each view change: note when a run ends, react to a newly picked face, and pop up for a newly finished
-  // desktop reply while the strip is hidden.
+  // After each view change: note when a run ends, and pop up for a newly finished desktop reply while the strip is
+  // hidden.
   function watchLive() {
     const running = Boolean(view.state.running || view.state.compacting);
     if (wasRunning && !running) idleSince = Date.now();
     wasRunning = running;
     now = Date.now();
-    const face = Live.newFace(view.items, seenFace);
-    if (seenFace === null) {
-      // On first sight, the faces already there are history: no reaction to them.
-      let latestFace = "";
-      for (let i = view.items.length - 1; i >= 0; i--) if (view.items[i].kind === "assistant" && view.items[i].expression) { latestFace = view.items[i].id; break; }
-      seenFace = latestFace;
-    } else if (face) {
-      seenFace = face.id;
-      if (miniShown || shown) react(face.expression);
-    }
     const latest = Live.newReply(view.items, seenReply);
     if (seenReply === null) { seenReply = latest ? latest.id : ""; return; }
     if (!latest) return;
@@ -599,12 +551,13 @@ ShellRoot {
     function scheme(name: string): void { if (Desktop.SCHEMES.includes(name)) root.scheme = name; }
     // The comic strip or the console look; anything else flips between them.
     function look(name: string): void { root.look = Console.LOOKS.includes(name) ? name : root.look === "console" ? "comic" : "console"; }
-    // Hidden, then live June with the note open, then the full strip, then hidden: one key for everything. When she has
-    // popped up by herself, the first press opens her note under her reply, as if she had been summoned.
+    // The Alt tap (Jon, 2026-11-26): live June on and off, her compose bar open; Tab there opens the full strip. When
+    // she has popped up by herself, the tap opens her compose bar under her news, as if she had been summoned; from
+    // the full strip it puts everything away. With live June off, it opens and closes the strip.
     function cycle(): void {
       if (root.shown) root.hide();
       else if (!root.liveEnabled) root.show();
-      else if (root.miniShown && root.miniInput) root.show();
+      else if (root.miniShown && root.miniInput) root.hideMini();
       else if (root.miniShown) root.answerMini();
       else root.showMini();
     }
@@ -614,20 +567,32 @@ ShellRoot {
     id: live
     screen: root.miniScreen
     shown: root.miniShown && !root.shown && root.liveEnabled
-    liveState: root.liveState
-    art: root.liveArt[root.liveState] ?? root.liveArt["sipping"] ?? null
-    reaction: root.reaction
-    face: root.liveFace
-    status: root.liveWords[root.liveState] ?? ""
-    message: root.miniText
-    messageShown: root.miniMessage
+    panelJson: root.newestPanel
+    activity: root.activity
+    poses: root.poses
+    now: root.now
+    hourOverride: root.lightHour
+    scenery: root.scenery
+    sky: root.view.state.sky ?? null
+    attached: root.attached
+    shelf: root.agentsView.working ?? []
     inputShown: root.miniInput
-    onOpenStrip: root.show()
-    onWantInput: root.answerMini()
-    onDismissed: root.hideMini()
-    onSubmitted: (text, followUp) => {
-      if (root.submit(text, followUp)) { root.miniInput = false; root.miniMessage = false; root.miniSummoned = false; tuckAway.interval = 8000; tuckAway.restart(); }
+    // Where the strip's compose bar is on her screen: on its tab bar when the boards do not fit beside the strip.
+    dock: Board.overlayBoards((root.miniScreen ? root.miniScreen.width : 1920) - Math.min(Theme.stripWidth, (root.miniScreen ? root.miniScreen.width : 1920) - 32)).fits ? 22 : 10 + 46 + 8
+    // Sent from her compose bar: it closes, and she stays a while to show the answer coming.
+    send: (text, followUp) => {
+      if (!root.submit(text, followUp)) return false;
+      root.miniInput = false; root.miniMessage = false; root.miniSummoned = false;
+      tuckAway.interval = 8000; tuckAway.restart();
+      return true;
     }
+    stop: () => root.stopJune()
+    attachments: root.outbox
+    unattach: index => root.unattach(index)
+    paste: fallback => root.pasteInto(fallback)
+    onOpenStrip: root.show()
+    onVisit: (host, terminal) => root.showSession(host, terminal)
+    onDismissed: root.hideMini()
   }
 
   FileView { id: tokenFile; path: Quickshell.env("JUNE_DESKTOP_TOKEN_FILE") || ""; blockLoading: true }
@@ -849,6 +814,7 @@ ShellRoot {
     syncWasRunning = running;
     const composed = Compose.composeStrip(list, past ? Strip.emptyView().state : view.state, poses, composeMemory, !past && Date.now() < faceHoldUntil);
     const rows = composed.reverse().map(p => ({ pid: p.id, json: JSON.stringify(p) }));
+    newestPanel = rows.length > 0 ? rows[0].json : "";
     let same = rows.length === strip.count;
     for (let i = 0; same && i < rows.length; i++) same = strip.get(i).pid === rows[i].pid;
     if (!same && rows.length === strip.count + 1) {
@@ -967,7 +933,6 @@ ShellRoot {
       // The unfold in two overlapping beats: the input grows out of her card, then the strip fades in, rising a little.
       readonly property real inputPhase: Math.min(1, root.unfold / 0.4)
       readonly property real stripPhase: Math.max(0, Math.min(1, (root.unfold - 0.2) / 0.8))
-      readonly property int dockHeight: 150 + 22
 
       // The paper fades in behind the input, rising the last few dozen pixels into place: a short, soft move rather than
       // a wipe across the whole screen.
@@ -1065,7 +1030,8 @@ ShellRoot {
             visible: boardsPaper.fits || root.overlayTab === "chat"
             anchors.top: masthead.bottom
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: page.dockHeight + 8
+            // Its newest panel ends just above the compose bar, as live June's does.
+            anchors.bottomMargin: page.height - composer.y + 8
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.leftMargin: 16
@@ -1103,7 +1069,7 @@ ShellRoot {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.leftMargin: 16
-            anchors.rightMargin: root.overlayTab === "chat" ? (150 + 22 + 14) : 16
+            anchors.rightMargin: 16
             anchors.bottomMargin: 10
             height: 46
             tab: root.overlayTab
@@ -1120,33 +1086,19 @@ ShellRoot {
         }
       }
 
-      // Live June's card, in the corner where min mode keeps her; a click shrinks the strip back down to her.
-      LiveCard {
-        id: maxCard
-        visible: boardsPaper.fits || root.overlayTab === "chat"
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.rightMargin: 22
-        anchors.bottomMargin: 22
-        liveState: root.liveState
-        art: root.liveArt[root.liveState] ?? root.liveArt["sipping"] ?? null
-        reaction: root.reaction
-        face: root.liveFace
-        running: root.shown && visible
-        // Already on screen when the strip grows out of min mode or shrinks back to it; otherwise she fades in with it.
-        opacity: root.cardSteady ? 1 : Math.min(1, root.unfold * 3)
-        onClicked: root.toMini()
-      }
-
-      // The user's balloon, growing leftward out of her card; Ctrl+N and Ctrl+P page through the strip, Esc hides.
+      // The compose bar across the strip, where live June has hers: the strip grows up out of it and her newest panel,
+      // and shrinks back down into them. In the narrow layout it sits on the tab bar.
       Composer {
         id: composer
-        anchors.right: maxCard.left
-        anchors.rightMargin: 14
-        anchors.bottom: maxCard.bottom
-        anchors.bottomMargin: 44
-        width: Math.max(0, maxCard.x - 14 - 16) * page.inputPhase
-        visible: (boardsPaper.fits || root.overlayTab === "chat") && width > 30
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: 16
+        anchors.rightMargin: 16
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: boardsPaper.fits ? 22 : 10 + 46 + 8
+        visible: boardsPaper.fits || root.overlayTab === "chat"
+        // Already on screen when the strip grows out of live June or shrinks back to her; otherwise it fades in with it.
+        opacity: root.cardSteady ? 1 : page.inputPhase
         send: (text, followUp) => root.submit(text, followUp)
         stop: () => root.stopJune()
         attachments: root.outbox
