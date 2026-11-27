@@ -88,21 +88,22 @@ Singleton {
   // Each clanker's frame colour by harness; the console has none, so its frames use the edge.
   readonly property var harnessTones: pick(Harnesses.HARNESS_TONES.paper, Harnesses.HARNESS_TONES.neon, {}, {})
   function harnessTone(name) { return harnessTones[name] ?? harnessTones.other ?? edge; }
-  // The boards' type scale in pixels, each with its line height set: Zen Kaku Gothic New's own is nearly a line tall,
+  // The boards' type scale in pixels, the phone's in sp (Look.Type), so the boards keep the phone's proportions to the
+  // strip, whose lettering already matches it. Each has its line height set: Zen Kaku Gothic New's own is nearly a line tall,
   // so a wrapped title would otherwise read as two rows. Words.qml sets a Text from a role.
   readonly property var type: ({
-    masthead: { family: display, size: consoleLook ? 17 : 22, line: consoleLook ? 22 : 27, weight: consoleLook ? Font.Bold : Font.Normal, spacing: 0 },
-    title: { family: caption, size: consoleLook ? 14 : 16, line: consoleLook ? 19 : 21, weight: Font.Bold, spacing: 0 },
-    name: { family: display, size: consoleLook ? 13 : 15, line: consoleLook ? 17 : 19, weight: consoleLook ? Font.Bold : Font.Normal, spacing: 0 },
-    row: { family: caption, size: consoleLook ? 12 : 13, line: 17, weight: Font.Bold, spacing: 0 },
-    meta: { family: caption, size: 11, line: 15, weight: Font.Medium, spacing: 0 },
-    label: { family: caption, size: 9.5, line: 13, weight: Font.Bold, spacing: 1.1 },
-    section: { family: caption, size: 10.5, line: 14, weight: Font.Bold, spacing: 1.3 },
-    button: { family: caption, size: 12, line: 16, weight: Font.Bold, spacing: 0 },
-    value: { family: caption, size: 13, line: 17, weight: Font.Medium, spacing: 0 },
-    body: { family: caption, size: 12.5, line: 18, weight: Font.Medium, spacing: 0 },
-    lettering: { family: lettering, size: consoleLook ? 12 : 13, line: 18, weight: Font.Medium, spacing: 0 },
-    number: { family: "monospace", size: 10.5, line: 14, weight: Font.Bold, spacing: 0.4 },
+    masthead: { family: display, size: consoleLook ? 20 : 26, line: consoleLook ? 26 : 32, weight: consoleLook ? Font.Bold : Font.Normal, spacing: 0 },
+    title: { family: caption, size: consoleLook ? 17 : 20, line: consoleLook ? 23 : 26, weight: Font.Bold, spacing: 0 },
+    name: { family: display, size: consoleLook ? 16 : 18, line: consoleLook ? 21 : 23, weight: consoleLook ? Font.Bold : Font.Normal, spacing: 0 },
+    row: { family: caption, size: consoleLook ? 14 : 15, line: 20, weight: Font.Bold, spacing: 0 },
+    meta: { family: caption, size: 12.5, line: 17, weight: Font.Medium, spacing: 0 },
+    label: { family: caption, size: 10.5, line: 14, weight: Font.Bold, spacing: 1.2 },
+    section: { family: caption, size: 12, line: 16, weight: Font.Bold, spacing: 1.4 },
+    button: { family: caption, size: 14, line: 18, weight: Font.Bold, spacing: 0 },
+    value: { family: caption, size: 15, line: 20, weight: Font.Medium, spacing: 0 },
+    body: { family: caption, size: 14, line: 20, weight: Font.Medium, spacing: 0 },
+    lettering: { family: lettering, size: consoleLook ? 14 : 15, line: 20.5, weight: Font.Medium, spacing: 0 },
+    number: { family: "monospace", size: 12, line: 16, weight: Font.Bold, spacing: 0.5 },
   })
 
   readonly property string lettering: consoleLook ? "monospace" : "Shantell Sans"
@@ -110,6 +111,8 @@ Singleton {
   readonly property string caption: consoleLook ? "monospace" : "Zen Kaku Gothic New"
 
   readonly property int stripWidth: 820
+  // The bottom bars, the compose bar and the boards' section bars, as the phone has both: one height, a pill.
+  readonly property int barHeight: 46
   readonly property real line: consoleLook ? 1.5 : 2.5
 
   function hash(id) {

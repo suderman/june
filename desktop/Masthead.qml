@@ -23,11 +23,12 @@ Row {
   // The day picker is the strip's: off while a narrow window shows a board instead.
   property bool showDays: true
 
-  height: 30
+  // The boards' masthead role for her name, as "agents" and "projects" have it, and their summary's size for the rest.
+  height: Theme.type.masthead.line
   spacing: 12
   // The follow list hangs below over the strip.
   z: 5
-  Text { text: "june"; font.family: Theme.display; font.pixelSize: 22; color: Theme.pageInk; anchors.verticalCenter: parent.verticalCenter }
+  Words { text: "june"; role: "masthead"; color: Theme.pageInk; anchors.verticalCenter: parent.verticalCenter }
   // The day on show: today, live, or a past day, fixed. ‹ and › step between days with conversation, and a click on the
   // date opens the calendar and search.
   Row {
@@ -43,7 +44,7 @@ Row {
       objectName: "earlierDay"
       visible: day.before !== ""
       text: "‹"
-      font.pixelSize: 18; color: Theme.pageInk
+      font.pixelSize: 20; color: Theme.pageInk
       anchors.verticalCenter: parent.verticalCenter
       MouseArea { anchors.fill: parent; anchors.margins: -6; cursorShape: Qt.PointingHandCursor; onClicked: day.b.openDay(day.before) }
     }
@@ -51,7 +52,7 @@ Row {
       id: date
       objectName: "date"
       text: (day.b !== null && day.b.past ? Strip.dayLabel(day.current, day.b.today) : "today") + " ▾"
-      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
+      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: Theme.type.meta.size
       color: day.b !== null && day.b.past ? Theme.accent : Theme.muted
       anchors.verticalCenter: parent.verticalCenter
       MouseArea { anchors.fill: parent; anchors.margins: -4; cursorShape: Qt.PointingHandCursor; onClicked: calendar.opened ? calendar.close() : calendar.open() }
@@ -61,7 +62,7 @@ Row {
       objectName: "laterDay"
       visible: day.after !== ""
       text: "›"
-      font.pixelSize: 18; color: Theme.pageInk
+      font.pixelSize: 20; color: Theme.pageInk
       anchors.verticalCenter: parent.verticalCenter
       MouseArea { anchors.fill: parent; anchors.margins: -6; cursorShape: Qt.PointingHandCursor; onClicked: day.b.openDay(day.after) }
     }
@@ -69,7 +70,7 @@ Row {
       objectName: "backToToday"
       visible: day.b !== null && day.b.past !== null
       text: "back to today"
-      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13; color: Theme.muted
+      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: Theme.type.meta.size; color: Theme.muted
       anchors.verticalCenter: parent.verticalCenter
       MouseArea { anchors.fill: parent; anchors.margins: -4; cursorShape: Qt.PointingHandCursor; onClicked: day.b.backToToday() }
     }
@@ -80,7 +81,7 @@ Row {
     width: Math.min(implicitWidth, Math.max(0, masthead.width - x - (meanwhileBox.visible ? meanwhileBox.width + masthead.spacing : 0)))
     elide: Text.ElideRight
     text: (!masthead.linked ? (masthead.refusals >= 2 ? "pairing needed: check this device's token" : "reconnecting to " + masthead.host + "…") : masthead.status) + (masthead.quiet ? " · do not disturb" : "") + (masthead.linked && masthead.detail.length > 0 ? (masthead.detailOpen ? "  ▴" : "  ▾") : "")
-    font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
+    font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: Theme.type.meta.size
     color: masthead.linked && !masthead.detail.some(f => f.needsYou) ? Theme.muted : Theme.accent
     MouseArea {
       anchors.fill: parent
@@ -111,7 +112,7 @@ Row {
           delegate: Text {
             required property var modelData
             text: modelData.title + "  ·  " + modelData.state + (modelData.needsYou ? "   dismiss" : "")
-            font.family: Theme.caption; font.pixelSize: 12; font.weight: modelData.needsYou ? Font.Bold : Font.Normal
+            font.family: Theme.caption; font.pixelSize: Theme.type.meta.size; font.weight: modelData.needsYou ? Font.Bold : Font.Normal
             color: modelData.needsYou ? Theme.cardFail : Theme.cardInk
             MouseArea {
               anchors.fill: parent
@@ -139,7 +140,7 @@ Row {
       id: meanwhile
       anchors.centerIn: parent
       text: "meanwhile, on " + masthead.host + " · " + (masthead.background === 1 ? "1 brief" : masthead.background + " briefs")
-      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
+      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: Theme.type.meta.size
       color: Theme.cardBusy
     }
   }

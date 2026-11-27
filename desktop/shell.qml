@@ -1179,6 +1179,8 @@ ShellRoot {
         anchors.fill: parent
         anchors.margins: Board.GAP
         anchors.topMargin: 16
+        // The compose bar's line, so the section bars end where it does.
+        anchors.bottomMargin: 22
         AgentsBoard {
           id: wideAgents
           width: boardsPaper.layout.side
@@ -1220,6 +1222,8 @@ ShellRoot {
         anchors.fill: parent
         anchors.margins: Board.GAP
         anchors.topMargin: 16
+        // The compose bar's line, so the section bars end where it does.
+        anchors.bottomMargin: 22
         ProjectsBoard {
           id: wideProjects
           width: boardsPaper.layout.side

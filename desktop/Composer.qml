@@ -28,11 +28,14 @@ Rectangle {
   function blurInput() { input.focus = false; }
 
   readonly property real shelf: attachments.length > 0 ? 54 : 0
-  height: Math.min(input.contentHeight + 34, 220) + shelf
-  radius: Theme.consoleLook ? 6 : Math.min(height / 2, 30)
-  color: Theme.balloon
-  border.color: Theme.consoleLook ? Theme.muted : Theme.balloonLine
-  border.width: Theme.consoleLook ? 1.5 : 3
+  // The phone's compose bar: Theme.barHeight for a line, as tall as the boards' section bars beside it, growing with
+  // more; the section bars' fill and line, a pill.
+  readonly property real words: Math.min(Math.max(Theme.barHeight, input.contentHeight + 24), 220)
+  height: words + shelf
+  radius: Theme.consoleLook ? 6 : Math.min(height / 2, Theme.barHeight / 2)
+  color: Theme.surface
+  border.color: Theme.rule
+  border.width: 1
   clip: true
 
   // Attached pictures as thumbnails and files by name, above the words.
@@ -77,28 +80,33 @@ Rectangle {
     }
   }
 
-  // Attach files from a picker.
-  Text {
+  // Attach files from a picker: the phone's 36-pixel button at the bar's last line.
+  Item {
     id: plus
-    x: 14
-    anchors.bottom: parent.bottom; anchors.bottomMargin: (Math.min(input.contentHeight + 34, 220) - height) / 2
-    text: "+"
-    font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 22; color: Theme.muted
-    MouseArea { anchors.fill: parent; anchors.margins: -6; cursorShape: Qt.PointingHandCursor; onClicked: composer.pick() }
+    x: 5
+    width: 36; height: 36
+    anchors.bottom: parent.bottom; anchors.bottomMargin: 5
+    Text {
+      anchors.centerIn: parent
+      text: "+"
+      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 22; color: Theme.muted
+    }
+    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: composer.pick() }
   }
 
   ScrollView {
     anchors.fill: parent
-    anchors.leftMargin: 36
-    anchors.rightMargin: 26
-    anchors.topMargin: 10 + composer.shelf
-    anchors.bottomMargin: 10
+    anchors.leftMargin: 5 + 36 + 6
+    anchors.rightMargin: 18
+    anchors.topMargin: 12 + composer.shelf
+    anchors.bottomMargin: 12
     TextArea {
       id: input
       placeholderText: Theme.consoleLook ? "› message june" : "to june…"
       wrapMode: TextEdit.Wrap
+      padding: 0
       font.family: Theme.lettering
-      font.pixelSize: Theme.consoleLook ? 15 : 19
+      font.pixelSize: 15
       color: Theme.balloonInk
       placeholderTextColor: Theme.consoleLook || Theme.neon ? Theme.muted : "#9a958a"
       background: null

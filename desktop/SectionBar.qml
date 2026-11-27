@@ -12,10 +12,11 @@ Rectangle {
   readonly property int at: Math.max(0, sections.findIndex(s => s.id === current))
   readonly property real cell: (width - 8) / Math.max(1, sections.length)
 
-  implicitHeight: 40
+  // The compose bar's height, fill and line, so the bottom bars line up across the columns as on the phone.
+  implicitHeight: Theme.barHeight
   radius: Theme.consoleLook ? 0 : height / 2
   color: Theme.surface
-  border.color: Theme.muted
+  border.color: Theme.rule
   border.width: 1
 
   // The fill under the showing section, sliding when it changes.

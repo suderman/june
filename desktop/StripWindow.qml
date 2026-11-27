@@ -89,7 +89,7 @@ FloatingWindow {
       Text {
         anchors.verticalCenter: parent.verticalCenter
         text: win.settingsOpen ? "settings ▴" : "settings"
-        font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
+        font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: Theme.type.meta.size
         color: win.settingsOpen ? Theme.pageInk : Theme.muted
         MouseArea { anchors.fill: parent; anchors.margins: -4; cursorShape: Qt.PointingHandCursor; onClicked: win.settingsOpen = !win.settingsOpen }
       }
@@ -411,7 +411,7 @@ FloatingWindow {
       id: label
       anchors.centerIn: parent
       text: pill.text
-      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
+      font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: Theme.type.button.size
       color: pill.on ? Theme.paper : Theme.pageInk
     }
     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: pill.clicked() }

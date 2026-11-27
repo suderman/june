@@ -17,7 +17,7 @@ Rectangle {
     width: Math.min(implicitWidth, toast.width - 28)
     wrapMode: Text.Wrap
     text: toast.text
-    font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 13
+    font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: Theme.type.button.size
     color: Theme.captionInk
   }
 }

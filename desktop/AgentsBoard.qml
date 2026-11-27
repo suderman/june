@@ -384,7 +384,7 @@ Item {
                 required property int index
                 first: index === 0
                 title: modelData.title; meta: modelData.who
-                lead: board.whenLead(modelData.when); leadWidth: 58
+                lead: board.whenLead(modelData.when); leadWidth: 66
                 onClicked: board.show(modelData.task, modelData.link ?? "")
               }
             }

@@ -48,7 +48,7 @@ Item {
     anchors.verticalCenter: parent.verticalCenter
     spacing: 1
     Words { width: parent.width; role: "row"; wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight; text: stub.title }
-    Words { visible: stub.quote !== ""; width: parent.width; role: "lettering"; font.pixelSize: 12; wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight; text: "“" + stub.quote + "”"; color: Theme.surfaceMuted }
+    Words { visible: stub.quote !== ""; width: parent.width; role: "lettering"; font.pixelSize: Theme.type.meta.size * 1.1; wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight; text: "“" + stub.quote + "”"; color: Theme.surfaceMuted }
     Words { visible: stub.meta !== ""; width: parent.width; role: "meta"; elide: Text.ElideRight; text: stub.meta; color: stub.overdue ? Theme.accent : Theme.surfaceMuted }
   }
   Stamp {

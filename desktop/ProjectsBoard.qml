@@ -169,7 +169,7 @@ Item {
                 required property int index
                 first: index === 0
                 title: modelData.title; meta: modelData.meta; stamp: modelData.state ?? ""
-                lead: modelData.allDay ? "all day" : (modelData.time ?? ""); leadWidth: 46
+                lead: modelData.allDay ? "all day" : (modelData.time ?? ""); leadWidth: 54
                 overdue: modelData.overdue ?? false
                 opens: (modelData.task ?? "") !== "" || (modelData.link ?? "") !== ""
                 onClicked: board.show(modelData)
