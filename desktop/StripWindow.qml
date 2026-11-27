@@ -147,7 +147,7 @@ FloatingWindow {
     if (res.action === "previewCopy") { if (preview.kind === "artifact" && preview.what?.text) { Quickshell.clipboardText = preview.what.text; win.shell.say("copied"); } return; }
     if (res.action === "previewExternal") { if (preview.kind !== "artifact" && preview.what?.url) { preview.close(); Qt.openUrlExternally(preview.what.url); } return; }
     if (res.action === "enterInsert") { win.enterInsert(); return; }
-    if (res.action === "back") {
+    if (res.action === "escape" || res.action === "quit") {
       if (preview.open) { preview.close(); return; }
       if (win.activeColumn === "agents" && activeAgentsBoard().dismissSheet()) return;
       if (win.activeColumn === "projects") {
@@ -252,8 +252,11 @@ FloatingWindow {
   }
   Shortcut {
     sequence: "Escape"
-    enabled: !win.normalMode && !masthead.browseOpen && (preview.open || [narrowAgents, narrowProjects, wideAgents, wideProjects].some(b => b.visible && b.hovered && b.sheetOpen))
-    onActivated: if (preview.open) preview.close(); else win.dismissHoveredSheet()
+    enabled: !win.normalMode && !masthead.browseOpen
+    onActivated: {
+      if (preview.open) preview.close();
+      else if (!win.dismissHoveredSheet()) win.enterNormal();
+    }
   }
   Shortcut { sequences: ["Right", "PgDown"]; enabled: preview.paging || preview.stepping; onActivated: preview.next() }
   Shortcut { sequences: ["Left", "PgUp"]; enabled: preview.paging || preview.stepping; onActivated: preview.previous() }

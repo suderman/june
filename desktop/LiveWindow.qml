@@ -125,7 +125,8 @@ PanelWindow {
     if (res.action === "cancelLeader") { leader = false; return; }
     leader = false;
     if (res.action === "enterInsert") { enterInsert(); return; }
-    if (res.action === "back") { dismissed(); return; }
+    if (res.action === "quit") { dismissed(); return; }
+    if (res.action === "escape") return;
     if (res.action === "expandOverlay") { openStripNormal(); return; }
     if (res.action === "hint") {
       if (cell.item && typeof cell.item.collectHints === "function") {
@@ -207,6 +208,11 @@ PanelWindow {
     focus: win.normalMode
     Keys.onPressed: event => { if (win.normalMode) win.handleNormalKey(event); }
   }
+  Shortcut {
+    sequence: "Escape"
+    enabled: win.inputShown && !win.normalMode
+    onActivated: win.enterNormal()
+  }
 
   HoverHandler { id: hover }
 
@@ -282,7 +288,7 @@ PanelWindow {
       TapHandler { onTapped: win.openStrip() }
     }
 
-      // The strip's compose bar, where the strip has it. Tab toggles Insert ↔ Normal; Esc dismisses mini June.
+      // The strip's compose bar, where the strip has it. Tab and Esc enter Normal mode; q in Normal dismisses mini June.
       Composer {
         id: composer
         visible: win.inputShown
@@ -298,7 +304,7 @@ PanelWindow {
         paste: win.paste
         pick: win.pick
         tabAction: () => win.enterNormal()
-        escAction: () => win.dismissed()
+        escAction: () => win.enterNormal()
         onEnteredInsert: win.enterInsert()
       }
 

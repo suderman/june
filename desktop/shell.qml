@@ -1151,14 +1151,14 @@ ShellRoot {
       if (res.action === "previewCopy") { if (preview.kind === "artifact" && preview.what?.text) { Quickshell.clipboardText = preview.what.text; root.say("copied"); } return; }
       if (res.action === "previewExternal") { if (preview.kind !== "artifact" && preview.what?.url) { preview.close(); Qt.openUrlExternally(preview.what.url); } return; }
       if (res.action === "enterInsert") { window.enterInsert(); return; }
-      if (res.action === "back") {
+      if (res.action === "escape" || res.action === "quit") {
         if (preview.open) { preview.close(); return; }
         if (window.activeColumn === "agents" && activeAgentsBoard().dismissSheet()) return;
         if (window.activeColumn === "projects") {
           if (activeProjectsBoard().dismissSheet()) return;
           if (activeProjectsBoard().mode === "state") { activeProjectsBoard().mode = "tasks"; activeProjectsBoard().drill = ""; return; }
         }
-        if (!window.dismissHoveredSheet()) root.hide();
+        if (!window.dismissHoveredSheet() && res.action === "quit") root.hide();
         return;
       }
       if (res.action === "moveColumn") {
@@ -1277,7 +1277,7 @@ ShellRoot {
       enabled: !root.overlayNormal && !masthead.browseOpen
       onActivated: {
         if (preview.open) preview.close();
-        else if (!window.dismissHoveredSheet()) root.hide();
+        else if (!window.dismissHoveredSheet()) window.enterNormal();
       }
     }
     // The arrow keys turn a PDF's pages in the preview, then step through what the message brought.
@@ -1504,7 +1504,7 @@ ShellRoot {
         paste: fallback => root.pasteInto(fallback)
         pick: () => filePicker.open()
         tabAction: () => window.enterNormal()
-        escAction: () => root.hide()
+        escAction: () => window.enterNormal()
         onEnteredInsert: window.enterInsert()
       }
     }

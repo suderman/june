@@ -330,7 +330,7 @@ export function helpSections(surface, column, sheet) {
 					["c", "copy newest reply"],
 					["1–9", "visit working clanker"],
 					["SPC", "leader toggles"],
-					["q / Esc", "dismiss mini June"],
+					["q", "dismiss mini June"],
 				],
 			},
 		];
@@ -386,7 +386,8 @@ export function helpSections(surface, column, sheet) {
 		["Z", "bottom ↔ top"],
 		["z", surface === "overlay" ? "shrink to mini June" : "toggle settings"],
 		["SPC", "leader toggles"],
-		["q / Esc", "step back / dismiss"],
+		["q", surface === "overlay" ? "close sheet / dismiss" : "close open sheet"],
+		["Esc", "cancel / close sheet"],
 	];
 	const ctx = column === "chat"
 		? {
@@ -487,7 +488,8 @@ export function dispatchNormalKey(ev, ctx) {
 	if (key === "Tab" || text === "i" || text === "a") return { action: "enterInsert" };
 	if (key === "Space" || text === " ") return { action: "openLeader" };
 	if (text === "?") return { action: "toggleHelp" };
-	if (key === "Escape" || text === "q") return { action: "back" };
+	if (key === "Escape") return { action: "escape" };
+	if (text === "q") return { action: "quit" };
 
 	// Mini June NORMAL mode.
 	if (surface === "mini") {

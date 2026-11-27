@@ -18,7 +18,7 @@ Rectangle {
   property var unattach: (index) => {}
   property var paste: (fallback) => fallback()
   property var pick: () => {}
-  // Tab and Esc in the text box: Tab toggles Insert -> Normal; Esc dismisses overlays or exits Insert in the window.
+  // Tab and Esc in the text box: both drop from Insert to Normal mode.
   property var tabAction: null
   property var escAction: null
   // True when the host window is in NORMAL mode: dims caret/border and shows a compact NORMAL badge.
