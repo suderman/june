@@ -5,6 +5,7 @@
 // below the screen's edge when she shows and sinks back into it. Only what is drawn takes the mouse; the keyboard only
 // while the compose bar is open, where Tab opens the full strip. The shell decides when she shows (see live.mjs).
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Wayland
 
@@ -45,6 +46,11 @@ PanelWindow {
   // 22, or above the tab bar where the strip has one (a screen too narrow for the boards beside it).
   property int dock: 22
   readonly property int gap: 8
+  // Room around what is drawn for the shadow behind her panel and the shelf, as far as the screen allows; the content
+  // sits inside it, so the panel and the compose bar stay where the strip has them.
+  readonly property int halo: 28
+  readonly property real stripSpan: Math.min(Theme.stripWidth, (win.screen ? win.screen.width : Theme.stripWidth + 32) - 32)
+  readonly property real side: Math.max(0, Math.min(halo, ((win.screen ? win.screen.width : stripSpan) - stripSpan) / 2))
 
   // Rising from below the edge, and sinking back before the window goes; INSTANT skips it, when she trades places
   // with the full strip (shell.qml miniBridge).
@@ -58,7 +64,7 @@ PanelWindow {
   }
 
   anchors { bottom: true }
-  implicitWidth: Math.min(Theme.stripWidth, (win.screen ? win.screen.width : Theme.stripWidth + 32) - 32)
+  implicitWidth: stripSpan + 2 * side
   implicitHeight: Math.min((win.screen ? win.screen.height : 900) - 40, content.implicitHeight)
   exclusionMode: ExclusionMode.Ignore
   color: "transparent"
@@ -80,20 +86,38 @@ PanelWindow {
 
   HoverHandler { id: hover }
 
+  // The span of what is drawn, for the mask, where the content comes to rest. Outside the content: Quickshell's Region
+  // recomputes only when its own item moves, so inside the rising content it kept the place it had below the window
+  // and the shelf took neither hover nor clicks (Jon, 2026-11-27).
+  Item {
+    id: drawn
+    x: content.x + win.margin
+    y: shelfRow.y
+    width: content.width - 2 * win.margin
+    height: (win.inputShown ? composer.y + composer.height : panel.y + panel.height) - shelfRow.y
+  }
+
   Item {
     id: content
-    width: parent.width
+    x: win.side
+    width: parent.width - 2 * win.side
     height: parent.height
-    implicitHeight: shelfRow.height + win.gap + panel.height + (win.inputShown ? win.gap + composer.height : 0) + win.dock
+    implicitHeight: win.halo + shelfRow.height + win.gap + panel.height + (win.inputShown ? win.gap + composer.height : 0) + win.dock
     transform: Translate { y: (1 - win.rise) * (content.implicitHeight + 24) }
 
-    // The span of what is drawn, for the mask.
-    Item {
-      id: drawn
-      x: win.margin
-      y: shelfRow.y
-      width: parent.width - 2 * win.margin
-      height: (win.inputShown ? composer.y + composer.height : panel.y + panel.height) - shelfRow.y
+    // A soft shadow behind her panel and up over the shelf, so the clankers read against any wallpaper. Not in the
+    // mask: clicks pass through it.
+    RectangularShadow {
+      visible: cell.item !== null
+      x: panel.x
+      width: panel.width
+      // A little above the shelf, for the clankers' bob.
+      y: win.shelf.length > 0 ? shelfRow.y - 6 : panel.y
+      height: panel.y + panel.height - y
+      radius: 8
+      blur: 20
+      spread: 2
+      color: Qt.rgba(0, 0, 0, 0.55)
     }
 
     // Who is working: a clanker each, bobbing gently over its name (the clanker's, else the harness's); hover adds its task
@@ -165,6 +189,7 @@ PanelWindow {
           TapHandler {
             onTapped: {
               const at = String(bot.modelData.key ?? "").split("|");
+              console.info("shelf: visit", bot.modelData.key ?? "");
               if (at.length === 2) win.visit(at[0], at[1]);
             }
           }

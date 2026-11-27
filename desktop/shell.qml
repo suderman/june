@@ -196,9 +196,22 @@ ShellRoot {
     deployPendingId = id;
     deployNotice = { text: "", busy: true };
   }
-  Process { id: shower }
+  // Showing a session in herdr-app; a failure is logged with its words, since nothing else shows it.
+  Process {
+    id: shower
+    property string showing: ""
+    stderr: StdioCollector { id: showerErrors }
+    onExited: (code) => {
+      if (code !== 0) console.warn("showing", showing, "failed with", code + ":", showerErrors.text.trim());
+    }
+  }
   function showSession(host, terminal) {
-    if (shower.running) return;
+    if (shower.running) {
+      console.warn("showing", host + "/" + terminal, "skipped: showing", shower.showing, "is still running");
+      return;
+    }
+    console.info("showing", host + "/" + terminal);
+    shower.showing = host + "/" + terminal;
     shower.command = Desktop.showDeployedCommand(host, terminal);
     shower.running = true;
     hide();
