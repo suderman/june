@@ -336,7 +336,7 @@ Coding workers must not set AUTO; that permission lives in instructions."
              (when live-content
                (if grant
                    (progn
-                     (org-entry-put nil "LIVE_CONTENT" (decode-coding-string (json-serialize grant) 'utf-8))
+                     (org-entry-put nil "LIVE_CONTENT" (org-dispatch--json grant))
                      (org-entry-put nil "LIVE_CONTENT_SCOPE" (org-dispatch--live-content-scope)))
                  (org-entry-delete nil "LIVE_CONTENT")
                  (org-entry-delete nil "LIVE_CONTENT_SCOPE")))
@@ -357,7 +357,7 @@ Coding workers must not set AUTO; that permission lives in instructions."
                           (depends . ,(vconcat (split-string (or (org-entry-get nil "DEPENDS") ""))))
                           (written . ,(if replay :false t)))))))
      request))
-    (when request (princ (concat (json-serialize result) "\n")))))
+    (when request (princ (concat (org-dispatch--json result) "\n")))))
 
 (defun org-edit-stop-task ()
   "Park a dispatcher task, then stop its exact worker and record the result.
@@ -467,7 +467,7 @@ The wrapper holds the launch lock. A failed stop stays parked and cannot resume.
                             ("interrupted" "stopped its turn at the interrupt")
                             ("killed" "did not stop at the interrupt and was killed")))))) t)
       (org-dispatch--save-state (plist-put state :status "stopped")))
-    (princ (concat (json-serialize (append result `((stopped . t) (outcome . ,(or outcome "confirmed")))))
+    (princ (concat (org-dispatch--json (append result `((stopped . t) (outcome . ,(or outcome "confirmed")))))
                    "\n"))))
 
 (defun org-edit-remove-dependencies ()
@@ -563,7 +563,7 @@ keep Dialog append-only, and never change prose or launch a worker here."
                         (depends . ,(vconcat (split-string (or (org-entry-get nil "DEPENDS") ""))))
                         (written . ,(if replay :false t))))))
      t)
-    (princ (concat (json-serialize result) "\n"))))
+    (princ (concat (org-dispatch--json result) "\n"))))
 
 ;; Jon's reply from June's boards: one Dialog entry in his name, nothing else.
 (defun org-edit-reply ()
@@ -599,7 +599,7 @@ The wrapper holds the launch lock. Replays find the receipt even after a rename.
                (scope (plist-get spec :scope))
                (fingerprint (secure-hash 'sha256 (json-serialize
                              (list :title title :scope scope :note note))))
-               (receipt (json-serialize (list :request request :hash fingerprint)))
+               (receipt (org-dispatch--json (list :request request :hash fingerprint)))
                (create-lockfiles t) (file-precious-flag t)
                (agenda nil) (replay-selector nil) (result nil))
     (cl-loop for (key _value) on spec by #'cddr do
@@ -715,12 +715,12 @@ The wrapper holds the launch lock. Replays find the receipt even after a rename.
              (org-entry-put nil "JUNE_TASK_EDIT" receipt)
              (org-dispatch--append "Dialog" (org-dispatch--entry "June"
                (concat note " Previous content (JSON): "
-                       (json-serialize (append (when title (list :title old-title))
-                                               (when scope (list :scope old-scope)))))))
+                       (org-dispatch--json (append (when title (list :title old-title))
+                                                   (when scope (list :scope old-scope)))))))
              (set-marker start nil)))
          (setq result `((id . ,(org-entry-get nil "ID")) (title . ,(org-get-heading t t t t))
                         (state . ,(org-get-todo-state)) (written . ,(if replay :false t)))))) t)
-    (princ (concat (json-serialize result) "\n"))))
+    (princ (concat (org-dispatch--json result) "\n"))))
 
 (defun org-edit-reschedule-task ()
   "Correct an AUTO start with a revision, request and note in JSON.
@@ -801,7 +801,7 @@ The wrapper holds the dispatcher lock through validation and the atomic save."
                (format "Rescheduled from %s to %s. %s" (or old "no scheduled start") stamp note)))))
          (setq result `((id . ,id) (state . ,(or state :null)) (scheduled . ,(or (org-entry-get nil "SCHEDULED") :null))
                         (written . ,(if replay :false t)))))) t)
-    (princ (concat (json-serialize result) "\n"))))
+    (princ (concat (org-dispatch--json result) "\n"))))
 
 (defun org-edit--planning (keyword usage)
   "Set or remove the KEYWORD planning date: FILE HEADING WHEN, or none."

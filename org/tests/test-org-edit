@@ -365,6 +365,14 @@ out=$(run update-task "$content" "Old title" "$spec")
 check "content wrapper replays after rename" has "$out" '"written":false'
 check "content replay leaves all bytes alone" cmp -s "$content" "$fixture/content-edited"
 check "content edit releases its lock" flock -n "$XDG_RUNTIME_DIR/org-dispatch.lock" true
+accented="$HOME/org/accented.org"
+printf '* TODO Réparer la cafetière\nAncien périmètre.\n' >"$accented"
+printf -v spec '{"revision":"%s","request":"fixture:accented","note":"Jon a dit oui, voilà.","title":"Cafetière neuve","scope":"Nouveau périmètre, déjà prêt."}' "$(printf '* TODO Réparer la cafetière\nAncien périmètre.' | sha256sum | cut -d' ' -f1)"
+out=$(run update-task "$accented" "Réparer la cafetière" "$spec")
+check "an accented title and scope are edited" has "$out" '"written":true'
+check "the result prints the accented title intact" has "$out" '"title":"Cafetière neuve"'
+check "the accented title is written as UTF-8" line "$accented" '^\* TODO Cafetière neuve$'
+check "the Dialog keeps the accented old content readable" line "$accented" 'Jon a dit oui, voilà. Previous content (JSON): {"title":"Réparer la cafetière","scope":"Ancien périmètre.\\n"}'
 queued="$HOME/org/queued.org"
 printf '* AUTO Queued title\nWork.\n\n* AUTO Queued scope\nWork.\n' >"$queued"
 printf -v spec '{"revision":"%s","request":"fixture:queued","note":"Jon renamed it.","title":"Queued renamed"}' "$(printf '* AUTO Queued title\nWork.' | sha256sum | cut -d' ' -f1)"

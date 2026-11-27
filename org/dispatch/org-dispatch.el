@@ -1459,7 +1459,7 @@ replaying the same key and spec; missing prerequisites block partial plans."
     (let ((spec (with-temp-buffer
                   (insert-file-contents file)
                   (json-parse-buffer :object-type 'alist :array-type 'list :false-object :false))))
-      (princ (json-serialize (vconcat (org-dispatch--queue-plan spec))))
+      (princ (org-dispatch--json (vconcat (org-dispatch--queue-plan spec))))
       (princ "\n"))))
 
 ;;; Local state
@@ -2471,7 +2471,7 @@ run's eligible observations for the next one. Return the retired rows."
   (setq command-line-args-left nil)
   (let ((agenda (let ((standard-output #'external-debugging-output))
                   (org-dispatch--agenda-files t))))
-    (princ (json-serialize
+    (princ (org-dispatch--json
             (vconcat (mapcar (lambda (row)
                                (let ((row (org-plist-delete (copy-sequence row) :observation)))
                                  (dolist (key '(:eligible :stable :close))
