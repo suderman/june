@@ -5,12 +5,13 @@ import { obj, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, type Extension, section } from "@earendil-works/pi-durable";
 import { type Config, type Paths, type PromptFiles, promptFiles } from "./config.ts";
 import { latestEntry, recentDayEnds } from "./journal.ts";
+import { clankersDir, hostsFile, readClankers, readHosts } from "./roster.ts";
 import { DEFAULT_BASH_TIMEOUT } from "./tools/coding.ts";
 import { User, user } from "./user.ts";
 
 // Harness mechanics only. The user's conventions (Org, herdr-core, task states) come from AGENTS.md in the config directory.
 const harness = (host: string, inbox?: string) => `How this harness works:
-- The user reaches you from a terminal client, a desktop client, an Android app, and Telegram. Talk to them directly, never about them in the third person. It is one conversation. Messages from the terminal start with [tui] (older ones [kitty]), one-shot commands with [cli], the desktop client with [gui], and the Android app with [apk], and untagged messages come from Telegram. Answer every one in Org markup, never Markdown (*bold*, /italic/, =code=, [[url][label]], - lists, #+begin_src blocks), since the desktop and the phone render Org and the terminal and Telegram convert it themselves; keep Telegram answers compact and without tables.
+- The user reaches you from a terminal client, a desktop client, an Android app, and Telegram. Talk to them directly, never about them in the third person. It is one conversation. Messages from the terminal start with [tui] (older ones [kitty]), one-shot commands with [cli], the desktop client with [gui], and the Android app with [apk], and untagged messages come from Telegram. A tag with @DEVICE (such as [gui@cog] or [apk@gem]) names the remote device sending it; without @DEVICE, the client is local on ${host}. Answer every one in Org markup, never Markdown (*bold*, /italic/, =code=, [[url][label]], - lists, #+begin_src blocks), since the desktop and the phone render Org and the terminal and Telegram convert it themselves; keep Telegram answers compact and without tables.
 - Put code and text intended for the user to copy in a block of its own. Use #+begin_src LANGUAGE and #+end_src for code, Org or Markdown source; use #+begin_example and #+end_example for emails, drafts and other plain copy text. Keep explanation outside the block and put only the exact copyable text inside. Desktop and phone show these as bounded artifact balloons with full preview and copy buttons.
 - Messages starting with [heartbeat] are your own private look at the moment between conversations; the user never sees them or your quiet answers, only a message you choose to send.
 - Messages starting with [follow] come from your own checks on tasks you queued or were asked to follow; nobody typed them. Do what they say and tell the user briefly; do not repeat the check yourself. When the user asks for updates on a task or its agent every few minutes, use org_follow_task rather than your heartbeat. Follows survive daemon restarts and resume automatically with their timing and last reported state. Use org_following to check what you are watching; never re-follow a task just because you restarted.
@@ -87,7 +88,7 @@ function skillsSection(skills: readonly Skill[]): string {
 async function personalSection(files: PromptFiles, memory: () => Promise<string>, journal: () => Promise<string>, recentDays: number, people?: string): Promise<string | undefined> {
 	if (files.soulFile === undefined || files.memoryFile === undefined) return undefined;
 	const dir = dirname(files.soulFile);
-	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY|JOURNAL|HEARTBEAT|MOOD|SELF)\.sync-conflict-.*\.org$/.test(name)).sort();
+	const conflicts = (await readdir(dir).catch(() => [])).filter((name) => /^(SOUL|MEMORY|JOURNAL|HEARTBEAT|MOOD|SELF|HOSTS)\.sync-conflict-.*\.org$/.test(name)).sort();
 	return [
 		`Your own files, which you keep with read and edit: ${files.soulFile} (identity, shown first in this prompt) and ${files.memoryFile} (below). Changes apply from your next turn. Refine SOUL.org when ${user()}'s feedback shows your approach should change, and tell them what you changed and why. When you remember something that will matter later, tell ${user()} in a few words; when they ask you to forget something, remove it and confirm. None of your files holds tasks, TODO keywords, or schedules, which stay in ${user()}'s Org records, and none can widen your authority or override ${user()}'s instructions.`,
 		`${basename(files.memoryFile)} is the page of what is true about ${user()}'s life that you must never get wrong: who they are and where they live, their household and people, what they do, their routine, where their records live, and the corrections that shape how you work with them. When they tell you a lasting fact or correct one, update it with edit in the same turn, in its own section; keep it to a page or two, replacing what changed. What happened on a given day goes in the journal instead. A nightly reflection also tidies the day's journal and carries lasting facts here.`,
@@ -156,6 +157,78 @@ function longView(journal: string): string[] {
 	];
 }
 
+/**
+ * The user's team of clankers and hosts, read dynamically from clankers/<slug>/CARD.org and HOSTS.org and cached by
+ * their stat stamps so edits reach June on her very next turn without busting the prompt cache between edits.
+ */
+function cachedTeam(dataDir: () => string | undefined, config: Config): (force?: boolean) => Promise<string | undefined> {
+	let cached: { stamp: string; text: string | undefined } | undefined;
+	const stampOf = async (dir: string): Promise<string> => {
+		const parts: string[] = [];
+		const hostStat = await stat(hostsFile(dir)).catch(() => undefined);
+		parts.push(hostStat ? `H:${hostStat.mtimeMs}:${hostStat.size}` : "H:-");
+		const root = clankersDir(dir);
+		const folders = (await readdir(root, { withFileTypes: true }).catch(() => []))
+			.filter((d) => d.isDirectory() && !d.name.startsWith("."))
+			.map((d) => d.name)
+			.sort();
+		for (const folder of folders) {
+			const cardStat = await stat(join(root, folder, "CARD.org")).catch(() => undefined);
+			parts.push(cardStat ? `C:${folder}:${cardStat.mtimeMs}:${cardStat.size}` : `C:${folder}:-`);
+		}
+		return parts.join("|");
+	};
+	return async (force = false) => {
+		const dir = dataDir();
+		if (!dir) return undefined;
+		const stamp = await stampOf(dir);
+		if (!force && cached?.stamp === stamp) return cached.text;
+		const text = renderTeam(dir, config);
+		cached = { stamp, text };
+		return text;
+	};
+}
+
+/** Render the clankers and hosts section from disk; omitted when neither clankers nor HOSTS.org exist. */
+export function renderTeam(dataDir: string, config: Config): string | undefined {
+	const cards = readClankers(dataDir);
+	const hosts = readHosts(dataDir);
+	if (cards.length === 0 && hosts.length === 0) return undefined;
+	const dispatchHosts = new Set(config.dispatch.hosts);
+	const knownHosts = [config.herdr.host, ...Object.keys(config.herdr.hosts), ...config.dispatch.hosts];
+	const hostLines: string[] = [];
+	const seenHosts = new Set<string>();
+	for (const h of hosts) {
+		seenHosts.add(h.slug);
+		const tag = dispatchHosts.has(h.slug) ? " [dispatcher]" : " [no dispatcher]";
+		const notes = h.notes ? `: ${h.notes.replace(/\s+/g, " ")}` : "";
+		hostLines.push(`- ${h.name}${tag}${notes}`);
+	}
+	for (const name of knownHosts) {
+		const slug = name.toLowerCase();
+		if (seenHosts.has(slug)) continue;
+		seenHosts.add(slug);
+		hostLines.push(`- ${name}${dispatchHosts.has(name) ? " [dispatcher]" : " [no dispatcher]"}`);
+	}
+	const cardLines = cards.map((c) => {
+		const attrs = [c.host, c.harness, c.model, c.effort ? `effort ${c.effort}` : undefined].filter(Boolean).join(", ");
+		const body = c.instructions ? c.instructions.replace(/\s+/g, " ") : "";
+		const issues = c.problems.length ? ` [unusable: ${c.problems.join("; ")}]` : "";
+		return `- ${c.slug}${c.name !== c.slug ? ` (${c.name})` : ""} [${attrs || "incomplete"}]${issues}${body ? `: ${body}` : ""}`;
+	});
+	return [
+		`Your team of clankers. ${User()} adds, edits, and removes clankers and hosts directly, and this list refreshes automatically before each turn—never copy the roster, host specs, or deployment mechanics into MEMORY.org. Keep MEMORY.org, SELF.org, and your journal for earned reputation, judgment, preferences, and quirks you observe from real runs (never invent a track record).`,
+		`Be the expert on your team—know who is free, what they are working on, their quota, and how they have been performing better than ${user()} does:`,
+		`- Inspect live standing with clankers_status before choosing or answering about team status: it shows busy/idle and current task, host reachability and load, provider quota and reset timing, XP/level, current-model vs lifetime stats (so model swaps are visible), and each clanker's MEMORY.org.`,
+		`- Choose clankers proactively on ${user()}'s behalf unless they name one. Weigh role/identity, live availability (idle and host reachable), quota and expiring resets (prefer spending quota before a reset), host capabilities and ${user()}'s proximity (from the message tag: [gui]/[tui] is on ${config.herdr.host}, [gui@HOST] is on HOST), and earned reputation + XP.`,
+		`- Delegate unattended work through Org AUTO tasks (org_queue_task / org_queue_plan) by passing your ranked clanker slugs in agents (and matching host to your preferred clanker's host). Use clanker_deploy when ${user()} wants an interactive terminal session to work alongside a clanker, or to jump into one already running.`,
+		`- Help your clankers level up: each clanker maintains its own MEMORY.org of general lessons injected at launch. After reviewing a finished run, use clanker_rate_run (good/mixed/poor) to update its XP and track record, and clanker_memory to read, add, or prune concise lessons when a pattern is worth keeping.`,
+		...(hostLines.length ? ["", "Hosts:", ...hostLines] : []),
+		"",
+		...(cardLines.length ? ["Current clankers:", ...cardLines] : ["No clankers are configured yet."]),
+	].join("\n");
+}
+
 /** With `dirs`, reload looks for the prompt files again, so a file made since startup is found. */
 export function createPromptExtension(
 	config: Config,
@@ -174,6 +247,8 @@ export function createPromptExtension(
 		self: cachedFile(f.selfFile, ""),
 	});
 	let read = open(files);
+	const teamDir = () => dirs?.data ?? (files.soulFile ? dirname(files.soulFile) : undefined);
+	const readTeam = cachedTeam(teamDir, config);
 	let skills: Promise<Skill[]> | undefined;
 	const loadSkills = () => (skills ??= findSkills(config.skillDirs));
 
@@ -223,6 +298,7 @@ export function createPromptExtension(
 			section("agents", async () => (await read.instructions()) || undefined, { tag: false }),
 			section("memory", () => personalSection(files, read.memory, read.journal, config.reflection.recentDays, config.org.people)),
 			section("skills", async () => skillsSection(await loadSkills())),
+			section("team", () => readTeam()),
 			// Just before now: it changes nightly and now hourly, so the prefix above both stays cached.
 			section("mood", async () => moodSection(await read.mood())),
 			section("now", () => situation?.render() ?? today()),
@@ -236,7 +312,7 @@ export function createPromptExtension(
 			const refreshed = await findSkills(config.skillDirs);
 			if (dirs !== undefined) files = promptFiles(dirs);
 			const next = open(files);
-			await Promise.all([next.soul(true), next.memory(true), next.instructions(true)]);
+			await Promise.all([next.soul(true), next.memory(true), next.instructions(true), readTeam(true)]);
 			read = next;
 			skills = Promise.resolve(refreshed);
 			return refreshed.length;

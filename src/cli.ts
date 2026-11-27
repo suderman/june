@@ -932,7 +932,7 @@ async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: 
 	const { stats } = statsByAgent(p.database);
 	for (const row of rows) {
 		const s = stats.get(row.card.slug);
-		if (s) row.stats = { rank: s.rank, runs: s.runs, completed: s.completed, handoffs: s.handoffs, parked: s.parked, ...(s.avgDurationMs !== undefined ? { avgDurationMs: s.avgDurationMs } : {}), ...(s.lastRunAt !== undefined ? { lastRunAt: s.lastRunAt } : {}) };
+		if (s) row.stats = { rank: s.rank, runs: s.runs, completed: s.completed, failed: s.failed, handoffs: s.handoffs, parked: s.parked, xp: s.xp, level: s.level, title: s.title, ...(s.avgDurationMs !== undefined ? { avgDurationMs: s.avgDurationMs } : {}), ...(s.lastRunAt !== undefined ? { lastRunAt: s.lastRunAt } : {}) };
 	}
 	if (args[0]) {
 		const card = findCard(rows.map((r) => r.card), args[0]);
@@ -950,7 +950,7 @@ async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: 
 		!b ? "" : "account" in b ? `${b.weekly}% weekly, resets in ${b.hours < 48 ? `${Math.round(b.hours)}h` : `${Math.round(b.hours / 24)}d`}, via ${b.account}` : b.reason;
 	if (args[0]) {
 		const { card, status, terminal, battery: b, stats: s } = rows[0]!;
-		const runSummary = s ? `#${s.rank} · ${s.runs} run${s.runs === 1 ? "" : "s"} (${s.completed} ok${s.handoffs ? `, ${s.handoffs} handoff` : ""}${s.parked ? `, ${s.parked} parked` : ""}${s.avgDurationMs ? `, ${formatDuration(s.avgDurationMs)} avg` : ""})` : undefined;
+		const runSummary = s ? `#${s.rank}${s.level !== undefined ? ` · Lv.${s.level} ${s.title ?? ""} (${s.xp ?? 0} XP)` : ""} · ${s.runs} run${s.runs === 1 ? "" : "s"} (${s.completed} ok${s.handoffs ? `, ${s.handoffs} handoff` : ""}${s.parked ? `, ${s.parked} parked` : ""}${s.avgDurationMs ? `, ${formatDuration(s.avgDurationMs)} avg` : ""})` : undefined;
 		console.log(`${card.name} (${card.slug})`);
 		for (const [k, v] of [["host", card.host], ["harness", card.harness], ["model", card.model ?? "the harness's default"], ["effort", card.effort ?? "the harness's default"], ["status", terminal ? `${status} in ${terminal}` : status], ["battery", battery(b)], ["history", runSummary]] as const)
 			if (v) console.log(`  ${k.padEnd(8)} ${v}`);
@@ -1039,12 +1039,12 @@ async function agentsLeaderboard(p: ReturnType<typeof paths>, json: boolean): Pr
 		return 0;
 	}
 	const width = Math.max(5, ...rows.map((r) => r.agent.length));
-	console.log(`${"#".padEnd(3)} ${"AGENT".padEnd(width)}  ${"RUNS".padStart(4)}  ${"OK".padStart(4)}  ${"RATE".padStart(5)}  ${"HAND".padStart(4)}  ${"PARK".padStart(4)}  ${"AVG".padStart(6)}  LAST`);
+	console.log(`${"#".padEnd(3)} ${"AGENT".padEnd(width)}  ${"LVL".padStart(3)}  ${"XP".padStart(5)}  ${"RUNS".padStart(4)}  ${"OK".padStart(4)}  ${"FAIL".padStart(4)}  ${"RATE".padStart(5)}  ${"AVG".padStart(6)}  LAST`);
 	for (const r of rows) {
 		const finished = r.runs - r.running;
 		const rate = finished > 0 ? `${Math.round((r.completed * 100) / finished)}%` : "—";
 		const last = r.lastRunAt ? new Date(r.lastRunAt).toLocaleString("en-CA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }) : "—";
-		console.log(`${String(r.rank).padEnd(3)} ${r.agent.padEnd(width)}  ${String(r.runs).padStart(4)}  ${String(r.completed).padStart(4)}  ${rate.padStart(5)}  ${String(r.handoffs).padStart(4)}  ${String(r.parked).padStart(4)}  ${formatDuration(r.avgDurationMs).padStart(6)}  ${last}`);
+		console.log(`${String(r.rank).padEnd(3)} ${r.agent.padEnd(width)}  ${`L${r.level}`.padStart(3)}  ${String(r.xp).padStart(5)}  ${String(r.runs).padStart(4)}  ${String(r.completed).padStart(4)}  ${String(r.failed).padStart(4)}  ${rate.padStart(5)}  ${formatDuration(r.avgDurationMs).padStart(6)}  ${last}`);
 	}
 	return 0;
 }

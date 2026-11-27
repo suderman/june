@@ -710,12 +710,9 @@ export function createDispatchExtension(
 	const defaultAgent = config.dispatch.agent ?? "pi";
 	const agents = dispatchAgents(config.dispatch);
 	const agentParameter = (description: string) => opt(union(agents.map((agent) => lit(agent)), { description }));
-	// The roster as it stood when June started; the check at queueing reads it fresh.
-	const roster = rosterCards(config).filter((c) => !c.problems.length);
-	const rosterList = roster.map((c) => `${c.slug} (${[c.harness, c.model, c.effort].filter(Boolean).join(" ")} on ${c.host})`).join(", ");
 	const agentsParameter = opt(arr(str(), {
 		minItems: 1,
-		description: `Instead of agent, the clankers to choose among, in ${user()}'s order of preference, written as :AGENTS:. The dispatcher gives the task to the first one free when it launches, unless a later one would lose quota at a reset within hours; each works one task at a time. A harness name (${agents.join(", ")}) in the list means an unnamed worker on it, always free, such as ["pax", "pi"]. Use it when ${user()} names agents or asks for one of them${roster.length ? `. The clankers: ${rosterList}; run june agents for who is free now and their quota` : ""}`,
+		description: `Preferred way to assign clankers: ordered list of clanker slugs (from your team section / clankers_status) or fallback harness names (${agents.join(", ")}), written as :AGENTS:. The dispatcher picks the first free candidate on launch (unless a later one would lose quota at a reset within hours) and uses the rest for handoff. Use your judgment to pick suitable clankers proactively unless ${user()} names one; set host to match your first-choice clanker's host`,
 	}));
 	// Say what the dispatcher could run but June may not choose, so she gives one accurate answer instead of a workaround.
 	const disabled = disabledAgents(config.dispatch);
@@ -880,7 +877,7 @@ review: opt(union([bool(), lit("agent")], { description: `Default true: the work
 					heading: str({ description: "Exact title or id:UUID, as org_read_task accepts" }),
 					expected: union([lit("TODO"), lit("EVAL"), lit("HOLD")], { description: "Current state just read; a stale request is refused" }),
 					host: str({ description: `Keep the existing host unless the user changes it (or match the new clanker's host); otherwise default ${defaultHost}. Allowed: ${hosts.join(", ")}` }),
-					agent: opt(str({ description: `Only when ${user()} asks for a different agent or hands off to another clanker: ${agents.join(", ")}${roster.length ? `, or a clanker (${roster.map((c) => c.slug).join(", ")})` : ""}. Omit to keep the task's agent` })),
+					agent: opt(str({ description: `Only when ${user()} asks for a different agent or hands off to another clanker: a clanker slug (see your team section / clankers_status) or harness (${agents.join(", ")}). Omit to keep the task's agent` })),
 					note: str({ description: `One line recording ${user()}'s request and any answer or revised scope, naming ${user()} rather than writing you` }),
 					depends: opt(arr(str(), { description: "id:UUID of existing Org tasks that must be DONE before this one launches, read with org_read_task first; added to any it already has" })),
 					revision: opt(str({ description: "Exact org_read_task revision; required for granting, retaining or revoking scoped live-content approval" })),
@@ -1041,21 +1038,26 @@ review: opt(union([bool(), lit("agent")], { description: `Default true: the work
 			}),
 			...(database ? [defineTool({
 				name: "org_agents_leaderboard",
-				description: "Read the clankers' leaderboard and recent dispatched run history from June's database: per-agent runs, completions, handoffs, parked runs, and average duration. Read-only.",
+				description: "Read the clankers' leaderboard (XP, level, runs, completions, failures, ratings, per-model breakdown) and recent dispatched run history from June's database. Read-only; for full live status + quota + memory use clankers_status.",
 				parameters: obj({
 					agent: opt(str({ description: "Optional clanker slug to filter recent runs to one agent" })),
 					limit: opt(num({ description: "How many recent runs to include (default 15, max 50)" })),
 				}),
 				replay: "safe",
-				execute: async (args) => ({
-					output: [{
-						type: "text",
-						text: JSON.stringify({
-							leaderboard: leaderboard(database),
-							recent: listRuns(database, { ...(args.agent ? { agent: args.agent } : {}), limit: Math.min(50, Math.max(1, args.limit ?? 15)) }),
-						}, null, 1),
-					}],
-				}),
+				execute: async (args) => {
+					const slugs = rosterCards(config).map((c) => c.slug);
+					const all = leaderboard(database);
+					return {
+						output: [{
+							type: "text",
+							text: JSON.stringify({
+								clankers: slugs.length ? leaderboard(database, { agents: slugs }) : [],
+								leaderboard: all,
+								recent: listRuns(database, { ...(args.agent ? { agent: args.agent } : {}), limit: Math.min(50, Math.max(1, args.limit ?? 15)) }),
+							}, null, 1),
+						}],
+					};
+				},
 			})] : []),
 		],
 	});

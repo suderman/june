@@ -563,7 +563,7 @@ export class Boards {
 				// ACCOUNTS.org, and any clanker's card or folder; not the clankers' own MEMORY.org.
 				this.#rosterWatch = watch(this.#o.dataDir, { recursive: true }, (_event, name) => {
 					const file = name?.toString() ?? "";
-					if (file === "ACCOUNTS.org" || (file.startsWith("clankers") && !file.endsWith("MEMORY.org") && !file.endsWith(".june-tmp"))) {
+					if (file === "ACCOUNTS.org" || file === "HOSTS.org" || (file.startsWith("clankers") && !file.endsWith("MEMORY.org") && !file.endsWith(".june-tmp"))) {
 						clearTimeout(this.#rosterDebounce);
 						this.#rosterDebounce = setTimeout(() => void this.refreshRoster().catch(() => {}), 500);
 					}
@@ -758,8 +758,12 @@ export class Boards {
 						rank: s.rank,
 						runs: s.runs,
 						completed: s.completed,
+						failed: s.failed,
 						handoffs: s.handoffs,
 						parked: s.parked,
+						xp: s.xp,
+						level: s.level,
+						title: s.title,
 						...(s.avgDurationMs !== undefined ? { avgDurationMs: s.avgDurationMs } : {}),
 						...(s.lastRunAt !== undefined ? { lastRunAt: s.lastRunAt } : {}),
 					};

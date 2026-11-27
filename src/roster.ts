@@ -197,8 +197,12 @@ export type RosterStats = {
 	rank: number;
 	runs: number;
 	completed: number;
+	failed?: number;
 	handoffs: number;
 	parked: number;
+	xp?: number;
+	level?: number;
+	title?: string;
 	avgDurationMs?: number;
 	lastRunAt?: number;
 };
@@ -393,4 +397,143 @@ export function editClanker(dataDir: string, edit: RosterEdit, now = new Date())
 	const memory = join(dir, "MEMORY.org");
 	if (!existsSync(memory)) writeAtomic(memory, `#+TITLE: ${name}'s memory\n\nLessons ${name} learned, one list item each, newest last. ${name} adds to this file; edit or prune it freely.\n`);
 	return { slug };
+}
+
+export type HostInfo = {
+	name: string;
+	slug: string;
+	notes: string;
+};
+
+export const hostsFile = (dataDir: string) => join(dataDir, "HOSTS.org");
+
+/** Parse HOSTS.org: one first-level heading per machine and its traits/capabilities prose. */
+export function parseHosts(text: string): HostInfo[] {
+	const sections = text.split(/^(?=\* )/m).filter((s) => s.startsWith("* "));
+	const out: HostInfo[] = [];
+	const seen = new Set<string>();
+	for (const section of sections) {
+		const [heading, ...rest] = section.split("\n");
+		const name = heading!.slice(2).replace(/\s+:[\w@#%:]+:\s*$/, "").trim();
+		const slug = slugOf(name);
+		if (!slug || seen.has(slug)) continue;
+		seen.add(slug);
+		out.push({ name, slug, notes: rest.join("\n").trim() });
+	}
+	return out;
+}
+
+/** Read HOSTS.org beside SOUL.org and clankers/; empty when absent. */
+export function readHosts(dataDir: string): HostInfo[] {
+	try {
+		return parseHosts(readFileSync(hostsFile(dataDir), "utf8"));
+	} catch {
+		return [];
+	}
+}
+
+export type ClankerMemory = {
+	file: string;
+	lessons: string[];
+	raw: string;
+	conflict?: string;
+};
+
+function memoryConflict(dir: string): string | undefined {
+	try {
+		return readdirSync(dir)
+			.filter((name) => /^MEMORY\.sync-conflict-.*\.org$/.test(name))
+			.sort()[0];
+	} catch {
+		return undefined;
+	}
+}
+
+function parseMemoryLessons(text: string): { preamble: string; lessons: string[] } {
+	const lines = text.replace(/\r\n/g, "\n").split("\n");
+	const firstLesson = lines.findIndex((line) => /^\s*-\s+\S/.test(line));
+	if (firstLesson < 0) return { preamble: text.trimEnd(), lessons: [] };
+	const preamble = lines.slice(0, firstLesson).join("\n").trimEnd();
+	const lessons: string[] = [];
+	for (const line of lines.slice(firstLesson)) {
+		const m = /^\s*-\s+(.*)$/.exec(line);
+		if (m) {
+			const clean = m[1]!.trim();
+			if (clean) lessons.push(clean);
+		} else if (lessons.length > 0 && line.trim()) {
+			lessons[lessons.length - 1] = `${lessons[lessons.length - 1]} ${line.trim()}`;
+		}
+	}
+	return { preamble, lessons };
+}
+
+/** Read one clanker's MEMORY.org as parsed lessons and raw text, flagging any Syncthing conflict copy. */
+export function readClankerMemory(card: Card): ClankerMemory {
+	if (!card.dir) return { file: "", lessons: [], raw: "" };
+	const file = join(card.dir, "MEMORY.org");
+	const conflict = memoryConflict(card.dir);
+	let raw = "";
+	try {
+		raw = readFileSync(file, "utf8");
+	} catch {}
+	const { lessons } = parseMemoryLessons(raw);
+	return { file, lessons, raw: raw.trim(), ...(conflict ? { conflict } : {}) };
+}
+
+export type ClankerMemoryEdit =
+	| { clanker: string; action: "add"; lesson: string }
+	| { clanker: string; action: "remove"; match: string }
+	| { clanker: string; action: "replace"; lessons: readonly string[] };
+
+const cleanLesson = (text: string): string => {
+	const cleaned = oneLine(text, "lesson").replace(/^-\s+/, "").trim();
+	if (!cleaned) throw new Error("lesson must be non-empty");
+	return cleaned;
+};
+
+/** Add, remove, or replace lessons in a clanker's MEMORY.org atomically, refusing when a conflict copy sits beside it. */
+export function editClankerMemory(dataDir: string, edit: ClankerMemoryEdit): { file: string; count: number; lessons: string[]; added?: boolean; removed?: number } {
+	const card = findCard(readClankers(dataDir), edit.clanker);
+	if (!card || !card.dir) throw new Error(`no clanker called ${edit.clanker}`);
+	const conflict = memoryConflict(card.dir);
+	if (conflict) throw new Error(`${card.slug}/MEMORY.org has a Syncthing conflict copy (${conflict}); resolve it with the org-conflicts skill first`);
+	const file = join(card.dir, "MEMORY.org");
+	const defaultPreamble = `#+TITLE: ${card.name}'s memory\n\nLessons ${card.name} learned, one list item each, newest last. ${card.name} adds to this file; edit or prune it freely.`;
+	const existing = existsSync(file) ? readFileSync(file, "utf8") : `${defaultPreamble}\n`;
+	const parsed = parseMemoryLessons(existing);
+	const preamble = parsed.preamble || defaultPreamble;
+	let lessons = [...parsed.lessons];
+	let added: boolean | undefined;
+	let removed: number | undefined;
+	if (edit.action === "add") {
+		const item = cleanLesson(edit.lesson);
+		if (lessons.includes(item)) {
+			added = false;
+		} else {
+			lessons.push(item);
+			added = true;
+		}
+	} else if (edit.action === "remove") {
+		const needle = oneLine(edit.match, "match");
+		if (!needle) throw new Error("match is required");
+		const exact = lessons.filter((l) => l === needle);
+		const matches = exact.length ? exact : lessons.filter((l) => l.toLowerCase().includes(needle.toLowerCase()));
+		if (matches.length === 0) throw new Error(`no lesson in ${card.slug}'s memory matched ${JSON.stringify(needle)}`);
+		if (matches.length > 1 && exact.length === 0) throw new Error(`match ${JSON.stringify(needle)} matched ${matches.length} lessons; be more specific`);
+		const drop = new Set(matches);
+		lessons = lessons.filter((l) => !drop.has(l));
+		removed = matches.length;
+	} else if (edit.action === "replace") {
+		const next: string[] = [];
+		for (const raw of edit.lessons) {
+			const item = cleanLesson(raw);
+			if (!next.includes(item)) next.push(item);
+		}
+		lessons = next;
+	} else {
+		throw new Error(`unknown memory action ${String((edit as { action?: unknown }).action)}`);
+	}
+	const body = lessons.length ? `${preamble}\n\n${lessons.map((l) => `- ${l}`).join("\n")}\n` : `${preamble}\n`;
+	writeAtomic(file, body);
+	return { file, count: lessons.length, lessons, ...(added !== undefined ? { added } : {}), ...(removed !== undefined ? { removed } : {}) };
 }
