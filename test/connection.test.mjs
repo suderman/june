@@ -557,11 +557,11 @@ test("Qt's masthead steps between days and its calendar and search open a day or
 	const dir = await mkdtemp(join(tmpdir(), "june-browse-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await mkdir(join(dir, "ui"));
-	for (const file of ["Masthead.qml", "Browse.qml", "strip.mjs"]) await copyFile(new URL(`../desktop/${file}`, import.meta.url), join(dir, "ui", file));
+	for (const file of ["Masthead.qml", "Browse.qml", "Words.qml", "strip.mjs"]) await copyFile(new URL(`../desktop/${file}`, import.meta.url), join(dir, "ui", file));
 	await copyFile(new URL("../desktop/harnesses.mjs", import.meta.url), join(dir, "ui", "harnesses.mjs"));
 	const theme = (await readFile(new URL("../desktop/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
-	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\nMasthead 1.0 Masthead.qml\nBrowse 1.0 Browse.qml\n");
+	await writeFile(join(dir, "ui", "qmldir"), "singleton Theme 1.0 Theme.qml\nMasthead 1.0 Masthead.qml\nBrowse 1.0 Browse.qml\nWords 1.0 Words.qml\n");
 	await writeFile(join(dir, "tst_browse.qml"), `
 import QtQuick
 import QtTest
