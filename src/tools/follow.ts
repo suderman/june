@@ -152,6 +152,9 @@ function progress(input: FollowInput, file: string | undefined): string {
 	return `Time for the regular update ${user()} asked for on the task «${input.title}»${where}. Read its agent with herdr_read_agent, sending it nothing, and tell ${user()} in a line or two what it is doing now and what is left.`;
 }
 
+/** Recorded when a follow ends, so `watch` knows which dispatch run it already reported. Legacy tasks have `null`. */
+export type FollowResult = { endedAt: number; signal: string } | null;
+
 export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions = FOLLOW_DEFAULTS) {
 	const observe = async (input: FollowInput): Promise<Observation> => {
 		const task = input.file !== undefined ? await org.byHeading(input.file, input.title) : await org.byId(input.id);
@@ -187,7 +190,7 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 		};
 	};
 
-	return defineTask<FollowInput, FollowState, null>({
+	return defineTask<FollowInput, FollowState, FollowResult>({
 		name: "june.follow",
 		version: 1,
 		initial: (input) => ({ phase: "watch", due: input.queuedAt + options.intervalMs, checks: 0, last: "AUTO" }),
@@ -238,7 +241,7 @@ export function createFollowTask(org: Org, herdr: Herdr, options: FollowOptions 
 				await runtime.commit(async (tx) => {
 					if (notice !== undefined) await admitNotice(tx, root!, runtime.conversationId, notice);
 					return next?.done
-						? { status: "terminal", outcome: { status: "completed", result: null } }
+						? { status: "terminal", outcome: { status: "completed", result: { endedAt: now, signal: next.signal } } }
 						: { status: "running", checkpoint: { phase: "watch", due: nextDue, checks: checks + 1, last: next?.signal ?? last, reported: update ? now : reported, missing, ...(waited !== undefined ? { waited } : {}) } };
 				}, context);
 			},

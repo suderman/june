@@ -4,11 +4,14 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as BG } from "@earendil-works/chord/context";
+import { defineExtension } from "@earendil-works/pi-durable";
 import { fauxAssistantMessage, fauxProvider, type TranscriptContext } from "@earendil-works/pi-ai";
 import { createFollowTask, follow } from "../src/tools/follow.ts";
+import { Herdr } from "../src/tools/herdr.ts";
+import { Org } from "../src/tools/org.ts";
 import { createWatch, message } from "../src/watch.ts";
 import { createLogger } from "../src/runtime.ts";
-import { openTestDaemon, tempDir, until } from "./helpers.ts";
+import { openTestDaemon, tempDir, testConfig, until } from "./helpers.ts";
 
 const task = (state: string, title: string, id: string, report?: { line: string; state?: string; at?: number }) =>
 	`* ${state} ${title} :kit:\n:PROPERTIES:\n:ID: ${id}\n${report ? `:HEADLINE: ${report.line}\n${report.state ? `:HEADLINE_STATE: ${report.state}\n` : ""}${report.at ? `:HEADLINE_AT: ${report.at}\n` : ""}` : ""}:END:\nBody.\n`;
@@ -419,4 +422,73 @@ test("the watch says a question needs the user and HOLD does not", () => {
 	const text = message([{ title: "Fix the build", host: "kit", signal: "asks" }, { title: "Renew the cert", host: "kit", signal: "HOLD" }] as never);
 	assert.match(text, /«Fix the build» on kit is at EVAL with a question or a problem for them/);
 	assert.match(text, /«Renew the cert» on kit is on HOLD, waiting on something outside; nothing for them to do yet/);
+});
+
+test("watch stays quiet when a followed task finishes and its follow ends, but still reports a later manual run", async (t) => {
+	const tmp = await tempDir();
+	const orgDir = join(tmp.dir, "org");
+	const home = join(tmp.dir, "home");
+	const records = join(home, ".local/state/org-dispatch");
+	await mkdir(orgDir, { recursive: true });
+	await mkdir(records, { recursive: true });
+	const file = join(orgDir, "work.org");
+	const id1 = "task-followed-0001";
+	const id2 = "task-fast-0002";
+	const nowSec = Date.now() / 1000;
+	const render = (s1: string, s2: string) => [
+		task(s1, "Followed task", id1, s1 === "EVAL" ? { line: "Done by wrench.", state: "EVAL", at: Math.floor(nowSec) + 1 } : undefined),
+		task(s2, "Fast task", id2, s2 === "EVAL" ? { line: "Quick fix.", state: "EVAL", at: Math.floor(nowSec) + 1 } : undefined),
+	].join("\n");
+	await writeFile(file, render("PROG", "EVAL"));
+	await writeFile(join(records, `${id1}.json`), JSON.stringify({ id: id1, heading: "Followed task", status: "running", started: nowSec }));
+	let polls = 0;
+	const followTask = createFollowTask(new Org(orgDir), new Herdr(testConfig(tmp.dir).herdr, async () => "{}"), { intervalMs: 30, launchMs: 60_000, maxMs: 3_600_000 });
+	const faux = fauxProvider();
+	faux.setResponses(Array.from({ length: 6 }, () => fauxAssistantMessage("noted")));
+	const daemon = await openTestDaemon({
+		...tmp,
+		faux,
+		config: { dispatch: { hosts: ["kit"] }, watch: { enabled: true, gapMinutes: 0 } },
+		extensions: [defineExtension({ name: "watch-follow-race-test", tasks: [followTask] })],
+		watchClock: { now: () => (polls++, new Date(2026, 10, 27, 13, 0, polls)), tickMs: 20, home, run: async () => "" },
+	});
+	t.after(async () => { await daemon.close(); await tmp.cleanup(); });
+	const ledger = join(tmp.paths.state, "watch.json");
+	const entriesBySource = async (source: string) =>
+		(await daemon.root.context(BG)).entries.filter((e) => e.kind === "june.input" && (e.data as { source?: string })?.source === source);
+
+	// Register follow for id1 while it is PROG and let watch learn the run.
+	await daemon.harness.commit((tx) => follow(tx, followTask, { id: id1, title: "Followed task", host: "kit", queuedAt: Date.now() }, Number(daemon.root.id)), BG);
+	await until(async () => (await readFile(ledger, "utf8").catch(() => "")).includes(`"hosts":["kit"]`));
+	const waitPolls = async (n = 3) => {
+		const from = polls;
+		await until(() => polls >= from + n);
+	};
+	await waitPolls(2);
+
+	// 1. Followed task reaches EVAL and org-dispatch removes its run record; follow reports it and becomes terminal.
+	replace(file, render("EVAL", "EVAL"));
+	rmSync(join(records, `${id1}.json`));
+	await until(async () => (await entriesBySource("follow")).length === 1 && !(await daemon.status()).busy);
+	await until(async () => (await daemon.harness.inspect(BG)).tasks.filter((t) => t.record.kind === "june.follow").length === 0);
+	await waitPolls(4);
+	assert.equal((await entriesBySource("watch")).length, 0, "watch must not re-report a run whose follow just completed");
+
+	// 2. Fast task: follow completes BEFORE watch ever sees its finished run record.
+	await daemon.harness.commit((tx) => follow(tx, followTask, { id: id2, title: "Fast task", host: "kit", queuedAt: Date.now() }, Number(daemon.root.id)), BG);
+	await until(async () => (await entriesBySource("follow")).length === 2 && !(await daemon.status()).busy);
+	await writeFile(join(records, `${id2}.json`), JSON.stringify({ id: id2, heading: "Fast task", status: "finished", started: nowSec }));
+	await waitPolls(4);
+	assert.equal((await entriesBySource("watch")).length, 0, "watch must not report a finished run covered by a completed follow");
+
+	// 3. Later manual resume on id1 (started after the follow ended): watch DOES report it.
+	const manualStart = Date.now() / 1000 + 60;
+	replace(file, render("PROG", "EVAL"));
+	await writeFile(join(records, `${id1}.json`), JSON.stringify({ id: id1, heading: "Followed task", status: "running", started: manualStart }));
+	await until(async () => (await readFile(ledger, "utf8")).includes(`kit:${id1}:${manualStart}`));
+	replace(file, render("DONE", "EVAL"));
+	rmSync(join(records, `${id1}.json`));
+	await until(async () => (await entriesBySource("watch")).length === 1 && !(await daemon.status()).busy);
+	const watchNotice = (await entriesBySource("watch"))[0]!;
+	assert.match(JSON.stringify(watchNotice), /Followed task.*DONE|is DONE/);
 });

@@ -21,8 +21,8 @@ import { user } from "./user.ts";
 /** A dispatcher receipt. terminal is the hc address of its worker; pane is a receipt from before herdr-core. */
 export type DispatchRun = { id: string; heading?: string; file?: string; status?: string; started?: number; terminal?: string; pane?: string };
 
-/** `missed` marks one look that could not find the task, which only a second look in a row confirms. */
-type Seen = { signal: string; title: string; host: string; file?: string; headlineAt?: number; report?: WorkerHeadline; missed?: true };
+/** `missed` marks one look that could not find the task, which only a second look in a row confirms. `followed` marks a run June's follow task already owns, so `watch` stays quiet even after the follow ends. */
+type Seen = { signal: string; title: string; host: string; file?: string; headlineAt?: number; report?: WorkerHeadline; missed?: true; followed?: true };
 /** `hosts` have had a first look, which only learns what is there. */
 type Ledger = { runs: Record<string, Seen>; pending: Record<string, Seen>; notified: number; hosts: string[] };
 
@@ -119,7 +119,7 @@ export function createWatch(options: {
 	const confirm = (observed: Omit<Seen, "host">, last: Seen | undefined, host: string): Seen =>
 		observed.signal === "missing" && last !== undefined && last.signal !== "missing" && !last.missed
 			? { ...last, missed: true, host }
-			: { ...observed, host };
+			: { ...observed, host, ...(last?.followed ? { followed: true as const } : {}) };
 
 	const start = (harness: Harness, root: Conversation) => {
 		let busy = false;
@@ -130,17 +130,32 @@ export function createWatch(options: {
 				const at = now();
 				const ledger: Ledger = { runs: {}, pending: {}, notified: 0, hosts: [], ...load() };
 				const live = new Set<string>();
-				// June's own follows report her tasks; a run she follows is recorded here but never raised.
-				const followed = await harness.commit(async (tx) => {
+				// June's own follows report her tasks; a run she follows is recorded here but never raised, even if the
+				// follow already reached its terminal state before this poll ran.
+				const { activeFollowed, finishedFollows } = await harness.commit(async (tx) => {
 					const ids = (await tx.doc(Follows)).ids;
-					const mine = new Set<string>();
+					const active = new Set<string>();
+					const finished = new Map<string, { endedAt: number; signal: string }>();
 					for (const [id, task] of Object.entries(ids)) {
 						// SAFETY: Follows stores numeric task creation IDs; this restores their erased TaskId brand.
 						const record = await tx.task(task as unknown as TaskId);
-						if (record !== undefined && record.state.status !== "terminal") mine.add(id);
+						if (record === undefined) continue;
+						if (record.state.status !== "terminal") {
+							active.add(id);
+						} else if (record.state.outcome.status === "completed" && record.state.outcome.result && typeof record.state.outcome.result === "object") {
+							const res = record.state.outcome.result as { endedAt?: unknown; signal?: unknown };
+							if (typeof res.endedAt === "number" && typeof res.signal === "string") finished.set(id, { endedAt: res.endedAt, signal: res.signal });
+						}
 					}
-					return mine;
+					return { activeFollowed: active, finishedFollows: finished };
 				}, BG);
+				const ownedByFollow = (id: string, started: number | undefined, last?: Seen): boolean => {
+					if (last?.followed || activeFollowed.has(id)) return true;
+					const done = finishedFollows.get(id);
+					if (!done || done.signal === "TODO" || done.signal === "expired") return false;
+					// org-dispatch records `started` in epoch seconds; a follow that ended at or after this run started covered it.
+					return started !== undefined && started > 0 && started * 1000 <= done.endedAt;
+				};
 				for (const host of options.hosts) {
 					const found = await runs(host);
 					// An unreachable host keeps what is known of it, so its runs are not news when it is back.
@@ -153,12 +168,17 @@ export function createWatch(options: {
 						const key = `${host}:${run.id}:${run.started ?? 0}`;
 						live.add(key);
 						const last = ledger.runs[key];
-						if (last !== undefined && run.status === "finished" && SETTLED.has(last.signal)) continue;
+						const owned = ownedByFollow(run.id, run.started, last);
+						if (owned) delete ledger.pending[key];
+						if (last !== undefined && run.status === "finished" && SETTLED.has(last.signal)) {
+							if (owned && !last.followed) ledger.runs[key] = { ...last, followed: true };
+							continue;
+						}
 						const seen = confirm(await observe(host, run, last), last, host);
-						ledger.runs[key] = seen;
+						ledger.runs[key] = owned ? { ...seen, followed: true } : seen;
 						if (seen.signal === last?.signal) continue;
 						// The first look at a host only learns what is there; it raises nothing.
-						if (first || followed.has(run.id)) continue;
+						if (first || owned) continue;
 						if (NEWS.has(seen.signal)) ledger.pending[key] = seen;
 						else delete ledger.pending[key];
 					}
@@ -167,7 +187,10 @@ export function createWatch(options: {
 					for (const [key, last] of Object.entries(ledger.runs)) {
 						if (first || live.has(key) || !key.startsWith(`${host}:`) || SETTLED.has(last.signal)) continue;
 						const [, id, started] = key.split(":");
-						if (followed.has(id!)) continue;
+						if (ownedByFollow(id!, Number(started), last)) {
+							delete ledger.pending[key];
+							continue;
+						}
 						const seen = confirm(await observe(host, { id: id!, heading: last.title, status: "finished", started: Number(started) }, last), last, host);
 						// Not found this once: keep it for one more look.
 						if (seen.missed) {
