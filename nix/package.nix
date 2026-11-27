@@ -34,7 +34,7 @@ in
     pname = "june";
     version = (lib.importJSON ../package.json).version;
     inherit src nodejs;
-    npmDepsHash = "sha256-RZ+FXx4Q1qC02ZFnGHhG9YesgtZ+VgufppLoIGHcFVI=";
+    npmDepsHash = "sha256-bjbt6f1sOpjqH1grXKe1Z6UmFzfQELtzp932g2r/DEg=";
     nativeBuildInputs = [makeWrapper];
 
     # Node runs the TypeScript sources directly; typecheck instead of building.
