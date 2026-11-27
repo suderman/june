@@ -39,14 +39,25 @@ ListView {
 
   // Whether to stay on the newest panel, and the wheel's momentum.
   property bool follow: true
+  property bool landingTop: false
   property var scrollState: Scroll.rest()
 
   verticalLayoutDirection: ListView.BottomToTop
   spacing: 14
   clip: true
   opacity: linked ? 1 : 0.5
-  // Stay on the newest panel as panels arrive and settle their height, unless the user has scrolled away.
-  onContentHeightChanged: if (follow) Qt.callLater(list.positionViewAtBeginning)
+  // Stay on the newest panel as panels arrive and settle their height, unless the user has scrolled away;
+  // likewise hold the visual top briefly after jumping there with Z while the oldest panel measures itself.
+  function snapTop() {
+    if (!landingTop) return;
+    positionViewAtEnd();
+    contentY = originY;
+  }
+  onContentHeightChanged: {
+    if (follow) Qt.callLater(list.positionViewAtBeginning);
+    else if (landingTop) Qt.callLater(list.snapTop);
+  }
+  onOriginYChanged: if (landingTop) Qt.callLater(list.snapTop)
   onMovementEnded: follow = atYEnd
 
   function scrollBy(dy) {
@@ -61,6 +72,8 @@ ListView {
     target: null
     onWheel: event => {
       list.follow = false;
+      list.landingTop = false;
+      settleTop.stop();
       const r = Scroll.wheel(list.scrollState, { angleY: event.angleDelta.y, pixelY: event.pixelDelta.y, now: Date.now() });
       list.scrollState = r.state;
       if (r.dy !== 0) list.scrollBy(r.dy);
@@ -90,6 +103,8 @@ ListView {
   function page(direction) {
     // The user is moving: stop following the newest panel first, or the follow snaps back as panels come into view.
     follow = false;
+    landingTop = false;
+    settleTop.stop();
     scrollState = Scroll.rest();
     glider.running = false;
     paging.stop();
@@ -99,7 +114,10 @@ ListView {
   }
   // Opening lands on the newest panel; panels measure themselves a moment later, so land again once they have.
   Timer { id: settle; interval: 120; onTriggered: if (list.follow) list.positionViewAtBeginning() }
+  Timer { id: settleTop; interval: 260; onTriggered: { if (list.landingTop) { list.snapTop(); list.landingTop = false; } } }
   function landOnNewest() {
+    landingTop = false;
+    settleTop.stop();
     follow = true;
     cursorIndex = count > 0 ? 0 : -1;
     scrollState = Scroll.rest();
@@ -107,10 +125,24 @@ ListView {
     positionViewAtBeginning();
     settle.restart();
   }
+  function landOnOldest() {
+    if (count === 0) return;
+    follow = false;
+    landingTop = true;
+    scrollState = Scroll.rest();
+    glider.running = false;
+    paging.stop();
+    cursorIndex = count - 1;
+    snapTop();
+    Qt.callLater(list.snapTop);
+    settleTop.restart();
+  }
   /** Step panel cursor: delta -1 = older (up), +1 = newer (down). */
   function stepPanel(delta) {
     if (count === 0) return;
     follow = false;
+    landingTop = false;
+    settleTop.stop();
     scrollState = Scroll.rest();
     glider.running = false;
     paging.stop();
@@ -124,16 +156,8 @@ ListView {
   /** Jon's Emacs `Z`: go to bottom (newest); if already at bottom, go to top (oldest). */
   function toggleBottomTop() {
     if (count === 0) return;
-    if (atYEnd && (cursorIndex <= 0)) {
-      follow = false;
-      scrollState = Scroll.rest();
-      glider.running = false;
-      paging.stop();
-      cursorIndex = count - 1;
-      positionViewAtEnd();
-    } else {
-      landOnNewest();
-    }
+    if (atYEnd && (cursorIndex <= 0)) landOnOldest();
+    else landOnNewest();
   }
   /** Currently cursor-focused panel object (or newest panel when cursor is unset). */
   function focusedPanel() {
@@ -183,6 +207,8 @@ ListView {
   function land(panel) {
     if (panel === "") { landing = ""; landOnNewest(); return; }
     follow = false;
+    landingTop = false;
+    settleTop.stop();
     scrollState = Scroll.rest();
     glider.running = false;
     paging.stop();
@@ -202,6 +228,8 @@ ListView {
     onPressedChanged: {
       if (pressed) {
         list.follow = false;
+        list.landingTop = false;
+        settleTop.stop();
         list.scrollState = Scroll.rest();
         glider.running = false;
         paging.stop();
