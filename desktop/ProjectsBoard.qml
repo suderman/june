@@ -95,7 +95,8 @@ Item {
     anchors { left: parent.left; right: parent.right; bottom: parent.bottom; rightMargin: 4 }
     sections: [{ id: "agenda", label: "agenda" }, { id: "tasks", label: "tasks" }, { id: "projects", label: "by project" }]
     current: board.mode === "state" ? "tasks" : board.mode
-    onPicked: id => { if (id === (board.mode === "state" ? "tasks" : board.mode)) board.resetSection(); else { board.mode = id; board.drill = ""; } }
+    // Another section puts away the open task page, which belongs to the one left.
+    onPicked: id => { if (id === (board.mode === "state" ? "tasks" : board.mode)) board.resetSection(); else { board.detailKey = ""; board.mode = id; board.drill = ""; } }
   }
 
   // The showing section again: put its sheet and drill-down away and go back to its top.

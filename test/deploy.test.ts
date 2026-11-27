@@ -111,3 +111,28 @@ test("a deploy joins the Herdr app space named after its folder, else the host's
 	const space = (argv: string[]) => argv.find((a, i) => argv[i - 1] === "--label" && a.startsWith("herdr.space="));
 	assert.deepEqual(runs.map(space), ["herdr.space=spJune", "herdr.space=spMain", undefined], "june's folder, kit's home in main, and cog with no main stays hidden");
 });
+
+test("a host without a main space gets one made through the Herdr app when a deploy needs it", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const asked: string[][] = [];
+	const started: string[][] = [];
+	const live: any[] = [];
+	const herdr = new Herdr({ host: "kit", hosts: { lux: {} }, allowPrompt: false }, async (argv) => {
+		if (argv[0] === "herdr-app") { asked.push([...argv]); return JSON.stringify({ space: "lux/spNew", tab: "lux/tb1" }); }
+		if (argv[1] === "machine") return JSON.stringify({ machines: [{ name: "lux", state: "connected" }] });
+		if (argv[1] === "run") { started.push([...argv]); live.push({ address: "lux/t3", state: "live", agent: "pi" }); return JSON.stringify({ address: "lux/t3" }); }
+		if (argv[1] === "ls") return JSON.stringify({ terminals: live });
+		return "{}";
+	});
+	await deploy(herdr, tmp.dir, { host: "lux", harness: "pi", dir: "~" }, { home: "/home/j", waitMs: 0 });
+	assert.deepEqual(asked, [["herdr-app", "do", "space.new", "--name", "main", "--folder", "/home/j", "--machine", "lux", "--focus", "false"]]);
+	assert.ok(started[0]!.includes("herdr.space=spNew"), "the session joins the space just made, its machine prefix dropped");
+	const none = new Herdr({ host: "kit", hosts: {}, allowPrompt: false }, async (argv) => {
+		if (argv[0] === "herdr-app") throw new Error("herdr-app: no window");
+		if (argv[1] === "run") { assert.ok(!argv.some((a) => a.startsWith("herdr.space=")), "no app to ask: no space"); return JSON.stringify({ address: "t5" }); }
+		if (argv[1] === "ls") return JSON.stringify({ terminals: [{ address: "t5", state: "live", agent: "pi" }] });
+		return "{}";
+	});
+	assert.equal((await deploy(none, tmp.dir, { host: "kit", harness: "pi" }, { waitMs: 0 })).terminal, "t5");
+});

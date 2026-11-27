@@ -277,6 +277,15 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
     // Bumped when the user taps an already-open tab in the bottom bar to jump back to its default subsection.
     var agentsReset by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var projectsReset by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    // Settling on another section of the same board puts away the sheet the last one had open, as the desktop does.
+    var lastSection by remember { androidx.compose.runtime.mutableIntStateOf(pager.settledPage) }
+    LaunchedEffect(pager.settledPage) {
+        val was = lastSection - first
+        val now = pager.settledPage - first
+        lastSection = pager.settledPage
+        if (was != now && was in AgentsSections.indices && now in AgentsSections.indices) agentsReset++
+        if (was != now && was in projectPages && now in projectPages) projectsReset++
+    }
     val ready = decisions
     // The boards stay while the link comes back after June was in the background, so their place is kept.
     val boards = !fromSheet && ready != null && (link.status is LinkStatus.Linked || link.agenda != null || link.agents != null)

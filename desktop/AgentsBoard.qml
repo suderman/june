@@ -211,7 +211,8 @@ Item {
       { id: "activity", label: "activity", badge: board.view.needs.length },
     ]
     current: board.mode
-    onPicked: id => { if (id === board.mode) board.resetSection(); else board.mode = id; }
+    // Another section puts away the open sheet, which belongs to the one left.
+    onPicked: id => { if (id === board.mode) board.resetSection(); else { board.dismissSheet(); board.mode = id; } }
   }
 
   Flickable {

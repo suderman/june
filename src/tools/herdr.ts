@@ -170,6 +170,18 @@ export class Herdr {
 		return undefined;
 	}
 
+	/**
+	 * Make a herdr-app space on HOST named NAME, its terminals starting in FOLDER, through the Herdr app open here (it
+	 * reaches the machines this core has added), without changing what the app shows; it opens with a shell. Returns its
+	 * id as a terminal's herdr.space label carries it, or undefined when no app is open to ask.
+	 */
+	async newSpace(host: string, name: string, folder: string): Promise<string | undefined> {
+		const machine = host === this.#config.host ? "" : host;
+		const out = await this.#run(["herdr-app", "do", "space.new", "--name", name, "--folder", folder, "--machine", machine, "--focus", "false"], 15_000).catch(() => "");
+		const id = (() => { try { return String(JSON.parse(out).space ?? ""); } catch { return ""; } })();
+		return id ? id.replace(`${host}/`, "") : undefined;
+	}
+
 	/** HOST's /proc/stat and /proc/meminfo, for its load: read here, through hc on a machine it has added, else over SSH. */
 	async load(host: string): Promise<string> {
 		const files = ["/proc/stat", "/proc/meminfo"];
