@@ -554,7 +554,13 @@ ShellRoot {
     function open(): void { root.show(); }
     function refresh(): void { root.refresh(); }
     function close(): void { root.hide(); }
-    function mini(): void { root.miniShown ? root.hideMini() : root.showMini(); }
+    // The other size (Hyprland's long press of Alt while June shows, Jon 2026-11-26): the full strip shrinks into live
+    // June and she grows into it, as Tab does; with neither showing, live June comes.
+    function mini(): void {
+      if (root.shown) root.toMini();
+      else if (root.miniShown && root.liveEnabled) root.show();
+      else root.showMini();
+    }
     // Lights every panel as if at this hour (0 to 24, fractional), to preview the day's light; a negative hour or
     // "now" goes back to each panel's own.
     function light(hour: string): void { const h = Number(hour); root.lightHour = hour === "now" || isNaN(h) ? -1 : h; }
