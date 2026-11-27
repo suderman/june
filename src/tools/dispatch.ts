@@ -9,7 +9,7 @@ import { arr, bool, lit, num, obj, opt, str, union } from "@earendil-works/pi-sc
 import { defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import { LAUNCHABLE_HARNESSES } from "../../desktop/harnesses.mjs";
 import { type Config, expandHome } from "../config.ts";
-import { type Card, findCard, readClankers } from "../roster.ts";
+import { type Card, findCard, ownersOf, readClankers } from "../roster.ts";
 import { leaderboard, listRuns } from "../runs.ts";
 import { type Run, runProcess } from "./herdr.ts";
 import { createFollowTask, FOLLOW_DEFAULTS, type FollowInput, type FollowOptions, follow, listFollowing } from "./follow.ts";
@@ -373,6 +373,8 @@ export class Dispatch {
 			if (!dir?.isDirectory()) throw new Error(`dir ${request.dir} is not a directory; use one of the project's repository links`);
 		}
 		const path = await this.#target(request.file);
+		// Naming no agent gives the task to the clankers that own its file, as the dispatcher would.
+		const owners = request.agent || request.agents?.length ? [] : ownersOf(rosterCards(this.#config), path).map((c) => c.slug);
 		let stamp: string | undefined;
 		for (let attempt = 0; attempt < 3; attempt++) {
 			const before = await stat(path);
@@ -385,7 +387,7 @@ export class Dispatch {
 			if (startsAt !== undefined && startsAt <= this.#now())
 				throw new Error(`scheduled ${stamp} has already passed in Calgary time; omit scheduled to start now, or choose a later time`);
 			const id = randomUUID();
-			const next = insertAfterPreamble(content, renderTask({ agent: this.#config.dispatch.agent ?? "pi", ...request }, id, stamp));
+			const next = insertAfterPreamble(content, renderTask({ agent: this.#config.dispatch.agent ?? "pi", ...request, ...(owners.length ? { agents: owners } : {}) }, id, stamp));
 			// Replace only if nobody (Emacs, Syncthing) changed the file since it was read.
 			if ((await stat(path)).mtimeMs !== before.mtimeMs) continue;
 			const temp = join(dirname(path), `.${basename(path)}.june-${process.pid}`);
@@ -424,13 +426,15 @@ export class Dispatch {
 				if (ref === task.key) throw new Error(`${task.key} cannot depend on itself`);
 				if (!keys.has(ref) && !/^id:[0-9A-Za-z-]{8,64}$/.test(ref)) throw new Error(`${task.key} depends on ${ref}, which is neither a task key in this plan nor id:UUID`);
 			}
+			const path = await this.#target(task.file);
+			const owners = task.agent || task.agents?.length ? [] : ownersOf(rosterCards(this.#config), path).map((c) => c.slug);
 			tasks.push({
 				key: task.key,
-				file: this.#org.rel(await this.#target(task.file)),
+				file: this.#org.rel(path),
 				title: task.title,
 				body: task.body.trim(),
 				host,
-				...(task.agents?.length ? { agents: [...task.agents] } : { agent: task.agent ?? defaultAgent }),
+				...(task.agents?.length ? { agents: [...task.agents] } : owners.length ? { agents: owners } : { agent: task.agent ?? defaultAgent }),
 				...(task.depends?.length ? { depends: [...task.depends] } : {}),
 				...(task.dir ? { dir: task.dir } : {}),
 				...(task.review === false || task.review === "agent" ? { review: task.review } : {}),
@@ -712,7 +716,7 @@ export function createDispatchExtension(
 	const agentParameter = (description: string) => opt(union(agents.map((agent) => lit(agent)), { description }));
 	const agentsParameter = opt(arr(str(), {
 		minItems: 1,
-		description: `Preferred way to assign clankers: ordered list of clanker slugs (from your team section / clankers_status) or fallback harness names (${agents.join(", ")}), written as :AGENTS:. The dispatcher picks the first free candidate on launch (unless a later one would lose quota at a reset within hours) and uses the rest for handoff. Use your judgment to pick suitable clankers proactively unless ${user()} names one; set host to match your first-choice clanker's host`,
+		description: `Preferred way to assign clankers: ordered list of clanker slugs (from your team section / clankers_status) or fallback harness names (${agents.join(", ")}), written as :AGENTS:. The dispatcher picks the first free candidate on launch (unless a later one would lose quota at a reset within hours) and uses the rest for handoff. Use your judgment to pick suitable clankers proactively unless ${user()} names one; set host to match your first-choice clanker's host. Omitting both agent and agents gives a task in an owned file to its owners`,
 	}));
 	// Say what the dispatcher could run but June may not choose, so she gives one accurate answer instead of a workaround.
 	const disabled = disabledAgents(config.dispatch);

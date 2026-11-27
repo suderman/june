@@ -107,6 +107,21 @@ test("June can give a task to roster agents in order, with a harness as the unna
 	await assert.rejects(dispatch.queue({ ...request, body, key: "inst:33", agents: ["bolt", "bolt"] }), /each agent once/);
 });
 
+test("a queued task naming no agent goes to the clankers that own its file", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	const soulFile = join(f.root, "june-data", "SOUL.org");
+	for (const [slug, owns] of [["ledger", join(f.root, "work/studio")], ["other", join(f.root, "elsewhere")]]) {
+		await mkdir(join(f.root, "june-data", "clankers", slug!), { recursive: true });
+		await writeFile(join(f.root, "june-data", "clankers", slug!, "CARD.org"), `* ${slug}\n:PROPERTIES:\n:HOST: kit\n:HARNESS: claude\n:OWNS: ${owns}\n:END:\n`);
+	}
+	const dispatch = new Dispatch(new Org(f.root), { ...f.config, soulFile }, async () => "");
+	await dispatch.queue({ ...request, body });
+	assert.match(await readFile(f.project, "utf8"), /^:ID: .+\n:AGENTS: ledger\n:HOST: kit$/m);
+	await dispatch.queue({ ...request, body, key: "inst:40", title: "Named", agent: "pi" });
+	assert.match(await readFile(f.project, "utf8"), /^\* AUTO Named\n:PROPERTIES:\n:ID: .+\n:AGENT: pi\n/m, "a named agent wins over the owner");
+});
+
 test("a scheduled task is written with its SCHEDULED line in the one save, and a replay finds it after the time passes", async (t) => {
 	const f = await fixture();
 	t.after(f.cleanup);

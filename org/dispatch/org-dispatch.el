@@ -1073,10 +1073,38 @@ unless STOPPED names it."
   (let ((latest (cdr (assoc agent sessions))))
     (unless (member latest stopped) latest)))
 
+(defvar org-dispatch--owners 'unread
+  "The roster agents that own files, from `june agents owners', read once a run:
+a list of alists with slug, host and owns (full paths).")
+
+(defun org-dispatch--owners (file)
+  "The roster agents whose card owns FILE, in roster order, or nil."
+  (when (eq org-dispatch--owners 'unread)
+    (setq org-dispatch--owners
+          (let ((june (executable-find org-dispatch-june)))
+            (when june
+              (with-temp-buffer
+                (when (eql 0 (call-process june nil '(t nil) nil "agents" "owners" "--json"))
+                  (let ((owners (ignore-errors
+                                  (json-parse-string (buffer-string) :object-type 'alist :array-type 'list))))
+                    (seq-filter (lambda (o) (and (consp o) (consp (car o)) (stringp (alist-get 'slug o))))
+                                (and (listp owners) owners)))))))))
+  (when file
+    (let ((file (expand-file-name file)))
+      (delq nil (mapcar (lambda (owner)
+                          (when (seq-some (lambda (path)
+                                            (and (stringp path)
+                                                 (or (string= file path)
+                                                     (string-prefix-p (file-name-as-directory path) file))))
+                                          (alist-get 'owns owner))
+                            (alist-get 'slug owner)))
+                        org-dispatch--owners)))))
+
 (defun org-dispatch--roster-names ()
   "The roster agents the entry at point asks for, in order, or nil.
 AGENTS lists candidates. An AGENT that is not a harness name is one agent.
-A task with no AGENT, AGENTS or agent tag takes June's dispatch.roster."
+A task with no AGENT, AGENTS or agent tag goes to the roster agents that own
+its file, else takes June's dispatch.roster."
   (let ((agents (org-entry-get nil "AGENTS"))
         (agent (org-entry-get nil "AGENT")))
     (cond (agents (split-string agents))
@@ -1084,6 +1112,7 @@ A task with no AGENT, AGENTS or agent tag takes June's dispatch.roster."
           ((or (seq-intersection (org-get-tags nil t) org-dispatch-agents)
                (seq-intersection org-file-tags org-dispatch-agents))
            nil)
+          ((org-dispatch--owners buffer-file-name))
           (t (let ((roster (org-dispatch--default "roster" nil)))
                (when (and (vectorp roster) (> (length roster) 0))
                  (append roster nil)))))))

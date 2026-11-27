@@ -33,6 +33,9 @@ const USAGE = `usage:
                           which of these agents, in your order, to give a task: the first available, unless a later
                           one would lose quota at a reset within hours; a harness name (pi, claude, codex, agy) is
                           an unnamed worker on it; the dispatcher passes its host and the harnesses it can start
+  june agents owners [--json]
+                          the clankers whose card owns files (:OWNS:), with their host and each owned path in full;
+                          the dispatcher gives an unassigned task in an owned file to its owners
   june start NAME [PROMPT...]
                           start clanker NAME here, in this terminal, on the account its harness picks; refuses
                           while NAME is busy or works on another host
@@ -915,6 +918,7 @@ async function rosterStanding(p: ReturnType<typeof paths>): Promise<import("./ro
 /** `june agents [NAME|pick|leaderboard|history|record]`: roster, picker, run history and leaderboard. */
 async function agentsCommand(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {
 	if (args[0] === "pick") return agentsPick(p, args.slice(1).filter((x) => x !== "--explain"), json || args.includes("--explain"));
+	if (args[0] === "owners" && args.length === 1) return agentsOwners(p, json);
 	if (args[0] === "record") return agentsRecord(p, args.slice(1));
 	if (args[0] === "leaderboard" || args[0] === "stats") return agentsLeaderboard(p, json);
 	if (args[0] === "history") return agentsHistory(p, args.slice(1), json);
@@ -1083,6 +1087,18 @@ async function agentsHistory(p: ReturnType<typeof paths>, args: string[], json: 
  * `june agents pick NAME... [--explain]`: the candidate to give a task, from names in the user's order: the first one
  * available, unless a later one would otherwise lose quota at a reset within hours. Prints the name alone.
  */
+/** `june agents owners`: the usable clankers that own files, in roster order, with ~ expanded. */
+async function agentsOwners(p: ReturnType<typeof paths>, json: boolean): Promise<number> {
+	const { readClankers } = await import("./roster.ts");
+	const { expandHome } = await import("./config.ts");
+	const owners = readClankers(p.data)
+		.filter((c) => !c.problems.length && c.owns?.length)
+		.map((c) => ({ slug: c.slug, host: c.host!, owns: c.owns!.map((path) => expandHome(path).replace(/\/+$/, "")) }));
+	if (json) console.log(JSON.stringify(owners));
+	else for (const o of owners) console.log(`${o.slug}\t${o.host}\t${o.owns.join(" ")}`);
+	return 0;
+}
+
 async function agentsPick(p: ReturnType<typeof paths>, args: string[], json: boolean): Promise<number> {
 	const { choose, findCard, launchInstructions } = await import("./roster.ts");
 	const a = await import("./accounts.ts");

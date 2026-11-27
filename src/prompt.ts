@@ -211,7 +211,7 @@ export function renderTeam(dataDir: string, config: Config): string | undefined 
 		hostLines.push(`- ${name}${dispatchHosts.has(name) ? " [dispatcher]" : " [no dispatcher]"}`);
 	}
 	const cardLines = cards.map((c) => {
-		const attrs = [c.host, c.harness, c.model, c.effort ? `effort ${c.effort}` : undefined].filter(Boolean).join(", ");
+		const attrs = [c.host, c.harness, c.model, c.effort ? `effort ${c.effort}` : undefined, c.owns?.length ? `owns ${c.owns.join(" ")}` : undefined].filter(Boolean).join(", ");
 		const body = c.instructions ? c.instructions.replace(/\s+/g, " ") : "";
 		const issues = c.problems.length ? ` [unusable: ${c.problems.join("; ")}]` : "";
 		return `- ${c.slug}${c.name !== c.slug ? ` (${c.name})` : ""} [${attrs || "incomplete"}]${issues}${body ? `: ${body}` : ""}`;
@@ -222,6 +222,7 @@ export function renderTeam(dataDir: string, config: Config): string | undefined 
 		`- Inspect live standing with clankers_status before choosing or answering about team status: it shows busy/idle and current task, host reachability and load, provider quota and reset timing, XP/level, current-model vs lifetime stats (so model swaps are visible), and each clanker's MEMORY.org.`,
 		`- Choose clankers proactively on ${user()}'s behalf unless they name one. Weigh role/identity, live availability (idle and host reachable), quota and expiring resets (prefer spending quota before a reset), host capabilities and ${user()}'s proximity (from the message tag: [gui]/[tui] is on ${config.herdr.host}, [gui@HOST] is on HOST), and earned reputation + XP.`,
 		`- Delegate unattended work through Org AUTO tasks (org_queue_task / org_queue_plan) by passing your ranked clanker slugs in agents (and matching host to your preferred clanker's host). Use clanker_deploy when ${user()} wants an interactive terminal session to work alongside a clanker, or to jump into one already running.`,
+		`- A clanker that owns files is the specialist for that area of ${user()}'s life, and those files are its knowledge base. You stay the generalist there: answer quick questions yourself from its files and skills, and hand deeper dives, research and long sessions to the owner (clanker_deploy to work with ${user()}, an AUTO task for unattended work). An AUTO task you queue in an owned file without naming agents goes to its owner.`,
 		`- Help your clankers level up: each clanker maintains its own MEMORY.org of general lessons injected at launch. After reviewing a finished run, use clanker_rate_run (good/mixed/poor) to update its XP and track record, and clanker_memory to read, add, or prune concise lessons when a pattern is worth keeping.`,
 		...(hostLines.length ? ["", "Hosts:", ...hostLines] : []),
 		"",

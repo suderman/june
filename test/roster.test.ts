@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { HARNESSES as HARNESS_TABLE, HARNESS_NAMES, LAUNCHABLE_HARNESSES } from "../desktop/harnesses.mjs";
 import { HARNESSES as ACCOUNT_HARNESSES } from "../src/accounts.ts";
-import { assignRosterAgents, batteryOf, choose, computeStanding, editClanker, familyOf, findCard, formatCard, harnessBatteries, launchArgs, launchInstructions, MEMORY_CHARS, parseRoster, readClankers } from "../src/roster.ts";
+import { assignRosterAgents, batteryOf, choose, computeStanding, editClanker, familyOf, findCard, ownersOf, formatCard, harnessBatteries, launchArgs, launchInstructions, MEMORY_CHARS, parseRoster, readClankers } from "../src/roster.ts";
 import { LAUNCHABLE } from "../src/tools/dispatch.ts";
 import { activeRunsByTask, leaderboard, listRuns, recordRunEnd, recordRunStart, statsByAgent } from "../src/runs.ts";
 import { tempDir } from "./helpers.ts";
@@ -146,6 +146,28 @@ test("clanker edits create, update, rename and destroy folders, keeping memory a
 	assert.deepEqual(readClankers(tmp.dir).map((c) => c.slug), ["pax"]);
 	assert.throws(() => editClanker(tmp.dir, { action: "delete", slug: "nope" }), /no clanker/);
 	assert.match(formatCard({ name: "Solo", host: "kit", harness: "claude", effort: "high", instructions: "" }), /^\* Solo\n:PROPERTIES:\n:HOST: kit\n:HARNESS: claude\n:EFFORT: high\n:END:$/);
+});
+
+test("a card's :OWNS: names its files, edits keep it, and ownersOf finds a file's usable owners", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const [ledger, odd] = parseRoster("* Ledger\n:PROPERTIES:\n:HOST: kit\n:HARNESS: claude\n:OWNS: ~/org/finance/ /srv/notes.org\n:END:\n* Odd\n:PROPERTIES:\n:HOST: kit\n:HARNESS: pi\n:OWNS: org/house\n:END:\n");
+	assert.deepEqual(ledger!.owns, ["~/org/finance/", "/srv/notes.org"]);
+	assert.deepEqual(odd!.problems, [":OWNS: org/house is not an absolute or ~/ path"]);
+	const home = process.env.HOME!;
+	assert.deepEqual(ownersOf([ledger!, odd!], `${home}/org/finance/finance.org`).map((c) => c.slug), ["ledger"]);
+	assert.deepEqual(ownersOf([ledger!], "~/org/finance").map((c) => c.slug), ["ledger"], "the directory itself");
+	assert.deepEqual(ownersOf([ledger!], "/srv/notes.org").map((c) => c.slug), ["ledger"], "a file");
+	assert.deepEqual(ownersOf([ledger!], `${home}/org/finance-old/x.org`), [], "a sibling with the same prefix is not inside");
+
+	editClanker(tmp.dir, { action: "save", name: "Ledger", host: "kit", harness: "claude", owns: "~/org/finance/", instructions: "Counts." });
+	editClanker(tmp.dir, { action: "save", original: "ledger", name: "Ledger", host: "kit", harness: "claude", effort: "high", instructions: "Counts carefully." });
+	const card = readClankers(tmp.dir)[0]!;
+	assert.deepEqual([card.owns, card.effort], [["~/org/finance/"], "high"], "an editor that leaves owns out keeps it");
+	assert.match(await readFile(join(tmp.dir, "clankers", "ledger", "CARD.org"), "utf8"), /^:EFFORT: high\n:OWNS: ~\/org\/finance\/\n:END:$/m);
+	editClanker(tmp.dir, { action: "save", original: "ledger", name: "Ledger", host: "kit", harness: "claude", owns: "" });
+	assert.equal(readClankers(tmp.dir)[0]!.owns, undefined, "an empty owns clears it");
+	assert.throws(() => editClanker(tmp.dir, { action: "save", name: "Bad", host: "kit", harness: "pi", owns: "relative/path" }), /owns relative\/path is not an absolute or ~\/ path/);
 });
 
 test("computeStanding combines roster cards, live workers, and account battery", () => {

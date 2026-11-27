@@ -984,6 +984,38 @@ cat >"$fixture/launch-tests.el" <<'EOF'
         (delete-file file))
       (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id))))))
 
+(ert-deftest an-unassigned-task-in-an-owned-file-goes-to-its-owners ()
+  ;; A card's :OWNS: makes its clanker the default for tasks there; a task that
+  ;; names an agent keeps it, and a task elsewhere still takes the default agent.
+  (let* ((bin (make-temp-file "june-bin" t))
+         (org-dispatch-june (expand-file-name "june" bin))
+         (owned (expand-file-name "money" org-dispatch-root))
+         (org-dispatch--owners 'unread)
+         (write (lambda (file n drawer)
+                  (let ((id (format "00000000-0000-0000-0000-00000000020%d" n)))
+                    (make-directory (file-name-directory file) t)
+                    (with-temp-file file
+                      (insert (format "* AUTO Owned task %d\n:PROPERTIES:\n:ID: %s\n:HOST: kit\n%s:END:\n" n id drawer)))
+                    (org-dispatch--edit file id #'org-dispatch--task)))))
+    (with-temp-file org-dispatch-june
+      (insert "#!/bin/sh\n"
+              "[ \"$1 $2\" = 'agents owners' ] && echo '[{\"slug\":\"tally\",\"host\":\"kit\",\"owns\":[\"" owned "\"]},"
+              "{\"slug\":\"wrench\",\"host\":\"kit\",\"owns\":[\"" owned "-not\"]}]'\n"))
+    (set-file-modes org-dispatch-june #o755)
+    (unwind-protect
+        (let ((inside (funcall write (expand-file-name "money.org" owned) 1 ""))
+              (named (funcall write (expand-file-name "named.org" owned) 2 ":AGENT: pi\n"))
+              (outside (funcall write (expand-file-name "elsewhere.org" org-dispatch-root) 3 "")))
+          (should (equal (plist-get inside :roster) '("tally")))
+          (should-not (plist-get inside :agent))
+          (should-not (plist-get named :roster))
+          (should (equal (plist-get named :agent) "pi"))
+          (should-not (plist-get outside :roster))
+          (should (equal (plist-get outside :agent) "pi")))
+      (delete-directory bin t)
+      (delete-directory owned t)
+      (delete-file (expand-file-name "elsewhere.org" org-dispatch-root)))))
+
 (ert-deftest closed-claude-sessions-in-the-shared-store-resume-on-any-account ()
   ;; June's account folders share ~/.claude/projects, so the account-picking
   ;; launcher resumes a closed session there instead of restarting it.

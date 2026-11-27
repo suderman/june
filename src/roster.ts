@@ -1,12 +1,14 @@
 // The clankers (clankers/ beside SOUL.org): named agents, one folder each. Its CARD.org is the user's: one heading whose
 // properties fix the host it works on, the harness, model and effort, and whose text is its directives, added to the
 // harness's instructions. Its MEMORY.org is the clanker's own: lessons it adds as it works, given back to it at each
-// launch. A clanker works one task at a time: it is busy while a live herdr terminal carries its june.agent label.
+// launch. A card's :OWNS: names the files and directories it keeps, its area: an unassigned task in one goes to it,
+// and June hands it the deeper dives there. A clanker works one task at a time: it is busy while a live herdr terminal carries its june.agent label.
 // Accounts are not on the card; the harness's plain name picks one from quota on the clanker's host (src/accounts.ts).
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { HARNESSES as HARNESS_TABLE } from "../desktop/harnesses.mjs";
 import { HARNESSES, type HarnessName, type Quota, rank, type SlotStatus } from "./accounts.ts";
+import { expandHome } from "./config.ts";
 import type { AgentSummary } from "./tools/herdr.ts";
 
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -19,6 +21,8 @@ export type Card = {
 	harness?: HarnessName;
 	model?: string;
 	effort?: string;
+	/** Files and directories it owns, as :OWNS: writes them (~/ allowed). */
+	owns?: string[];
 	/** The card's directives. */
 	instructions: string;
 	/** Its folder, clankers/<slug>/, when read from one; MEMORY.org lives there. */
@@ -60,6 +64,8 @@ export function parseRoster(text: string): Card[] {
 		const effort = props.EFFORT?.toLowerCase();
 		if (effort && !(EFFORTS as readonly string[]).includes(effort)) problems.push(`:EFFORT: ${effort} is not one of ${EFFORTS.join(", ")}`);
 		if (cards.some((c) => c.slug === slug)) problems.push(`another agent is also called ${slug}`);
+		const owns = props.OWNS?.split(/\s+/).filter(Boolean) ?? [];
+		for (const path of owns) if (!path.startsWith("/") && !path.startsWith("~/")) problems.push(`:OWNS: ${path} is not an absolute or ~/ path`);
 		cards.push({
 			name,
 			slug,
@@ -67,11 +73,21 @@ export function parseRoster(text: string): Card[] {
 			...(harness && harness in HARNESSES ? { harness: harness as HarnessName } : {}),
 			...(props.MODEL ? { model: props.MODEL } : {}),
 			...(effort ? { effort } : {}),
+			...(owns.length ? { owns } : {}),
 			instructions: body.trim(),
 			problems,
 		});
 	}
 	return cards;
+}
+
+/** The usable cards whose :OWNS: is FILE or a directory holding it, in roster order. */
+export function ownersOf(cards: readonly Card[], file: string): Card[] {
+	const path = expandHome(file);
+	return cards.filter((c) => !c.problems.length && c.owns?.some((own) => {
+		const owned = expandHome(own).replace(/\/+$/, "");
+		return path === owned || path.startsWith(owned + sep);
+	}));
 }
 
 /** The card named NAME, by its name or slug, ignoring case. */
@@ -226,7 +242,7 @@ export type RosterEntry = {
 
 /** A clanker edit from a client: save (create or update) one card, or delete (destroy, archiving its folder) one by slug. */
 export type RosterEdit =
-	| { action: "save"; original?: string; name: string; host: string; harness: string; model?: string; effort?: string; instructions?: string }
+	| { action: "save"; original?: string; name: string; host: string; harness: string; model?: string; effort?: string; owns?: string; instructions?: string }
 	| { action: "delete"; slug: string };
 
 /** Whether the dispatcher on this host has an active run of task ID, from its receipt in ~/.local/state/org-dispatch. */
@@ -325,7 +341,7 @@ const oneLine = (value: unknown, field: string): string => {
 };
 
 /** Format one card as an Org first-level heading with a PROPERTIES drawer and its directives. */
-export function formatCard(fields: { name: string; host: string; harness: string; model?: string; effort?: string; instructions?: string }): string {
+export function formatCard(fields: { name: string; host: string; harness: string; model?: string; effort?: string; owns?: readonly string[]; instructions?: string }): string {
 	const lines = [
 		`* ${fields.name}`,
 		":PROPERTIES:",
@@ -333,6 +349,7 @@ export function formatCard(fields: { name: string; host: string; harness: string
 		`:HARNESS: ${fields.harness}`,
 		...(fields.model ? [`:MODEL: ${fields.model}`] : []),
 		...(fields.effort ? [`:EFFORT: ${fields.effort}`] : []),
+		...(fields.owns?.length ? [`:OWNS: ${fields.owns.join(" ")}`] : []),
 		":END:",
 	];
 	if (fields.instructions) lines.push(fields.instructions);
@@ -385,6 +402,9 @@ export function editClanker(dataDir: string, edit: RosterEdit, now = new Date())
 	if (original && !slugs.includes(original)) throw new Error(`no clanker called ${edit.original}`);
 	if (slug !== original && (slugs.includes(slug) || existsSync(join(root, slug)))) throw new Error(`another clanker is already called ${name}`);
 
+	// An editor that does not show :OWNS: keeps what the card owns.
+	const owns = typeof edit.owns === "string" ? oneLine(edit.owns, "owns").split(/\s+/).filter(Boolean) : readClankers(dataDir).find((c) => c.slug === (original || slug))?.owns ?? [];
+	for (const path of owns) if (!path.startsWith("/") && !path.startsWith("~/")) throw new Error(`owns ${path} is not an absolute or ~/ path`);
 	const dir = join(root, slug);
 	if (original && original !== slug) renameSync(join(root, original), dir);
 	mkdirSync(dir, { recursive: true });
@@ -392,7 +412,7 @@ export function editClanker(dataDir: string, edit: RosterEdit, now = new Date())
 	const current = existsSync(file) ? readFileSync(file, "utf8") : "";
 	const first = /^\* /m.exec(current);
 	const preamble = (first ? current.slice(0, first.index) : current).trimEnd();
-	const card = formatCard({ name, host, harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(instructions ? { instructions } : {}) });
+	const card = formatCard({ name, host, harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(owns.length ? { owns } : {}), ...(instructions ? { instructions } : {}) });
 	writeAtomic(file, `${preamble ? `${preamble}\n\n` : ""}${card}\n`);
 	const memory = join(dir, "MEMORY.org");
 	if (!existsSync(memory)) writeAtomic(memory, `#+TITLE: ${name}'s memory\n\nLessons ${name} learned, one list item each, newest last. ${name} adds to this file; edit or prune it freely.\n`);

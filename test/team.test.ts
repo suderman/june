@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { WebSocket } from "ws";
 import { promptFiles } from "../src/config.ts";
+import { renderTeam } from "../src/prompt.ts";
 import { Client, type Reply } from "../src/protocol.ts";
 import { editClanker, editClankerMemory, parseHosts, readClankerMemory, readClankers } from "../src/roster.ts";
 import { leaderboard, levelOf, listRuns, rateRun, recordRunEnd, recordRunStart, runXp } from "../src/runs.ts";
@@ -347,4 +348,13 @@ test("team tools inspect live standing, deploy clankers, coach memory, and rate 
 	assert.equal(deployed.host, "kit");
 	assert.equal(deployed.terminal, "t7");
 	assert.equal(deployedCalls, 1);
+});
+
+test("the team section names what each specialist owns and tells June to hand it the deeper dives", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	editClanker(tmp.dir, { action: "save", name: "Ledger", host: "kit", harness: "claude", owns: "~/org/finance/", instructions: "Keeps the books." });
+	const team = renderTeam(tmp.dir, testConfig(tmp.dir))!;
+	assert.match(team, /^- ledger \(Ledger\) \[kit, claude, owns ~\/org\/finance\/\]: Keeps the books\.$/m);
+	assert.match(team, /You stay the generalist there/);
 });
