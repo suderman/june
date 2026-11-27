@@ -1,7 +1,9 @@
 // Deploying from the boards: a raw harness session on a host, or a clanker on its own host, in a folder the user
 // picks, each in a new herdr-core terminal the way the dispatcher starts its workers. A clanker already at work is
 // visited instead: its terminal comes back, and nothing new starts. A raw session is the harness as the user would type
-// it, so its wrapper picks the account; a clanker runs `june start NAME`, which gives it its card and memory.
+// it, so its wrapper picks the account; a clanker runs `june start NAME`, which gives it its card and memory. Each joins
+// the Herdr app's space on its host named after its folder (june for ~/src/suderman/june), else the host's main space,
+// so the app shows it; a terminal hc starts with no space stays hidden there.
 import { homedir } from "node:os";
 import { HARNESSES as HARNESS_TABLE } from "../desktop/harnesses.mjs";
 import { findCard, readClankers } from "./roster.ts";
@@ -36,15 +38,22 @@ export async function deploy(herdr: Herdr, dataDir: string, request: DeployReque
 		const host = card.host!;
 		const busy = (await herdr.labelled(host, "june.agent", card.slug))[0];
 		if (busy) return { host, terminal: String(busy.address).replace(`${host}/`, ""), existing: true, listed: true };
-		const terminal = await herdr.start(host, ["june", "start", card.slug], { name: `${card.slug}-${stamp(now)}`, ...(dir ? { dir } : {}), labels: { "june.agent": card.slug, "june.deploy": card.slug } });
+		const terminal = await herdr.start(host, ["june", "start", card.slug], { name: `${card.slug}-${stamp(now)}`, ...(dir ? { dir } : {}), labels: { "june.agent": card.slug, "june.deploy": card.slug, ...(await spaceFor(herdr, host, dir)) } });
 		return { host, terminal, listed: await listed(herdr, host, terminal, options.waitMs) };
 	}
 	const harness = String(request.harness ?? "");
 	if (!(harness in HARNESS_TABLE)) throw new Error(`Harness must be one of ${Object.keys(HARNESS_TABLE).join(", ")}`);
 	const host = String(request.host ?? "");
 	if (!herdr.hosts().includes(host)) throw new Error(`Host must be one of ${herdr.hosts().join(", ")}`);
-	const terminal = await herdr.start(host, [harness], { name: `${harness}-${stamp(now)}`, ...(dir ? { dir } : {}), labels: { "june.deploy": harness } });
+	const terminal = await herdr.start(host, [harness], { name: `${harness}-${stamp(now)}`, ...(dir ? { dir } : {}), labels: { "june.deploy": harness, ...(await spaceFor(herdr, host, dir)) } });
 	return { host, terminal, listed: await listed(herdr, host, terminal, options.waitMs) };
+}
+
+/** The herdr.space label for a session in DIR on HOST: the space named after the folder, else "main"; none without either. */
+async function spaceFor(herdr: Herdr, host: string, dir: string | undefined): Promise<Record<string, string>> {
+	const folder = dir?.split("/").filter(Boolean).pop();
+	const space = (folder ? await herdr.space(host, folder).catch(() => undefined) : undefined) ?? (await herdr.space(host, "main").catch(() => undefined));
+	return space ? { "herdr.space": space } : {};
 }
 
 /**

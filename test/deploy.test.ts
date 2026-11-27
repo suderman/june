@@ -42,6 +42,12 @@ test("a deploy folder is the host's home, a path under it, or an absolute path",
 	assert.throws(() => deployDir("/x\n/y", "/home/j"), /one line/);
 });
 
+/** Terminals the Herdr app shows: cog's june space, and kit's main one. */
+const shown = () => ({
+	cog: [{ address: "cog/t1", state: "live", agent: "zsh", where: "june / 1", labels: { "herdr.space": "spJune" } }],
+	kit: [{ address: "t2", state: "live", agent: "zsh", where: "[2] main / 1", labels: { "herdr.space": "spMain" } }],
+});
+
 test("a raw harness starts on its host as typed, in the folder, labelled, and waits until hc lists it", async (t) => {
 	const tmp = await tempDir();
 	t.after(tmp.cleanup);
@@ -92,4 +98,16 @@ test("a program hc cannot start, as in a folder that is not there, is said plain
 		return "";
 	});
 	await assert.rejects(deploy(herdr, tmp.dir, { host: "kit", harness: "pi", dir: "/nope" }, { waitMs: 0 }), /^Error: Could not start pi on kit in \/nope: No such file or directory \(os error 2\)$/);
+});
+
+test("a deploy joins the Herdr app space named after its folder, else the host's main one, else none", async (t) => {
+	const tmp = await tempDir();
+	t.after(tmp.cleanup);
+	const { herdr, runs } = fakeHc(shown());
+	const now = new Date(2026, 10, 26, 18, 0, 0);
+	await deploy(herdr, tmp.dir, { host: "cog", harness: "pi", dir: "~/src/suderman/june" }, { now, home: "/home/j", waitMs: 0 });
+	await deploy(herdr, tmp.dir, { host: "kit", harness: "pi", dir: "~" }, { now, home: "/home/j", waitMs: 0 });
+	await deploy(herdr, tmp.dir, { host: "cog", harness: "pi", dir: "~/notes" }, { now, home: "/home/j", waitMs: 0 });
+	const space = (argv: string[]) => argv.find((a, i) => argv[i - 1] === "--label" && a.startsWith("herdr.space="));
+	assert.deepEqual(runs.map(space), ["herdr.space=spJune", "herdr.space=spMain", undefined], "june's folder, kit's home in main, and cog with no main stays hidden");
 });

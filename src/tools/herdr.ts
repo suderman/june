@@ -154,6 +154,22 @@ export class Herdr {
 		return local ? address : address.replace(new RegExp(`^${host}/`), "");
 	}
 
+	/**
+	 * The herdr-app space on HOST named NAME, as the dispatcher finds one (org-dispatch--space): a live terminal there whose
+	 * place reads "NAME / TAB" carries its id as herdr.space. Undefined when no terminal is in such a space.
+	 */
+	async space(host: string, name: string): Promise<string | undefined> {
+		const { prefix } = await this.#argv(host, []);
+		const list = await this.#json(host, ["ls", "--json"]);
+		const place = new RegExp(`^(?:\\[\\d+\\] )?${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} / `);
+		const rows = (list?.terminals ?? []).filter((row: any) => row.state === "live" && sameHost(row.address, prefix) && place.test(String(row.where ?? "")));
+		for (const row of rows) {
+			const id = (await this.#json(host, ["get", row.address, "--json"]).catch(() => undefined))?.labels?.["herdr.space"];
+			if (typeof id === "string" && id !== "") return id;
+		}
+		return undefined;
+	}
+
 	/** HOST's /proc/stat and /proc/meminfo, for its load: read here, through hc on a machine it has added, else over SSH. */
 	async load(host: string): Promise<string> {
 		const files = ["/proc/stat", "/proc/meminfo"];
