@@ -697,7 +697,7 @@ export function agentsView(agents, now, today, user, pending) {
 		return {
 			key: `${w.host}|${w.terminal}`, host: w.host, task: w.taskKey ?? "", harness: harnessOf(w.agent), status: w.status,
 			title: task?.title ?? w.title ?? (place.length ? place[place.length - 1] : w.terminal),
-			name: card ? card.name : "",
+			name: card ? card.name : "", agent: String(w.agent ?? ""),
 			where: `${card ? card.name + " · " : ""}${w.agent} · ${w.host}/${w.terminal}`, link: w.herdrLink ?? null,
 		};
 	};

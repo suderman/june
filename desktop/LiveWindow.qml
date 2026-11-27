@@ -21,7 +21,8 @@ PanelWindow {
   property var scenery: ({ rooms: [], plates: [], props: [] })
   property var sky: null
   property string attached: ""
-  // Each working session, as the agents board lists it (board.mjs agentsView working): its harness, title and HOST|TERMINAL key.
+  // Each working session, as the agents board lists it (board.mjs agentsView working): its clanker's name, harness, title
+  // and HOST|TERMINAL key.
   property var shelf: []
   property bool inputShown: false
   // The compose bar's hooks, as the strip's has them.
@@ -95,28 +96,30 @@ PanelWindow {
       height: (win.inputShown ? composer.y + composer.height : panel.y + panel.height) - shelfRow.y
     }
 
-    // Who is working: a clanker each, bobbing gently; hover names its task, a click visits it.
+    // Who is working: a clanker each, bobbing gently over its name (the clanker's, else the harness's); hover adds its task
+    // beside it, inside the window, and a click visits it.
     Row {
       id: shelfRow
       x: win.margin + 10
       anchors.bottom: panel.top
       anchors.bottomMargin: win.gap
       spacing: 12
-      height: win.shelf.length > 0 ? 52 : 0
+      height: win.shelf.length > 0 ? 54 : 0
       Repeater {
         model: win.shelf
         delegate: Item {
           id: bot
           required property var modelData
           required property int index
-          width: 34
-          height: 52
+          z: botHover.hovered ? 1 : 0
+          width: Math.max(34, tag.width)
+          height: 54
           Clanker {
             id: art
             harness: bot.modelData.harness ?? "other"
             size: 30
             claws: true
-            x: 2
+            anchors.horizontalCenter: parent.horizontalCenter
             SequentialAnimation on y {
               running: win.visible
               loops: Animation.Infinite
@@ -126,16 +129,37 @@ PanelWindow {
             }
           }
           Rectangle {
+            id: tag
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: tagText.implicitWidth + 12
+            height: 16
+            radius: 8
+            color: Theme.cardFill
+            border.color: Theme.cardLine
+            border.width: 1
+            Text {
+              id: tagText
+              anchors.centerIn: parent
+              text: bot.modelData.name || bot.modelData.agent || bot.modelData.harness || ""
+              font.family: Theme.caption
+              font.weight: Font.Bold
+              font.pixelSize: 11
+              color: Theme.cardBusy
+            }
+          }
+          Rectangle {
             visible: botHover.hovered
-            anchors.bottom: art.top
-            anchors.left: parent.left
-            width: botLabel.implicitWidth + 14
+            anchors.left: parent.right
+            anchors.leftMargin: 6
+            anchors.verticalCenter: art.verticalCenter
+            width: Math.min(botLabel.implicitWidth + 14, win.width - 2 * win.margin - bot.x - bot.width - 16)
             height: 22
             radius: 6
             color: Theme.cardFill
             border.color: Theme.cardLine
             border.width: 1.5
-            Text { id: botLabel; anchors.centerIn: parent; text: bot.modelData.title ?? ""; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: Theme.cardBusy }
+            Text { id: botLabel; anchors.centerIn: parent; width: parent.width - 14; elide: Text.ElideRight; text: bot.modelData.title ?? ""; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: Theme.cardBusy }
           }
           HoverHandler { id: botHover; cursorShape: Qt.PointingHandCursor }
           TapHandler {
