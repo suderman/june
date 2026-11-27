@@ -579,6 +579,18 @@ Sessions are shared between a harness's accounts, so the agent carries on."
                       (string-prefix-p (concat host "/") address))))
                 terminals)))
 
+(defun org-dispatch--busy-workers (id)
+  "Live terminals labelled as task ID's worker whose agent is busy.
+Busy is working or blocked. An idle or finished one, left from an earlier run,
+may be adopted or retired; a busy one is still at the task, whatever the Org
+file says."
+  (let ((rows (org-dispatch--get (org-dispatch--hc "ls" "--label" (concat "org.task=" id)) 'terminals)))
+    (unless (vectorp rows) (error "hc did not return a terminal list"))
+    (delq nil (mapcar (lambda (row)
+                        (and (member (org-dispatch--status row) '("working" "blocked"))
+                             (alist-get 'address row)))
+                      rows))))
+
 (defun org-dispatch--live-session (session agent)
   "The address of the live local terminal running AGENT's SESSION, if any.
 Ambiguity is an error: two live terminals must never run one session."
@@ -1814,7 +1826,15 @@ is accepted as unknown, which the watcher never mistakes for idle."
                    (org-dispatch--edit (plist-get task :file) (plist-get task :id)
                                        #'org-dispatch--task (plist-get task :heading)))))
     (when (and (equal (plist-get current :todo) "AUTO")
-               (eq (plist-get (org-dispatch--dependencies current) :kind) 'ready))
+               (eq (plist-get (org-dispatch--dependencies current) :kind) 'ready)
+               ;; Never a second worker beside a busy one, even when the run's record is gone.
+               (let ((busy (and (plist-get task :id)
+                                (condition-case err (org-dispatch--busy-workers (plist-get task :id))
+                                  (error (list (format "an unknown terminal (%s)" (org-dispatch--reason err))))))))
+                 (when busy
+                   (org-dispatch--log "held %s: its worker is still busy in %s"
+                                      (plist-get task :id) (string-join busy ", ")))
+                 (null busy)))
       (setq task (plist-put (copy-sequence task) :depends (plist-get current :depends)))
       (let* ((id (or (plist-get task :id) (org-id-new)))
              (task (plist-put (copy-sequence task) :id id))
@@ -1988,6 +2008,16 @@ The original file may still exist after its heading has been archived."
       ;; Missing/duplicate IDs include archive copy gaps. Keep the receipt and
       ;; slot for a later pass; absence is not permission to touch the worker.
       (org-dispatch--log "waiting for unique task record: %s" id))
+     ((and (equal todo "AUTO") status)
+      ;; Back at AUTO while this run's worker still runs: an older copy of the file won, as a Syncthing conflict
+      ;; does (Jon, 2026-11-26: null launched twice when kit and cog wrote one file). Only the dispatcher sets AUTO
+      ;; on a run it owns, and finish and retry mark the run finished first, so claim it again; dropping the run
+      ;; here would let this pass launch a second worker beside the first.
+      (org-dispatch--claim (list :file (plist-get state :file) :id id :agent (plist-get state :agent)
+                                 :heading (plist-get state :heading))
+                           (plist-get state :terminal) (plist-get state :session))
+      (org-dispatch--log "reclaimed %s: back at AUTO while its worker in %s is %s"
+                         id (plist-get state :terminal) status))
      ((not (equal todo "PROG"))
       ;; A state change made elsewhere is not permission to interrupt the worker.
       (ignore-errors (org-dispatch--edit (plist-get state :file) id #'org-dispatch--untag-auto))

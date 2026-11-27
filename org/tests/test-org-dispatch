@@ -1400,6 +1400,9 @@ check "dependencies, handoffs, and recoverable plan queuing" \
 check "worker retirement eligibility, stability, races and reopening" \
   emacs -Q --batch -l "$org/dispatch/org-dispatch.el" -l "$org/tests/retirement.el"
 
+check "one worker per task when a claimed heading is AUTO again" \
+  emacs -Q --batch -l "$org/dispatch/org-dispatch.el" -l "$org/tests/relaunch.el"
+
 check "safe task interruption, parking, replay and reassignment" \
   emacs -Q --batch -L "$org/dispatch" -L "$org/edit" -l "$org/tests/stop.el"
 
