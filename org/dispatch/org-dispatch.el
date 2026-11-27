@@ -460,7 +460,7 @@ re-queue the task AUTO for that host. Returns non-nil if handed off."
                                           :switches 0 :handoffs (1+ handoffs) :tried (string-join tried " ")
                                           :repeat (or (plist-get state :repeat) 0))
                                     (when model (list :model model))
-                                    (when card (list :card (json-serialize card))))))
+                                    (when card (list :card (org-dispatch--json card))))))
             (condition-case err
                 (let* ((started (apply #'org-dispatch--hc "run" "--bg" "--no-parent"
                                        "--name" (format "auto-%s-%s" (org-dispatch--id8 id) (format-time-string "%H%M%S"))
@@ -1464,11 +1464,16 @@ replaying the same key and spec; missing prerequisites block partial plans."
 
 ;;; Local state
 
+(defun org-dispatch--json (object)
+  "OBJECT as a JSON string of characters. `json-serialize' returns UTF-8
+bytes, which another `json-serialize' refuses once they hold non-ASCII text."
+  (decode-coding-string (json-serialize object) 'utf-8))
+
 (defun org-dispatch--write-json (file object)
-  "Write OBJECT to FILE as UTF-8 JSON, decoding the serializer's bytes first."
+  "Write OBJECT to FILE as UTF-8 JSON."
   (let ((coding-system-for-write 'utf-8-unix))
     (with-temp-file file
-      (insert (decode-coding-string (json-serialize object) 'utf-8)))))
+      (insert (org-dispatch--json object)))))
 
 (defun org-dispatch--state-file (id)
   (expand-file-name (concat id ".json") org-dispatch-state-dir))
@@ -1787,7 +1792,7 @@ The card's model comes through the task's :model."
        (pcase (alist-get 'kind ins-spec)
          ("flag" (list (alist-get 'flag ins-spec) instructions))
          ("config" (list (alist-get 'flag ins-spec)
-                         (concat (alist-get 'key ins-spec) "=" (json-serialize instructions)))))))))
+                         (concat (alist-get 'key ins-spec) "=" (org-dispatch--json instructions)))))))))
 
 (defun org-dispatch--find-session (agent dir since)
   "The session AGENT started in DIR after SINCE (float time), or nil.
@@ -1899,7 +1904,7 @@ is accepted as unknown, which the watcher never mistakes for idle."
              ;; What a later switch to another account needs to start the same agent.
              (state (append state
                             (when (plist-get task :model) (list :model (plist-get task :model)))
-                            (when (plist-get task :card) (list :card (json-serialize (plist-get task :card))))))
+                            (when (plist-get task :card) (list :card (org-dispatch--json (plist-get task :card))))))
              (prompt (org-dispatch--render
                       "task" task `(("DIALOG" . ,(concat
                                                  (when fresh

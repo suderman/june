@@ -875,6 +875,35 @@ cat >"$fixture/launch-tests.el" <<'EOF'
         (delete-file file))
       (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id))))))
 
+(ert-deftest a-card-with-accented-text-launches-and-reaches-codex-intact ()
+  ;; json-serialize returns UTF-8 bytes; nesting them in the run's JSON state, or
+  ;; in Codex's -c value, must not fail or mangle a card that says voil\u00e0.
+  (let* ((bin (make-temp-file "june-bin" t))
+         (org-dispatch-june (expand-file-name "june" bin))
+         (text "Voil\u00e0, bon. Oh l\u00e0 l\u00e0.")
+         (coding-system-for-write 'utf-8-unix))
+    (with-temp-file org-dispatch-june
+      (insert "#!/bin/sh\n"
+              "echo '{\"chosen\":\"bolt\",\"why\":\"first\",\"card\":"
+              "{\"name\":\"Bolt\",\"slug\":\"bolt\",\"host\":\"kit\",\"harness\":\"claude\","
+              "\"instructions\":\"" text "\",\"problems\":[]}}'\n"))
+    (set-file-modes org-dispatch-june #o755)
+    (unwind-protect
+        (test-with-hc
+         (let* ((task (test-roster-task 7 "bolt"))
+                (chosen (car (org-dispatch--eligible (list task) nil))))
+           (should (org-dispatch--launch chosen))
+           (should (equal (cadr (member "--append-system-prompt" (test-argv))) text))
+           (let ((state (seq-find (lambda (s) (equal (plist-get s :id) (plist-get task :id))) (org-dispatch--states))))
+             (should (equal (alist-get 'instructions (json-parse-string (plist-get state :card) :object-type 'alist))
+                            text))))
+         (should (member (format "developer_instructions=\"%s\"" text)
+                         (org-dispatch--card-flags "codex" (list (cons 'instructions text))))))
+      (delete-directory bin t)
+      (dolist (file (file-expand-wildcards (expand-file-name "roster-*.org" org-dispatch-root)))
+        (delete-file file))
+      (dolist (state (org-dispatch--states)) (org-dispatch--drop-state (plist-get state :id))))))
+
 (ert-deftest a-harness-name-is-an-unnamed-worker-and-mixes-with-agents ()
   ;; AGENT: pi runs a plain pi worker without asking June; in AGENTS, a harness
   ;; name is the fallback June answers with when the agents before it are busy.
