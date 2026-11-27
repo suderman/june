@@ -480,9 +480,13 @@ ShellRoot {
   // The newest panel's JSON, which live June shows on its own (a ListModel's rows do not notify a binding).
   property string newestPanel: ""
 
-  function focusedScreen() {
-    const name = Hyprland.focusedMonitor?.name;
+  readonly property var currentScreen: {
+    const name = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "";
     return Quickshell.screens.find(s => s.name === name) || Quickshell.screens[0];
+  }
+  readonly property bool focusedFullscreen: Boolean(Hyprland.focusedWorkspace && Hyprland.focusedWorkspace.hasFullscreen)
+  function focusedScreen() {
+    return currentScreen;
   }
   // The unfold: 0 is live June alone (her newest panel and compose bar), 1 the full strip around them. About a quarter
   // second either way.
@@ -707,7 +711,6 @@ ShellRoot {
     scenery: root.scenery
     sky: root.view.state.sky ?? null
     attached: root.attached
-    shelf: root.agentsView.working ?? []
     inputShown: root.miniInput
     // Where the strip's compose bar is on her screen: on its tab bar when the boards do not fit beside the strip.
     dock: Board.overlayBoards((root.miniScreen ? root.miniScreen.width : 1920) - Math.min(Theme.stripWidth, (root.miniScreen ? root.miniScreen.width : 1920) - 32)).fits ? 22 : 10 + 46 + 8
@@ -723,8 +726,19 @@ ShellRoot {
     unattach: index => root.unattach(index)
     paste: fallback => root.pasteInto(fallback)
     onOpenStrip: root.show()
-    onVisit: (host, terminal) => root.showSession(host, terminal)
     onDismissed: root.hideMini()
+  }
+
+  // Persistent patrolling clanker shelf: rests in Hyprland's bottom margin gap on the focused monitor while minimised
+  // June is away, and rides smoothly up onto her panel when she rises.
+  ShelfWindow {
+    id: shelf
+    screen: live.visible ? root.miniScreen : root.currentScreen
+    shelf: root.agentsView.working ?? []
+    active: root.liveEnabled && !root.shown && (live.visible || !root.focusedFullscreen)
+    perched: live.shown
+    perchBottom: live.panelTopFromBottom
+    onVisit: (host, terminal) => root.showSession(host, terminal)
   }
 
   FileView { id: tokenFile; path: Quickshell.env("JUNE_DESKTOP_TOKEN_FILE") || ""; blockLoading: true }
@@ -807,6 +821,7 @@ ShellRoot {
       }
       agentsFetching = false;
       if (boardsWanted) fetchBoards(true, true);
+      else if (liveEnabled) wantBoards();
       return;
     }
     if (reply.type === "agenda") {

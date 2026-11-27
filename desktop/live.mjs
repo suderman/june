@@ -78,6 +78,61 @@ export function shouldPopReply({ overlayShown, windowVisible, windowFocused, liv
 }
 
 /**
+ * Deterministic positive integer hash for a working clanker's key, so each bot keeps its own patrol rhythm without
+ * syncing up or resetting when other bots join or leave the shelf.
+ */
+export function patrolSeed(key) {
+	const s = String(key ?? "");
+	let h = 2166136261;
+	for (let i = 0; i < s.length; i++) {
+		h ^= s.charCodeAt(i);
+		h = Math.imul(h, 16777619);
+	}
+	return h >>> 0;
+}
+
+/** Deterministic unit float [0, 1) from `seed` and `step` (mulberry32 single step). */
+function patrolRand(seed, step) {
+	let t = (seed + Math.imul(step + 1, 0x6d2b79f5)) >>> 0;
+	t = Math.imul(t ^ (t >>> 15), t | 1);
+	t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+	return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+/** Starting X along a track of `trackWidth` for a bot of `botWidth`, spread across the shelf by key. */
+export function patrolStartX(key, trackWidth, botWidth) {
+	const span = Math.max(0, Number(trackWidth) - Number(botWidth));
+	if (span <= 0) return 0;
+	return Math.round(patrolRand(patrolSeed(key), 0) * span);
+}
+
+/**
+ * Next leg of a clanker's busy shelf patrol: picks a fresh destination across the track (preferring the opposite side
+ * so it travels back and forth), travel duration in ms proportional to distance, facing direction (-1 or 1), and a
+ * brief inspection pause after arriving.
+ */
+export function nextPatrolStep(key, currentX, trackWidth, botWidth, step) {
+	const span = Math.max(0, Number(trackWidth) - Number(botWidth));
+	const cur = Math.min(span, Math.max(0, Number(currentX) || 0));
+	if (span <= 8) return { targetX: 0, durationMs: 1200, pauseMs: 1400, facing: 1 };
+	const seed = patrolSeed(key);
+	const r1 = patrolRand(seed, step * 3 + 1);
+	const r2 = patrolRand(seed, step * 3 + 2);
+	const r3 = patrolRand(seed, step * 3 + 3);
+	// Prefer crossing toward the side with more room so bots roam the whole shelf instead of pacing one corner.
+	const goRight = cur < span * 0.25 ? true : cur > span * 0.75 ? false : r1 >= 0.5;
+	const minHop = Math.min(span * 0.65, Math.max(70, span * 0.22));
+	const room = goRight ? span - cur : cur;
+	const hop = room <= minHop ? room : minHop + r1 * (room - minHop);
+	const targetX = Math.round(Math.min(span, Math.max(0, goRight ? cur + hop : cur - hop)));
+	const dist = Math.abs(targetX - cur);
+	const speed = 48 + r2 * 34; // 48-82 px/s: brisk, lively hover
+	const durationMs = Math.round(Math.min(5400, Math.max(900, (dist / speed) * 1000)));
+	const pauseMs = Math.round(700 + r3 * 1600);
+	return { targetX, durationMs, pauseMs, facing: targetX >= cur ? 1 : -1 };
+}
+
+/**
  * What `june-desktop cycle` (Left Alt tap) should do: hide the full overlay, focus an already-visible June window
  * instead of spawning a second minimised June, or toggle minimised June as usual.
  */

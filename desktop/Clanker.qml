@@ -13,6 +13,8 @@ Item {
   property color markColor: "#b3311f"
   property bool claws: true
   property real size: 40
+  // Horizontal gaze direction: 1 looks right, -1 looks left.
+  property int facing: 1
 
   width: size
   height: size
@@ -58,16 +60,19 @@ Item {
       ctx.beginPath(); ctx.arc(32, 31, 20, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       ctx.fillStyle = clanker.colours.band;
       ctx.beginPath(); ctx.ellipse(17, 40.5, 30, 9); ctx.fill(); ctx.stroke();
+      const eyeX = 32 + 2.5 * (clanker.facing < 0 ? -1 : 1);
+      const glintX = eyeX - 2.5 * (clanker.facing < 0 ? -1 : 1);
       ctx.fillStyle = neon ? "#0e0b18" : ink;
-      ctx.beginPath(); ctx.arc(34, 28, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(eyeX, 28, 10, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = clanker.colours.eye;
-      ctx.beginPath(); ctx.arc(34, 28, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(eyeX, 28, 7, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = "#fffcf5";
-      ctx.beginPath(); ctx.arc(31, 25, 2.2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(glintX, 25, 2.2, 0, Math.PI * 2); ctx.fill();
     }
   }
   onHarnessChanged: canvas.requestPaint()
   onClawsChanged: canvas.requestPaint()
+  onFacingChanged: canvas.requestPaint()
   onWidthChanged: canvas.requestPaint()
   Connections { target: Theme; function onDarkChanged() { canvas.requestPaint(); } function onConsoleLookChanged() { canvas.requestPaint(); } }
 

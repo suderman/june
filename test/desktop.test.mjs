@@ -12,7 +12,7 @@ import { MAX_PROPS, focusBlur, panelScene, SEASONS as SCENE_SEASONS, SETTINGS as
 import { SEASONS, SETTINGS, SPOTS as AVATAR_SPOTS } from "../src/avatar.ts";
 import { DND_MODE, HYPR_REFRESH_EVENTS, MIN_USABLE_WINDOW_HEIGHT, MIN_USABLE_WINDOW_WIDTH, MODES_CALL, SCHEMES, SCHEME_CALL, TABS, appLaunchCommand, findJuneToplevel, focusWindowDispatch, hyprAddress, isDark, isUsableWindowSize, juneWindowVisibility, normalizeTab, parseModes, parseScheme, quietIn, setQuietCall } from "../desktop/desktop.mjs";
 import { FACES, LOOKS, face, liveFace, lines as consoleLines } from "../desktop/console.mjs";
-import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, cycleAction, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent, shouldPopReply } from "../desktop/live.mjs";
+import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, cycleAction, excerpt, idleState, liveState, newFace, newReply, nextPatrolStep, patrolSeed, patrolStartX, reactionArt, readChibi, readLive, readingTime, recent, shouldPopReply } from "../desktop/live.mjs";
 
 import { replyParts } from "../src/artifact.ts";
 import { excerpt as codeExcerpt, html as codeHtml } from "../desktop/Code.mjs";
@@ -1495,6 +1495,28 @@ test("desktop tab names normalize strip to chat and companion app launchers resp
 	assert.deepEqual(appLaunchCommand("terminal", { JUNE_DESKTOP_TERMINAL: "alacritty" }), ["sh", "-c", "setsid -f alacritty >/dev/null 2>&1 </dev/null"]);
 	assert.deepEqual(appLaunchCommand("editor", { JUNE_DESKTOP_EDITOR: "nvim" }), ["sh", "-c", "setsid -f nvim >/dev/null 2>&1 </dev/null"]);
 	assert.equal(appLaunchCommand("unknown"), null);
+});
+
+test("shelf clanker patrol stays within track bounds, alternates direction, and varies by session key", () => {
+	const track = 740, bot = 40;
+	const a0 = patrolStartX("kit|t1", track, bot);
+	const b0 = patrolStartX("kit|t2", track, bot);
+	assert.ok(a0 >= 0 && a0 <= track - bot);
+	assert.ok(b0 >= 0 && b0 <= track - bot);
+	assert.notEqual(patrolSeed("kit|t1"), patrolSeed("kit|t2"));
+	let x = a0;
+	const dirs = new Set();
+	for (let step = 0; step < 8; step++) {
+		const leg = nextPatrolStep("kit|t1", x, track, bot, step);
+		assert.ok(leg.targetX >= 0 && leg.targetX <= track - bot, `step ${step}: ${leg.targetX}`);
+		assert.ok(leg.durationMs >= 900 && leg.durationMs <= 5400);
+		assert.ok(leg.pauseMs >= 700 && leg.pauseMs <= 2300);
+		assert.equal(leg.facing, leg.targetX >= x ? 1 : -1);
+		dirs.add(leg.facing);
+		x = leg.targetX;
+	}
+	assert.deepEqual([...dirs].sort(), [-1, 1], "travels both left and right along the shelf");
+	assert.equal(nextPatrolStep("kit|t1", 0, 30, 40, 0).targetX, 0, "tiny track clamps safely");
 });
 
 test("live June suppresses popups and Left Alt focuses the June window when it is visibly shown at a usable size on any monitor", () => {

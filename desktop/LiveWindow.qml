@@ -22,9 +22,6 @@ PanelWindow {
   property var scenery: ({ rooms: [], plates: [], props: [] })
   property var sky: null
   property string attached: ""
-  // Each working session, as the agents board lists it (board.mjs agentsView working): its clanker's name, harness, title
-  // and HOST|TERMINAL key.
-  property var shelf: []
   property bool inputShown: false
   // The compose bar's hooks, as the strip's has them.
   property var send: (text, followUp) => true
@@ -34,11 +31,12 @@ PanelWindow {
   property var paste: (fallback) => fallback()
   property var pick: () => {}
   readonly property bool hovered: hover.hovered
+  // Height from the screen's bottom edge to the top of June's panel, for ShelfWindow to perch right on it.
+  readonly property real panelTopFromBottom: (cell.item ? panel.height : 0) + (inputShown ? gap + composer.height : 0) + dock + gap
   // The draft, so it moves to the strip's compose bar and back.
   property alias draft: composer.text
 
   signal openStrip()
-  signal visit(string host, string terminal)
   signal dismissed()
 
   // The strip's measures (shell.qml page): its width, its side margins, and the compose bar's place at the bottom.
@@ -87,14 +85,13 @@ PanelWindow {
   HoverHandler { id: hover }
 
   // The span of what is drawn, for the mask, where the content comes to rest. Outside the content: Quickshell's Region
-  // recomputes only when its own item moves, so inside the rising content it kept the place it had below the window
-  // and the shelf took neither hover nor clicks (Jon, 2026-11-27).
+  // recomputes only when its own item moves, so inside the rising content it kept the place it had below the window.
   Item {
     id: drawn
     x: content.x + win.margin
-    y: shelfRow.y
+    y: panel.y
     width: content.width - 2 * win.margin
-    height: (win.inputShown ? composer.y + composer.height : panel.y + panel.height) - shelfRow.y
+    height: (win.inputShown ? composer.y + composer.height : panel.y + panel.height) - panel.y
   }
 
   Item {
@@ -102,7 +99,7 @@ PanelWindow {
     x: win.side
     width: parent.width - 2 * win.side
     height: parent.height
-    implicitHeight: win.halo + shelfRow.height + win.gap + panel.height + (win.inputShown ? win.gap + composer.height : 0) + win.dock
+    implicitHeight: win.halo + panel.height + (win.inputShown ? win.gap + composer.height : 0) + win.dock
     transform: Translate { y: (1 - win.rise) * (content.implicitHeight + 24) }
 
     // A soft shadow behind her panel. Not in the mask: clicks pass through it.
@@ -116,92 +113,6 @@ PanelWindow {
       blur: 20
       spread: 0
       color: Qt.rgba(0, 0, 0, 0.42)
-    }
-
-    // Who is working: a clanker each, bobbing gently over its name (the clanker's, else the harness's); hover adds its task
-    // beside it, inside the window, and a click visits it.
-    Row {
-      id: shelfRow
-      x: win.margin + 10
-      anchors.bottom: panel.top
-      anchors.bottomMargin: win.gap
-      spacing: 12
-      height: win.shelf.length > 0 ? 54 : 0
-      Repeater {
-        model: win.shelf
-        delegate: Item {
-          id: bot
-          required property var modelData
-          required property int index
-          z: botHover.hovered ? 1 : 0
-          width: Math.max(34, tag.width)
-          height: 54
-          // Soft local shadow behind just this clanker and its name pill, instead of a dark band across the panel width.
-          RectangularShadow {
-            anchors.fill: parent
-            anchors.topMargin: 2
-            radius: 16
-            blur: 16
-            spread: 0
-            color: Qt.rgba(0, 0, 0, 0.24)
-          }
-          Clanker {
-            id: art
-            harness: bot.modelData.harness ?? "other"
-            size: 30
-            claws: true
-            anchors.horizontalCenter: parent.horizontalCenter
-            SequentialAnimation on y {
-              running: win.visible
-              loops: Animation.Infinite
-              PauseAnimation { duration: (bot.index * 370) % 900 }
-              NumberAnimation { from: 6; to: 0; duration: 1300; easing.type: Easing.InOutSine }
-              NumberAnimation { from: 0; to: 6; duration: 1300; easing.type: Easing.InOutSine }
-            }
-          }
-          Rectangle {
-            id: tag
-            anchors.bottom: parent.bottom
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: tagText.implicitWidth + 12
-            height: 16
-            radius: 8
-            color: Theme.cardFill
-            border.color: Theme.cardLine
-            border.width: 1
-            Text {
-              id: tagText
-              anchors.centerIn: parent
-              text: bot.modelData.name || bot.modelData.agent || bot.modelData.harness || ""
-              font.family: Theme.caption
-              font.weight: Font.Bold
-              font.pixelSize: 11
-              color: Theme.cardBusy
-            }
-          }
-          Rectangle {
-            visible: botHover.hovered
-            anchors.left: parent.right
-            anchors.leftMargin: 6
-            anchors.verticalCenter: art.verticalCenter
-            width: Math.min(botLabel.implicitWidth + 14, win.width - 2 * win.margin - bot.x - bot.width - 16)
-            height: 22
-            radius: 6
-            color: Theme.cardFill
-            border.color: Theme.cardLine
-            border.width: 1.5
-            Text { id: botLabel; anchors.centerIn: parent; width: parent.width - 14; elide: Text.ElideRight; text: bot.modelData.title ?? ""; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: Theme.cardBusy }
-          }
-          HoverHandler { id: botHover; cursorShape: Qt.PointingHandCursor }
-          TapHandler {
-            onTapped: {
-              const at = String(bot.modelData.key ?? "").split("|");
-              console.info("shelf: visit", bot.modelData.key ?? "");
-              if (at.length === 2) win.visit(at[0], at[1]);
-            }
-          }
-        }
-      }
     }
 
     // Her newest panel, the strip's own; a click opens the full strip around it.
