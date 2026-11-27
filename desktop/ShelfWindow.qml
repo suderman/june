@@ -264,7 +264,7 @@ PanelWindow {
             SequentialAnimation on y {
               running: win.visible && !bot.leaving
               loops: Animation.Infinite
-              PauseAnimation { duration: (bot.index * 370) % 900 }
+              PauseAnimation { duration: (Math.max(0, bot.index) * 370) % 900 }
               NumberAnimation { from: bot.expanded ? 6 : 2; to: 0; duration: 1300; easing.type: Easing.InOutSine }
               NumberAnimation { from: 0; to: bot.expanded ? 6 : 2; duration: 1300; easing.type: Easing.InOutSine }
             }
