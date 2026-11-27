@@ -53,9 +53,89 @@ ShellRoot {
   // The mode asked of mako, shown at once until mako's own modes say it took, or the call fails.
   property var askedQuiet: null
   readonly property bool quiet: askedQuiet !== null ? askedQuiet : systemModes === null ? localQuiet : Desktop.quietIn(systemModes)
-  readonly property bool windowFocused: stripWindow.focused
+  // Bumped after Hyprland events and refreshes so `juneWindow` re-evaluates against fresh monitor/toplevel state.
+  property int hyprTick: 0
+  Timer { id: hyprSettle; interval: 120; onTriggered: root.hyprTick += 1 }
+  function refreshHyprWindow() {
+    if (!Hyprland.requestSocketPath) return;
+    Hyprland.refreshMonitors();
+    Hyprland.refreshToplevels();
+    hyprTick += 1;
+    hyprSettle.restart();
+  }
+  onWindowShownChanged: if (windowShown) refreshHyprWindow()
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (root.windowShown && Desktop.HYPR_REFRESH_EVENTS.includes(event.name)) root.refreshHyprWindow();
+    }
+  }
+  function readJuneWindow() {
+    const mons = [];
+    const monValues = Hyprland.monitors ? Hyprland.monitors.values : [];
+    for (let i = 0; i < monValues.length; i++) {
+      const m = monValues[i];
+      const ipc = m.lastIpcObject || {};
+      mons.push({
+        id: m.id,
+        activeWorkspaceId: m.activeWorkspace ? m.activeWorkspace.id : (ipc.activeWorkspace ? ipc.activeWorkspace.id : 0),
+        specialWorkspaceId: ipc.specialWorkspace ? ipc.specialWorkspace.id : 0,
+      });
+    }
+    const tls = [];
+    const tlValues = Hyprland.toplevels ? Hyprland.toplevels.values : [];
+    for (let i = 0; i < tlValues.length; i++) {
+      const t = tlValues[i];
+      const ipc = t.lastIpcObject || {};
+      const ws = t.workspace;
+      tls.push({
+        address: t.address || ipc.address || "",
+        title: t.title || ipc.title || "",
+        appId: t.wayland ? (t.wayland.appId || "") : "",
+        className: ipc.class || "",
+        pid: ipc.pid || 0,
+        workspaceId: ws ? ws.id : (ipc.workspace ? ipc.workspace.id : 0),
+        workspaceActive: ws ? Boolean(ws.active) : false,
+        workspaceHasFullscreen: ws ? Boolean(ws.hasFullscreen) : false,
+        mapped: ipc.mapped !== false,
+        hidden: Boolean(ipc.hidden),
+        fullscreen: Boolean(ipc.fullscreen),
+      });
+    }
+    return Desktop.juneWindowVisibility({
+      windowShown: root.windowShown,
+      windowWidth: stripWindow.width,
+      windowHeight: stripWindow.height,
+      windowFocused: stripWindow.focused,
+      pid: Quickshell.processId,
+      appId: Quickshell.appId,
+      monitors: mons,
+      toplevels: tls,
+    });
+  }
+  readonly property var juneWindow: {
+    const _dep = root.hyprTick
+      + (root.windowShown ? 1 : 0)
+      + stripWindow.width
+      + stripWindow.height
+      + (stripWindow.focused ? 1 : 0)
+      + (Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.id : 0)
+      + (Hyprland.focusedMonitor ? Hyprland.focusedMonitor.id : 0)
+      + (Hyprland.activeToplevel ? 1 : 0);
+    return root.readJuneWindow();
+  }
+  readonly property bool windowVisible: juneWindow.visible
+  function focusJuneWindow() {
+    if (miniShown) hideMini();
+    const state = readJuneWindow();
+    if (state.address !== "") {
+      const req = Desktop.focusWindowDispatch(state.address, Boolean(Hyprland.usingLua));
+      if (req !== "") Hyprland.dispatch(req);
+    }
+    stripWindow.focusComposer();
+  }
   onQuietChanged: if (quiet && miniShown && !miniSummoned) hideMini()
-  onWindowFocusedChanged: if (windowFocused && miniShown && !miniSummoned) hideMini()
+  onWindowVisibleChanged: if (windowVisible && miniShown && !miniSummoned) hideMini()
   onSystemModesChanged: if (askedQuiet !== null && !quietSetter.running && systemModes !== null && Desktop.quietIn(systemModes) === askedQuiet) askedQuiet = null
   function setQuiet(on) {
     if (systemModes === null) { localQuiet = on; return; }
@@ -554,7 +634,7 @@ ShellRoot {
     seenReply = latest.id;
     miniText = Live.excerpt(latest.text);
     miniTextAt = Date.now();
-    if (Live.shouldPopReply({ overlayShown: shown, windowFocused: windowFocused, liveEnabled: liveEnabled, quiet: quiet })) popReply(latest);
+    if (Live.shouldPopReply({ overlayShown: shown, windowVisible: root.readJuneWindow().visible, liveEnabled: liveEnabled, quiet: quiet })) popReply(latest);
   }
   // Turning live June off puts her away at once.
   onLiveEnabledChanged: if (!liveEnabled) hideMini()
@@ -599,10 +679,18 @@ ShellRoot {
     // she has popped up by herself, the tap opens her compose bar under her news, as if she had been summoned; from
     // the full strip it puts everything away. With live June off, it opens and closes the strip.
     function cycle(): void {
-      if (root.shown) root.hide();
-      else if (!root.liveEnabled) root.show();
-      else if (root.miniShown && root.miniInput) root.hideMini();
-      else if (root.miniShown) root.answerMini();
+      const action = Live.cycleAction({
+        overlayShown: root.shown,
+        windowVisible: root.readJuneWindow().visible,
+        liveEnabled: root.liveEnabled,
+        miniShown: root.miniShown,
+        miniInput: root.miniInput,
+      });
+      if (action === "hide") root.hide();
+      else if (action === "focusWindow") root.focusJuneWindow();
+      else if (action === "show") root.show();
+      else if (action === "hideMini") root.hideMini();
+      else if (action === "answerMini") root.answerMini();
       else root.showMini();
     }
   }

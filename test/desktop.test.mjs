@@ -10,9 +10,9 @@ import { PAGE, pageTarget, rest, step, wheel } from "../desktop/scroll.mjs";
 import { CALM_GROUND, LONG_SHARE, PATTERNS, TIMES, WEATHER_MS, backdrop, cutaway, fallingPath, graded, hourOf, look, moment, patternPath, place, skyLook, sunFor, sunKeys, sunTimes } from "../desktop/light.mjs";
 import { MAX_PROPS, focusBlur, panelScene, SEASONS as SCENE_SEASONS, SETTINGS as SCENE_SETTINGS, SPOTS, choosePlate, chooseProps, chooseRoom, mergeScenery, placeProps, placeRoom, readScenery, roomPoint, season } from "../desktop/scenery.mjs";
 import { SEASONS, SETTINGS, SPOTS as AVATAR_SPOTS } from "../src/avatar.ts";
-import { DND_MODE, MODES_CALL, SCHEMES, SCHEME_CALL, TABS, appLaunchCommand, isDark, normalizeTab, parseModes, parseScheme, quietIn, setQuietCall } from "../desktop/desktop.mjs";
+import { DND_MODE, HYPR_REFRESH_EVENTS, MIN_USABLE_WINDOW_HEIGHT, MIN_USABLE_WINDOW_WIDTH, MODES_CALL, SCHEMES, SCHEME_CALL, TABS, appLaunchCommand, findJuneToplevel, focusWindowDispatch, hyprAddress, isDark, isUsableWindowSize, juneWindowVisibility, normalizeTab, parseModes, parseScheme, quietIn, setQuietCall } from "../desktop/desktop.mjs";
 import { FACES, LOOKS, face, liveFace, lines as consoleLines } from "../desktop/console.mjs";
-import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent, shouldPopReply } from "../desktop/live.mjs";
+import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, cycleAction, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent, shouldPopReply } from "../desktop/live.mjs";
 
 import { replyParts } from "../src/artifact.ts";
 import { excerpt as codeExcerpt, html as codeHtml } from "../desktop/Code.mjs";
@@ -1497,12 +1497,52 @@ test("desktop tab names normalize strip to chat and companion app launchers resp
 	assert.equal(appLaunchCommand("unknown"), null);
 });
 
-test("live June suppresses reply popups while the full overlay or focused June window is active", () => {
-	assert.equal(shouldPopReply({ overlayShown: false, windowFocused: false, liveEnabled: true, quiet: false }), true);
-	assert.equal(shouldPopReply({ overlayShown: false, windowFocused: true, liveEnabled: true, quiet: false }), false, "no popup over focused June window");
-	assert.equal(shouldPopReply({ overlayShown: true, windowFocused: false, liveEnabled: true, quiet: false }), false, "no popup over overlay");
-	assert.equal(shouldPopReply({ overlayShown: false, windowFocused: false, liveEnabled: false, quiet: false }), false);
-	assert.equal(shouldPopReply({ overlayShown: false, windowFocused: false, liveEnabled: true, quiet: true }), false);
+test("live June suppresses popups and Left Alt focuses the June window when it is visibly shown at a usable size on any monitor", () => {
+	assert.equal(shouldPopReply({ overlayShown: false, windowVisible: false, liveEnabled: true, quiet: false }), true);
+	assert.equal(shouldPopReply({ overlayShown: false, windowVisible: true, liveEnabled: true, quiet: false }), false, "no popup when June window is visible");
+	assert.equal(shouldPopReply({ overlayShown: true, windowVisible: false, liveEnabled: true, quiet: false }), false, "no popup over overlay");
+	assert.equal(shouldPopReply({ overlayShown: false, windowVisible: false, liveEnabled: false, quiet: false }), false);
+	assert.equal(shouldPopReply({ overlayShown: false, windowVisible: false, liveEnabled: true, quiet: true }), false);
+
+	assert.equal(cycleAction({ overlayShown: true, windowVisible: true, liveEnabled: true, miniShown: false, miniInput: false }), "hide");
+	assert.equal(cycleAction({ overlayShown: false, windowVisible: true, liveEnabled: true, miniShown: false, miniInput: false }), "focusWindow");
+	assert.equal(cycleAction({ overlayShown: false, windowVisible: true, liveEnabled: false, miniShown: false, miniInput: false }), "focusWindow");
+	assert.equal(cycleAction({ overlayShown: false, windowVisible: false, liveEnabled: true, miniShown: false, miniInput: false }), "showMini");
+	assert.equal(cycleAction({ overlayShown: false, windowVisible: false, liveEnabled: true, miniShown: true, miniInput: false }), "answerMini");
+	assert.equal(cycleAction({ overlayShown: false, windowVisible: false, liveEnabled: true, miniShown: true, miniInput: true }), "hideMini");
+	assert.equal(cycleAction({ overlayShown: false, windowVisible: false, liveEnabled: false, miniShown: false, miniInput: false }), "show");
+
+	assert.equal(isUsableWindowSize(MIN_USABLE_WINDOW_WIDTH, MIN_USABLE_WINDOW_HEIGHT), true);
+	assert.equal(isUsableWindowSize(MIN_USABLE_WINDOW_WIDTH - 1, 800), false);
+	assert.equal(isUsableWindowSize(800, MIN_USABLE_WINDOW_HEIGHT - 1), false);
+	assert.equal(hyprAddress("55abc"), "0x55abc");
+	assert.equal(hyprAddress("0x55abc"), "0x55abc");
+	assert.equal(hyprAddress(""), "");
+	assert.equal(focusWindowDispatch("55abc", true), 'hl.dsp.focus({ window = "address:0x55abc" })');
+	assert.equal(focusWindowDispatch("0x55abc", false), "focuswindow address:0x55abc");
+	assert.ok(HYPR_REFRESH_EVENTS.includes("activespecial") && HYPR_REFRESH_EVENTS.includes("changegroupactive"));
+
+	const monitors = [
+		{ id: 0, activeWorkspaceId: 1, specialWorkspaceId: 0 },
+		{ id: 1, activeWorkspaceId: 4, specialWorkspaceId: -98 },
+	];
+	const baseTl = { address: "abc123", title: "June", appId: "org.quickshell", className: "org.quickshell", pid: 4242, workspaceId: 4, workspaceActive: true, workspaceHasFullscreen: false, mapped: true, hidden: false, fullscreen: false };
+	const otherJune = { address: "def999", title: "June", appId: "firefox", className: "firefox", pid: 9999, workspaceId: 1, workspaceActive: true, workspaceHasFullscreen: false, mapped: true, hidden: false, fullscreen: false };
+	assert.equal(findJuneToplevel([otherJune, baseTl], 4242, "org.quickshell")?.address, "abc123", "matches own PID over unrelated window titled June");
+
+	const base = { windowShown: true, windowWidth: 620, windowHeight: 880, windowFocused: false, pid: 4242, appId: "org.quickshell", monitors, toplevels: [otherJune, baseTl] };
+	assert.deepEqual(juneWindowVisibility(base), { visible: true, address: "0xabc123" }, "visible on second monitor active workspace even when unfocused");
+	assert.deepEqual(juneWindowVisibility({ ...base, windowWidth: 260 }), { visible: false, address: "" }, "tiny width does not count as visible");
+	assert.deepEqual(juneWindowVisibility({ ...base, windowHeight: 280 }), { visible: false, address: "" }, "tiny height does not count as visible");
+	assert.deepEqual(juneWindowVisibility({ ...base, windowShown: false }), { visible: false, address: "" });
+	assert.deepEqual(juneWindowVisibility({ ...base, toplevels: [{ ...baseTl, workspaceId: 2, workspaceActive: false }] }), { visible: false, address: "0xabc123" }, "hidden on inactive workspace");
+	assert.deepEqual(juneWindowVisibility({ ...base, toplevels: [{ ...baseTl, hidden: true }] }), { visible: false, address: "0xabc123" }, "inactive tab in window group is hidden");
+	assert.deepEqual(juneWindowVisibility({ ...base, toplevels: [{ ...baseTl, workspaceHasFullscreen: true, fullscreen: false }] }), { visible: false, address: "0xabc123" }, "covered by fullscreen window");
+	assert.deepEqual(juneWindowVisibility({ ...base, toplevels: [{ ...baseTl, workspaceHasFullscreen: true, fullscreen: true }] }), { visible: true, address: "0xabc123" }, "June itself fullscreen is visible");
+	assert.deepEqual(juneWindowVisibility({ ...base, toplevels: [{ ...baseTl, workspaceId: -98, workspaceActive: false }] }), { visible: true, address: "0xabc123" }, "visible on active special workspace");
+	assert.deepEqual(juneWindowVisibility({ ...base, toplevels: [{ ...baseTl, workspaceId: -99, workspaceActive: false }] }), { visible: false, address: "0xabc123" }, "hidden on closed special workspace");
+	assert.deepEqual(juneWindowVisibility({ ...base, monitors: [], toplevels: [], windowFocused: true }), { visible: true, address: "" }, "outside Hyprland falls back to focus");
+	assert.deepEqual(juneWindowVisibility({ ...base, monitors: [], toplevels: [], windowFocused: true, windowWidth: 200 }), { visible: false, address: "" }, "tiny size still rejected outside Hyprland");
 });
 
 test("a deployed session shows in the Herdr app through hc and herdr-app, its host and terminal kept out of the script", async () => {

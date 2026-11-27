@@ -69,11 +69,25 @@ export function liveState({ view, linked, now, idleSince, once }) {
 }
 
 /**
- * Whether live June should pop up with a newly finished desktop reply: not when the full overlay is open, the windowed
- * strip is open and focused, live June is off, or do-not-disturb is on.
+ * Whether live June should pop up with a newly finished desktop reply: not when the full overlay is open, June's
+ * window is visibly shown at a usable size on any current workspace, live June is off, or do-not-disturb is on.
  */
-export function shouldPopReply({ overlayShown, windowFocused, liveEnabled, quiet }) {
-	return !overlayShown && !windowFocused && Boolean(liveEnabled) && !quiet;
+export function shouldPopReply({ overlayShown, windowVisible, windowFocused, liveEnabled, quiet }) {
+	const visible = windowVisible !== undefined ? Boolean(windowVisible) : Boolean(windowFocused);
+	return !overlayShown && !visible && Boolean(liveEnabled) && !quiet;
+}
+
+/**
+ * What `june-desktop cycle` (Left Alt tap) should do: hide the full overlay, focus an already-visible June window
+ * instead of spawning a second minimised June, or toggle minimised June as usual.
+ */
+export function cycleAction({ overlayShown, windowVisible, liveEnabled, miniShown, miniInput }) {
+	if (overlayShown) return "hide";
+	if (windowVisible) return "focusWindow";
+	if (!liveEnabled) return "show";
+	if (miniShown && miniInput) return "hideMini";
+	if (miniShown) return "answerMini";
+	return "showMini";
 }
 
 /**

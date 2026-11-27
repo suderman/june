@@ -52,6 +52,89 @@ export function isDark(choice, system) {
 	return system === "dark";
 }
 
+/** Minimum logical dimensions (px) for the windowed June strip to count as usable rather than squeezed tiny. */
+export const MIN_USABLE_WINDOW_WIDTH = 320;
+export const MIN_USABLE_WINDOW_HEIGHT = 360;
+
+/** Hyprland events that can change whether June's window is visible on a shown workspace. */
+export const HYPR_REFRESH_EVENTS = [
+	"openwindow",
+	"closewindow",
+	"movewindow",
+	"movewindowv2",
+	"workspace",
+	"workspacev2",
+	"focusedmon",
+	"focusedmonv2",
+	"activespecial",
+	"activespecialv2",
+	"fullscreen",
+	"togglegroup",
+	"changegroupactive",
+	"moveintogroup",
+	"moveoutofgroup",
+	"monitoradded",
+	"monitoraddedv2",
+	"monitorremoved",
+	"monitorremovedv2",
+];
+
+/** Whether a windowed June strip at `width` × `height` logical pixels is large enough to read and use. */
+export function isUsableWindowSize(width, height) {
+	return Number(width) >= MIN_USABLE_WINDOW_WIDTH && Number(height) >= MIN_USABLE_WINDOW_HEIGHT;
+}
+
+/** Normalizes a Hyprland window address to include its `0x` prefix; empty string when absent. */
+export function hyprAddress(address) {
+	const raw = String(address ?? "").trim();
+	if (!raw) return "";
+	return raw.startsWith("0x") ? raw : `0x${raw}`;
+}
+
+/** Hyprland IPC dispatch argument to focus a window by address, matching hyprlua or standard Hyprland. */
+export function focusWindowDispatch(address, usingLua) {
+	const addr = hyprAddress(address);
+	if (!addr) return "";
+	return usingLua ? `hl.dsp.focus({ window = "address:${addr}" })` : `focuswindow address:${addr}`;
+}
+
+/** Finds this June client's StripWindow among Hyprland toplevel snapshots, preferring exact PID match. */
+export function findJuneToplevel(toplevels, pid, appId) {
+	const list = Array.isArray(toplevels) ? toplevels : [];
+	if (Number(pid) > 0) {
+		const byPid = list.filter((t) => Number(t.pid) === Number(pid));
+		if (byPid.length > 0) return byPid.find((t) => t.title === "June") ?? byPid[0];
+	}
+	const wantApp = String(appId ?? "");
+	return list.find((t) => t.title === "June" && (wantApp === "" || t.appId === wantApp || t.className === wantApp)) ?? null;
+}
+
+/**
+ * Whether June's windowed client is visibly shown at a usable size on any currently displayed workspace (multi-monitor
+ * aware), along with its normalized Hyprland address when known. Falls back to `windowFocused` outside Hyprland.
+ */
+export function juneWindowVisibility({ windowShown, windowWidth, windowHeight, windowFocused, pid, appId, monitors, toplevels }) {
+	if (!windowShown || !isUsableWindowSize(windowWidth, windowHeight)) return { visible: false, address: "" };
+	const mons = Array.isArray(monitors) ? monitors : [];
+	if (mons.length === 0) return { visible: Boolean(windowFocused), address: "" };
+	const tl = findJuneToplevel(toplevels, pid, appId);
+	if (!tl) return { visible: Boolean(windowFocused), address: "" };
+	const address = hyprAddress(tl.address);
+	if (tl.mapped === false || tl.hidden === true) return { visible: false, address };
+	const activeRegular = [];
+	const activeSpecial = [];
+	for (let i = 0; i < mons.length; i++) {
+		const m = mons[i];
+		if (Number(m.activeWorkspaceId) > 0) activeRegular.push(Number(m.activeWorkspaceId));
+		if (Number(m.specialWorkspaceId) !== 0 && !isNaN(Number(m.specialWorkspaceId))) activeSpecial.push(Number(m.specialWorkspaceId));
+	}
+	const wsId = Number(tl.workspaceId);
+	const onShownWorkspace = wsId < 0 ? activeSpecial.includes(wsId) : wsId > 0 ? activeRegular.includes(wsId) || tl.workspaceActive === true : tl.workspaceActive === true;
+	if (!onShownWorkspace) return { visible: false, address };
+	if (tl.workspaceHasFullscreen && !tl.fullscreen) return { visible: false, address };
+	return { visible: true, address };
+}
+
 /** Valid tab names for narrow desktop views: chat (formerly strip), agents, and projects. */
 export const TABS = ["agents", "chat", "projects"];
 
