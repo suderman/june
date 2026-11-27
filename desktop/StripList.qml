@@ -3,6 +3,7 @@
 import QtQuick
 import QtQuick.Controls
 import "scroll.mjs" as Scroll
+import "keys.mjs" as KeyNav
 
 ListView {
   id: list
@@ -139,6 +140,34 @@ ListView {
     if (count === 0) return null;
     const idx = cursorIndex >= 0 && cursorIndex < count ? cursorIndex : 0;
     try { return JSON.parse(model.get(idx).json); } catch (e) { return null; }
+  }
+  /** Collects visible actionable targets across panels in view, newest first, with home-row hint codes. */
+  function collectVisibleHints(targetItem) {
+    if (!targetItem || count === 0) return [];
+    const boundsTop = list.mapToItem(targetItem, 0, 0);
+    const minY = boundsTop.y;
+    const maxY = boundsTop.y + list.height;
+    const cells = [];
+    const kids = list.contentItem ? list.contentItem.children : [];
+    for (let i = 0; i < kids.length; i++) {
+      const c = kids[i];
+      if (!c || c.item === undefined || !c.item || typeof c.item.collectHints !== "function") continue;
+      if (c.y + c.height < list.contentY - 8 || c.y > list.contentY + list.height + 8) continue;
+      cells.push(c);
+    }
+    cells.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    const raw = [];
+    for (let i = 0; i < cells.length; i++) {
+      const hs = cells[i].item.collectHints(targetItem, list.attached);
+      for (let j = 0; j < hs.length; j++) {
+        const h = hs[j];
+        if (h.y < minY - 12 || h.y > maxY - 12) continue;
+        raw.push(h);
+      }
+    }
+    const codes = KeyNav.hintLabels(raw.length);
+    for (let i = 0; i < raw.length; i++) raw[i].code = codes[i];
+    return raw;
   }
   // A day just opened: its newest panel, or with `panel`, that panel in the middle of the view, landing again once the
   // panels around it have measured themselves.

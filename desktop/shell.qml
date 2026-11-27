@@ -1063,9 +1063,13 @@ ShellRoot {
     WlrLayershell.namespace: "june-desktop"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     readonly property string activeColumn: boardsPaper.fits ? root.overlayColumn : root.overlayTab
+    property var hints: []
+    property string hintTyped: ""
+    function clearHints() { hints = []; hintTyped = ""; }
     function enterNormal() {
       root.overlayNormal = true;
       root.overlayLeader = false;
+      clearHints();
       composer.blurInput();
       overlayNormalCatcher.forceActiveFocus();
     }
@@ -1074,6 +1078,7 @@ ShellRoot {
       root.overlayNormal = false;
       root.overlayLeader = false;
       root.overlayHelp = false;
+      clearHints();
       root.overlayColumn = "chat";
       composer.focusInput();
     }
@@ -1085,12 +1090,32 @@ ShellRoot {
       const acts = KeyNav.panelActions(p, root.attached);
       if (acts.length === 0) return;
       const first = acts[0];
-      if (first.kind === "artifact") preview.show({ kind: "artifact", artifact: first.artifact });
-      else if (first.kind === "file") preview.show(first.item);
+      if (first.kind === "artifact" || first.kind === "file") preview.show(first.item);
       else if (first.kind === "link" && root.openLink(first.url)) root.hide();
+    }
+    function activateHint(h) {
+      if (!h) return;
+      if (h.kind === "artifact" || h.kind === "file") preview.show(h.item);
+      else if (h.kind === "link" && h.url && root.openLink(h.url)) root.hide();
+      else if (h.kind === "toggleTool" && typeof h.toggle === "function") h.toggle();
     }
     function handleNormalKey(event) {
       const ev = root.keyEv(event);
+      if (window.hints.length > 0) {
+        event.accepted = true;
+        if (ev.key === "Escape") { window.clearHints(); return; }
+        if (event.key === Qt.Key_Backspace) { window.hintTyped = window.hintTyped.slice(0, -1); return; }
+        if (ev.text && ev.text.length === 1 && /^[a-zA-Z]$/.test(ev.text)) {
+          const next = window.hintTyped + ev.text.toLowerCase();
+          const m = KeyNav.matchHint(window.hints, next);
+          if (m.kind === "exact") { window.clearHints(); window.activateHint(m.hint); }
+          else if (m.kind === "prefix") window.hintTyped = next;
+          else window.clearHints();
+          return;
+        }
+        window.clearHints();
+        return;
+      }
       if (!root.overlayHelp && !root.overlayLeader && !preview.open) {
         if (window.activeColumn === "agents") {
           const ab = activeAgentsBoard();
@@ -1186,6 +1211,14 @@ ShellRoot {
         else if (window.activeColumn === "projects") activeProjectsBoard().foldCurrent();
         return;
       }
+      if (res.action === "hint") {
+        if (list.visible) {
+          const found = list.collectVisibleHints(window.contentItem);
+          if (found.length > 0) { window.hints = found; window.hintTyped = ""; }
+          else root.say("no links or actions in view");
+        }
+        return;
+      }
       if (res.action === "search" || res.action === "calendar") { masthead.openBrowse(); return; }
       if (res.action === "stepDay") { masthead.stepDay(res.delta); return; }
       if (res.action === "today") { root.backToToday(); return; }
@@ -1212,6 +1245,7 @@ ShellRoot {
       } else {
         root.overlayLeader = false;
         root.overlayHelp = false;
+        window.clearHints();
       }
     }
     Connections {
@@ -1593,6 +1627,8 @@ ShellRoot {
       anchors.fill: parent
       leader: root.overlayLeader
       helpOpen: root.overlayHelp
+      hints: window.hints
+      hintTyped: window.hintTyped
       surface: "overlay"
       column: window.activeColumn
       sheet: window.activeColumn === "agents" ? window.activeAgentsBoard().activeSheet : window.activeColumn === "projects" ? window.activeProjectsBoard().activeSheet : ""

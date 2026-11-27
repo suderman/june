@@ -4,6 +4,7 @@
 import QtQuick
 import "console.mjs" as Console
 import "strip.mjs" as Strip
+import "keys.mjs" as KeyNav
 
 Item {
   id: row
@@ -20,6 +21,25 @@ Item {
   readonly property var out: Console.lines(p)
 
   height: column.implicitHeight + 6
+
+  function collectHints(targetItem, attachedBase) {
+    const out = [];
+    if (!targetItem) return out;
+    const pt = row.mapToItem(targetItem, 0, 0);
+    const acts = KeyNav.panelActions(row.p, attachedBase);
+    for (let i = 0; i < acts.length; i++) {
+      const a = acts[i];
+      out.push({
+        x: pt.x + 6 + (i % 3) * 28,
+        y: pt.y + 4 + Math.floor(i / 3) * 22,
+        kind: a.kind,
+        url: a.url ?? "",
+        item: a.item ?? null,
+        label: a.label || a.kind,
+      });
+    }
+    return out;
+  }
 
   function colour(line) {
     if (line.kind === "user") return Theme.consoleUser;

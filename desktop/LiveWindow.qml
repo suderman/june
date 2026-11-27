@@ -40,6 +40,8 @@ PanelWindow {
   property bool normalMode: false
   property bool leader: false
   property bool helpOpen: false
+  property var hints: []
+  property string hintTyped: ""
 
   signal openStrip()
   signal openStripNormal()
@@ -52,6 +54,8 @@ PanelWindow {
   function enterNormal() {
     normalMode = true;
     leader = false;
+    hints = [];
+    hintTyped = "";
     composer.blurInput();
     normalCatcher.forceActiveFocus();
   }
@@ -59,7 +63,16 @@ PanelWindow {
     normalMode = false;
     leader = false;
     helpOpen = false;
+    hints = [];
+    hintTyped = "";
     composer.focusInput();
+  }
+  function clearHints() { hints = []; hintTyped = ""; }
+  function activateHint(h) {
+    if (!h) return;
+    if (h.kind === "link" && h.url) openLink(h.url);
+    else if (h.kind === "toggleTool" && typeof h.toggle === "function") h.toggle();
+    else openStripNormal();
   }
   function keyEv(event) {
     const k = event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab ? "Tab"
@@ -79,7 +92,23 @@ PanelWindow {
     };
   }
   function handleNormalKey(event) {
-    const res = KeyNav.dispatchNormalKey(keyEv(event), {
+    const ev = keyEv(event);
+    if (hints.length > 0) {
+      event.accepted = true;
+      if (ev.key === "Escape") { clearHints(); return; }
+      if (event.key === Qt.Key_Backspace) { hintTyped = hintTyped.slice(0, -1); return; }
+      if (ev.text && ev.text.length === 1 && /^[a-zA-Z]$/.test(ev.text)) {
+        const next = hintTyped + ev.text.toLowerCase();
+        const m = KeyNav.matchHint(hints, next);
+        if (m.kind === "exact") { clearHints(); activateHint(m.hint); }
+        else if (m.kind === "prefix") hintTyped = next;
+        else clearHints();
+        return;
+      }
+      clearHints();
+      return;
+    }
+    const res = KeyNav.dispatchNormalKey(ev, {
       surface: "mini",
       column: "chat",
       leader: leader,
@@ -98,6 +127,15 @@ PanelWindow {
     if (res.action === "enterInsert") { enterInsert(); return; }
     if (res.action === "back") { dismissed(); return; }
     if (res.action === "expandOverlay") { openStripNormal(); return; }
+    if (res.action === "hint") {
+      if (cell.item && typeof cell.item.collectHints === "function") {
+        const raw = cell.item.collectHints(panel, win.attached);
+        const codes = KeyNav.hintLabels(raw.length);
+        for (let i = 0; i < raw.length; i++) raw[i].code = codes[i];
+        if (raw.length > 0) { hints = raw; hintTyped = ""; }
+      }
+      return;
+    }
     if (res.action === "copyNewest") {
       try {
         const p = JSON.parse(panelJson);
@@ -139,7 +177,7 @@ PanelWindow {
   visible: shown || rise > 0.001
   onShownChanged: {
     rise = shown ? 1 : 0;
-    if (!shown) { normalMode = false; leader = false; helpOpen = false; }
+    if (!shown) { normalMode = false; leader = false; helpOpen = false; clearHints(); }
     else if (inputShown) Qt.callLater(() => { if (normalMode) normalCatcher.forceActiveFocus(); else composer.focusInput(); });
   }
 
@@ -268,6 +306,8 @@ PanelWindow {
         anchors.fill: panel
         leader: win.leader
         helpOpen: win.helpOpen
+        hints: win.hints
+        hintTyped: win.hintTyped
         surface: "mini"
         column: "chat"
         onCloseHelp: win.helpOpen = false

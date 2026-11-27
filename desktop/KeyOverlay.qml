@@ -11,10 +11,78 @@ Item {
   property string surface: "window"
   property string column: "chat"
   property string sheet: ""
+  property var hints: []
+  property string hintTyped: ""
   signal closeHelp()
 
   z: 40
-  visible: leader || helpOpen
+  visible: leader || helpOpen || (hints && hints.length > 0)
+
+  // Avy / Vimium-style `f` hint badges positioned over visible links, files, artifacts, and tool chips.
+  Repeater {
+    model: overlay.hints && !overlay.helpOpen ? overlay.hints : []
+    delegate: Rectangle {
+      required property var modelData
+      readonly property bool matches: overlay.hintTyped === "" || String(modelData.code ?? "").indexOf(overlay.hintTyped) === 0
+      x: Math.max(6, Math.min(overlay.width - width - 6, modelData.x))
+      y: Math.max(6, Math.min(overlay.height - height - 48, modelData.y))
+      width: Math.max(22, codeText.implicitWidth + 10)
+      height: 20
+      radius: 4
+      color: Theme.accent
+      border.color: Theme.paper
+      border.width: 1.5
+      opacity: matches ? 0.96 : 0.22
+      Text {
+        id: codeText
+        anchors.centerIn: parent
+        text: String(modelData.code ?? "").toUpperCase()
+        font.family: "monospace"; font.weight: Font.Bold; font.pixelSize: 11
+        color: Theme.paper
+      }
+    }
+  }
+
+  // Bottom legend strip for active `f` hint mode so every letter clearly identifies its target.
+  Rectangle {
+    visible: overlay.hints && overlay.hints.length > 0 && !overlay.helpOpen
+    anchors.horizontalCenter: parent.horizontalCenter
+    anchors.bottom: parent.bottom
+    anchors.bottomMargin: 14
+    width: Math.min(parent.width - 32, hintLegend.implicitWidth + 28)
+    height: hintLegend.implicitHeight + 16
+    radius: 8
+    color: Theme.cardFill
+    border.color: Theme.accent
+    border.width: 1.5
+    Flow {
+      id: hintLegend
+      anchors.centerIn: parent
+      width: Math.min(overlay.width - 60, implicitWidth)
+      spacing: 10
+      Text {
+        text: overlay.hintTyped !== "" ? "HINT " + overlay.hintTyped.toUpperCase() : "HINT"
+        font.family: "monospace"; font.weight: Font.Bold; font.pixelSize: 12
+        color: Theme.accent
+      }
+      Repeater {
+        model: overlay.hints ? overlay.hints.slice(0, 12) : []
+        delegate: Row {
+          required property var modelData
+          readonly property bool matches: overlay.hintTyped === "" || String(modelData.code ?? "").indexOf(overlay.hintTyped) === 0
+          visible: matches
+          spacing: 4
+          Text { text: "[" + String(modelData.code ?? "") + "]"; font.family: "monospace"; font.weight: Font.Bold; font.pixelSize: 11; color: Theme.cardBusy }
+          Text {
+            text: String(modelData.label ?? "").length > 26 ? String(modelData.label ?? "").slice(0, 25) + "…" : String(modelData.label ?? "")
+            font.family: Theme.caption; font.pixelSize: 11
+            color: Theme.cardInk
+          }
+        }
+      }
+      Text { text: "Esc cancel"; font.family: Theme.caption; font.pixelSize: 11; color: Theme.muted }
+    }
+  }
 
   // Compact SPC leader strip along the bottom.
   Rectangle {

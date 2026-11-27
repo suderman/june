@@ -1698,3 +1698,39 @@ test("board cursor lists, state quick-pick mnemonics, ISO date stepping, and she
 	assert.equal(K.helpSections("window", "agents", "task")[0].title, "Task docket");
 	assert.equal(K.helpSections("window", "agents", "host")[0].title, "Host page");
 });
+
+test("Avy/Vimium hint mode labels, prefix matching, and shown/user media extraction (keys.mjs)", async () => {
+	const K = await import(new URL("../desktop/keys.mjs", import.meta.url));
+	assert.deepEqual(K.hintLabels(0), []);
+	assert.deepEqual(K.hintLabels(4), ["a", "s", "d", "f"]);
+	const big = K.hintLabels(30);
+	assert.equal(big.length, 30);
+	assert.equal(new Set(big).size, 30);
+	assert.equal(big[0].length, 2);
+
+	const hints = [{ code: "a", id: 1 }, { code: "sa", id: 2 }, { code: "sd", id: 3 }];
+	assert.deepEqual(K.matchHint(hints, "a"), { kind: "exact", hint: hints[0] });
+	assert.equal(K.matchHint(hints, "s").kind, "prefix");
+	assert.equal(K.matchHint(hints, "s").remaining.length, 2);
+	assert.deepEqual(K.matchHint(hints, "sd"), { kind: "exact", hint: hints[2] });
+	assert.deepEqual(K.matchHint(hints, "z"), { kind: "none" });
+
+	assert.deepEqual(K.dispatchNormalKey({ text: "f" }, { surface: "window", column: "chat" }), { action: "hint" });
+	assert.deepEqual(K.dispatchNormalKey({ text: "f" }, { surface: "mini", column: "chat" }), { action: "hint" });
+
+	const panel = {
+		id: "p9",
+		elements: [
+			{ kind: "user", item: { id: "m42" }, pictures: 1, files: [{ n: 0, name: "plan.pdf", preview: "pdf", expired: false }] },
+			{ kind: "shown", files: [{ id: "s7", n: 0, name: "shot.png", preview: "picture" }] },
+			{ kind: "june", artifact: { title: "script.sh", language: "bash", text: "echo hi", lines: null } },
+		],
+	};
+	const acts = K.panelActions(panel, "http://127.0.0.1:4242/a/");
+	assert.equal(acts.length, 4);
+	assert.equal(acts[0].item.url, "http://127.0.0.1:4242/a/m42/0");
+	assert.equal(acts[1].item.url, "http://127.0.0.1:4242/a/m42/file/0");
+	assert.equal(acts[2].item.url, "http://127.0.0.1:4242/a/s7/file/0");
+	assert.equal(acts[3].item.kind, "artifact");
+	assert.equal(acts[3].item.text, "echo hi");
+});

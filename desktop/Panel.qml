@@ -8,6 +8,7 @@ import "strip.mjs" as Strip
 import "compose.mjs" as Compose
 import "light.mjs" as Light
 import "scenery.mjs" as Scenery
+import "keys.mjs" as KeyNav
 
 Item {
   id: panel
@@ -47,6 +48,40 @@ Item {
   readonly property var sources: ({ tui: "terminal", kitty: "terminal", apk: "phone", telegram: "telegram", cli: "command line" })
 
   function kindOf(e) { return e.kind === "tools" ? (e.items.length > 1 ? "card" : "chip") : e.kind; }
+  function collectHints(targetItem, attachedBase) {
+    const out = [];
+    if (!targetItem) return out;
+    for (let i = 0; i < elements.count; i++) {
+      const slot = elements.itemAt(i);
+      if (!slot || !slot.visible || !slot.element) continue;
+      const pt = slot.mapToItem(targetItem, 0, 0);
+      if (slot.kind === "chip" || slot.kind === "card") {
+        const ref = slot;
+        const n = (slot.element.items ?? []).length;
+        out.push({
+          x: pt.x + 4,
+          y: pt.y + 4,
+          kind: "toggleTool",
+          label: slot.kind === "card" ? "tools (" + n + ")" : "tool",
+          toggle: () => { if (ref && ref.item) ref.item.open = !ref.item.open; },
+        });
+        continue;
+      }
+      const acts = KeyNav.panelActions({ id: panel.p.id, elements: [slot.element] }, attachedBase);
+      for (let j = 0; j < acts.length; j++) {
+        const a = acts[j];
+        out.push({
+          x: pt.x + 6 + (j % 3) * 28,
+          y: pt.y + 6 + Math.floor(j / 3) * 24,
+          kind: a.kind,
+          url: a.url ?? "",
+          item: a.item ?? null,
+          label: a.label || a.kind,
+        });
+      }
+    }
+    return out;
+  }
   function measure() {
     const out = [];
     for (let i = 0; i < elements.count; i++) {

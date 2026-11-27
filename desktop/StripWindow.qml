@@ -39,11 +39,15 @@ FloatingWindow {
   property string focusColumn: "chat"
   property bool leader: false
   property bool helpOpen: false
+  property var hints: []
+  property string hintTyped: ""
   readonly property string activeColumn: win.layout.columns ? focusColumn : win.tab
 
+  function clearHints() { hints = []; hintTyped = ""; }
   function enterNormal() {
     normalMode = true;
     leader = false;
+    clearHints();
     composer.blurInput();
     normalCatcher.forceActiveFocus();
   }
@@ -52,6 +56,7 @@ FloatingWindow {
     normalMode = false;
     leader = false;
     helpOpen = false;
+    clearHints();
     focusColumn = "chat";
     composer.focusInput();
   }
@@ -81,12 +86,32 @@ FloatingWindow {
     const acts = KeyNav.panelActions(p, win.shell.attached);
     if (acts.length === 0) return;
     const first = acts[0];
-    if (first.kind === "artifact") preview.show({ kind: "artifact", artifact: first.artifact });
-    else if (first.kind === "file") preview.show(first.item);
+    if (first.kind === "artifact" || first.kind === "file") preview.show(first.item);
     else if (first.kind === "link") win.shell.openLink(first.url);
+  }
+  function activateHint(h) {
+    if (!h) return;
+    if (h.kind === "artifact" || h.kind === "file") preview.show(h.item);
+    else if (h.kind === "link" && h.url) win.shell.openLink(h.url);
+    else if (h.kind === "toggleTool" && typeof h.toggle === "function") h.toggle();
   }
   function handleNormalKey(event) {
     const ev = win.shell.keyEv(event);
+    if (win.hints.length > 0) {
+      event.accepted = true;
+      if (ev.key === "Escape") { win.clearHints(); return; }
+      if (event.key === Qt.Key_Backspace) { win.hintTyped = win.hintTyped.slice(0, -1); return; }
+      if (ev.text && ev.text.length === 1 && /^[a-zA-Z]$/.test(ev.text)) {
+        const next = win.hintTyped + ev.text.toLowerCase();
+        const m = KeyNav.matchHint(win.hints, next);
+        if (m.kind === "exact") { win.clearHints(); win.activateHint(m.hint); }
+        else if (m.kind === "prefix") win.hintTyped = next;
+        else win.clearHints();
+        return;
+      }
+      win.clearHints();
+      return;
+    }
     if (!win.helpOpen && !win.leader && !preview.open) {
       if (win.activeColumn === "agents") {
         const ab = activeAgentsBoard();
@@ -180,6 +205,14 @@ FloatingWindow {
     if (res.action === "fold") {
       if (win.activeColumn === "agents") activeAgentsBoard().foldCurrent();
       else if (win.activeColumn === "projects") activeProjectsBoard().foldCurrent();
+      return;
+    }
+    if (res.action === "hint") {
+      if (strip.visible) {
+        const found = strip.collectVisibleHints(win.contentItem);
+        if (found.length > 0) { win.hints = found; win.hintTyped = ""; }
+        else win.shell.say("no links or actions in view");
+      }
       return;
     }
     if (res.action === "search" || res.action === "calendar") { masthead.openBrowse(); return; }
@@ -582,6 +615,8 @@ FloatingWindow {
     anchors.fill: parent
     leader: win.leader
     helpOpen: win.helpOpen
+    hints: win.hints
+    hintTyped: win.hintTyped
     surface: "window"
     column: win.activeColumn
     sheet: win.activeColumn === "agents" ? win.activeAgentsBoard().activeSheet : win.activeColumn === "projects" ? win.activeProjectsBoard().activeSheet : ""

@@ -201,7 +201,7 @@ export function panelCopyText(panel) {
 	return "";
 }
 
-/** Extracts actionable targets (artifacts, file cards, Org/Markdown links) from a composed panel for DWIM RET / hints. */
+/** Extracts actionable targets (artifacts, file cards, pictures, Org/Markdown links) from a composed panel. */
 export function panelActions(panel, attachedBase) {
 	const out = [];
 	if (!panel || !Array.isArray(panel.elements)) return out;
@@ -215,17 +215,46 @@ export function panelActions(panel, attachedBase) {
 	for (let i = 0; i < panel.elements.length; i++) {
 		const e = panel.elements[i];
 		if (!e) continue;
-		if (e.artifact) out.push({ kind: "artifact", artifact: e.artifact, label: e.artifact.title || e.artifact.language || "artifact" });
-		if (e.kind === "user" && Array.isArray(e.files)) {
+		if (e.artifact) {
+			const name = e.artifact.title || e.artifact.language || "artifact";
+			out.push({
+				kind: "artifact",
+				artifact: e.artifact,
+				item: { kind: "artifact", name: name, text: e.artifact.text || "", lines: e.artifact.lines ?? null },
+				label: name,
+			});
+		}
+		if (e.kind === "user" && attachedBase) {
+			const msgId = (e.item && e.item.id) || panel.id;
+			const base = attachedBase + msgId + "/";
+			const pics = e.pictures || 0;
+			const files = Array.isArray(e.files) ? e.files : [];
+			const set = [];
+			for (let p = 0; p < pics; p++) set.push({ kind: "picture", url: base + p, name: pics > 1 ? "picture " + (p + 1) + " of " + pics : "picture" });
+			for (let j = 0; j < files.length; j++) {
+				const f = files[j];
+				if (f && !f.expired) set.push({ kind: f.preview || "file", url: base + "file/" + f.n, name: f.name || "file" });
+			}
+			for (let s = 0; s < set.length; s++) {
+				out.push({
+					kind: "file",
+					item: { kind: set[s].kind, url: set[s].url, name: set[s].name, set: set, at: s },
+					label: set[s].name,
+				});
+			}
+		}
+		if (e.kind === "shown" && attachedBase && Array.isArray(e.files)) {
+			const set = [];
 			for (let j = 0; j < e.files.length; j++) {
 				const f = e.files[j];
-				if (f && !f.expired && attachedBase) {
-					out.push({
-						kind: "file",
-						item: { kind: f.preview || "file", url: attachedBase + panel.id + "/file/" + f.n, name: f.name || "file", mimeType: f.type || "" },
-						label: f.name || "file",
-					});
-				}
+				if (f) set.push({ kind: f.preview || "file", url: attachedBase + f.id + "/file/" + f.n, name: f.name || "file" });
+			}
+			for (let s = 0; s < set.length; s++) {
+				out.push({
+					kind: "file",
+					item: { kind: set[s].kind, url: set[s].url, name: set[s].name, set: set, at: s },
+					label: set[s].name,
+				});
 			}
 		}
 		if (typeof e.text === "string" && e.text !== "") {
@@ -237,6 +266,41 @@ export function panelActions(panel, attachedBase) {
 		}
 	}
 	return out;
+}
+
+/** Home-row-first Avy/Vimium hint alphabet. */
+export const HINT_KEYS = "asdfjklghqwertuiopzxcvbnm";
+
+/** Generates `count` unique lowercase hint codes (single-letter up to 25 targets, two-letter beyond). */
+export function hintLabels(count) {
+	const n = Math.max(0, Number(count) || 0);
+	const out = [];
+	if (n === 0) return out;
+	if (n <= HINT_KEYS.length) {
+		for (let i = 0; i < n; i++) out.push(HINT_KEYS[i]);
+		return out;
+	}
+	for (let i = 0; i < HINT_KEYS.length && out.length < n; i++) {
+		for (let j = 0; j < HINT_KEYS.length && out.length < n; j++) {
+			out.push(HINT_KEYS[i] + HINT_KEYS[j]);
+		}
+	}
+	return out;
+}
+
+/** Matches a typed hint prefix against `hints` (`[{ code, ... }]`). */
+export function matchHint(hints, typed) {
+	const t = String(typed ?? "").toLowerCase();
+	if (!Array.isArray(hints) || hints.length === 0 || t === "") return { kind: "none" };
+	const remaining = [];
+	for (let i = 0; i < hints.length; i++) {
+		const h = hints[i];
+		if (!h || typeof h.code !== "string") continue;
+		if (h.code === t) return { kind: "exact", hint: h };
+		if (h.code.indexOf(t) === 0) remaining.push(h);
+	}
+	if (remaining.length > 0) return { kind: "prefix", remaining: remaining };
+	return { kind: "none" };
 }
 
 /** Entries shown in the compact SPC leader bar (Which-Key style). */
@@ -262,6 +326,7 @@ export function helpSections(surface, column, sheet) {
 					["Tab / i / a", "back to Insert"],
 					["k / p / z", "expand full overlay"],
 					["RET", "open link or expand"],
+					["f", "hint links / files / tools"],
 					["c", "copy newest reply"],
 					["1–9", "visit working clanker"],
 					["SPC", "leader toggles"],
@@ -330,6 +395,7 @@ export function helpSections(surface, column, sheet) {
 				["k / p", "older panel"],
 				["j / n", "newer panel"],
 				["RET", "open artifact / link"],
+				["f", "hint links / files / tools"],
 				["c", "copy focused panel"],
 				["/", "search history"],
 				["d", "calendar & search"],
@@ -426,6 +492,7 @@ export function dispatchNormalKey(ev, ctx) {
 	// Mini June NORMAL mode.
 	if (surface === "mini") {
 		if (text === "k" || text === "p" || text === "z" || key === "Up") return { action: "expandOverlay" };
+		if (text === "f") return { action: "hint" };
 		if (text === "c") return { action: "copyNewest" };
 		if (key === "Return" || key === "Enter") return { action: "activateNewest" };
 		if (text >= "1" && text <= "9") return { action: "visitShelf", index: Number(text) - 1 };
@@ -447,6 +514,7 @@ export function dispatchNormalKey(ev, ctx) {
 	if (text === "N" || key === "PageDown") return { action: "page", delta: 1 };
 	if (text === "P" || key === "PageUp") return { action: "page", delta: -1 };
 	if (key === "Return" || key === "Enter") return { action: "activate" };
+	if (text === "f") return { action: "hint" };
 	if (text === "o") return { action: "fold" };
 	if (text === "c") return { action: "copy" };
 	if (text === "/") return { action: "search" };
