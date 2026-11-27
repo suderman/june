@@ -30,13 +30,15 @@ export function boardLayout(width) {
 }
 
 /**
- * Width for each side board in the desktop overlay's `boardsPaper` given the screen space left of the strip (`avail`),
- * leaving 40 px of dimmed backdrop and three GAP gutters. Fits once each board gets at least MIN_SIDE, capped at MAX_SIDE.
+ * The desktop overlay's boards, either side of the centred strip as the window and the phone have them: agents on the
+ * left, projects on the right. AVAIL is the screen's width beside the strip; each side gets half, leaving 10 px of
+ * dimmed backdrop at the screen's edge and a GAP gutter either side of its board. Fits once each board gets at least
+ * MIN_SIDE, capped at MAX_SIDE; WIDTH is one side's paper.
  */
 export function overlayBoards(avail) {
-	const side = Math.min(MAX_SIDE, Math.floor((avail - 40 - 3 * GAP) / 2));
+	const side = Math.min(MAX_SIDE, Math.floor(avail / 2 - 10 - 2 * GAP));
 	if (side < MIN_SIDE) return { fits: false, side: 0, width: 0 };
-	return { fits: true, side, width: 2 * side + 3 * GAP };
+	return { fits: true, side, width: side + 2 * GAP };
 }
 
 /** Each state's chip: fill and ink, ink also the outline; both pass 4.5:1. */

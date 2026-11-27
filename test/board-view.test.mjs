@@ -26,10 +26,11 @@ test("three columns start balanced at 1296 px, grow together toward comfortable 
 		prev = cur;
 	}
 	// Overlay side boards also scale between MIN_SIDE and MAX_SIDE.
+	// The overlay: half the width beside the centred strip on each side, the same 836 px threshold as one side had.
 	assert.deepEqual(overlayBoards(835), { fits: false, side: 0, width: 0 });
-	assert.deepEqual(overlayBoards(836), { fits: true, side: 368, width: 796 });
-	assert.deepEqual(overlayBoards(872), { fits: true, side: 386, width: 832 });
-	assert.deepEqual(overlayBoards(1740), { fits: true, side: 460, width: 980 });
+	assert.deepEqual(overlayBoards(836), { fits: true, side: 368, width: 408 });
+	assert.deepEqual(overlayBoards(872), { fits: true, side: 386, width: 426 });
+	assert.deepEqual(overlayBoards(1740), { fits: true, side: 460, width: 500 });
 });
 
 const task = (key, extra = {}) => ({ key, file: "work/demo/demo.org", line: 7, level: 1, title: key, tags: [], path: [], project: "Demo", sessions: [], ...extra });

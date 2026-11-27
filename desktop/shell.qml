@@ -943,9 +943,10 @@ ShellRoot {
     Rectangle { anchors.fill: parent; color: Theme.backdrop; opacity: root.unfold }
     MouseArea { anchors.fill: parent; onClicked: root.hide() }
 
+    // The strip in the middle of the screen, as the window and the phone have it, the boards either side.
     Item {
       id: page
-      anchors.right: parent.right
+      anchors.horizontalCenter: parent.horizontalCenter
       anchors.top: parent.top
       anchors.bottom: parent.bottom
       width: Math.min(Theme.stripWidth, parent.width - 32)
@@ -1155,8 +1156,9 @@ ShellRoot {
       }
     }
 
-    // A wide screen has room left of the strip for the agents and projects boards, on paper that unfolds with it (see
-    // "Agents and projects" in docs/interfaces.org). What a board opens takes the desktop client away, as a link does.
+    // A wide screen has room either side of the strip for the boards, agents on the left and projects on the right, on
+    // paper that unfolds with it (see "Agents and projects" in docs/interfaces.org). What a board opens takes the
+    // desktop client away, as a link does.
     Rectangle {
       id: boardsPaper
       readonly property var layout: Board.overlayBoards(window.width - page.width)
@@ -1172,11 +1174,10 @@ ShellRoot {
       MouseArea { anchors.fill: parent } // clicks on the boards stay on them
       onFitsChanged: if (fits && root.shown) root.wantBoards()
       Rectangle { anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1.5; color: Theme.pageInk; opacity: 0.25 }
-      Row {
+      Item {
         anchors.fill: parent
         anchors.margins: Board.GAP
         anchors.topMargin: 16
-        spacing: Board.GAP
         AgentsBoard {
           id: wideAgents
           width: boardsPaper.layout.side
@@ -1200,6 +1201,24 @@ ShellRoot {
           onLaunchTerminal: { if (root.openApp("terminal")) root.hide(); }
           onOpen: link => { if (root.openLink(link)) root.hide(); }
         }
+      }
+    }
+    Rectangle {
+      id: projectsPaper
+      visible: boardsPaper.visible
+      anchors.left: page.right
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      width: boardsPaper.layout.width
+      color: Theme.paper
+      opacity: page.stripPhase
+      transform: Translate { y: (1 - page.stripPhase) * 56 }
+      MouseArea { anchors.fill: parent } // clicks on the boards stay on them
+      Rectangle { anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 1.5; color: Theme.pageInk; opacity: 0.25 }
+      Item {
+        anchors.fill: parent
+        anchors.margins: Board.GAP
+        anchors.topMargin: 16
         ProjectsBoard {
           id: wideProjects
           width: boardsPaper.layout.side

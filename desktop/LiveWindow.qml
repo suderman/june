@@ -1,5 +1,6 @@
-// Live June: the desktop client's minimised form, in the focused screen's bottom-right corner. Her card shows what she is
-// doing right now; it grows leftward to hold her latest reply or the user's input. It takes the keyboard only while the
+// Live June: the desktop client's minimised form, at the middle of the focused screen's bottom, as wide as the strip
+// with her card where the strip's is, so neither she nor the input moves when the strip unfolds around them. Her card
+// shows what she is doing right now; it grows leftward to hold her latest reply or the user's input. It takes the keyboard only while the
 // input is open, and only where it draws does it take the mouse. The shell decides the state (see live.mjs) and when
 // she shows; see "Live June" in docs/interfaces.org.
 import QtQuick
@@ -34,10 +35,10 @@ PanelWindow {
   readonly property int reach: 340
 
   visible: shown
-  anchors { bottom: true; right: true }
-  margins { bottom: 22; right: 22 }
-  implicitWidth: card + reach + 14
-  implicitHeight: card + 190
+  // Anchored to the bottom alone, the window sits at its middle; it is the strip's width (shell.qml page).
+  anchors { bottom: true }
+  implicitWidth: Math.min(Theme.stripWidth, (win.screen ? win.screen.width : Theme.stripWidth + 32) - 32)
+  implicitHeight: card + 190 + 22
   exclusionMode: ExclusionMode.Ignore
   color: "transparent"
   WlrLayershell.layer: WlrLayer.Overlay
@@ -82,6 +83,8 @@ PanelWindow {
     id: cardBox
     anchors.right: parent.right
     anchors.bottom: parent.bottom
+    anchors.rightMargin: 22
+    anchors.bottomMargin: 22
     width: win.card
     height: win.card
     liveState: win.liveState
@@ -101,7 +104,7 @@ PanelWindow {
     anchors.rightMargin: 18
     anchors.bottom: note.visible ? note.top : cardBox.bottom
     anchors.bottomMargin: note.visible ? 14 : 26
-    maxWidth: win.reach - 18
+    maxWidth: Math.min(win.reach + 180, cardBox.x - 16 - 18)
     pixelSize: 16
     rich: false
     text: win.message
@@ -110,15 +113,17 @@ PanelWindow {
     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: win.wantInput() }
   }
 
-  // The user's note to her, without the strip. Enter steers, Shift+Enter queues, Esc puts her away.
+  // The user's note to her, without the strip, where the strip's input is: from its left edge to her card. Enter
+  // steers, Shift+Enter queues, Esc puts her away.
   Rectangle {
     id: note
     visible: win.inputShown
+    anchors.left: parent.left
+    anchors.leftMargin: 16
     anchors.right: cardBox.left
     anchors.rightMargin: 14
     anchors.bottom: cardBox.bottom
     anchors.bottomMargin: 16
-    width: win.reach - 14
     height: Math.min(field.contentHeight + 26, 160)
     radius: 14
     color: Theme.noteFill
