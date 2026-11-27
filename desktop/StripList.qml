@@ -28,6 +28,13 @@ ListView {
 
   // The panel holding a moment opened from June's history, outlined until another day opens; "" for none.
   property string marked: ""
+  // Keyboard NORMAL mode focus & selected panel index (0 = newest, -1 = none/newest).
+  property bool keyboardFocused: false
+  property int cursorIndex: -1
+  onCountChanged: {
+    if (cursorIndex >= count) cursorIndex = count - 1;
+    if (follow) Qt.callLater(list.positionViewAtBeginning);
+  }
 
   // Whether to stay on the newest panel, and the wheel's momentum.
   property bool follow: true
@@ -39,7 +46,6 @@ ListView {
   opacity: linked ? 1 : 0.5
   // Stay on the newest panel as panels arrive and settle their height, unless the user has scrolled away.
   onContentHeightChanged: if (follow) Qt.callLater(list.positionViewAtBeginning)
-  onCountChanged: if (follow) Qt.callLater(list.positionViewAtBeginning)
   onMovementEnded: follow = atYEnd
 
   function scrollBy(dy) {
@@ -94,10 +100,45 @@ ListView {
   Timer { id: settle; interval: 120; onTriggered: if (list.follow) list.positionViewAtBeginning() }
   function landOnNewest() {
     follow = true;
+    cursorIndex = count > 0 ? 0 : -1;
     scrollState = Scroll.rest();
     glider.running = false;
     positionViewAtBeginning();
     settle.restart();
+  }
+  /** Step panel cursor: delta -1 = older (up), +1 = newer (down). */
+  function stepPanel(delta) {
+    if (count === 0) return;
+    follow = false;
+    scrollState = Scroll.rest();
+    glider.running = false;
+    paging.stop();
+    const cur = cursorIndex < 0 ? 0 : cursorIndex;
+    // BottomToTop: index 0 is newest (bottom), higher index is older (up).
+    const next = Math.max(0, Math.min(count - 1, cur - delta));
+    cursorIndex = next;
+    if (next === 0) { landOnNewest(); return; }
+    positionViewAtIndex(next, ListView.Contain);
+  }
+  /** Jon's Emacs `Z`: go to bottom (newest); if already at bottom, go to top (oldest). */
+  function toggleBottomTop() {
+    if (count === 0) return;
+    if (atYEnd && (cursorIndex <= 0)) {
+      follow = false;
+      scrollState = Scroll.rest();
+      glider.running = false;
+      paging.stop();
+      cursorIndex = count - 1;
+      positionViewAtEnd();
+    } else {
+      landOnNewest();
+    }
+  }
+  /** Currently cursor-focused panel object (or newest panel when cursor is unset). */
+  function focusedPanel() {
+    if (count === 0) return null;
+    const idx = cursorIndex >= 0 && cursorIndex < count ? cursorIndex : 0;
+    try { return JSON.parse(model.get(idx).json); } catch (e) { return null; }
   }
   // A day just opened: its newest panel, or with `panel`, that panel in the middle of the view, landing again once the
   // panels around it have measured themselves.
@@ -188,15 +229,15 @@ ListView {
     required property string pid
     width: list.width
     sourceComponent: list.consoleLook ? consoleCell : comicCell
-    // The moment opened from June's history.
+    // The moment opened from June's history, or the active NORMAL-mode panel cursor.
     Rectangle {
       // Inside the panel's edge: the list clips anything wider.
       anchors.fill: parent
       z: 9
-      visible: list.marked !== "" && cell.pid === list.marked
+      visible: (list.marked !== "" && cell.pid === list.marked) || (list.keyboardFocused && (list.cursorIndex >= 0 ? cell.index === list.cursorIndex : cell.index === 0))
       color: "transparent"
       border.color: Theme.accent
-      border.width: 4
+      border.width: (list.marked !== "" && cell.pid === list.marked) ? 4 : 2.5
     }
     TakeMenu {
       anchors.fill: parent

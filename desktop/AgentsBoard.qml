@@ -96,6 +96,26 @@ Item {
 
   // Whether a sheet is open, so Esc has something to put away.
   readonly property bool sheetOpen: detailKey !== "" || rosterSlug !== "" || rosterNew || hostKey !== ""
+  property bool keyboardFocused: false
+
+  function cycleSection(delta) {
+    const sections = ["hosts", "clankers", "activity"];
+    const i = sections.indexOf(mode);
+    const next = sections[((i >= 0 ? i : 2) + delta + sections.length) % sections.length];
+    dismissSheet();
+    mode = next;
+    flick.contentY = 0;
+  }
+  function scrollBy(dy) {
+    const maxY = Math.max(0, flick.contentHeight - flick.height);
+    flick.contentY = Math.max(0, Math.min(maxY, flick.contentY + dy));
+  }
+  function scrollStep(delta) { scrollBy(delta * 96); }
+  function scrollPage(delta) { scrollBy(delta * Math.max(160, flick.height * 0.8)); }
+  function toggleBottomTop() {
+    const maxY = Math.max(0, flick.contentHeight - flick.height);
+    flick.contentY = flick.contentY >= maxY - 8 ? 0 : maxY;
+  }
 
   // The showing section again: put its sheet away and go back to its top.
   function resetSection() {

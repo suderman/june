@@ -13,6 +13,7 @@ import { SEASONS, SETTINGS, SPOTS as AVATAR_SPOTS } from "../src/avatar.ts";
 import { DND_MODE, HYPR_REFRESH_EVENTS, MIN_USABLE_WINDOW_HEIGHT, MIN_USABLE_WINDOW_WIDTH, MODES_CALL, SCHEMES, SCHEME_CALL, TABS, appLaunchCommand, findJuneToplevel, focusWindowDispatch, hyprAddress, isDark, isUsableWindowSize, juneWindowVisibility, normalizeTab, parseModes, parseScheme, quietIn, setQuietCall } from "../desktop/desktop.mjs";
 import { FACES, LOOKS, face, liveFace, lines as consoleLines } from "../desktop/console.mjs";
 import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, cycleAction, excerpt, idleState, liveState, newFace, newReply, nextPatrolStep, patrolSeed, patrolStartX, reactionArt, readChibi, readLive, readingTime, recent, shouldPopReply } from "../desktop/live.mjs";
+import { AGENT_SECTIONS, COLUMNS, LEADER_HINTS, PROJECT_SECTIONS, cycleSection, dispatchNormalKey, helpSections, initialNormalMode, nextZTarget, panelActions, panelCopyText, stepColumn } from "../desktop/keys.mjs";
 
 import { replyParts } from "../src/artifact.ts";
 import { excerpt as codeExcerpt, html as codeHtml } from "../desktop/Code.mjs";
@@ -1495,6 +1496,70 @@ test("desktop tab names normalize strip to chat and companion app launchers resp
 	assert.deepEqual(appLaunchCommand("terminal", { JUNE_DESKTOP_TERMINAL: "alacritty" }), ["sh", "-c", "setsid -f alacritty >/dev/null 2>&1 </dev/null"]);
 	assert.deepEqual(appLaunchCommand("editor", { JUNE_DESKTOP_EDITOR: "nvim" }), ["sh", "-c", "setsid -f nvim >/dev/null 2>&1 </dev/null"]);
 	assert.equal(appLaunchCommand("unknown"), null);
+});
+
+test("modal keyboard navigation (keys.mjs): Tab, Z bottom/top toggle, hjkl/np, SPC leader, mini shelf, and DWIM panel actions", () => {
+	assert.deepEqual(COLUMNS, ["agents", "chat", "projects"]);
+	assert.equal(stepColumn("chat", -1), "agents");
+	assert.equal(stepColumn("agents", -1), "agents", "clamps at left edge");
+	assert.equal(stepColumn("chat", 1), "projects");
+	assert.equal(stepColumn("projects", 1), "projects", "clamps at right edge");
+	assert.equal(cycleSection(AGENT_SECTIONS, "activity", 1), "hosts");
+	assert.equal(cycleSection(AGENT_SECTIONS, "hosts", -1), "activity");
+	assert.equal(cycleSection(PROJECT_SECTIONS, "agenda", 1), "tasks");
+	assert.equal(nextZTarget(false), "bottom", "Z goes to bottom first");
+	assert.equal(nextZTarget(true), "top", "Z toggles to top when already at bottom");
+	assert.equal(initialNormalMode({ tab: "chat", narrow: true, past: false }), false);
+	assert.equal(initialNormalMode({ tab: "agents", narrow: true, past: false }), true, "board tab starts in NORMAL");
+	assert.equal(initialNormalMode({ tab: "chat", narrow: false, past: true }), true, "past day starts in NORMAL");
+
+	const win = { surface: "window", column: "chat", leader: false, helpOpen: false, previewOpen: false };
+	assert.deepEqual(dispatchNormalKey({ key: "Tab", text: "\t" }, win), { action: "enterInsert" });
+	assert.deepEqual(dispatchNormalKey({ text: "i" }, win), { action: "enterInsert" });
+	assert.deepEqual(dispatchNormalKey({ text: "Z", shift: true }, win), { action: "toggleBottomTop" });
+	assert.equal(dispatchNormalKey({ text: "g" }, win), null, "bare g is left unassigned (Emacs Meow meaning)");
+	assert.deepEqual(dispatchNormalKey({ text: "j" }, win), { action: "step", delta: 1 });
+	assert.deepEqual(dispatchNormalKey({ text: "n" }, win), { action: "step", delta: 1 });
+	assert.deepEqual(dispatchNormalKey({ text: "k" }, win), { action: "step", delta: -1 });
+	assert.deepEqual(dispatchNormalKey({ text: "p" }, win), { action: "step", delta: -1 });
+	assert.deepEqual(dispatchNormalKey({ text: "N", shift: true }, win), { action: "page", delta: 1 });
+	assert.deepEqual(dispatchNormalKey({ text: "P", shift: true }, win), { action: "page", delta: -1 });
+	assert.deepEqual(dispatchNormalKey({ text: "h" }, win), { action: "moveColumn", delta: -1 });
+	assert.deepEqual(dispatchNormalKey({ text: "l" }, win), { action: "moveColumn", delta: 1 });
+	assert.deepEqual(dispatchNormalKey({ text: "[" }, win), { action: "cycleSection", delta: -1 });
+	assert.deepEqual(dispatchNormalKey({ text: "]" }, win), { action: "cycleSection", delta: 1 });
+	assert.deepEqual(dispatchNormalKey({ text: "/" }, win), { action: "search" });
+	assert.deepEqual(dispatchNormalKey({ text: "<" }, win), { action: "stepDay", delta: -1 });
+	assert.deepEqual(dispatchNormalKey({ text: ">" }, win), { action: "stepDay", delta: 1 });
+	assert.deepEqual(dispatchNormalKey({ text: " " }, win), { action: "openLeader" });
+	assert.deepEqual(dispatchNormalKey({ text: "q" }, { ...win, leader: true }), { action: "toggleQuiet" });
+	assert.deepEqual(dispatchNormalKey({ text: "c" }, { ...win, leader: true }), { action: "toggleLook" });
+	assert.deepEqual(dispatchNormalKey({ text: "d" }, { ...win, leader: true }), { action: "cycleScheme" });
+	assert.deepEqual(dispatchNormalKey({ text: "?" }, { ...win, helpOpen: true }), { action: "closeHelp" });
+	assert.deepEqual(dispatchNormalKey({ text: "n" }, { ...win, previewOpen: true }), { action: "previewNext" });
+	assert.deepEqual(dispatchNormalKey({ text: "c" }, { ...win, previewOpen: true }), { action: "previewCopy" });
+	assert.equal(dispatchNormalKey({ text: "n", ctrl: true }, win), null, "Ctrl+N passes through to window shortcut");
+
+	const mini = { surface: "mini", column: "chat", leader: false, helpOpen: false, previewOpen: false };
+	assert.deepEqual(dispatchNormalKey({ text: "k" }, mini), { action: "expandOverlay" });
+	assert.deepEqual(dispatchNormalKey({ text: "z" }, mini), { action: "expandOverlay" });
+	assert.deepEqual(dispatchNormalKey({ text: "1" }, mini), { action: "visitShelf", index: 0 });
+	assert.deepEqual(dispatchNormalKey({ text: "3" }, mini), { action: "visitShelf", index: 2 });
+	assert.deepEqual(dispatchNormalKey({ text: "c" }, mini), { action: "copyNewest" });
+	assert.deepEqual(dispatchNormalKey({ key: "Return" }, mini), { action: "activateNewest" });
+
+	const panel = {
+		id: "p1",
+		elements: [
+			{ kind: "user", text: "check it", files: [{ n: 0, name: "quote.pdf", preview: "pdf", expired: false }] },
+			{ kind: "june", text: "see [[file:~/org/todo.org][the task]] and [site](https://example.com)" },
+		],
+	};
+	assert.equal(panelCopyText(panel), "see [[file:~/org/todo.org][the task]] and [site](https://example.com)");
+	assert.equal(panelCopyText({ elements: [{ kind: "june", text: "intro" }, { kind: "june", artifact: { text: "literal code" } }] }), "literal code");
+	const acts = panelActions(panel, "https://june.kit/att/");
+	assert.deepEqual(acts.map((a) => [a.kind, a.label]), [["file", "quote.pdf"], ["link", "the task"], ["link", "site"]]);
+	assert.ok(LEADER_HINTS.length >= 6 && helpSections("mini", "chat").length === 1 && helpSections("window", "chat").length === 2);
 });
 
 test("shelf clanker patrol stays within track bounds, alternates direction, and varies by session key", () => {

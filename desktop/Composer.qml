@@ -18,10 +18,12 @@ Rectangle {
   property var unattach: (index) => {}
   property var paste: (fallback) => fallback()
   property var pick: () => {}
-  // Tab and Esc in the text box, when the place it sits in gives them a meaning (minimised June: open the strip, put
-  // her away); without one, Tab moves focus as usual and Esc goes to the window.
+  // Tab and Esc in the text box: Tab toggles Insert -> Normal; Esc dismisses overlays or exits Insert in the window.
   property var tabAction: null
   property var escAction: null
+  // True when the host window is in NORMAL mode: dims caret/border and shows a compact NORMAL badge.
+  property bool normalMode: false
+  signal enteredInsert()
 
   function clear() { input.clear(); }
   function focusInput() { input.forceActiveFocus(); }
@@ -49,8 +51,8 @@ Rectangle {
   height: words + shelf
   radius: Theme.consoleLook ? 6 : Math.min(height / 2, Theme.barHeight / 2)
   color: Theme.surface
-  border.color: Theme.rule
-  border.width: 1
+  border.color: !normalMode && input.activeFocus ? Theme.accent : Theme.rule
+  border.width: !normalMode && input.activeFocus ? 1.5 : 1
   clip: true
 
   // Attached pictures as thumbnails and files by name, above the words.
@@ -112,7 +114,7 @@ Rectangle {
   ScrollView {
     anchors.fill: parent
     anchors.leftMargin: 5 + 36 + 6
-    anchors.rightMargin: 18
+    anchors.rightMargin: composer.normalMode ? 78 : 18
     anchors.topMargin: 12 + composer.shelf
     anchors.bottomMargin: 12
     TextArea {
@@ -125,6 +127,7 @@ Rectangle {
       color: Theme.balloonInk
       placeholderTextColor: Theme.consoleLook || Theme.neon ? Theme.muted : "#9a958a"
       background: null
+      onActiveFocusChanged: if (activeFocus && composer.normalMode) composer.enteredInsert()
       Keys.onPressed: event => {
         if (event.key === Qt.Key_Tab && composer.tabAction) { composer.tabAction(); event.accepted = true; return; }
         if (event.key === Qt.Key_Escape && composer.escAction) { composer.escAction(); event.accepted = true; return; }
@@ -144,6 +147,28 @@ Rectangle {
         if (composer.send(input.text, Boolean(event.modifiers & Qt.ShiftModifier))) input.clear();
         event.accepted = true;
       }
+    }
+  }
+
+  // Compact NORMAL pill while navigating by keyboard, so mode is unmistakable at a glance.
+  Rectangle {
+    visible: composer.normalMode
+    anchors.right: parent.right
+    anchors.rightMargin: 10
+    anchors.bottom: parent.bottom
+    anchors.bottomMargin: 12
+    width: normalLabel.implicitWidth + 12
+    height: 20
+    radius: 10
+    color: Theme.cardFill
+    border.color: Theme.accent
+    border.width: 1
+    Text {
+      id: normalLabel
+      anchors.centerIn: parent
+      text: "NORMAL"
+      font.family: "monospace"; font.weight: Font.Bold; font.pixelSize: 10
+      color: Theme.cardBusy
     }
   }
 

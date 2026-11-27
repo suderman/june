@@ -22,6 +22,13 @@ Row {
   property var browser: null
   // The day picker is the strip's: off while a narrow window shows a board instead.
   property bool showDays: true
+  function openBrowse() { if (day.visible) calendar.open(); }
+  function stepDay(delta) {
+    if (!day.visible || day.b === null) return;
+    if (delta < 0 && day.before !== "") day.b.openDay(day.before);
+    else if (delta > 0 && day.after !== "") day.b.openDay(day.after);
+  }
+  readonly property bool browseOpen: calendar.opened
 
   // The boards' masthead role for her name, as "agents" and "projects" have it, and their summary's size for the rest.
   height: Theme.type.masthead.line

@@ -25,6 +25,7 @@ import "console.mjs" as Console
 import "desktop.mjs" as Desktop
 import "attach.mjs" as Attach
 import "board.mjs" as Board
+import "keys.mjs" as KeyNav
 
 ShellRoot {
   id: root
@@ -35,6 +36,42 @@ ShellRoot {
   // In a narrow window or narrow overlay, which of chat and the two boards shows: chat, agents, or projects.
   property string windowTab: "chat"
   property string overlayTab: "chat"
+  // Full overlay modal keyboard state (INSERT ↔ NORMAL toggled by Tab).
+  property bool overlayNormal: false
+  property string overlayColumn: "chat"
+  property bool overlayLeader: false
+  property bool overlayHelp: false
+
+  function keyEv(event) {
+    const k = event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab ? "Tab"
+      : event.key === Qt.Key_Escape ? "Escape"
+      : event.key === Qt.Key_Return || event.key === Qt.Key_Enter ? "Return"
+      : event.key === Qt.Key_Space ? "Space"
+      : event.key === Qt.Key_Left ? "Left"
+      : event.key === Qt.Key_Right ? "Right"
+      : event.key === Qt.Key_Up ? "Up"
+      : event.key === Qt.Key_Down ? "Down"
+      : event.key === Qt.Key_PageUp ? "PageUp"
+      : event.key === Qt.Key_PageDown ? "PageDown"
+      : event.key === Qt.Key_Z ? "Z" : "";
+    return {
+      key: k,
+      text: event.text || "",
+      shift: Boolean(event.modifiers & Qt.ShiftModifier),
+      ctrl: Boolean(event.modifiers & Qt.ControlModifier),
+      alt: Boolean(event.modifiers & Qt.AltModifier),
+    };
+  }
+  function runLeaderCommand(action, arg, dismissOverlay) {
+    if (action === "toggleQuiet") setQuiet(!quiet);
+    else if (action === "toggleLook") look = look === "console" ? "comic" : "console";
+    else if (action === "cycleScheme") scheme = Desktop.SCHEMES[(Desktop.SCHEMES.indexOf(scheme) + 1) % Desktop.SCHEMES.length];
+    else if (action === "toggleLive") liveEnabled = !liveEnabled;
+    else if (action === "refresh") refresh();
+    else if (action === "openApp" && arg) {
+      if (openApp(arg) && dismissOverlay) { hide(); hideMini(); }
+    }
+  }
   // Live June in the corner: off, she never pops up and the key goes straight between hidden and the strip.
   property bool liveEnabled: true
   // The comic strip, or the console look for when June should look professional (a client meeting).
@@ -517,7 +554,7 @@ ShellRoot {
     unfolding.to = target;
     unfolding.start();
   }
-  function show() {
+  function show(startNormal) {
     const fromMini = miniShown;
     targetScreen = fromMini ? miniScreen : focusedScreen();
     cardSteady = fromMini;
@@ -525,9 +562,13 @@ ShellRoot {
     if (fromMini && live.draft !== "") { composer.text = live.draft; live.draft = ""; }
     if (fromMini) miniBridge = true;
     else hideMini();
+    overlayLeader = false;
+    overlayHelp = false;
+    overlayNormal = Boolean(startNormal) || KeyNav.initialNormalMode({ tab: overlayTab, narrow: !boardsPaper.fits, past: past !== null });
     shown = true;
     list.landOnNewest();
     unfoldTo(1);
+    if (overlayNormal) Qt.callLater(() => window.enterNormal());
   }
   function hide() {
     if (!shown) return;
@@ -725,7 +766,12 @@ ShellRoot {
     attachments: root.outbox
     unattach: index => root.unattach(index)
     paste: fallback => root.pasteInto(fallback)
-    onOpenStrip: root.show()
+    onOpenStrip: root.show(false)
+    onOpenStripNormal: root.show(true)
+    onCopyText: text => { Quickshell.clipboardText = text; root.say("copied"); }
+    onOpenLink: url => { if (root.openLink(url)) root.hideMini(); }
+    onVisitShelf: idx => { if (shelf.visitIndex(idx)) root.hideMini(); }
+    onLeaderCommand: (action, arg) => root.runLeaderCommand(action, arg, true)
     onDismissed: root.hideMini()
   }
 
@@ -738,6 +784,7 @@ ShellRoot {
     active: root.liveEnabled && !root.shown && (live.visible || !root.focusedFullscreen)
     perched: live.shown
     perchBottom: live.panelTopFromBottom
+    showKeyBadges: live.shown && live.normalMode
     onVisit: (host, terminal) => root.showSession(host, terminal)
   }
 
@@ -1015,17 +1062,142 @@ ShellRoot {
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "june-desktop"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    readonly property string activeColumn: boardsPaper.fits ? root.overlayColumn : root.overlayTab
+    function enterNormal() {
+      root.overlayNormal = true;
+      root.overlayLeader = false;
+      composer.blurInput();
+      overlayNormalCatcher.forceActiveFocus();
+    }
+    function enterInsert() {
+      if (!boardsPaper.fits && root.overlayTab !== "chat") root.overlayTab = "chat";
+      root.overlayNormal = false;
+      root.overlayLeader = false;
+      root.overlayHelp = false;
+      root.overlayColumn = "chat";
+      composer.focusInput();
+    }
+    function activeAgentsBoard() { return boardsPaper.fits ? wideAgents : overlayAgents; }
+    function activeProjectsBoard() { return boardsPaper.fits ? wideProjects : overlayProjects; }
+    function activateFocusedPanel() {
+      const p = list.focusedPanel();
+      if (!p) return;
+      const acts = KeyNav.panelActions(p, root.attached);
+      if (acts.length === 0) return;
+      const first = acts[0];
+      if (first.kind === "artifact") preview.show({ kind: "artifact", artifact: first.artifact });
+      else if (first.kind === "file") preview.show(first.item);
+      else if (first.kind === "link" && root.openLink(first.url)) root.hide();
+    }
+    function handleNormalKey(event) {
+      const res = KeyNav.dispatchNormalKey(root.keyEv(event), {
+        surface: "overlay",
+        column: window.activeColumn,
+        leader: root.overlayLeader,
+        helpOpen: root.overlayHelp,
+        previewOpen: preview.open,
+      });
+      if (!res) return;
+      event.accepted = true;
+      if (res.action === "noop") return;
+      if (res.action === "closeHelp") { root.overlayHelp = false; return; }
+      if (res.action === "toggleHelp") { root.overlayHelp = !root.overlayHelp; root.overlayLeader = false; return; }
+      if (res.action === "openHelp") { root.overlayHelp = true; root.overlayLeader = false; return; }
+      if (res.action === "openLeader") { root.overlayLeader = true; return; }
+      if (res.action === "cancelLeader") { root.overlayLeader = false; return; }
+      root.overlayLeader = false;
+      if (res.action === "closePreview") { preview.close(); return; }
+      if (res.action === "previewPrev") { if (preview.paging || preview.stepping) preview.previous(); return; }
+      if (res.action === "previewNext") { if (preview.paging || preview.stepping) preview.next(); return; }
+      if (res.action === "previewCopy") { if (preview.kind === "artifact" && preview.what?.artifact) { Quickshell.clipboardText = preview.what.artifact.text; root.say("copied"); } return; }
+      if (res.action === "previewExternal") { if (preview.kind !== "artifact" && preview.what?.url) { preview.close(); Qt.openUrlExternally(preview.what.url); } return; }
+      if (res.action === "enterInsert") { window.enterInsert(); return; }
+      if (res.action === "back") {
+        if (preview.open) { preview.close(); return; }
+        if (window.activeColumn === "agents" && activeAgentsBoard().dismissSheet()) return;
+        if (window.activeColumn === "projects") {
+          if (activeProjectsBoard().dismissSheet()) return;
+          if (activeProjectsBoard().mode === "state") { activeProjectsBoard().mode = "tasks"; activeProjectsBoard().drill = ""; return; }
+        }
+        if (!window.dismissHoveredSheet()) root.hide();
+        return;
+      }
+      if (res.action === "moveColumn") {
+        const next = KeyNav.stepColumn(window.activeColumn, res.delta);
+        if (boardsPaper.fits) root.overlayColumn = next; else root.overlayTab = next;
+        return;
+      }
+      if (res.action === "setColumn") {
+        if (boardsPaper.fits) root.overlayColumn = res.column; else root.overlayTab = res.column;
+        return;
+      }
+      if (res.action === "cycleSection") {
+        if (window.activeColumn === "agents") activeAgentsBoard().cycleSection(res.delta);
+        else if (window.activeColumn === "projects") activeProjectsBoard().cycleSection(res.delta);
+        else masthead.stepDay(res.delta);
+        return;
+      }
+      if (res.action === "tradeSize") { root.toMini(); return; }
+      if (res.action === "toggleBottomTop") {
+        if (window.activeColumn === "chat") list.toggleBottomTop();
+        else if (window.activeColumn === "agents") activeAgentsBoard().toggleBottomTop();
+        else activeProjectsBoard().toggleBottomTop();
+        return;
+      }
+      if (res.action === "step") {
+        if (window.activeColumn === "chat") list.stepPanel(res.delta);
+        else if (window.activeColumn === "agents") activeAgentsBoard().scrollStep(res.delta);
+        else activeProjectsBoard().scrollStep(res.delta);
+        return;
+      }
+      if (res.action === "page") {
+        if (window.activeColumn === "chat") list.page(res.delta);
+        else if (window.activeColumn === "agents") activeAgentsBoard().scrollPage(res.delta);
+        else activeProjectsBoard().scrollPage(res.delta);
+        return;
+      }
+      if (res.action === "copy") {
+        const txt = KeyNav.panelCopyText(list.focusedPanel());
+        if (txt !== "") { Quickshell.clipboardText = txt; root.say("copied"); }
+        return;
+      }
+      if (res.action === "activate") {
+        if (window.activeColumn === "chat") activateFocusedPanel();
+        return;
+      }
+      if (res.action === "search" || res.action === "calendar") { masthead.openBrowse(); return; }
+      if (res.action === "stepDay") { masthead.stepDay(res.delta); return; }
+      if (res.action === "today") { root.backToToday(); return; }
+      if (res.action === "undo") {
+        if (root.taskNotice?.undo && root.taskNotice?.key) root.editTask(root.taskNotice.key, root.taskNotice.undo);
+        return;
+      }
+      if (res.action === "attach") { filePicker.open(); return; }
+      root.runLeaderCommand(res.action, res.app ?? "", true);
+    }
+
+    Item {
+      id: overlayNormalCatcher
+      focus: root.overlayNormal
+      Keys.onPressed: event => { if (root.overlayNormal) window.handleNormalKey(event); }
+    }
+
     onVisibleChanged: {
       if (visible) {
-        if (boardsPaper.fits || root.overlayTab === "chat") composer.focusInput();
+        if (root.overlayNormal) window.enterNormal();
+        else if (boardsPaper.fits || root.overlayTab === "chat") composer.focusInput();
+        else window.enterNormal();
         root.wantBoards();
+      } else {
+        root.overlayLeader = false;
+        root.overlayHelp = false;
       }
     }
     Connections {
       target: root
       function onOverlayTabChanged() {
-        if (!boardsPaper.fits && root.overlayTab !== "chat") composer.blurInput();
-        else if (window.visible) composer.focusInput();
+        if (!boardsPaper.fits && root.overlayTab !== "chat") window.enterNormal();
+        else if (window.visible && !root.overlayNormal) composer.focusInput();
       }
     }
 
@@ -1036,8 +1208,18 @@ ShellRoot {
         if (b.visible && b.hovered && b.dismissSheet()) return true;
       return false;
     }
+    Connections {
+      target: masthead
+      function onBrowseOpenChanged() {
+        if (!masthead.browseOpen && window.visible) {
+          if (root.overlayNormal) overlayNormalCatcher.forceActiveFocus();
+          else composer.focusInput();
+        }
+      }
+    }
     Shortcut {
       sequence: "Escape"
+      enabled: !root.overlayNormal && !masthead.browseOpen
       onActivated: {
         if (preview.open) preview.close();
         else if (!window.dismissHoveredSheet()) root.hide();
@@ -1205,6 +1387,7 @@ ShellRoot {
         onCopyText: text => Quickshell.clipboardText = text
             onLink: url => { if (root.openLink(url)) root.hide(); }
             marked: root.markedPanel
+            keyboardFocused: root.overlayNormal && window.activeColumn === "chat"
             Connections { target: root; function onLanded(panel) { list.land(panel); } }
           }
 
@@ -1250,6 +1433,7 @@ ShellRoot {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: boardsPaper.fits ? 22 : 10 + 46 + 8
         visible: boardsPaper.fits || root.overlayTab === "chat"
+        normalMode: root.overlayNormal
         // Already on screen when the strip grows out of live June or shrinks back to her; otherwise it fades in with it.
         opacity: root.cardSteady ? 1 : page.inputPhase
         send: (text, followUp) => root.submit(text, followUp)
@@ -1258,7 +1442,9 @@ ShellRoot {
         unattach: index => root.unattach(index)
         paste: fallback => root.pasteInto(fallback)
         pick: () => filePicker.open()
-        tabAction: () => root.toMini()
+        tabAction: () => window.enterNormal()
+        escAction: () => root.hide()
+        onEnteredInsert: window.enterInsert()
       }
     }
 
@@ -1351,12 +1537,32 @@ ShellRoot {
       }
     }
 
+    // Subtle top focus rail showing which wide column owns NORMAL-mode keys.
+    Rectangle {
+      visible: root.overlayNormal && boardsPaper.visible
+      y: 0; height: 3; z: 25
+      x: root.overlayColumn === "agents" ? boardsPaper.x : root.overlayColumn === "projects" ? projectsPaper.x : page.x
+      width: root.overlayColumn === "agents" ? boardsPaper.width : root.overlayColumn === "projects" ? projectsPaper.width : page.width
+      color: Theme.accent
+      Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+      Behavior on width { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+    }
+
     // A picture or file a note brought, over everything in the desktop client until closed.
     Preview {
       id: preview
       anchors.fill: parent
       onExternal: url => { preview.close(); Qt.openUrlExternally(url); }
       onCopyText: text => Quickshell.clipboardText = text
+    }
+
+    KeyOverlay {
+      anchors.fill: parent
+      leader: root.overlayLeader
+      helpOpen: root.overlayHelp
+      surface: "overlay"
+      column: window.activeColumn
+      onCloseHelp: root.overlayHelp = false
     }
   }
 }

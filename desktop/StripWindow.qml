@@ -9,6 +9,7 @@ import QtQuick.Controls
 import Quickshell
 import "desktop.mjs" as Desktop
 import "board.mjs" as Board
+import "keys.mjs" as KeyNav
 
 FloatingWindow {
   id: win
@@ -24,17 +25,38 @@ FloatingWindow {
   onVisibleChanged: {
     if (visible) {
       strip.landOnNewest();
-      if (win.layout.columns || win.tab === "chat") composer.focusInput();
       shell.wantBoards();
+      if (KeyNav.initialNormalMode({ tab: win.tab, narrow: !win.layout.columns, past: shell.past !== null })) enterNormal();
+      else enterInsert();
     } else shell.windowShown = false;
   }
 
   readonly property var layout: Board.boardLayout(width)
   // True only while this window is both shown and the compositor's active window (Window.active can stay true while hidden).
   readonly property bool focused: visible && column.Window.active
-  function focusComposer(flash) {
+  // Modal keyboard state: INSERT (typing in composer) ↔ NORMAL (hjkl/np/Z/[/]/SPC/?).
+  property bool normalMode: false
+  property string focusColumn: "chat"
+  property bool leader: false
+  property bool helpOpen: false
+  readonly property string activeColumn: win.layout.columns ? focusColumn : win.tab
+
+  function enterNormal() {
+    normalMode = true;
+    leader = false;
+    composer.blurInput();
+    normalCatcher.forceActiveFocus();
+  }
+  function enterInsert() {
     if (!win.layout.columns && win.tab !== "chat") win.shell.windowTab = "chat";
+    normalMode = false;
+    leader = false;
+    helpOpen = false;
+    focusColumn = "chat";
     composer.focusInput();
+  }
+  function focusComposer(flash) {
+    enterInsert();
     if (flash) composer.flash();
   }
   // In a narrow window, which of chat and the two boards shows (the shell keeps it, for `june-desktop tab`).
@@ -42,8 +64,112 @@ FloatingWindow {
   property bool settingsOpen: false
   onClosed: shell.windowShown = false
   onTabChanged: {
-    if (!win.layout.columns && win.tab !== "chat") composer.blurInput();
-    else if (win.visible) composer.focusInput();
+    if (!win.layout.columns && win.tab !== "chat") enterNormal();
+    else if (win.visible && !win.normalMode) composer.focusInput();
+  }
+
+  Item {
+    id: normalCatcher
+    focus: win.normalMode
+    Keys.onPressed: event => { if (win.normalMode) win.handleNormalKey(event); }
+  }
+  function activeAgentsBoard() { return win.layout.columns ? wideAgents : narrowAgents; }
+  function activeProjectsBoard() { return win.layout.columns ? wideProjects : narrowProjects; }
+  function activateFocusedPanel() {
+    const p = strip.focusedPanel();
+    if (!p) return;
+    const acts = KeyNav.panelActions(p, win.shell.attached);
+    if (acts.length === 0) return;
+    const first = acts[0];
+    if (first.kind === "artifact") preview.show({ kind: "artifact", artifact: first.artifact });
+    else if (first.kind === "file") preview.show(first.item);
+    else if (first.kind === "link") win.shell.openLink(first.url);
+  }
+  function handleNormalKey(event) {
+    const res = KeyNav.dispatchNormalKey(win.shell.keyEv(event), {
+      surface: "window",
+      column: win.activeColumn,
+      leader: win.leader,
+      helpOpen: win.helpOpen,
+      previewOpen: preview.open,
+    });
+    if (!res) return;
+    event.accepted = true;
+    if (res.action === "noop") return;
+    if (res.action === "closeHelp") { win.helpOpen = false; return; }
+    if (res.action === "toggleHelp") { win.helpOpen = !win.helpOpen; win.leader = false; return; }
+    if (res.action === "openHelp") { win.helpOpen = true; win.leader = false; return; }
+    if (res.action === "openLeader") { win.leader = true; return; }
+    if (res.action === "cancelLeader") { win.leader = false; return; }
+    win.leader = false;
+    if (res.action === "closePreview") { preview.close(); return; }
+    if (res.action === "previewPrev") { if (preview.paging || preview.stepping) preview.previous(); return; }
+    if (res.action === "previewNext") { if (preview.paging || preview.stepping) preview.next(); return; }
+    if (res.action === "previewCopy") { if (preview.kind === "artifact" && preview.what?.artifact) { Quickshell.clipboardText = preview.what.artifact.text; win.shell.say("copied"); } return; }
+    if (res.action === "previewExternal") { if (preview.kind !== "artifact" && preview.what?.url) { preview.close(); Qt.openUrlExternally(preview.what.url); } return; }
+    if (res.action === "enterInsert") { win.enterInsert(); return; }
+    if (res.action === "back") {
+      if (preview.open) { preview.close(); return; }
+      if (win.activeColumn === "agents" && activeAgentsBoard().dismissSheet()) return;
+      if (win.activeColumn === "projects") {
+        if (activeProjectsBoard().dismissSheet()) return;
+        if (activeProjectsBoard().mode === "state") { activeProjectsBoard().mode = "tasks"; activeProjectsBoard().drill = ""; return; }
+      }
+      win.dismissHoveredSheet();
+      return;
+    }
+    if (res.action === "moveColumn") {
+      const next = KeyNav.stepColumn(win.activeColumn, res.delta);
+      if (win.layout.columns) win.focusColumn = next; else win.shell.windowTab = next;
+      return;
+    }
+    if (res.action === "setColumn") {
+      if (win.layout.columns) win.focusColumn = res.column; else win.shell.windowTab = res.column;
+      return;
+    }
+    if (res.action === "cycleSection") {
+      if (win.activeColumn === "agents") activeAgentsBoard().cycleSection(res.delta);
+      else if (win.activeColumn === "projects") activeProjectsBoard().cycleSection(res.delta);
+      else masthead.stepDay(res.delta);
+      return;
+    }
+    if (res.action === "tradeSize") { win.settingsOpen = !win.settingsOpen; return; }
+    if (res.action === "toggleBottomTop") {
+      if (win.activeColumn === "chat") strip.toggleBottomTop();
+      else if (win.activeColumn === "agents") activeAgentsBoard().toggleBottomTop();
+      else activeProjectsBoard().toggleBottomTop();
+      return;
+    }
+    if (res.action === "step") {
+      if (win.activeColumn === "chat") strip.stepPanel(res.delta);
+      else if (win.activeColumn === "agents") activeAgentsBoard().scrollStep(res.delta);
+      else activeProjectsBoard().scrollStep(res.delta);
+      return;
+    }
+    if (res.action === "page") {
+      if (win.activeColumn === "chat") strip.page(res.delta);
+      else if (win.activeColumn === "agents") activeAgentsBoard().scrollPage(res.delta);
+      else activeProjectsBoard().scrollPage(res.delta);
+      return;
+    }
+    if (res.action === "copy") {
+      const txt = KeyNav.panelCopyText(strip.focusedPanel());
+      if (txt !== "") { Quickshell.clipboardText = txt; win.shell.say("copied"); }
+      return;
+    }
+    if (res.action === "activate") {
+      if (win.activeColumn === "chat") activateFocusedPanel();
+      return;
+    }
+    if (res.action === "search" || res.action === "calendar") { masthead.openBrowse(); return; }
+    if (res.action === "stepDay") { masthead.stepDay(res.delta); return; }
+    if (res.action === "today") { win.shell.backToToday(); return; }
+    if (res.action === "undo") {
+      if (win.shell.taskNotice?.undo && win.shell.taskNotice?.key) win.shell.editTask(win.shell.taskNotice.key, win.shell.taskNotice.undo);
+      return;
+    }
+    if (res.action === "attach") { windowPicker.open(); return; }
+    win.shell.runLeaderCommand(res.action, res.app ?? "", false);
   }
 
   Shortcut { sequence: "Ctrl+N"; onActivated: strip.page(1) }
@@ -61,9 +187,18 @@ FloatingWindow {
       if (b.visible && b.hovered && b.dismissSheet()) return true;
     return false;
   }
+  Connections {
+    target: masthead
+    function onBrowseOpenChanged() {
+      if (!masthead.browseOpen && win.visible) {
+        if (win.normalMode) normalCatcher.forceActiveFocus();
+        else composer.focusInput();
+      }
+    }
+  }
   Shortcut {
     sequence: "Escape"
-    enabled: preview.open || [narrowAgents, narrowProjects, wideAgents, wideProjects].some(b => b.visible && b.hovered && b.sheetOpen)
+    enabled: !win.normalMode && !masthead.browseOpen && (preview.open || [narrowAgents, narrowProjects, wideAgents, wideProjects].some(b => b.visible && b.hovered && b.sheetOpen))
     onActivated: if (preview.open) preview.close(); else win.dismissHoveredSheet()
   }
   Shortcut { sequences: ["Right", "PgDown"]; enabled: preview.paging || preview.stepping; onActivated: preview.next() }
@@ -269,6 +404,7 @@ FloatingWindow {
       onCopyText: text => Quickshell.clipboardText = text
       onLink: url => win.shell.openLink(url)
       marked: win.shell.markedPanel
+      keyboardFocused: win.normalMode && win.activeColumn === "chat"
       Connections { target: win.shell; function onLanded(panel) { strip.land(panel); } }
     }
 
@@ -282,6 +418,7 @@ FloatingWindow {
     Composer {
       id: composer
       visible: win.layout.columns || win.tab === "chat"
+      normalMode: win.normalMode
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.bottom: win.layout.columns ? parent.bottom : tabBar.top
@@ -294,6 +431,9 @@ FloatingWindow {
       unattach: index => win.shell.unattach(index)
       paste: fallback => win.shell.pasteInto(fallback)
       pick: () => windowPicker.open()
+      tabAction: () => win.enterNormal()
+      escAction: () => win.enterNormal()
+      onEnteredInsert: win.enterInsert()
     }
 
     NavBar {
@@ -386,12 +526,32 @@ FloatingWindow {
     onOpen: link => win.shell.openLink(link)
   }
 
+  // Subtle top focus rail indicating which wide column owns NORMAL-mode keys.
+  Rectangle {
+    visible: win.normalMode && win.layout.columns
+    y: 0; height: 3; z: 25
+    x: win.focusColumn === "agents" ? wideAgents.x : win.focusColumn === "projects" ? wideProjects.x : column.x + 16
+    width: win.focusColumn === "agents" ? wideAgents.width : win.focusColumn === "projects" ? wideProjects.width : column.width - 32
+    color: Theme.accent
+    Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+    Behavior on width { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+  }
+
   // A picture or file a note brought, over the whole window until closed.
   Preview {
     id: preview
     anchors.fill: parent
     onExternal: url => { preview.close(); Qt.openUrlExternally(url); }
     onCopyText: text => Quickshell.clipboardText = text
+  }
+
+  KeyOverlay {
+    anchors.fill: parent
+    leader: win.leader
+    helpOpen: win.helpOpen
+    surface: "window"
+    column: win.activeColumn
+    onCloseHelp: win.helpOpen = false
   }
 
   /** An hour as a clock reading, 16.5 as 16:30. */

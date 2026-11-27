@@ -8,6 +8,7 @@ import QtQuick
 import QtQuick.Effects
 import Quickshell
 import Quickshell.Wayland
+import "keys.mjs" as KeyNav
 
 PanelWindow {
   id: win
@@ -35,9 +36,89 @@ PanelWindow {
   readonly property real panelTopFromBottom: (cell.item ? panel.height : 0) + (inputShown ? gap + composer.height : 0) + dock + gap
   // The draft, so it moves to the strip's compose bar and back.
   property alias draft: composer.text
+  // Modal keyboard state: INSERT (typing) ↔ NORMAL (navigating mini June & jumping to shelf clankers 1–9).
+  property bool normalMode: false
+  property bool leader: false
+  property bool helpOpen: false
 
   signal openStrip()
+  signal openStripNormal()
   signal dismissed()
+  signal copyText(string text)
+  signal openLink(string url)
+  signal visitShelf(int index)
+  signal leaderCommand(string action, string arg)
+
+  function enterNormal() {
+    normalMode = true;
+    leader = false;
+    composer.blurInput();
+    normalCatcher.forceActiveFocus();
+  }
+  function enterInsert() {
+    normalMode = false;
+    leader = false;
+    helpOpen = false;
+    composer.focusInput();
+  }
+  function keyEv(event) {
+    const k = event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab ? "Tab"
+      : event.key === Qt.Key_Escape ? "Escape"
+      : event.key === Qt.Key_Return || event.key === Qt.Key_Enter ? "Return"
+      : event.key === Qt.Key_Space ? "Space"
+      : event.key === Qt.Key_Up ? "Up"
+      : event.key === Qt.Key_Down ? "Down"
+      : event.key === Qt.Key_Left ? "Left"
+      : event.key === Qt.Key_Right ? "Right" : "";
+    return {
+      key: k,
+      text: event.text || "",
+      shift: Boolean(event.modifiers & Qt.ShiftModifier),
+      ctrl: Boolean(event.modifiers & Qt.ControlModifier),
+      alt: Boolean(event.modifiers & Qt.AltModifier),
+    };
+  }
+  function handleNormalKey(event) {
+    const res = KeyNav.dispatchNormalKey(keyEv(event), {
+      surface: "mini",
+      column: "chat",
+      leader: leader,
+      helpOpen: helpOpen,
+      previewOpen: false,
+    });
+    if (!res) return;
+    event.accepted = true;
+    if (res.action === "noop") return;
+    if (res.action === "closeHelp") { helpOpen = false; return; }
+    if (res.action === "toggleHelp") { helpOpen = !helpOpen; leader = false; return; }
+    if (res.action === "openHelp") { helpOpen = true; leader = false; return; }
+    if (res.action === "openLeader") { leader = true; return; }
+    if (res.action === "cancelLeader") { leader = false; return; }
+    leader = false;
+    if (res.action === "enterInsert") { enterInsert(); return; }
+    if (res.action === "back") { dismissed(); return; }
+    if (res.action === "expandOverlay") { openStripNormal(); return; }
+    if (res.action === "copyNewest") {
+      try {
+        const p = JSON.parse(panelJson);
+        const txt = KeyNav.panelCopyText(p);
+        if (txt !== "") copyText(txt);
+      } catch (e) {}
+      return;
+    }
+    if (res.action === "activateNewest") {
+      try {
+        const p = JSON.parse(panelJson);
+        const acts = KeyNav.panelActions(p, attached);
+        const link = acts.find(a => a.kind === "link");
+        if (link) { openLink(link.url); return; }
+      } catch (e) {}
+      openStripNormal();
+      return;
+    }
+    if (res.action === "visitShelf") { visitShelf(res.index); return; }
+    leaderCommand(res.action, res.app ?? "");
+  }
 
   // The strip's measures (shell.qml page): its width, its side margins, and the compose bar's place at the bottom.
   readonly property int margin: 16
@@ -58,7 +139,8 @@ PanelWindow {
   visible: shown || rise > 0.001
   onShownChanged: {
     rise = shown ? 1 : 0;
-    if (shown && inputShown) Qt.callLater(() => composer.focusInput());
+    if (!shown) { normalMode = false; leader = false; helpOpen = false; }
+    else if (inputShown) Qt.callLater(() => { if (normalMode) normalCatcher.forceActiveFocus(); else composer.focusInput(); });
   }
 
   anchors { bottom: true }
@@ -75,12 +157,18 @@ PanelWindow {
   function refocus() {
     if (!inputShown) return;
     regrab = true;
-    Qt.callLater(() => { regrab = false; composer.focusInput(); });
+    Qt.callLater(() => { regrab = false; if (normalMode) normalCatcher.forceActiveFocus(); else composer.focusInput(); });
   }
   // Only what is drawn takes the mouse; the rest lets clicks through to the desktop.
   mask: Region { item: drawn }
 
-  onInputShownChanged: if (inputShown) composer.focusInput()
+  onInputShownChanged: if (inputShown) { normalMode = false; composer.focusInput(); }
+
+  Item {
+    id: normalCatcher
+    focus: win.normalMode
+    Keys.onPressed: event => { if (win.normalMode) win.handleNormalKey(event); }
+  }
 
   HoverHandler { id: hover }
 
@@ -156,22 +244,33 @@ PanelWindow {
       TapHandler { onTapped: win.openStrip() }
     }
 
-    // The strip's compose bar, where the strip has it. Tab opens the strip; Esc puts her away.
-    Composer {
-      id: composer
-      visible: win.inputShown
-      x: win.margin
-      width: parent.width - 2 * win.margin
-      anchors.bottom: parent.bottom
-      anchors.bottomMargin: win.dock
-      send: win.send
-      stop: win.stop
-      attachments: win.attachments
-      unattach: win.unattach
-      paste: win.paste
-      pick: win.pick
-      tabAction: () => win.openStrip()
-      escAction: () => win.dismissed()
-    }
+      // The strip's compose bar, where the strip has it. Tab toggles Insert ↔ Normal; Esc dismisses mini June.
+      Composer {
+        id: composer
+        visible: win.inputShown
+        normalMode: win.normalMode
+        x: win.margin
+        width: parent.width - 2 * win.margin
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: win.dock
+        send: win.send
+        stop: win.stop
+        attachments: win.attachments
+        unattach: win.unattach
+        paste: win.paste
+        pick: win.pick
+        tabAction: () => win.enterNormal()
+        escAction: () => win.dismissed()
+        onEnteredInsert: win.enterInsert()
+      }
+
+      KeyOverlay {
+        anchors.fill: panel
+        leader: win.leader
+        helpOpen: win.helpOpen
+        surface: "mini"
+        column: "chat"
+        onCloseHelp: win.helpOpen = false
+      }
   }
 }

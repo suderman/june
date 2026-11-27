@@ -43,6 +43,28 @@ Item {
 
   // Whether a sheet is open, so Esc has something to put away.
   readonly property bool sheetOpen: detailKey !== ""
+  property bool keyboardFocused: false
+
+  function cycleSection(delta) {
+    const sections = ["agenda", "tasks", "projects"];
+    const cur = mode === "state" ? "tasks" : mode;
+    const i = sections.indexOf(cur);
+    const next = sections[((i >= 0 ? i : 0) + delta + sections.length) % sections.length];
+    detailKey = "";
+    drill = "";
+    mode = next;
+    flick.contentY = 0;
+  }
+  function scrollBy(dy) {
+    const maxY = Math.max(0, flick.contentHeight - flick.height);
+    flick.contentY = Math.max(0, Math.min(maxY, flick.contentY + dy));
+  }
+  function scrollStep(delta) { scrollBy(delta * 96); }
+  function scrollPage(delta) { scrollBy(delta * Math.max(160, flick.height * 0.8)); }
+  function toggleBottomTop() {
+    const maxY = Math.max(0, flick.contentHeight - flick.height);
+    flick.contentY = flick.contentY >= maxY - 8 ? 0 : maxY;
+  }
 
   // Put away the open task page, if there is one; whether there was.
   function dismissSheet() {

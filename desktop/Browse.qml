@@ -13,6 +13,7 @@ Popup {
   // The month on show, from the day the strip shows when the popup opens.
   property int year: new Date().getFullYear()
   property int month: new Date().getMonth()
+  property int selectedHit: 0
   readonly property var counts: {
     const out = {};
     for (const d of browser.days ?? []) out[d.date] = d.count;
@@ -33,6 +34,7 @@ Popup {
     year = at ? Number(at[1]) : now.getFullYear();
     month = at ? Number(at[2]) - 1 : now.getMonth();
     field.text = "";
+    selectedHit = 0;
     browser.search("");
     browser.listDays();
     field.forceActiveFocus();
@@ -61,8 +63,20 @@ Popup {
       color: Theme.cardInk
       placeholderTextColor: Theme.cardLine
       background: Rectangle { radius: 4; color: "transparent"; border.color: Theme.cardLine; border.width: 1 }
-      onTextEdited: settle.restart()
-      Keys.onReturnPressed: if (browse.browser.hits.length > 0) browse.chooseHit(browse.browser.hits[0].id)
+      onTextEdited: { browse.selectedHit = 0; settle.restart(); }
+      Keys.onPressed: event => {
+        const hits = browse.browser.hits ?? [];
+        if (event.key === Qt.Key_Down || (event.key === Qt.Key_N && (event.modifiers & Qt.ControlModifier))) {
+          if (hits.length > 0) { browse.selectedHit = Math.min(hits.length - 1, browse.selectedHit + 1); results.positionViewAtIndex(browse.selectedHit, ListView.Contain); }
+          event.accepted = true;
+        } else if (event.key === Qt.Key_Up || (event.key === Qt.Key_P && (event.modifiers & Qt.ControlModifier))) {
+          if (hits.length > 0) { browse.selectedHit = Math.max(0, browse.selectedHit - 1); results.positionViewAtIndex(browse.selectedHit, ListView.Contain); }
+          event.accepted = true;
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+          if (hits.length > 0) browse.chooseHit(hits[Math.max(0, Math.min(hits.length - 1, browse.selectedHit))].id);
+          event.accepted = true;
+        }
+      }
     }
 
     // The calendar, while nothing is typed.
@@ -163,10 +177,19 @@ Popup {
         required property int index
         objectName: "hit-" + index
         width: results.width
-        height: lines.implicitHeight
+        height: lines.implicitHeight + 6
+        Rectangle {
+          anchors.fill: parent
+          radius: 4
+          visible: hit.index === browse.selectedHit
+          color: Qt.alpha(Theme.accent, 0.18)
+          border.color: Theme.accent
+          border.width: 1
+        }
         Column {
           id: lines
-          width: parent.width
+          x: 4; y: 3
+          width: parent.width - 8
           Text {
             width: parent.width
             text: Strip.dayLabel(hit.modelData.date, browse.browser.today) + " · " + new Date(hit.modelData.at).toLocaleTimeString(Qt.locale("en_CA"), "HH:mm") + " · " + (hit.modelData.kind === "user" ? "you" : "June")

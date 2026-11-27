@@ -20,8 +20,20 @@ PanelWindow {
   property bool perched: false
   // Height from the screen's bottom edge to the top of LiveWindow's panel (plus gap) when perched.
   property real perchBottom: 0
+  // True while mini June is in NORMAL mode: shows 1–9 jump badges on working clankers.
+  property bool showKeyBadges: false
 
   signal visit(string host, string terminal)
+
+  function visitIndex(idx) {
+    if (idx < 0 || idx >= shelfModel.count) return false;
+    const row = shelfModel.get(idx);
+    if (!row || row.leaving) return false;
+    const at = String(row.key).split("|");
+    if (at.length !== 2) return false;
+    win.visit(at[0], at[1]);
+    return true;
+  }
 
   readonly property int margin: 16
   readonly property int halo: 28
@@ -291,6 +303,20 @@ PanelWindow {
               font.weight: Font.Bold
               font.pixelSize: 11
               color: Theme.cardBusy
+            }
+          }
+
+          // Numeric keycap badge (1–9) while mini June is in NORMAL mode.
+          Rectangle {
+            visible: win.showKeyBadges && !bot.leaving && bot.index >= 0 && bot.index < 9
+            x: -4; y: -2
+            width: 16; height: 16; radius: 4
+            color: Theme.accent
+            Text {
+              anchors.centerIn: parent
+              text: String(bot.index + 1)
+              font.family: "monospace"; font.weight: Font.Bold; font.pixelSize: 10
+              color: "#fffcf5"
             }
           }
 
