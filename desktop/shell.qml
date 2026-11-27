@@ -53,7 +53,9 @@ ShellRoot {
   // The mode asked of mako, shown at once until mako's own modes say it took, or the call fails.
   property var askedQuiet: null
   readonly property bool quiet: askedQuiet !== null ? askedQuiet : systemModes === null ? localQuiet : Desktop.quietIn(systemModes)
+  readonly property bool windowFocused: stripWindow.focused
   onQuietChanged: if (quiet && miniShown && !miniSummoned) hideMini()
+  onWindowFocusedChanged: if (windowFocused && miniShown && !miniSummoned) hideMini()
   onSystemModesChanged: if (askedQuiet !== null && !quietSetter.running && systemModes !== null && Desktop.quietIn(systemModes) === askedQuiet) askedQuiet = null
   function setQuiet(on) {
     if (systemModes === null) { localQuiet = on; return; }
@@ -552,7 +554,7 @@ ShellRoot {
     seenReply = latest.id;
     miniText = Live.excerpt(latest.text);
     miniTextAt = Date.now();
-    if (!shown && liveEnabled && !quiet) popReply(latest);
+    if (Live.shouldPopReply({ overlayShown: shown, windowFocused: windowFocused, liveEnabled: liveEnabled, quiet: quiet })) popReply(latest);
   }
   // Turning live June off puts her away at once.
   onLiveEnabledChanged: if (!liveEnabled) hideMini()
@@ -892,7 +894,7 @@ ShellRoot {
     return true;
   }
 
-  StripWindow { shell: root }
+  StripWindow { id: stripWindow; shell: root }
 
   // Max mode: the strip at the screen's right edge, full height, unfolding out of live June's card, which stays in the
   // same corner as in min mode. See "Live June" in docs/interfaces.org.

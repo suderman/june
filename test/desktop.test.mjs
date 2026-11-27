@@ -12,7 +12,7 @@ import { MAX_PROPS, focusBlur, panelScene, SEASONS as SCENE_SEASONS, SETTINGS as
 import { SEASONS, SETTINGS, SPOTS as AVATAR_SPOTS } from "../src/avatar.ts";
 import { DND_MODE, MODES_CALL, SCHEMES, SCHEME_CALL, TABS, appLaunchCommand, isDark, normalizeTab, parseModes, parseScheme, quietIn, setQuietCall } from "../desktop/desktop.mjs";
 import { FACES, LOOKS, face, liveFace, lines as consoleLines } from "../desktop/console.mjs";
-import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent } from "../desktop/live.mjs";
+import { LIVE_STATES as LIVE, RECENT_MS, REACTION_MS, excerpt, idleState, liveState, newFace, newReply, reactionArt, readChibi, readLive, readingTime, recent, shouldPopReply } from "../desktop/live.mjs";
 
 import { replyParts } from "../src/artifact.ts";
 import { excerpt as codeExcerpt, html as codeHtml } from "../desktop/Code.mjs";
@@ -1495,6 +1495,14 @@ test("desktop tab names normalize strip to chat and companion app launchers resp
 	assert.deepEqual(appLaunchCommand("terminal", { JUNE_DESKTOP_TERMINAL: "alacritty" }), ["sh", "-c", "setsid -f alacritty >/dev/null 2>&1 </dev/null"]);
 	assert.deepEqual(appLaunchCommand("editor", { JUNE_DESKTOP_EDITOR: "nvim" }), ["sh", "-c", "setsid -f nvim >/dev/null 2>&1 </dev/null"]);
 	assert.equal(appLaunchCommand("unknown"), null);
+});
+
+test("live June suppresses reply popups while the full overlay or focused June window is active", () => {
+	assert.equal(shouldPopReply({ overlayShown: false, windowFocused: false, liveEnabled: true, quiet: false }), true);
+	assert.equal(shouldPopReply({ overlayShown: false, windowFocused: true, liveEnabled: true, quiet: false }), false, "no popup over focused June window");
+	assert.equal(shouldPopReply({ overlayShown: true, windowFocused: false, liveEnabled: true, quiet: false }), false, "no popup over overlay");
+	assert.equal(shouldPopReply({ overlayShown: false, windowFocused: false, liveEnabled: false, quiet: false }), false);
+	assert.equal(shouldPopReply({ overlayShown: false, windowFocused: false, liveEnabled: true, quiet: true }), false);
 });
 
 test("a deployed session shows in the Herdr app through hc and herdr-app, its host and terminal kept out of the script", async () => {

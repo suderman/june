@@ -69,6 +69,14 @@ export function liveState({ view, linked, now, idleSince, once }) {
 }
 
 /**
+ * Whether live June should pop up with a newly finished desktop reply: not when the full overlay is open, the windowed
+ * strip is open and focused, live June is off, or do-not-disturb is on.
+ */
+export function shouldPopReply({ overlayShown, windowFocused, liveEnabled, quiet }) {
+	return !overlayShown && !windowFocused && Boolean(liveEnabled) && !quiet;
+}
+
+/**
  * The newest finished reply meant to interrupt the user at the desktop (`alert` "gui"), when it is not `seen`; null
  * otherwise. Live June pops up with it as her own notification.
  */
