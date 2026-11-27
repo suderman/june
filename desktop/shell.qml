@@ -887,6 +887,10 @@ ShellRoot {
     id: window
     visible: root.shown
     screen: root.targetScreen
+    // The screen's size, which the window takes once mapped; the layout keys on it rather than the window's own, which is
+    // 100 × 100 while hidden and 0 for a moment each time it maps (see page).
+    readonly property real screenWidth: root.targetScreen ? root.targetScreen.width : width
+    readonly property real screenHeight: root.targetScreen ? root.targetScreen.height : height
     anchors { top: true; bottom: true; left: true; right: true }
     exclusionMode: ExclusionMode.Ignore
     color: "transparent"
@@ -943,8 +947,10 @@ ShellRoot {
       id: page
       anchors.horizontalCenter: parent.horizontalCenter
       anchors.top: parent.top
-      anchors.bottom: parent.bottom
-      width: Math.min(Theme.stripWidth, parent.width - 32)
+      // The screen's size, not the window's: the window measures 0 for a moment each time it maps, before the compositor
+      // sizes it, and the strip would then throw away its panels and draw them again, June's poses and all.
+      height: window.screenHeight
+      width: Math.min(Theme.stripWidth, window.screenWidth - 32)
       // A picker for +, drawn inside the desktop client: as a window of its own it would open under the desktop client's layer.
       FileDialog {
         id: filePicker
@@ -1143,7 +1149,7 @@ ShellRoot {
     // desktop client away, as a link does.
     Rectangle {
       id: boardsPaper
-      readonly property var layout: Board.overlayBoards(window.width - page.width)
+      readonly property var layout: Board.overlayBoards(window.screenWidth - page.width)
       readonly property bool fits: layout.fits
       visible: fits && page.stripPhase > 0
       anchors.right: page.left
