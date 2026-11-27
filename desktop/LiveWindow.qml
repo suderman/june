@@ -105,19 +105,17 @@ PanelWindow {
     implicitHeight: win.halo + shelfRow.height + win.gap + panel.height + (win.inputShown ? win.gap + composer.height : 0) + win.dock
     transform: Translate { y: (1 - win.rise) * (content.implicitHeight + 24) }
 
-    // A soft shadow behind her panel and up over the shelf, so the clankers read against any wallpaper. Not in the
-    // mask: clicks pass through it.
+    // A soft shadow behind her panel. Not in the mask: clicks pass through it.
     RectangularShadow {
       visible: cell.item !== null
       x: panel.x
+      y: panel.y
       width: panel.width
-      // A little above the shelf, for the clankers' bob.
-      y: win.shelf.length > 0 ? shelfRow.y - 6 : panel.y
-      height: panel.y + panel.height - y
+      height: panel.height
       radius: 8
       blur: 20
-      spread: 2
-      color: Qt.rgba(0, 0, 0, 0.55)
+      spread: 0
+      color: Qt.rgba(0, 0, 0, 0.42)
     }
 
     // Who is working: a clanker each, bobbing gently over its name (the clanker's, else the harness's); hover adds its task
@@ -138,6 +136,15 @@ PanelWindow {
           z: botHover.hovered ? 1 : 0
           width: Math.max(34, tag.width)
           height: 54
+          // Soft local shadow behind just this clanker and its name pill, instead of a dark band across the panel width.
+          RectangularShadow {
+            anchors.fill: parent
+            anchors.topMargin: 2
+            radius: 16
+            blur: 16
+            spread: 0
+            color: Qt.rgba(0, 0, 0, 0.24)
+          }
           Clanker {
             id: art
             harness: bot.modelData.harness ?? "other"
