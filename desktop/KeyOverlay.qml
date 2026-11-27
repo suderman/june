@@ -48,8 +48,8 @@ Item {
     visible: overlay.hints && overlay.hints.length > 0 && !overlay.helpOpen
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.bottom: parent.bottom
-    anchors.bottomMargin: 14
-    width: Math.min(parent.width - 32, hintLegend.implicitWidth + 28)
+    anchors.bottomMargin: 10
+    width: Math.min(parent.width - 24, 620)
     height: hintLegend.implicitHeight + 16
     radius: 8
     color: Theme.cardFill
@@ -58,7 +58,7 @@ Item {
     Flow {
       id: hintLegend
       anchors.centerIn: parent
-      width: Math.min(overlay.width - 60, implicitWidth)
+      width: parent.width - 24
       spacing: 10
       Text {
         text: overlay.hintTyped !== "" ? "HINT " + overlay.hintTyped.toUpperCase() : "HINT"
@@ -89,8 +89,8 @@ Item {
     visible: overlay.leader && !overlay.helpOpen
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.bottom: parent.bottom
-    anchors.bottomMargin: 14
-    width: Math.min(parent.width - 32, leaderRow.implicitWidth + 28)
+    anchors.bottomMargin: 10
+    width: Math.min(parent.width - 24, 620)
     height: leaderRow.implicitHeight + 16
     radius: 8
     color: Theme.cardFill
@@ -99,7 +99,7 @@ Item {
     Flow {
       id: leaderRow
       anchors.centerIn: parent
-      width: Math.min(overlay.width - 60, implicitWidth)
+      width: parent.width - 24
       spacing: 12
       Text {
         text: "SPC"
@@ -127,31 +127,38 @@ Item {
 
     Rectangle {
       anchors.centerIn: parent
-      width: Math.min(parent.width - 40, 560)
-      height: Math.min(parent.height - 40, helpBody.implicitHeight + 36)
+      width: Math.min(parent.width - 24, 560)
+      height: Math.min(parent.height - 24, helpBody.implicitHeight + 28)
       radius: 10
       color: Theme.cardFill
       border.color: Theme.cardLine
       border.width: 1.5
+      clip: true
       MouseArea { anchors.fill: parent }
+
+      Flickable {
+        anchors.fill: parent
+        anchors.margins: 14
+        contentHeight: helpBody.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
 
       Column {
         id: helpBody
-        anchors.fill: parent
-        anchors.margins: 18
-        spacing: 12
+        width: parent.width
+        spacing: 10
 
         Row {
           width: parent.width
           Text {
             text: "Keyboard · NORMAL mode"
-            font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 15
+            font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 14
             color: Theme.cardInk
           }
-          Item { width: 12; height: 1 }
+          Item { width: 10; height: 1 }
           Text {
             anchors.verticalCenter: parent.verticalCenter
-            text: "Tab toggles Insert ↔ Normal · ? or Esc closes"
+            text: "Tab / Esc · ? closes"
             font.family: Theme.caption; font.pixelSize: 12
             color: Theme.muted
           }
@@ -159,14 +166,14 @@ Item {
 
         Row {
           width: parent.width
-          spacing: 20
+          spacing: 16
           Repeater {
             model: KeyNav.helpSections(overlay.surface, overlay.column, overlay.sheet)
             delegate: Column {
               required property var modelData
               readonly property int sectionCount: Math.max(1, KeyNav.helpSections(overlay.surface, overlay.column, overlay.sheet).length)
-              width: (helpBody.width - (sectionCount > 1 ? 20 : 0)) / sectionCount
-              spacing: 6
+              width: (helpBody.width - (sectionCount > 1 ? 16 : 0)) / sectionCount
+              spacing: 5
               Text {
                 text: modelData.title
                 font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12
@@ -177,15 +184,15 @@ Item {
                 delegate: Row {
                   required property var modelData
                   width: parent.width
-                  spacing: 8
+                  spacing: 6
                   Text {
-                    width: 84
+                    width: 78
                     text: modelData[0]
                     font.family: "monospace"; font.weight: Font.Bold; font.pixelSize: 12
                     color: Theme.cardBusy
                   }
                   Text {
-                    width: parent.width - 92
+                    width: parent.width - 84
                     text: modelData[1]
                     elide: Text.ElideRight
                     font.family: Theme.caption; font.pixelSize: 12
@@ -196,6 +203,7 @@ Item {
             }
           }
         }
+      }
       }
     }
   }

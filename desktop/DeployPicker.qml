@@ -33,10 +33,10 @@ Item {
     const t = ev.text || "";
     if (k === "Tab" || k === "Space" || t === " " || t === "?") return false;
     if (k === "Escape" || t === "q") { picker.back(); return true; }
-    if (t === "j" || t === "n" || k === "Down") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, 1); return true; }
-    if (t === "k" || t === "p" || k === "Up") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, -1); return true; }
-    if (t === "N" || k === "PageDown") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, 5); return true; }
-    if (t === "P" || k === "PageUp") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, -5); return true; }
+    if (t === "j" || k === "Down") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, 1); return true; }
+    if (t === "k" || k === "Up") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, -1); return true; }
+    if (t === "n" || t === "N" || k === "PageDown") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, 5); return true; }
+    if (t === "p" || t === "P" || k === "PageUp") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, -5); return true; }
     if (t === "Z" || (ev.shift && k === "Z")) { cursorIndex = cursorIndex >= itemCount - 1 ? 0 : itemCount - 1; return true; }
     if (k === "Return" || k === "Enter") {
       if (cursorIndex === 0) picker.pick("~");

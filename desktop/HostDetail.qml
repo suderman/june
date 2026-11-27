@@ -35,10 +35,10 @@ Item {
     const t = ev.text || "";
     if (k === "Tab" || k === "Space" || t === " " || t === "?") return false;
     if (k === "Escape" || t === "q") { page.back(); return true; }
-    if (t === "j" || t === "n" || k === "Down") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, 1); return true; }
-    if (t === "k" || t === "p" || k === "Up") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, -1); return true; }
-    if (t === "N" || k === "PageDown") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, 5); return true; }
-    if (t === "P" || k === "PageUp") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, -5); return true; }
+    if (t === "j" || k === "Down") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, 1); return true; }
+    if (t === "k" || k === "Up") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, -1); return true; }
+    if (t === "n" || t === "N" || k === "PageDown") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, 5); return true; }
+    if (t === "p" || t === "P" || k === "PageUp") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, -5); return true; }
     if (t === "Z" || (ev.shift && k === "Z")) {
       const maxY = Math.max(0, flick.contentHeight - flick.height);
       if (itemCount > 0) cursorIndex = cursorIndex >= itemCount - 1 ? 0 : itemCount - 1;

@@ -49,10 +49,10 @@ Rectangle {
     if (k === "Return" || k === "Enter") { picked(time === "" ? date : date + " " + time); return true; }
     if (t === "h" || k === "Left") { setDate(KeyNav.stepIsoDate(date, -1)); return true; }
     if (t === "l" || k === "Right") { setDate(KeyNav.stepIsoDate(date, 1)); return true; }
-    if (t === "j" || t === "n" || k === "Down") { setDate(KeyNav.stepIsoDate(date, 7)); return true; }
-    if (t === "k" || t === "p" || k === "Up") { setDate(KeyNav.stepIsoDate(date, -7)); return true; }
-    if (t === "[") { moveMonth(-1); return true; }
-    if (t === "]") { moveMonth(1); return true; }
+    if (t === "j" || k === "Down") { setDate(KeyNav.stepIsoDate(date, 7)); return true; }
+    if (t === "k" || k === "Up") { setDate(KeyNav.stepIsoDate(date, -7)); return true; }
+    if (t === "[" || t === "p" || k === "PageUp") { moveMonth(-1); return true; }
+    if (t === "]" || t === "n" || k === "PageDown") { moveMonth(1); return true; }
     if (t === "t") { setDate(today); return true; }
     if (t === "m") { setDate(KeyNav.stepIsoDate(today, 1)); return true; }
     if (t === "-") { step(-15); return true; }

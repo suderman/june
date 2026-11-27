@@ -38,10 +38,10 @@ Item {
       page.back();
       return true;
     }
-    if (t === "j" || t === "n" || k === "Down") { scrollBy(96); return true; }
-    if (t === "k" || t === "p" || k === "Up") { scrollBy(-96); return true; }
-    if (t === "N" || k === "PageDown") { scrollBy(Math.max(160, flick.height * 0.8)); return true; }
-    if (t === "P" || k === "PageUp") { scrollBy(-Math.max(160, flick.height * 0.8)); return true; }
+    if (t === "j" || k === "Down") { scrollBy(96); return true; }
+    if (t === "k" || k === "Up") { scrollBy(-96); return true; }
+    if (t === "n" || t === "N" || k === "PageDown") { scrollBy(Math.max(160, flick.height * 0.8)); return true; }
+    if (t === "p" || t === "P" || k === "PageUp") { scrollBy(-Math.max(160, flick.height * 0.8)); return true; }
     if (t === "Z" || (ev.shift && k === "Z")) {
       const maxY = Math.max(0, flick.contentHeight - flick.height);
       flick.contentY = flick.contentY >= maxY - 8 ? 0 : maxY;

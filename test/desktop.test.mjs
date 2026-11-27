@@ -1521,9 +1521,9 @@ test("modal keyboard navigation (keys.mjs): Tab, Z bottom/top toggle, hjkl/np, S
 	assert.deepEqual(dispatchNormalKey({ text: "Z", shift: true }, win), { action: "toggleBottomTop" });
 	assert.equal(dispatchNormalKey({ text: "g" }, win), null, "bare g is left unassigned (Emacs Meow meaning)");
 	assert.deepEqual(dispatchNormalKey({ text: "j" }, win), { action: "step", delta: 1 });
-	assert.deepEqual(dispatchNormalKey({ text: "n" }, win), { action: "step", delta: 1 });
 	assert.deepEqual(dispatchNormalKey({ text: "k" }, win), { action: "step", delta: -1 });
-	assert.deepEqual(dispatchNormalKey({ text: "p" }, win), { action: "step", delta: -1 });
+	assert.deepEqual(dispatchNormalKey({ text: "n" }, win), { action: "page", delta: 1 });
+	assert.deepEqual(dispatchNormalKey({ text: "p" }, win), { action: "page", delta: -1 });
 	assert.deepEqual(dispatchNormalKey({ text: "N", shift: true }, win), { action: "page", delta: 1 });
 	assert.deepEqual(dispatchNormalKey({ text: "P", shift: true }, win), { action: "page", delta: -1 });
 	assert.deepEqual(dispatchNormalKey({ text: "h" }, win), { action: "moveColumn", delta: -1 });
@@ -1539,7 +1539,8 @@ test("modal keyboard navigation (keys.mjs): Tab, Z bottom/top toggle, hjkl/np, S
 	assert.deepEqual(dispatchNormalKey({ text: "d" }, { ...win, leader: true }), { action: "cycleScheme" });
 	assert.deepEqual(dispatchNormalKey({ text: "?" }, { ...win, helpOpen: true }), { action: "closeHelp" });
 	assert.deepEqual(dispatchNormalKey({ text: "l" }, { ...win, previewOpen: true }), { action: "previewNext" });
-	assert.deepEqual(dispatchNormalKey({ text: "n" }, { ...win, previewOpen: true }), { action: "previewScroll", delta: 1 });
+	assert.deepEqual(dispatchNormalKey({ text: "n" }, { ...win, previewOpen: true }), { action: "previewPage", delta: 1 });
+	assert.deepEqual(dispatchNormalKey({ text: "p" }, { ...win, previewOpen: true }), { action: "previewPage", delta: -1 });
 	assert.deepEqual(dispatchNormalKey({ text: "c" }, { ...win, previewOpen: true }), { action: "previewCopy" });
 	assert.equal(dispatchNormalKey({ text: "n", ctrl: true }, win), null, "Ctrl+N passes through to window shortcut");
 
@@ -1562,7 +1563,7 @@ test("modal keyboard navigation (keys.mjs): Tab, Z bottom/top toggle, hjkl/np, S
 	assert.equal(panelCopyText({ elements: [{ kind: "june", text: "intro" }, { kind: "june", artifact: { text: "literal code" } }] }), "literal code");
 	const acts = panelActions(panel, "https://june.kit/att/");
 	assert.deepEqual(acts.map((a) => [a.kind, a.label]), [["file", "quote.pdf"], ["link", "the task"], ["link", "site"]]);
-	assert.ok(LEADER_HINTS.length >= 6 && helpSections("mini", "chat").length === 1 && helpSections("window", "chat").length === 2);
+	assert.ok(LEADER_HINTS.length >= 6 && helpSections("mini", "chat").length === 2 && helpSections("window", "chat").length === 2);
 });
 
 test("shelf clanker patrol stays within track bounds, alternates direction, and varies by session key", () => {

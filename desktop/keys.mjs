@@ -321,16 +321,21 @@ export function helpSections(surface, column, sheet) {
 	if (surface === "mini") {
 		return [
 			{
-				title: "Mini June · NORMAL",
+				title: "Mini June",
 				rows: [
 					["Tab / i / a", "back to Insert"],
 					["k / p / z", "expand full overlay"],
+					["SPC", "leader toggles"],
+					["q / Esc", "dismiss mini June"],
+				],
+			},
+			{
+				title: "Actions",
+				rows: [
 					["RET", "open link or expand"],
 					["f", "hint links / files / tools"],
 					["c", "copy newest reply"],
 					["1–9", "visit working clanker"],
-					["SPC", "leader toggles"],
-					["q / Esc", "dismiss mini June"],
 				],
 			},
 		];
@@ -357,7 +362,8 @@ export function helpSections(surface, column, sheet) {
 	if (sheet === "host" || sheet === "roster" || sheet === "deploy") {
 		const rows = sheet === "host"
 			? [
-				["j k / n p", "select harness / session"],
+				["j / k", "select harness / session"],
+				["n / p", "page down / up"],
 				["RET", "deploy harness / open session"],
 				["Z", "bottom ↔ top"],
 				["q / Esc", "close host page"],
@@ -366,11 +372,13 @@ export function helpSections(surface, column, sheet) {
 				? [
 					["d / RET", "visit or deploy clanker"],
 					["e", "edit clanker card"],
-					["j k / Z", "scroll / bottom ↔ top"],
+					["j k / n p", "scroll / page"],
+					["Z", "bottom ↔ top"],
 					["q / Esc", "close card"],
 				]
 				: [
-					["j k / n p", "select folder"],
+					["j / k", "select folder"],
+					["n / p", "page down / up"],
 					["RET", "deploy there / type path"],
 					["q / Esc", "back"],
 				];
@@ -381,8 +389,8 @@ export function helpSections(surface, column, sheet) {
 		["h / l", "left / right column"],
 		["1 / 2 / 3", "agents / chat / projects"],
 		["[ / ]", "cycle sub-sections"],
-		["j k / n p", "step down / up"],
-		["N / P", "page down / up"],
+		["j / k", "step down / up"],
+		["n / p", "page down / up"],
 		["Z", "bottom ↔ top"],
 		["z", surface === "overlay" ? "shrink to mini June" : "toggle settings"],
 		["SPC", "leader toggles"],
@@ -393,8 +401,8 @@ export function helpSections(surface, column, sheet) {
 		? {
 			title: "Chat strip",
 			rows: [
-				["k / p", "older panel"],
-				["j / n", "newer panel"],
+				["k / j", "older / newer panel"],
+				["p / n", "page up / down"],
 				["RET", "open artifact / link"],
 				["f", "hint links / files / tools"],
 				["c", "copy focused panel"],
@@ -409,7 +417,8 @@ export function helpSections(surface, column, sheet) {
 				title: "Agents board",
 				rows: [
 					["[ / ]", "hosts / clankers / activity"],
-					["j k / n p", "move row cursor"],
+					["j / k", "move row cursor"],
+					["n / p", "page down / up"],
 					["RET", "open docket / card / host"],
 					["o", "direct link / toggle idle/queue"],
 					["C / S", "new clanker / sort (clankers)"],
@@ -421,7 +430,8 @@ export function helpSections(surface, column, sheet) {
 				title: "Projects board",
 				rows: [
 					["[ / ]", "agenda / tasks / projects"],
-					["j k / n p", "move row cursor"],
+					["j / k", "move row cursor"],
+					["n / p", "page down / up"],
 					["RET", "open task / drill / project"],
 					["o", "drill into state (tasks)"],
 					["e / t", "open Emacs / Herdr"],
@@ -474,10 +484,10 @@ export function dispatchNormalKey(ev, ctx) {
 		if (key === "Escape" || text === "q") return { action: "closePreview" };
 		if (text === "h" || key === "Left") return { action: "previewPrev" };
 		if (text === "l" || key === "Right") return { action: "previewNext" };
-		if (text === "j" || text === "n" || key === "Down") return { action: "previewScroll", delta: 1 };
-		if (text === "k" || text === "p" || key === "Up") return { action: "previewScroll", delta: -1 };
-		if (text === "N" || key === "PageDown") return { action: "previewPage", delta: 1 };
-		if (text === "P" || key === "PageUp") return { action: "previewPage", delta: -1 };
+		if (text === "j" || key === "Down") return { action: "previewScroll", delta: 1 };
+		if (text === "k" || key === "Up") return { action: "previewScroll", delta: -1 };
+		if (text === "n" || text === "N" || key === "PageDown") return { action: "previewPage", delta: 1 };
+		if (text === "p" || text === "P" || key === "PageUp") return { action: "previewPage", delta: -1 };
 		if (text === "Z" || (shift && key === "Z")) return { action: "previewBottomTop" };
 		if (text === "c") return { action: "previewCopy" };
 		if (text === "e" || text === "o") return { action: "previewExternal" };
@@ -511,10 +521,10 @@ export function dispatchNormalKey(ev, ctx) {
 	if (text === "]") return { action: "cycleSection", delta: 1 };
 	if (text === "z") return { action: "tradeSize" };
 	if (text === "Z" || (shift && key === "Z")) return { action: "toggleBottomTop" };
-	if (text === "j" || text === "n" || key === "Down") return { action: "step", delta: 1 };
-	if (text === "k" || text === "p" || key === "Up") return { action: "step", delta: -1 };
-	if (text === "N" || key === "PageDown") return { action: "page", delta: 1 };
-	if (text === "P" || key === "PageUp") return { action: "page", delta: -1 };
+	if (text === "j" || key === "Down") return { action: "step", delta: 1 };
+	if (text === "k" || key === "Up") return { action: "step", delta: -1 };
+	if (text === "n" || text === "N" || key === "PageDown") return { action: "page", delta: 1 };
+	if (text === "p" || text === "P" || key === "PageUp") return { action: "page", delta: -1 };
 	if (key === "Return" || key === "Enter") return { action: "activate" };
 	if (text === "f") return { action: "hint" };
 	if (text === "o") return { action: "fold" };
