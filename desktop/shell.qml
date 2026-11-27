@@ -1090,7 +1090,18 @@ ShellRoot {
       else if (first.kind === "link" && root.openLink(first.url)) root.hide();
     }
     function handleNormalKey(event) {
-      const res = KeyNav.dispatchNormalKey(root.keyEv(event), {
+      const ev = root.keyEv(event);
+      if (!root.overlayHelp && !root.overlayLeader && !preview.open) {
+        if (window.activeColumn === "agents") {
+          const ab = activeAgentsBoard();
+          if (ab.sheetOpen && ab.handleSheetKey(ev)) { event.accepted = true; return; }
+          if (!ab.sheetOpen && ab.handleBoardKey(ev)) { event.accepted = true; return; }
+        } else if (window.activeColumn === "projects") {
+          const pb = activeProjectsBoard();
+          if (pb.sheetOpen && pb.handleSheetKey(ev)) { event.accepted = true; return; }
+        }
+      }
+      const res = KeyNav.dispatchNormalKey(ev, {
         surface: "overlay",
         column: window.activeColumn,
         leader: root.overlayLeader,
@@ -1109,7 +1120,10 @@ ShellRoot {
       if (res.action === "closePreview") { preview.close(); return; }
       if (res.action === "previewPrev") { if (preview.paging || preview.stepping) preview.previous(); return; }
       if (res.action === "previewNext") { if (preview.paging || preview.stepping) preview.next(); return; }
-      if (res.action === "previewCopy") { if (preview.kind === "artifact" && preview.what?.artifact) { Quickshell.clipboardText = preview.what.artifact.text; root.say("copied"); } return; }
+      if (res.action === "previewScroll") { preview.scrollStep(res.delta); return; }
+      if (res.action === "previewPage") { preview.scrollPage(res.delta); return; }
+      if (res.action === "previewBottomTop") { preview.toggleBottomTop(); return; }
+      if (res.action === "previewCopy") { if (preview.kind === "artifact" && preview.what?.text) { Quickshell.clipboardText = preview.what.text; root.say("copied"); } return; }
       if (res.action === "previewExternal") { if (preview.kind !== "artifact" && preview.what?.url) { preview.close(); Qt.openUrlExternally(preview.what.url); } return; }
       if (res.action === "enterInsert") { window.enterInsert(); return; }
       if (res.action === "back") {
@@ -1146,14 +1160,14 @@ ShellRoot {
       }
       if (res.action === "step") {
         if (window.activeColumn === "chat") list.stepPanel(res.delta);
-        else if (window.activeColumn === "agents") activeAgentsBoard().scrollStep(res.delta);
-        else activeProjectsBoard().scrollStep(res.delta);
+        else if (window.activeColumn === "agents") activeAgentsBoard().stepRow(res.delta);
+        else activeProjectsBoard().stepRow(res.delta);
         return;
       }
       if (res.action === "page") {
         if (window.activeColumn === "chat") list.page(res.delta);
-        else if (window.activeColumn === "agents") activeAgentsBoard().scrollPage(res.delta);
-        else activeProjectsBoard().scrollPage(res.delta);
+        else if (window.activeColumn === "agents") activeAgentsBoard().pageRows(res.delta);
+        else activeProjectsBoard().pageRows(res.delta);
         return;
       }
       if (res.action === "copy") {
@@ -1163,6 +1177,13 @@ ShellRoot {
       }
       if (res.action === "activate") {
         if (window.activeColumn === "chat") activateFocusedPanel();
+        else if (window.activeColumn === "agents") activeAgentsBoard().activateCurrent();
+        else activeProjectsBoard().activateCurrent();
+        return;
+      }
+      if (res.action === "fold") {
+        if (window.activeColumn === "agents") activeAgentsBoard().foldCurrent();
+        else if (window.activeColumn === "projects") activeProjectsBoard().foldCurrent();
         return;
       }
       if (res.action === "search" || res.action === "calendar") { masthead.openBrowse(); return; }
@@ -1333,6 +1354,9 @@ ShellRoot {
             user: root.agentsBoard?.user ?? ""
             today: root.agendaBoard?.today ?? ""
             loaded: root.agentsBoard !== null
+            keyboardFocused: root.overlayNormal && window.activeColumn === "agents"
+            onCopyText: text => { Quickshell.clipboardText = text; root.say("copied"); }
+            onRestoreFocus: if (root.overlayNormal) overlayNormalCatcher.forceActiveFocus()
             onOpen: link => { if (root.openLink(link)) root.hide(); }
           }
 
@@ -1357,6 +1381,9 @@ ShellRoot {
             loaded: root.agendaBoard !== null
             host: root.host
             generatedAt: root.agendaBoard?.generatedAt ?? 0
+            keyboardFocused: root.overlayNormal && window.activeColumn === "projects"
+            onCopyText: text => { Quickshell.clipboardText = text; root.say("copied"); }
+            onRestoreFocus: if (root.overlayNormal) overlayNormalCatcher.forceActiveFocus()
             onOpen: link => { if (root.openLink(link)) root.hide(); }
           }
 
@@ -1492,6 +1519,9 @@ ShellRoot {
     today: root.agendaBoard?.today ?? ""
           loaded: root.agentsBoard !== null
           showLaunch: true
+          keyboardFocused: root.overlayNormal && window.activeColumn === "agents"
+          onCopyText: text => { Quickshell.clipboardText = text; root.say("copied"); }
+          onRestoreFocus: if (root.overlayNormal) overlayNormalCatcher.forceActiveFocus()
           onLaunchTerminal: { if (root.openApp("terminal")) root.hide(); }
           onOpen: link => { if (root.openLink(link)) root.hide(); }
         }
@@ -1531,6 +1561,9 @@ ShellRoot {
           host: root.host
           generatedAt: root.agendaBoard?.generatedAt ?? 0
           showLaunch: true
+          keyboardFocused: root.overlayNormal && window.activeColumn === "projects"
+          onCopyText: text => { Quickshell.clipboardText = text; root.say("copied"); }
+          onRestoreFocus: if (root.overlayNormal) overlayNormalCatcher.forceActiveFocus()
           onLaunchEditor: { if (root.openApp("editor")) root.hide(); }
           onOpen: link => { if (root.openLink(link)) root.hide(); }
         }
@@ -1562,6 +1595,7 @@ ShellRoot {
       helpOpen: root.overlayHelp
       surface: "overlay"
       column: window.activeColumn
+      sheet: window.activeColumn === "agents" ? window.activeAgentsBoard().activeSheet : window.activeColumn === "projects" ? window.activeProjectsBoard().activeSheet : ""
       onCloseHelp: root.overlayHelp = false
     }
   }

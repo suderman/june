@@ -11,7 +11,9 @@ Item {
   property bool mono: false
   signal accepted()
   signal edited(string text)
+  signal escaped()
   function focusField() { input.forceActiveFocus(); }
+  function blurField() { input.focus = false; }
   width: parent ? parent.width : 0
   implicitHeight: Theme.consoleLook ? 28 : caption.implicitHeight + 30
 
@@ -45,6 +47,13 @@ Item {
     font.pixelSize: Theme.type.value.size
     onAccepted: field.accepted()
     onTextEdited: field.edited(text)
+    Keys.onPressed: event => {
+      if (event.key === Qt.Key_Escape) {
+        input.focus = false;
+        field.escaped();
+        event.accepted = true;
+      }
+    }
     background: Rectangle {
       visible: !Theme.consoleLook
       anchors.bottom: parent.bottom

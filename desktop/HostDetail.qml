@@ -2,11 +2,15 @@
 // and its load, its harnesses with the quota each would spend, its sessions (each opens where it runs), and the
 // clankers that work there.
 import QtQuick
+import "keys.mjs" as KeyNav
 
 Item {
   id: page
   property var host: null
+  property bool keyboardFocused: false
+  property int cursorIndex: 0
   signal open(string link)
+  signal back()
   // A raw session of HARNESS on this host: the harness as typed, not a clanker.
   signal deploy(string harness)
 
@@ -14,6 +18,41 @@ Item {
   readonly property var sessions: host?.sessions ?? []
   readonly property var clankers: host?.clankers ?? []
   readonly property var harnesses: host?.harnesses ?? []
+  readonly property int itemCount: harnesses.length + sessions.length
+
+  onHostChanged: cursorIndex = 0
+  function ensureVisible(item) {
+    if (!item) return;
+    const top = item.mapToItem(column, 0, 0).y;
+    const bottom = top + item.height;
+    const maxY = Math.max(0, flick.contentHeight - flick.height);
+    if (top < flick.contentY + 20) flick.contentY = Math.max(0, top - 20);
+    else if (bottom > flick.contentY + flick.height - 20) flick.contentY = Math.min(maxY, bottom - flick.height + 20);
+  }
+  function handleKey(ev) {
+    if (!ev || ev.ctrl || ev.alt) return false;
+    const k = ev.key || "";
+    const t = ev.text || "";
+    if (k === "Tab" || k === "Space" || t === " " || t === "?") return false;
+    if (k === "Escape" || t === "q") { page.back(); return true; }
+    if (t === "j" || t === "n" || k === "Down") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, 1); return true; }
+    if (t === "k" || t === "p" || k === "Up") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, -1); return true; }
+    if (t === "N" || k === "PageDown") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, 5); return true; }
+    if (t === "P" || k === "PageUp") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, -5); return true; }
+    if (t === "Z" || (ev.shift && k === "Z")) {
+      const maxY = Math.max(0, flick.contentHeight - flick.height);
+      if (itemCount > 0) cursorIndex = cursorIndex >= itemCount - 1 ? 0 : itemCount - 1;
+      flick.contentY = flick.contentY >= maxY - 8 ? 0 : maxY;
+      return true;
+    }
+    if (k === "Return" || k === "Enter") {
+      if (cursorIndex >= 0 && cursorIndex < harnesses.length) { page.deploy(harnesses[cursorIndex].harness); return true; }
+      const si = cursorIndex - harnesses.length;
+      if (si >= 0 && si < sessions.length && (sessions[si].link ?? "") !== "") { page.open(sessions[si].link); return true; }
+      return true;
+    }
+    return false;
+  }
 
   Words {
     visible: page.host === null
@@ -25,6 +64,7 @@ Item {
   }
 
   Flickable {
+    id: flick
     visible: page.host !== null
     anchors.fill: parent
     contentHeight: column.implicitHeight + 16
@@ -66,9 +106,13 @@ Item {
             id: harnessRow
             required property var modelData
             required property int index
+            readonly property bool selected: page.keyboardFocused && page.cursorIndex === index
+            onSelectedChanged: if (selected) page.ensureVisible(harnessRow)
             width: parent ? parent.width : 0
             height: Math.max(48, harnessText.implicitHeight + 16)
             Rectangle { visible: harnessRow.index > 0; x: 12; width: parent.width - 24; height: 1; color: Theme.rule }
+            Rectangle { anchors.fill: parent; anchors.margins: 2; radius: 3; visible: harnessRow.selected; color: Qt.alpha(Theme.accent, 0.14) }
+            Rectangle { visible: harnessRow.selected; x: 2; y: 4; width: 3; height: parent.height - 8; radius: 1.5; color: Theme.accent }
             PressTab {
               id: deployTab
               anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
@@ -107,9 +151,12 @@ Item {
         Repeater {
           model: page.sessions
           delegate: StubRow {
+            id: sessionRow
             required property var modelData
             required property int index
             first: index === 0
+            selected: page.keyboardFocused && page.cursorIndex === page.harnesses.length + index
+            onSelectedChanged: if (selected) page.ensureVisible(sessionRow)
             title: modelData.title; meta: modelData.where + " · " + modelData.status
             harness: modelData.harness; artSize: 26
             opens: (modelData.link ?? "") !== ""

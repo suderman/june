@@ -3,6 +3,7 @@
 // org-edit reads, or with clear or cancel.
 import QtQuick
 import "board.mjs" as Board
+import "keys.mjs" as KeyNav
 
 Rectangle {
   id: picker
@@ -24,6 +25,12 @@ Rectangle {
   readonly property var shown: Board.monthDays(year, month, today)
   readonly property var presets: ["09:00", "12:00", "13:00", "17:00"]
 
+  function setDate(iso) {
+    if (!iso) return;
+    date = iso;
+    year = Number(iso.slice(0, 4));
+    month = Number(iso.slice(5, 7));
+  }
   function step(minutes) {
     const t = time === "" ? 9 * 60 : Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
     const n = Math.min(23 * 60 + 45, Math.max(0, Math.round((t + minutes) / 15) * 15));
@@ -33,6 +40,26 @@ Rectangle {
     const m = month - 1 + by;
     year = year + Math.floor(m / 12);
     month = ((m % 12) + 12) % 12 + 1;
+  }
+  function handleKey(ev) {
+    if (!ev || ev.ctrl || ev.alt) return false;
+    const k = ev.key || "";
+    const t = ev.text || "";
+    if (k === "Escape" || t === "q") { cancelled(); return true; }
+    if (k === "Return" || k === "Enter") { picked(time === "" ? date : date + " " + time); return true; }
+    if (t === "h" || k === "Left") { setDate(KeyNav.stepIsoDate(date, -1)); return true; }
+    if (t === "l" || k === "Right") { setDate(KeyNav.stepIsoDate(date, 1)); return true; }
+    if (t === "j" || t === "n" || k === "Down") { setDate(KeyNav.stepIsoDate(date, 7)); return true; }
+    if (t === "k" || t === "p" || k === "Up") { setDate(KeyNav.stepIsoDate(date, -7)); return true; }
+    if (t === "[") { moveMonth(-1); return true; }
+    if (t === "]") { moveMonth(1); return true; }
+    if (t === "t") { setDate(today); return true; }
+    if (t === "m") { setDate(KeyNav.stepIsoDate(today, 1)); return true; }
+    if (t === "-") { step(-15); return true; }
+    if (t === "+" || t === "=") { step(15); return true; }
+    if (t === "0") { time = ""; return true; }
+    if (t === "x" && canClear) { cleared(); return true; }
+    return false;
   }
 
   width: parent ? parent.width : 260
@@ -166,6 +193,13 @@ Rectangle {
       Pill { text: picker.setLabel; on: true; onClicked: picker.picked(picker.time === "" ? picker.date : picker.date + " " + picker.time) }
       Pill { visible: picker.canClear; text: "Clear"; onClicked: picker.cleared() }
       Pill { text: "Cancel"; onClicked: picker.cancelled() }
+    }
+    Text {
+      width: parent.width
+      wrapMode: Text.Wrap
+      text: "h/l day · j/k wk · [/] mo · t/m today/tmrw · -/+ time · RET set"
+      font.family: "monospace"; font.pixelSize: 10
+      color: Theme.muted
     }
   }
 

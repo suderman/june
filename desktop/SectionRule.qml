@@ -7,18 +7,26 @@ Item {
   property string text: ""
   property bool alert: false
   property bool clickable: false
+  property bool selected: false
   signal clicked()
   default property alias trailing: trail.data
   width: parent ? parent.width : 0
   implicitHeight: Math.max(26, trail.implicitHeight)
 
+  Rectangle {
+    visible: rule.selected
+    x: -4; y: 1; width: title.implicitWidth + 10; height: parent.height - 2; radius: 4
+    color: Qt.alpha(Theme.accent, 0.18)
+    border.color: Theme.accent
+    border.width: 1
+  }
   Words {
     id: title
     anchors.left: parent.left
     anchors.verticalCenter: parent.verticalCenter
     role: "section"
     text: (Theme.consoleLook ? "── " : "") + rule.text + (rule.clickable ? "  ›" : "")
-    color: rule.alert ? Theme.accent : Theme.neon ? Theme.muted : Qt.alpha(Theme.pageInk, 0.8)
+    color: rule.selected || rule.alert ? Theme.accent : Theme.neon ? Theme.muted : Qt.alpha(Theme.pageInk, 0.8)
     font.underline: rule.clickable && hover.containsMouse
   }
   Rectangle {

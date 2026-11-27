@@ -5,13 +5,18 @@ import QtQuick
 Item {
   id: card
   property var entry
+  property bool selected: false
   signal clicked()
   width: parent ? parent.width : 0
   implicitHeight: Math.max(portrait.height, lines.implicitHeight) + 20
   readonly property color stampTone: entry.stamp === "WORKING" ? Theme.tone("PROG") : entry.stamp === "INVALID" ? Theme.tone("TODO") : Theme.muted
 
-  Inked { anchors.fill: parent; lift: 3 }
-  Rectangle { anchors.fill: parent; anchors.margins: 2; radius: 4; visible: hover.containsMouse; color: Qt.alpha(Theme.surfaceInk, 0.04) }
+  Inked { anchors.fill: parent; lift: 3; edge: card.selected ? Theme.accent : Theme.edge; lineWidth: card.selected ? 2.5 : 2 }
+  Rectangle {
+    anchors.fill: parent; anchors.margins: 2; radius: 4
+    visible: card.selected || hover.containsMouse
+    color: card.selected ? Qt.alpha(Theme.accent, 0.1) : Qt.alpha(Theme.surfaceInk, 0.04)
+  }
   Portrait {
     id: portrait
     visible: !Theme.consoleLook

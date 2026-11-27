@@ -9,6 +9,9 @@ Item {
   property string placeholder: ""
   property int lines: 3
   signal submitted()
+  signal escaped()
+  function focusField() { area.forceActiveFocus(); }
+  function blurField() { area.focus = false; }
   width: parent ? parent.width : 0
   implicitHeight: Math.max(lines * Theme.type.body.line + 20, area.implicitHeight + 4)
 
@@ -55,6 +58,10 @@ Item {
     Keys.onPressed: event => {
       if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
         memo.submitted();
+        event.accepted = true;
+      } else if (event.key === Qt.Key_Escape || (event.key === Qt.Key_Tab && event.modifiers === Qt.NoModifier)) {
+        area.focus = false;
+        memo.escaped();
         event.accepted = true;
       }
     }

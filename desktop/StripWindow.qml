@@ -86,7 +86,18 @@ FloatingWindow {
     else if (first.kind === "link") win.shell.openLink(first.url);
   }
   function handleNormalKey(event) {
-    const res = KeyNav.dispatchNormalKey(win.shell.keyEv(event), {
+    const ev = win.shell.keyEv(event);
+    if (!win.helpOpen && !win.leader && !preview.open) {
+      if (win.activeColumn === "agents") {
+        const ab = activeAgentsBoard();
+        if (ab.sheetOpen && ab.handleSheetKey(ev)) { event.accepted = true; return; }
+        if (!ab.sheetOpen && ab.handleBoardKey(ev)) { event.accepted = true; return; }
+      } else if (win.activeColumn === "projects") {
+        const pb = activeProjectsBoard();
+        if (pb.sheetOpen && pb.handleSheetKey(ev)) { event.accepted = true; return; }
+      }
+    }
+    const res = KeyNav.dispatchNormalKey(ev, {
       surface: "window",
       column: win.activeColumn,
       leader: win.leader,
@@ -105,7 +116,10 @@ FloatingWindow {
     if (res.action === "closePreview") { preview.close(); return; }
     if (res.action === "previewPrev") { if (preview.paging || preview.stepping) preview.previous(); return; }
     if (res.action === "previewNext") { if (preview.paging || preview.stepping) preview.next(); return; }
-    if (res.action === "previewCopy") { if (preview.kind === "artifact" && preview.what?.artifact) { Quickshell.clipboardText = preview.what.artifact.text; win.shell.say("copied"); } return; }
+    if (res.action === "previewScroll") { preview.scrollStep(res.delta); return; }
+    if (res.action === "previewPage") { preview.scrollPage(res.delta); return; }
+    if (res.action === "previewBottomTop") { preview.toggleBottomTop(); return; }
+    if (res.action === "previewCopy") { if (preview.kind === "artifact" && preview.what?.text) { Quickshell.clipboardText = preview.what.text; win.shell.say("copied"); } return; }
     if (res.action === "previewExternal") { if (preview.kind !== "artifact" && preview.what?.url) { preview.close(); Qt.openUrlExternally(preview.what.url); } return; }
     if (res.action === "enterInsert") { win.enterInsert(); return; }
     if (res.action === "back") {
@@ -142,14 +156,14 @@ FloatingWindow {
     }
     if (res.action === "step") {
       if (win.activeColumn === "chat") strip.stepPanel(res.delta);
-      else if (win.activeColumn === "agents") activeAgentsBoard().scrollStep(res.delta);
-      else activeProjectsBoard().scrollStep(res.delta);
+      else if (win.activeColumn === "agents") activeAgentsBoard().stepRow(res.delta);
+      else activeProjectsBoard().stepRow(res.delta);
       return;
     }
     if (res.action === "page") {
       if (win.activeColumn === "chat") strip.page(res.delta);
-      else if (win.activeColumn === "agents") activeAgentsBoard().scrollPage(res.delta);
-      else activeProjectsBoard().scrollPage(res.delta);
+      else if (win.activeColumn === "agents") activeAgentsBoard().pageRows(res.delta);
+      else activeProjectsBoard().pageRows(res.delta);
       return;
     }
     if (res.action === "copy") {
@@ -159,6 +173,13 @@ FloatingWindow {
     }
     if (res.action === "activate") {
       if (win.activeColumn === "chat") activateFocusedPanel();
+      else if (win.activeColumn === "agents") activeAgentsBoard().activateCurrent();
+      else activeProjectsBoard().activateCurrent();
+      return;
+    }
+    if (res.action === "fold") {
+      if (win.activeColumn === "agents") activeAgentsBoard().foldCurrent();
+      else if (win.activeColumn === "projects") activeProjectsBoard().foldCurrent();
       return;
     }
     if (res.action === "search" || res.action === "calendar") { masthead.openBrowse(); return; }
@@ -351,6 +372,9 @@ FloatingWindow {
     user: win.shell.agentsBoard?.user ?? ""
     today: win.shell.agendaBoard?.today ?? ""
       loaded: win.shell.agentsBoard !== null
+      keyboardFocused: win.normalMode && win.activeColumn === "agents"
+      onCopyText: text => { Quickshell.clipboardText = text; win.shell.say("copied"); }
+      onRestoreFocus: if (win.normalMode) normalCatcher.forceActiveFocus()
       onOpen: link => win.shell.openLink(link)
     }
     ProjectsBoard {
@@ -375,6 +399,9 @@ FloatingWindow {
       loaded: win.shell.agendaBoard !== null
       host: win.shell.host
       generatedAt: win.shell.agendaBoard?.generatedAt ?? 0
+      keyboardFocused: win.normalMode && win.activeColumn === "projects"
+      onCopyText: text => { Quickshell.clipboardText = text; win.shell.say("copied"); }
+      onRestoreFocus: if (win.normalMode) normalCatcher.forceActiveFocus()
       onOpen: link => win.shell.openLink(link)
     }
 
@@ -498,6 +525,9 @@ FloatingWindow {
     today: win.shell.agendaBoard?.today ?? ""
     loaded: win.shell.agentsBoard !== null
     showLaunch: true
+    keyboardFocused: win.normalMode && win.activeColumn === "agents"
+    onCopyText: text => { Quickshell.clipboardText = text; win.shell.say("copied"); }
+    onRestoreFocus: if (win.normalMode) normalCatcher.forceActiveFocus()
     onLaunchTerminal: win.shell.openApp("terminal")
     onOpen: link => win.shell.openLink(link)
   }
@@ -522,6 +552,9 @@ FloatingWindow {
     host: win.shell.host
     generatedAt: win.shell.agendaBoard?.generatedAt ?? 0
     showLaunch: true
+    keyboardFocused: win.normalMode && win.activeColumn === "projects"
+    onCopyText: text => { Quickshell.clipboardText = text; win.shell.say("copied"); }
+    onRestoreFocus: if (win.normalMode) normalCatcher.forceActiveFocus()
     onLaunchEditor: win.shell.openApp("editor")
     onOpen: link => win.shell.openLink(link)
   }
@@ -551,6 +584,7 @@ FloatingWindow {
     helpOpen: win.helpOpen
     surface: "window"
     column: win.activeColumn
+    sheet: win.activeColumn === "agents" ? win.activeAgentsBoard().activeSheet : win.activeColumn === "projects" ? win.activeProjectsBoard().activeSheet : ""
     onCloseHelp: win.helpOpen = false
   }
 

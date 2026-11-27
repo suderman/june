@@ -6,6 +6,7 @@
 // "Agents and projects" in docs/interfaces.org.
 import QtQuick
 import "board.mjs" as Board
+import "keys.mjs" as KeyNav
 
 Item {
   id: board
@@ -96,14 +97,30 @@ Item {
 
   // Whether a sheet is open, so Esc has something to put away.
   readonly property bool sheetOpen: detailKey !== "" || rosterSlug !== "" || rosterNew || hostKey !== ""
+  readonly property string activeSheet: detailKey !== "" ? "task" : (rosterSlug !== "" || rosterNew) ? (clankerDeploying ? "deploy" : "roster") : hostKey !== "" ? (deployingHarness !== "" ? "deploy" : "host") : ""
   property bool keyboardFocused: false
+  property int cursorIndex: 0
+  readonly property var navItems: KeyNav.agentsItems(board.view, board.mode, { queueOpen: board.queueOpen, idleOpen: board.idleOpen, rosterSort: board.rosterSort })
+  readonly property string activeItemKey: navItems.length > 0 ? navItems[Math.max(0, Math.min(navItems.length - 1, cursorIndex))].key : ""
+  signal copyText(string text)
+  signal restoreFocus()
 
+  onModeChanged: cursorIndex = 0
+  function ensureVisible(item) {
+    if (!item || !column) return;
+    const top = item.mapToItem(column, 0, 0).y;
+    const bottom = top + item.height;
+    const maxY = Math.max(0, flick.contentHeight - flick.height);
+    if (top < flick.contentY + 24) flick.contentY = Math.max(0, top - 24);
+    else if (bottom > flick.contentY + flick.height - 24) flick.contentY = Math.min(maxY, bottom - flick.height + 24);
+  }
   function cycleSection(delta) {
     const sections = ["hosts", "clankers", "activity"];
     const i = sections.indexOf(mode);
     const next = sections[((i >= 0 ? i : 2) + delta + sections.length) % sections.length];
     dismissSheet();
     mode = next;
+    cursorIndex = 0;
     flick.contentY = 0;
   }
   function scrollBy(dy) {
@@ -112,9 +129,61 @@ Item {
   }
   function scrollStep(delta) { scrollBy(delta * 96); }
   function scrollPage(delta) { scrollBy(delta * Math.max(160, flick.height * 0.8)); }
+  function stepRow(delta) {
+    if (navItems.length === 0) { scrollStep(delta); return; }
+    cursorIndex = KeyNav.stepCursor(navItems.length, cursorIndex, delta);
+  }
+  function pageRows(delta) {
+    if (navItems.length === 0) { scrollPage(delta); return; }
+    cursorIndex = KeyNav.stepCursor(navItems.length, cursorIndex, delta * 6);
+  }
   function toggleBottomTop() {
     const maxY = Math.max(0, flick.contentHeight - flick.height);
-    flick.contentY = flick.contentY >= maxY - 8 ? 0 : maxY;
+    if (navItems.length > 0) {
+      const atEnd = cursorIndex >= navItems.length - 1 || flick.contentY >= maxY - 8;
+      cursorIndex = atEnd ? 0 : navItems.length - 1;
+      flick.contentY = atEnd ? 0 : maxY;
+    } else {
+      flick.contentY = flick.contentY >= maxY - 8 ? 0 : maxY;
+    }
+  }
+  function currentItem() {
+    if (navItems.length === 0) return null;
+    return navItems[Math.max(0, Math.min(navItems.length - 1, cursorIndex))];
+  }
+  function activateCurrent() {
+    const it = currentItem();
+    if (!it) return;
+    if (it.kind === "host") { board.hostKey = it.host; return; }
+    if (it.kind === "clanker") { board.rosterNew = false; board.rosterSlug = it.slug; return; }
+    if (it.kind === "toggleQueue") { board.queueOpen = !board.queueOpen; return; }
+    if (it.kind === "toggleIdle") { board.idleOpen = !board.idleOpen; return; }
+    if (it.kind === "need") { board.show(it.task, ""); return; }
+    board.show(it.task, it.link);
+  }
+  function foldCurrent() {
+    const it = currentItem();
+    if (it && it.kind === "need" && it.link !== "") { board.open(it.link); return; }
+    if (it && (it.kind === "queued" || it.kind === "toggleQueue") && (board.view.queued ?? []).length > 3) { board.queueOpen = !board.queueOpen; return; }
+    if ((board.view.idle ?? []).length > 0) board.idleOpen = !board.idleOpen;
+  }
+  function handleSheetKey(ev) {
+    if (detailKey !== "") return detailPage.handleKey(ev);
+    if (rosterSlug !== "" || rosterNew) return clankerDeploying ? clankerDeployPicker.handleKey(ev) : rosterPage.handleKey(ev);
+    if (hostKey !== "") return deployingHarness !== "" ? hostDeployPicker.handleKey(ev) : hostPage.handleKey(ev);
+    return false;
+  }
+  function handleBoardKey(ev) {
+    if (!ev || ev.ctrl || ev.alt || sheetOpen) return false;
+    if (mode === "clankers") {
+      if (ev.text === "C") { board.rosterSlug = ""; board.rosterNew = true; return true; }
+      if (ev.text === "S" && board.view.rosterHasStats === true) {
+        board.rosterSort = board.rosterSort === "leaderboard" ? "roster" : "leaderboard";
+        cursorIndex = 0;
+        return true;
+      }
+    }
+    return false;
   }
 
   // The showing section again: put its sheet away and go back to its top.
@@ -162,6 +231,8 @@ Item {
       roster: board.view.roster ?? []
       onBack: board.detailKey = ""
       onOpen: link => board.open(link)
+      onCopyText: text => board.copyText(text)
+      onRestoreFocus: board.restoreFocus()
       notice: board.notice.key === board.shownTask || board.notice.key === (detailPage.detail?.key ?? "") ? board.notice.text : ""
       onEdit: change => board.edit(detailPage.detail?.key ?? board.shownTask, change)
     }
@@ -174,6 +245,7 @@ Item {
     open: board.rosterSlug !== "" || board.rosterNew
     onDismissed: { board.rosterSlug = ""; board.rosterNew = false; }
     RosterDetail {
+      id: rosterPage
       anchors.fill: parent
       visible: !board.clankerDeploying
       card: board.activeCard
@@ -185,15 +257,19 @@ Item {
       onRemove: slug => board.rosterEdit({ action: "delete", slug: slug })
       onDeploy: { board.deployAsked = false; board.clankerDeploying = true; }
       onVisit: at => board.visit(at.split("/")[0], at.split("/")[1])
+      onRestoreFocus: board.restoreFocus()
     }
     DeployPicker {
+      id: clankerDeployPicker
       anchors.fill: parent
       visible: board.clankerDeploying && board.activeCard !== null
+      keyboardFocused: board.keyboardFocused && visible
       what: (board.activeCard?.name ?? "") + " on " + (board.activeCard?.host ?? "")
       places: board.view.places ?? []
       notice: board.deployNotice
       onBack: board.clankerDeploying = false
       onPicked: dir => { board.deployAsked = true; board.deploy({ clanker: board.activeCard.slug, dir: dir }); }
+      onRestoreFocus: board.restoreFocus()
     }
   }
 
@@ -204,20 +280,26 @@ Item {
     open: board.hostKey !== ""
     onDismissed: board.hostKey = ""
     HostDetail {
+      id: hostPage
       anchors.fill: parent
       visible: board.deployingHarness === ""
+      keyboardFocused: board.keyboardFocused && visible && board.hostKey !== ""
       host: board.activeHost
+      onBack: board.hostKey = ""
       onOpen: link => board.open(link)
       onDeploy: harness => { board.deployAsked = false; board.deployingHarness = harness; }
     }
     DeployPicker {
+      id: hostDeployPicker
       anchors.fill: parent
       visible: board.deployingHarness !== ""
+      keyboardFocused: board.keyboardFocused && visible
       what: board.deployingHarness + " on " + board.shownHost
       places: board.view.places ?? []
       notice: board.deployNotice
       onBack: board.deployingHarness = ""
       onPicked: dir => { board.deployAsked = true; board.deploy({ host: board.shownHost, harness: board.deployingHarness, dir: dir }); }
+      onRestoreFocus: board.restoreFocus()
     }
   }
 
@@ -294,9 +376,12 @@ Item {
           Repeater {
             model: board.view.hosts ?? []
             delegate: StubRow {
+              id: hostRow
               required property var modelData
               required property int index
               first: index === 0
+              selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "host:" + modelData.host
+              onSelectedChanged: if (selected) board.ensureVisible(hostRow)
               title: modelData.host; meta: modelData.meta
               stamp: modelData.ok ? "" : "OFFLINE"
               onClicked: board.hostKey = modelData.host
@@ -338,8 +423,11 @@ Item {
         Repeater {
           model: board.mode === "clankers" ? (board.rosterSort === "leaderboard" ? (board.view.rosterLeaderboard ?? []) : (board.view.roster ?? [])) : []
           delegate: EnlistCard {
+            id: enlistRow
             required property var modelData
             entry: modelData
+            selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "clanker:" + modelData.slug
+            onSelectedChanged: if (selected) board.ensureVisible(enlistRow)
             width: column.width
             onClicked: { board.rosterNew = false; board.rosterSlug = modelData.slug; }
           }
@@ -355,7 +443,15 @@ Item {
         SectionRule { text: "NEEDS YOU · " + board.view.needs.length; alert: true; visible: board.view.needs.length > 0 }
         Repeater {
           model: board.view.needs
-          delegate: NeedDocket { required property var modelData; need: modelData; width: column.width }
+          delegate: NeedDocket {
+            id: needCard
+            required property var modelData
+            required property int index
+            need: modelData
+            selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "need:" + index
+            onSelectedChanged: if (selected) board.ensureVisible(needCard)
+            width: column.width
+          }
         }
         Words {
           visible: board.loaded && board.view.needs.length === 0
@@ -372,9 +468,12 @@ Item {
           Repeater {
             model: board.view.working
             delegate: StubRow {
+              id: workRow
               required property var modelData
               required property int index
               first: index === 0
+              selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "work:" + index
+              onSelectedChanged: if (selected) board.ensureVisible(workRow)
               title: modelData.title; meta: modelData.where; harness: modelData.harness; artSize: 30
               opens: (modelData.link ?? "") !== "" || (modelData.task ?? "") !== ""
               onClicked: board.show(modelData.task ?? "", modelData.link ?? "")
@@ -400,9 +499,12 @@ Item {
             Repeater {
               model: board.queueOpen ? board.view.queued : board.view.queued.slice(0, 3)
               delegate: StubRow {
+                id: qRow
                 required property var modelData
                 required property int index
                 first: index === 0
+                selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "q:" + index
+                onSelectedChanged: if (selected) board.ensureVisible(qRow)
                 title: modelData.title; meta: modelData.who
                 lead: board.whenLead(modelData.when); leadWidth: 66
                 onClicked: board.show(modelData.task, modelData.link ?? "")
@@ -411,9 +513,17 @@ Item {
           }
         }
         Item {
+          id: queueToggleRow
           visible: board.view.queued.length > 3
+          readonly property bool selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "toggle:queue"
+          onSelectedChanged: if (selected) board.ensureVisible(queueToggleRow)
           width: parent.width
           height: moreQueued.height
+          Rectangle {
+            visible: queueToggleRow.selected
+            anchors.fill: moreQueued; anchors.margins: -3; radius: 5
+            color: Qt.alpha(Theme.accent, 0.16); border.color: Theme.accent; border.width: 1
+          }
           PressTab {
             id: moreQueued
             anchors.right: parent.right
@@ -429,9 +539,12 @@ Item {
           Repeater {
             model: board.view.reviewing
             delegate: StubRow {
+              id: revRow
               required property var modelData
               required property int index
               first: index === 0
+              selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "rev:" + index
+              onSelectedChanged: if (selected) board.ensureVisible(revRow)
               title: modelData.title; meta: modelData.who; stamp: "EVAL"
               onClicked: board.show(modelData.task, modelData.link ?? "")
             }
@@ -439,7 +552,10 @@ Item {
         }
 
         SectionRule {
+          id: idleRule
           visible: board.view.idle.length > 0
+          selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "toggle:idle"
+          onSelectedChanged: if (selected) board.ensureVisible(idleRule)
           text: "IDLE · " + board.view.idle.length + (board.idleOpen ? "  ▾" : "")
           clickable: true
           onClicked: board.idleOpen = !board.idleOpen
@@ -449,9 +565,12 @@ Item {
           Repeater {
             model: board.idleOpen ? board.view.idle : []
             delegate: StubRow {
+              id: idleRow
               required property var modelData
               required property int index
               first: index === 0
+              selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "idle:" + index
+              onSelectedChanged: if (selected) board.ensureVisible(idleRow)
               title: modelData.title; meta: modelData.where + " · " + modelData.status; harness: modelData.harness; artSize: 24
               opens: (modelData.link ?? "") !== "" || (modelData.task ?? "") !== ""
               onClicked: board.show(modelData.task ?? "", modelData.link ?? "")
@@ -465,9 +584,12 @@ Item {
           Repeater {
             model: board.view.recent.slice(0, 6)
             delegate: StubRow {
+              id: recRow
               required property var modelData
               required property int index
               first: index === 0
+              selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "rec:" + index
+              onSelectedChanged: if (selected) board.ensureVisible(recRow)
               title: modelData.title; stamp: modelData.state; quote: modelData.line
               meta: modelData.when ? modelData.when + " ago" : ""
               onClicked: board.show(modelData.task, modelData.link ?? "")
@@ -498,10 +620,11 @@ Item {
   component NeedDocket: Item {
     id: card
     property var need
+    property bool selected: false
     readonly property bool urgent: need.level === 1
     height: inner.implicitHeight
-    Inked { anchors.fill: parent; edge: card.urgent ? Theme.tone("TODO") : card.need.kind === "asks" ? Theme.accent : Theme.edge; lift: 3; lineWidth: card.urgent ? 2.5 : 2 }
-    Rectangle { anchors.fill: parent; anchors.margins: 2; radius: 4; visible: hover.containsMouse; color: Qt.alpha(Theme.surfaceInk, 0.04) }
+    Inked { anchors.fill: parent; edge: card.selected ? Theme.accent : card.urgent ? Theme.tone("TODO") : card.need.kind === "asks" ? Theme.accent : Theme.edge; lift: 3; lineWidth: card.selected || card.urgent ? 2.5 : 2 }
+    Rectangle { anchors.fill: parent; anchors.margins: 2; radius: 4; visible: card.selected || hover.containsMouse; color: card.selected ? Qt.alpha(Theme.accent, 0.1) : Qt.alpha(Theme.surfaceInk, 0.04) }
     // The docket opens the task's page; its button opens Herdr or Emacs straight away.
     MouseArea { id: hover; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: board.show(card.need.task ?? "", "") }
     Column {

@@ -10,6 +10,7 @@ Item {
   property bool helpOpen: false
   property string surface: "window"
   property string column: "chat"
+  property string sheet: ""
   signal closeHelp()
 
   z: 40
@@ -92,10 +93,11 @@ Item {
           width: parent.width
           spacing: 20
           Repeater {
-            model: KeyNav.helpSections(overlay.surface, overlay.column)
+            model: KeyNav.helpSections(overlay.surface, overlay.column, overlay.sheet)
             delegate: Column {
               required property var modelData
-              width: (helpBody.width - (KeyNav.helpSections(overlay.surface, overlay.column).length > 1 ? 20 : 0)) / Math.max(1, KeyNav.helpSections(overlay.surface, overlay.column).length)
+              readonly property int sectionCount: Math.max(1, KeyNav.helpSections(overlay.surface, overlay.column, overlay.sheet).length)
+              width: (helpBody.width - (sectionCount > 1 ? 20 : 0)) / sectionCount
               spacing: 6
               Text {
                 text: modelData.title

@@ -18,9 +18,46 @@ Item {
   signal visit(string at)
   signal save(var edit)
   signal remove(string slug)
+  signal restoreFocus()
 
   property bool editing: creating
   property bool confirmingDelete: false
+
+  function scrollBy(dy) {
+    const maxY = Math.max(0, flick.contentHeight - flick.height);
+    flick.contentY = Math.max(0, Math.min(maxY, flick.contentY + dy));
+  }
+  function handleKey(ev) {
+    if (!ev || ev.ctrl || ev.alt) return false;
+    const k = ev.key || "";
+    const t = ev.text || "";
+    if (k === "Tab" || k === "Space" || t === " " || t === "?") return false;
+    if (k === "Escape" || t === "q") {
+      if (confirmingDelete) { confirmingDelete = false; return true; }
+      if (editing && !creating) { editing = false; return true; }
+      page.back();
+      return true;
+    }
+    if (t === "j" || t === "n" || k === "Down") { scrollBy(96); return true; }
+    if (t === "k" || t === "p" || k === "Up") { scrollBy(-96); return true; }
+    if (t === "N" || k === "PageDown") { scrollBy(Math.max(160, flick.height * 0.8)); return true; }
+    if (t === "P" || k === "PageUp") { scrollBy(-Math.max(160, flick.height * 0.8)); return true; }
+    if (t === "Z" || (ev.shift && k === "Z")) {
+      const maxY = Math.max(0, flick.contentHeight - flick.height);
+      flick.contentY = flick.contentY >= maxY - 8 ? 0 : maxY;
+      return true;
+    }
+    if (!editing && card !== null) {
+      if (t === "d" || k === "Return" || k === "Enter") {
+        const at = card.terminal ?? "";
+        if (at.indexOf("/") > 0) page.visit(at);
+        else if ((card.problems ?? []).length === 0) page.deploy();
+        return true;
+      }
+      if (t === "e") { loadForm(card); editing = true; name.focusField(); return true; }
+    }
+    return false;
+  }
 
   // Form fields, loaded when entering edit mode or creating.
   property string fName: ""
@@ -58,6 +95,7 @@ Item {
   readonly property string stampTone: card?.stamp === "WORKING" ? Theme.tone("PROG") : card?.stamp === "INVALID" ? Theme.tone("TODO") : Theme.muted
 
   Flickable {
+    id: flick
     anchors.fill: parent
     contentHeight: col.implicitHeight + 20
     clip: true
@@ -269,6 +307,7 @@ Item {
                 width: parent.width - x - 10
                 label: "Name"; placeholder: "e.g. pax"
                 onEdited: text => page.fName = text
+                onEscaped: page.restoreFocus()
               }
             }
             FieldRow {
@@ -286,7 +325,7 @@ Item {
               visible: !page.hosts.includes(page.fHost)
               width: parent.width
               height: host.implicitHeight + 6
-              RuledField { id: host; x: 10; width: parent.width - 20; label: "Other unit"; placeholder: "host name"; mono: true; onEdited: text => page.fHost = text }
+              RuledField { id: host; x: 10; width: parent.width - 20; label: "Other unit"; placeholder: "host name"; mono: true; onEdited: text => page.fHost = text; onEscaped: page.restoreFocus() }
             }
             FieldRow {
               label: "Harness"
@@ -302,7 +341,7 @@ Item {
             Item {
               width: parent.width
               height: modelField.implicitHeight + 10
-              RuledField { id: modelField; x: 10; y: 4; width: parent.width - 20; label: "Model"; placeholder: "harness default"; mono: true; onEdited: text => page.fModel = text }
+              RuledField { id: modelField; x: 10; y: 4; width: parent.width - 20; label: "Model"; placeholder: "harness default"; mono: true; onEdited: text => page.fModel = text; onEscaped: page.restoreFocus() }
             }
             FieldRow {
               label: "Effort"
@@ -320,7 +359,7 @@ Item {
         }
 
         SectionRule { text: "DIRECTIVES" }
-        MemoField { id: orders; placeholder: "Role, skills, voice…"; lines: 4; onTextChanged: if (text !== page.fInstructions) page.fInstructions = text }
+        MemoField { id: orders; placeholder: "Role, skills, voice…"; lines: 4; onTextChanged: if (text !== page.fInstructions) page.fInstructions = text; onEscaped: page.restoreFocus() }
 
         Words {
           visible: page.notice.busy || (page.notice.text ?? "") !== ""

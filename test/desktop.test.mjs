@@ -1536,7 +1536,8 @@ test("modal keyboard navigation (keys.mjs): Tab, Z bottom/top toggle, hjkl/np, S
 	assert.deepEqual(dispatchNormalKey({ text: "c" }, { ...win, leader: true }), { action: "toggleLook" });
 	assert.deepEqual(dispatchNormalKey({ text: "d" }, { ...win, leader: true }), { action: "cycleScheme" });
 	assert.deepEqual(dispatchNormalKey({ text: "?" }, { ...win, helpOpen: true }), { action: "closeHelp" });
-	assert.deepEqual(dispatchNormalKey({ text: "n" }, { ...win, previewOpen: true }), { action: "previewNext" });
+	assert.deepEqual(dispatchNormalKey({ text: "l" }, { ...win, previewOpen: true }), { action: "previewNext" });
+	assert.deepEqual(dispatchNormalKey({ text: "n" }, { ...win, previewOpen: true }), { action: "previewScroll", delta: 1 });
 	assert.deepEqual(dispatchNormalKey({ text: "c" }, { ...win, previewOpen: true }), { action: "previewCopy" });
 	assert.equal(dispatchNormalKey({ text: "n", ctrl: true }, win), null, "Ctrl+N passes through to window shortcut");
 
@@ -1640,4 +1641,60 @@ test("a deployed session shows in the Herdr app through hc and herdr-app, its ho
 	assert.doesNotMatch(argv[2], /t7|cog/);
 	assert.match(argv[2], /hc label "\$a" "herdr\.space=\$space"/);
 	assert.match(argv[2], /herdr-app do agent\.focus --terminal "\$a"$/);
+});
+
+test("board cursor lists, state quick-pick mnemonics, ISO date stepping, and sheet cheatsheets (keys.mjs)", async () => {
+	const K = await import(new URL("../desktop/keys.mjs", import.meta.url));
+	assert.equal(K.stepCursor(0, 0, 1), 0);
+	assert.equal(K.stepCursor(5, 0, -1), 0);
+	assert.equal(K.stepCursor(5, 3, 10), 4);
+	assert.equal(K.stepIsoDate("2026-11-30", 1), "2026-12-01");
+	assert.equal(K.stepIsoDate("2026-12-01", -1), "2026-11-30");
+	assert.equal(K.stepIsoDate("2026-11-27", 7), "2026-12-04");
+
+	// State quick-pick respects locked / assignable / requeue rules.
+	const opts = K.taskStateOptions({ next: ["TODO", "AUTO", "EVAL", "HOLD", "DONE"] }, false, true, true);
+	assert.deepEqual(opts.map(o => o.key + ":" + o.state + (o.isRequeue ? "*" : "")), ["t:TODO", "e:EVAL", "h:HOLD", "d:DONE", "a:AUTO*"]);
+	const noRequeue = K.taskStateOptions({ next: ["TODO", "AUTO", "DONE"] }, false, true, false);
+	assert.deepEqual(noRequeue.map(o => o.state), ["TODO", "DONE"]);
+	const locked = K.taskStateOptions({ next: ["TODO", "DONE"] }, true, false, false);
+	assert.deepEqual(locked.map(o => o.key + ":" + o.state), ["t:TODO", "d:DONE"]);
+
+	// Agents board flattening across hosts, clankers, and activity (with queue/idle toggles).
+	const aView = {
+		hosts: [{ host: "kit" }, { host: "cog" }],
+		roster: [{ slug: "pax" }, { slug: "wrench" }],
+		rosterLeaderboard: [{ slug: "wrench" }, { slug: "pax" }],
+		needs: [{ task: "t1", link: "herdr://1" }],
+		working: [{ task: "t2", link: "" }],
+		queued: [{ task: "q1" }, { task: "q2" }, { task: "q3" }, { task: "q4" }],
+		reviewing: [{ task: "r1" }],
+		idle: [{ task: "i1" }],
+		recent: [{ task: "rec1" }],
+	};
+	assert.deepEqual(K.agentsItems(aView, "hosts", {}).map(x => x.key), ["host:kit", "host:cog"]);
+	assert.deepEqual(K.agentsItems(aView, "clankers", { rosterSort: "leaderboard" }).map(x => x.key), ["clanker:wrench", "clanker:pax"]);
+	const actClosed = K.agentsItems(aView, "activity", { queueOpen: false, idleOpen: false }).map(x => x.key);
+	assert.deepEqual(actClosed, ["need:0", "work:0", "q:0", "q:1", "q:2", "toggle:queue", "rev:0", "toggle:idle", "rec:0"]);
+	const actOpen = K.agentsItems(aView, "activity", { queueOpen: true, idleOpen: true }).map(x => x.key);
+	assert.ok(actOpen.includes("q:3"));
+	assert.ok(actOpen.includes("idle:0"));
+
+	// Projects board flattening across agenda, tasks, state drill, and projects.
+	const pView = {
+		sections: [{ rows: [{ title: "A" }] }, { rows: [{ title: "B" }, { title: "C" }] }],
+		lists: [{ state: "EVAL", more: 2, rows: [{ title: "E1" }] }],
+		projects: [{ link: "org://p1" }],
+	};
+	assert.deepEqual(K.projectsItems(pView, "agenda", []).map(x => x.key), ["ag:0:0", "ag:1:0", "ag:1:1"]);
+	assert.deepEqual(K.projectsItems(pView, "tasks", []).map(x => x.key), ["sh:EVAL", "tk:EVAL:0"]);
+	assert.deepEqual(K.projectsItems(pView, "state", [{ title: "D1" }]).map(x => x.key), ["dr:0"]);
+	assert.deepEqual(K.projectsItems(pView, "projects", []).map(x => x.key), ["pr:0"]);
+
+	// Preview scrolling & fold dispatch + sheet-specific help sections.
+	assert.deepEqual(K.dispatchNormalKey({ text: "j" }, { surface: "window", previewOpen: true }), { action: "previewScroll", delta: 1 });
+	assert.deepEqual(K.dispatchNormalKey({ text: "Z", shift: true }, { surface: "window", previewOpen: true }), { action: "previewBottomTop" });
+	assert.deepEqual(K.dispatchNormalKey({ text: "o" }, { surface: "window", column: "agents" }), { action: "fold" });
+	assert.equal(K.helpSections("window", "agents", "task")[0].title, "Task docket");
+	assert.equal(K.helpSections("window", "agents", "host")[0].title, "Host page");
 });

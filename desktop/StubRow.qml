@@ -16,12 +16,24 @@ Item {
   property bool overdue: false
   property bool first: false
   property bool opens: true
+  property bool selected: false
   signal clicked()
   width: parent ? parent.width : 0
   implicitHeight: Math.max(40, lines.implicitHeight + 16)
 
   Rectangle { visible: !stub.first; x: 10; width: stub.width - 20; height: 1; color: Theme.rule }
-  Rectangle { anchors.fill: parent; anchors.margins: 2; radius: 3; visible: stub.opens && hover.containsMouse; color: Qt.alpha(Theme.surfaceInk, 0.05) }
+  Rectangle {
+    anchors.fill: parent
+    anchors.margins: 2
+    radius: 3
+    visible: stub.selected || (stub.opens && hover.containsMouse)
+    color: stub.selected ? Qt.alpha(Theme.accent, 0.14) : Qt.alpha(Theme.surfaceInk, 0.05)
+  }
+  Rectangle {
+    visible: stub.selected
+    x: 2; y: 4; width: 3; height: parent.height - 8; radius: 1.5
+    color: Theme.accent
+  }
   Words {
     id: leadText
     visible: stub.leadWidth > 0

@@ -51,6 +51,23 @@ Item {
   // The arrow keys: a PDF's pages first, then on to the next or previous thing the message brought.
   function next() { if (paging && page < pages) page++; else step(1); }
   function previous() { if (paging && page > 1) page--; else step(-1); }
+  function scrollBy(dy) {
+    const maxY = Math.max(0, wordsFlick.contentHeight - wordsFlick.height);
+    wordsFlick.contentY = Math.max(0, Math.min(maxY, wordsFlick.contentY + dy));
+  }
+  function scrollStep(delta) {
+    if (kind === "text" || kind === "artifact") scrollBy(delta * 84);
+    else if (delta > 0) next(); else previous();
+  }
+  function scrollPage(delta) {
+    if (kind === "text" || kind === "artifact") scrollBy(delta * Math.max(160, wordsFlick.height * 0.85));
+    else if (delta > 0) next(); else previous();
+  }
+  function toggleBottomTop() {
+    if (kind !== "text" && kind !== "artifact") return;
+    const maxY = Math.max(0, wordsFlick.contentHeight - wordsFlick.height);
+    wordsFlick.contentY = wordsFlick.contentY >= maxY - 8 ? 0 : maxY;
+  }
 
   // GET `url`, then `done(text)`, or `fail()`; a reply for a preview since closed or replaced is dropped.
   function ask(url, done, fail) {
@@ -108,6 +125,7 @@ Item {
       color: preview.lit ? Theme.cardFill : "#fbf8f1"; radius: 6
       MouseArea { anchors.fill: parent }
       Flickable {
+        id: wordsFlick
         anchors.fill: parent; anchors.margins: 18
         clip: true
         contentWidth: width; contentHeight: text.height

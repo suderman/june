@@ -4,6 +4,7 @@
 // change. See "Restyle the phone boards as task dockets" in the June project notes for why the question comes first.
 import QtQuick
 import "board.mjs" as Board
+import "keys.mjs" as KeyNav
 
 Item {
   id: page
@@ -18,6 +19,9 @@ Item {
   signal open(string link)
   // The user's edit (board-edit.ts TaskEdit): a state, an assignment, a reply, a date, a title.
   signal edit(var change)
+  signal copyText(string text)
+  signal restoreFocus()
+  signal toggleEntries(bool expanded)
   // Who a task can be handed to, and where by default: { hosts, host, agents }.
   property var dispatch: null
   // The roster's cards (board.mjs rosterView), so a task can be handed to a clanker on its own host.
@@ -44,13 +48,150 @@ Item {
   // Which date is being picked: schedule, deadline, handoff, or "".
   property string picking: ""
   property bool renaming: false
+  property bool statePick: false
+  property bool assignPick: false
+  property int assignIndex: 0
+  property bool entriesExpanded: false
+  readonly property var stateOptions: KeyNav.taskStateOptions(page.detail, page.locked, page.assignable, page.agent !== "" && page.host !== "")
+  readonly property var assignCandidates: {
+    const out = [];
+    for (let i = 0; i < clankers.length; i++) {
+      const c = clankers[i];
+      out.push({ agent: c.slug, name: c.name, host: c.host, fixed: true });
+    }
+    const bare = dispatch?.agents ?? ["pi", "claude"];
+    for (let i = 0; i < bare.length; i++) {
+      const a = bare[i];
+      out.push({ agent: a, name: a, host: page.host !== "" ? page.host : (dispatch?.host ?? ""), fixed: false });
+    }
+    return out;
+  }
   onDetailChanged: {
-    if (detail === null || !assignable) handoff = null;
-    if (detail === null) { picking = ""; renaming = false; }
+    if (detail === null || !assignable) { handoff = null; assignPick = false; }
+    if (detail === null) { picking = ""; renaming = false; statePick = false; }
   }
   function send(change) {
     page.picking = "";
+    page.statePick = false;
+    page.assignPick = false;
     page.edit(change);
+  }
+  function scrollBy(dy) {
+    const maxY = Math.max(0, flick.contentHeight - flick.height);
+    flick.contentY = Math.max(0, Math.min(maxY, flick.contentY + dy));
+  }
+  function scrollToBottom() {
+    flick.contentY = Math.max(0, flick.contentHeight - flick.height);
+  }
+  function confirmHandoff() {
+    if (page.handoff === null) return;
+    const c = { action: "assign", agent: page.handoff.agent };
+    if ((page.handoff.host ?? "") !== "") c.host = page.handoff.host;
+    if ((page.handoff.when ?? "") !== "") c.when = page.handoff.when;
+    page.handoff = null;
+    page.send(c);
+  }
+  function handleKey(ev) {
+    if (!ev || ev.ctrl || ev.alt) return false;
+    const k = ev.key || "";
+    const t = ev.text || "";
+    if (k === "Tab" || k === "Space" || t === " " || t === "?") return false;
+    if (page.picking === "handoff") return handoffPicker.handleKey(ev);
+    if (page.picking === "schedule" || page.picking === "deadline") return datePicker.handleKey(ev);
+    if (page.statePick) {
+      if (k === "Escape" || t === "q") { page.statePick = false; return true; }
+      for (let i = 0; i < page.stateOptions.length; i++) {
+        const opt = page.stateOptions[i];
+        if (opt.key === t) {
+          page.statePick = false;
+          page.send(opt.isRequeue ? { action: "assign", agent: page.agent, host: page.host } : { action: "state", state: opt.state });
+          return true;
+        }
+      }
+      page.statePick = false;
+      return true;
+    }
+    if (page.assignPick) {
+      const list = page.assignCandidates;
+      if (k === "Escape" || t === "q") { page.assignPick = false; return true; }
+      if (t >= "1" && t <= "9") {
+        const idx = Number(t) - 1;
+        if (idx >= 0 && idx < list.length) {
+          const pick = list[idx];
+          page.handoff = { agent: pick.agent, name: pick.name, host: pick.host, when: "", fixed: pick.fixed };
+          page.assignPick = false;
+          scrollToBottom();
+        }
+        return true;
+      }
+      if (t === "j" || t === "n" || k === "Down") { page.assignIndex = KeyNav.stepCursor(list.length, page.assignIndex, 1); return true; }
+      if (t === "k" || t === "p" || k === "Up") { page.assignIndex = KeyNav.stepCursor(list.length, page.assignIndex, -1); return true; }
+      if (k === "Return" || k === "Enter") {
+        if (page.assignIndex >= 0 && page.assignIndex < list.length) {
+          const pick = list[page.assignIndex];
+          page.handoff = { agent: pick.agent, name: pick.name, host: pick.host, when: "", fixed: pick.fixed };
+          page.assignPick = false;
+          scrollToBottom();
+        }
+        return true;
+      }
+      return true;
+    }
+    if (page.handoff !== null) {
+      if (k === "Escape" || t === "q") { page.handoff = null; return true; }
+      if (k === "Return" || k === "Enter") { confirmHandoff(); return true; }
+      if (t === "w") { page.picking = "handoff"; scrollToBottom(); return true; }
+      if ((t === "h" || t === "l" || k === "Left" || k === "Right") && !page.handoff.fixed) {
+        const hosts = page.dispatch?.hosts ?? [];
+        if (hosts.length > 1) {
+          const i = hosts.indexOf(page.handoff.host);
+          const d = (t === "h" || k === "Left") ? -1 : 1;
+          const nextHost = hosts[((i >= 0 ? i : 0) + d + hosts.length) % hosts.length];
+          page.handoff = Object.assign({}, page.handoff, { host: nextHost });
+        }
+        return true;
+      }
+      return true;
+    }
+    if (k === "Escape" || t === "q") {
+      if (page.renaming) { page.renaming = false; return true; }
+      page.back();
+      return true;
+    }
+    if (t === "j" || t === "n" || k === "Down") { scrollBy(96); return true; }
+    if (t === "k" || t === "p" || k === "Up") { scrollBy(-96); return true; }
+    if (t === "N" || k === "PageDown") { scrollBy(Math.max(160, flick.height * 0.8)); return true; }
+    if (t === "P" || k === "PageUp") { scrollBy(-Math.max(160, flick.height * 0.8)); return true; }
+    if (t === "Z" || (ev.shift && k === "Z")) {
+      const maxY = Math.max(0, flick.contentHeight - flick.height);
+      flick.contentY = flick.contentY >= maxY - 8 ? 0 : maxY;
+      return true;
+    }
+    if (t === "s" && page.stateOptions.length > 0) { page.statePick = true; return true; }
+    if (t === "r" && page.editable) {
+      const y = reply.mapToItem(column, 0, 0).y;
+      const maxY = Math.max(0, flick.contentHeight - flick.height);
+      flick.contentY = Math.max(0, Math.min(maxY, y - 40));
+      reply.focusField();
+      return true;
+    }
+    if (t === "w" && page.editable) { page.handoff = null; page.picking = "schedule"; scrollToBottom(); return true; }
+    if (t === "W" && page.editable) { page.handoff = null; page.picking = "deadline"; scrollToBottom(); return true; }
+    if (t === "A" && page.assignable && page.assignCandidates.length > 0) { page.picking = ""; page.assignPick = true; page.assignIndex = 0; return true; }
+    if (t === "R" && page.renamable && page.detail) { page.renaming = true; rename.text = page.detail.title; flick.contentY = 0; rename.focusField(); return true; }
+    if (t === "e" && (page.detail?.emacs ?? "") !== "" && page.detail.emacs !== "null") { page.open(page.detail.emacs); return true; }
+    if (t === "t" && (page.detail?.herdr ?? "") !== "" && page.detail.herdr !== "null") { page.open(page.detail.herdr); return true; }
+    if (t === "o") { page.entriesExpanded = !page.entriesExpanded; page.toggleEntries(page.entriesExpanded); return true; }
+    if (t === "u" && !page.busy && page.undo !== null) { page.send(page.undo); return true; }
+    if (t === "c" && page.detail) {
+      const parts = [page.detail.title ?? ""];
+      if ((page.detail.headline ?? "") !== "") parts.push(page.detail.headline);
+      else if (page.asked && (page.asked.text ?? "") !== "") parts.push(page.asked.text);
+      const out = parts.filter(Boolean).join("\n\n");
+      if (out !== "") page.copyText(out);
+      return true;
+    }
+    return false;
   }
   // The dialog entry the page leads with when the task asks: the agent's latest.
   readonly property var asked: (detail?.dialog ?? []).find(e => (detail?.ask ?? "") !== "" && e.key === detail.ask) ?? null
@@ -66,7 +207,9 @@ Item {
   }
 
   Flickable {
+    id: flick
     anchors.fill: parent
+    anchors.bottomMargin: keyPromptBar.visible ? keyPromptBar.height + 6 : 0
     contentHeight: column.implicitHeight + 16
     clip: true
     boundsBehavior: Flickable.StopAtBounds
@@ -139,6 +282,7 @@ Item {
               id: rename
               label: "New title"
               onAccepted: renameButton.clicked()
+              onEscaped: { page.renaming = false; page.restoreFocus(); }
             }
             Row {
               spacing: 8
@@ -149,9 +293,10 @@ Item {
                   const title = rename.text.trim();
                   if (title !== "" && title !== page.detail.title) page.send({ action: "title", title: title });
                   page.renaming = false;
+                  page.restoreFocus();
                 }
               }
-              PressTab { text: "Cancel"; kind: "quiet"; small: true; onClicked: page.renaming = false }
+              PressTab { text: "Cancel"; kind: "quiet"; small: true; onClicked: { page.renaming = false; page.restoreFocus(); } }
             }
           }
           Words {
@@ -235,7 +380,8 @@ Item {
         id: reply
         visible: page.editable
         placeholder: (page.asked !== null ? "Answer in Dialog" : "Reply in Dialog") + " (Ctrl+Enter sends)"
-        onSubmitted: (page.assignable ? resumeButton : replyButton).clicked()
+        onSubmitted: { (page.assignable ? resumeButton : replyButton).clicked(); page.restoreFocus(); }
+        onEscaped: page.restoreFocus()
       }
       Row {
         visible: page.editable
@@ -350,6 +496,7 @@ Item {
               }
             }
             WhenPicker {
+              id: handoffPicker
               visible: page.picking === "handoff"
               width: parent.width
               title: "Start at"
@@ -365,13 +512,7 @@ Item {
               PressTab {
                 text: (page.handoff?.when ?? "") === "" && page.detail?.starts === "now" ? "Hand off now" : "Hand off"
                 kind: "primary"
-                onClicked: {
-                  const c = { action: "assign", agent: page.handoff.agent };
-                  if ((page.handoff.host ?? "") !== "") c.host = page.handoff.host;
-                  if ((page.handoff.when ?? "") !== "") c.when = page.handoff.when;
-                  page.handoff = null;
-                  page.send(c);
-                }
+                onClicked: page.confirmHandoff()
               }
               PressTab { visible: page.picking !== "handoff"; text: (page.handoff?.when ?? "") !== "" ? "Change start" : "Start later…"; onClicked: page.picking = "handoff" }
               PressTab { text: "Cancel"; kind: "quiet"; onClicked: { page.handoff = null; page.picking = ""; } }
@@ -394,6 +535,7 @@ Item {
             Words { width: parent.width; role: "value"; elide: Text.ElideRight; text: page.detail?.hasDeadline ? page.detail.deadlineLabel : "no deadline"; color: page.detail?.hasDeadline ? Theme.surfaceInk : Theme.surfaceMuted }
           }
           WhenPicker {
+            id: datePicker
             visible: page.picking === "schedule" || page.picking === "deadline"
             x: 10
             width: parent.width - 20
@@ -410,6 +552,59 @@ Item {
     }
   }
 
+  // Compact single-key sub-prompt bar for `s` state quick-pick, `A` assign picker, and handoff confirmation.
+  Rectangle {
+    id: keyPromptBar
+    visible: page.statePick || page.assignPick || (page.handoff !== null && page.picking === "")
+    anchors { left: parent.left; right: parent.right; bottom: parent.bottom; rightMargin: 4 }
+    height: promptFlow.implicitHeight + 14
+    radius: 6
+    color: Theme.cardFill
+    border.color: Theme.accent
+    border.width: 1.5
+    Flow {
+      id: promptFlow
+      anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; margins: 8 }
+      spacing: 8
+      Text {
+        visible: page.statePick
+        text: "STATE:"
+        font.family: "monospace"; font.weight: Font.Bold; font.pixelSize: 11
+        color: Theme.accent
+      }
+      Repeater {
+        model: page.statePick ? page.stateOptions : []
+        delegate: Text {
+          required property var modelData
+          text: "[" + modelData.key + "] " + modelData.state
+          font.family: "monospace"; font.weight: Font.Bold; font.pixelSize: 11
+          color: Theme.cardInk
+        }
+      }
+      Text {
+        visible: page.assignPick
+        text: "HAND TO:"
+        font.family: "monospace"; font.weight: Font.Bold; font.pixelSize: 11
+        color: Theme.accent
+      }
+      Repeater {
+        model: page.assignPick ? page.assignCandidates : []
+        delegate: Text {
+          required property var modelData
+          required property int index
+          text: (index < 9 ? "[" + (index + 1) + "] " : "") + modelData.name
+          font.family: "monospace"; font.weight: Font.Bold; font.pixelSize: 11
+          color: index === page.assignIndex ? Theme.accent : Theme.cardInk
+        }
+      }
+      Text {
+        visible: !page.statePick && !page.assignPick && page.handoff !== null
+        text: "[RET] hand off · " + (!(page.handoff?.fixed ?? true) ? "[h/l] host · " : "") + "[w] start time · [Esc] cancel"
+        font.family: "monospace"; font.weight: Font.Bold; font.pixelSize: 11
+        color: Theme.cardInk
+      }
+    }
+  }
   // The back link at the top of the page.
   // None in a sheet (backLabel ""), which closes the page itself.
   component BackLink: PressTab {
@@ -443,6 +638,10 @@ Item {
     property var entry: ({ kind: "", who: "", at: "", text: "", blocks: [] })
     property bool lead: false
     property bool open: lead
+    Connections {
+      target: page
+      function onToggleEntries(expanded) { e.open = e.lead || expanded; }
+    }
     readonly property string kind: entry?.kind ?? ""
     readonly property bool mine: kind === "user"
     readonly property bool narration: kind === "dispatcher"

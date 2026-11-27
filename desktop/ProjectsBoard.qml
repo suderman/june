@@ -3,6 +3,7 @@
 // project. A row opens its task's page, a project its file in Emacs. See "Agents and projects" in docs/interfaces.org.
 import QtQuick
 import "board.mjs" as Board
+import "keys.mjs" as KeyNav
 
 Item {
   id: board
@@ -43,8 +44,23 @@ Item {
 
   // Whether a sheet is open, so Esc has something to put away.
   readonly property bool sheetOpen: detailKey !== ""
+  readonly property string activeSheet: detailKey !== "" ? "task" : ""
   property bool keyboardFocused: false
+  property int cursorIndex: 0
+  readonly property var navItems: KeyNav.projectsItems(board.view, board.mode, board.drillRows)
+  readonly property string activeItemKey: navItems.length > 0 ? navItems[Math.max(0, Math.min(navItems.length - 1, cursorIndex))].key : ""
+  signal copyText(string text)
+  signal restoreFocus()
 
+  onModeChanged: cursorIndex = 0
+  function ensureVisible(item) {
+    if (!item || !column) return;
+    const top = item.mapToItem(column, 0, 0).y;
+    const bottom = top + item.height;
+    const maxY = Math.max(0, flick.contentHeight - flick.height);
+    if (top < flick.contentY + 24) flick.contentY = Math.max(0, top - 24);
+    else if (bottom > flick.contentY + flick.height - 24) flick.contentY = Math.min(maxY, bottom - flick.height + 24);
+  }
   function cycleSection(delta) {
     const sections = ["agenda", "tasks", "projects"];
     const cur = mode === "state" ? "tasks" : mode;
@@ -53,6 +69,7 @@ Item {
     detailKey = "";
     drill = "";
     mode = next;
+    cursorIndex = 0;
     flick.contentY = 0;
   }
   function scrollBy(dy) {
@@ -61,9 +78,45 @@ Item {
   }
   function scrollStep(delta) { scrollBy(delta * 96); }
   function scrollPage(delta) { scrollBy(delta * Math.max(160, flick.height * 0.8)); }
+  function stepRow(delta) {
+    if (navItems.length === 0) { scrollStep(delta); return; }
+    cursorIndex = KeyNav.stepCursor(navItems.length, cursorIndex, delta);
+  }
+  function pageRows(delta) {
+    if (navItems.length === 0) { scrollPage(delta); return; }
+    cursorIndex = KeyNav.stepCursor(navItems.length, cursorIndex, delta * 6);
+  }
   function toggleBottomTop() {
     const maxY = Math.max(0, flick.contentHeight - flick.height);
-    flick.contentY = flick.contentY >= maxY - 8 ? 0 : maxY;
+    if (navItems.length > 0) {
+      const atEnd = cursorIndex >= navItems.length - 1 || flick.contentY >= maxY - 8;
+      cursorIndex = atEnd ? 0 : navItems.length - 1;
+      flick.contentY = atEnd ? 0 : maxY;
+    } else {
+      flick.contentY = flick.contentY >= maxY - 8 ? 0 : maxY;
+    }
+  }
+  function currentItem() {
+    if (navItems.length === 0) return null;
+    return navItems[Math.max(0, Math.min(navItems.length - 1, cursorIndex))];
+  }
+  function activateCurrent() {
+    const it = currentItem();
+    if (!it) return;
+    if (it.kind === "stateHeader") { board.drill = it.state; board.mode = "state"; return; }
+    if (it.kind === "project") { if (it.link !== "") board.open(it.link); return; }
+    if (it.entry) board.show(it.entry);
+  }
+  function foldCurrent() {
+    const it = currentItem();
+    if (board.mode === "tasks" && it && (it.state ?? "") !== "") {
+      board.drill = it.state;
+      board.mode = "state";
+    }
+  }
+  function handleSheetKey(ev) {
+    if (detailKey !== "") return detailPage.handleKey(ev);
+    return false;
   }
 
   // Put away the open task page, if there is one; whether there was.
@@ -100,6 +153,8 @@ Item {
       roster: board.roster
       onBack: board.detailKey = ""
       onOpen: link => board.open(link)
+      onCopyText: text => board.copyText(text)
+      onRestoreFocus: board.restoreFocus()
       notice: board.notice.key === board.shownTask || board.notice.key === (detailPage.detail?.key ?? "") ? board.notice.text : ""
       onEdit: change => board.edit(detailPage.detail?.key ?? board.shownTask, change)
     }
@@ -178,6 +233,8 @@ Item {
         delegate: Column {
           id: section
           required property var modelData
+          required property int index
+          readonly property int sectionIndex: index
           width: column.width
           spacing: 8
           SectionRule { text: section.modelData.title; alert: section.modelData.alert }
@@ -187,9 +244,12 @@ Item {
             Repeater {
               model: section.modelData.rows
               delegate: StubRow {
+                id: agRow
                 required property var modelData
                 required property int index
                 first: index === 0
+                selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "ag:" + section.sectionIndex + ":" + index
+                onSelectedChanged: if (selected) board.ensureVisible(agRow)
                 title: modelData.title; meta: modelData.meta; stamp: modelData.state ?? ""
                 lead: modelData.allDay ? "all day" : (modelData.time ?? ""); leadWidth: 54
                 overdue: modelData.overdue ?? false
@@ -209,14 +269,24 @@ Item {
           required property var modelData
           width: column.width
           spacing: 6
-          SectionRule { text: list.modelData.title + " · " + list.modelData.n; clickable: true; onClicked: { board.drill = list.modelData.state; board.mode = "state"; } }
+          SectionRule {
+            id: stateRule
+            text: list.modelData.title + " · " + list.modelData.n
+            clickable: true
+            selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "sh:" + list.modelData.state
+            onSelectedChanged: if (selected) board.ensureVisible(stateRule)
+            onClicked: { board.drill = list.modelData.state; board.mode = "state"; }
+          }
           Pad {
             Repeater {
               model: list.modelData.rows
               delegate: StubRow {
+                id: tkRow
                 required property var modelData
                 required property int index
                 first: index === 0
+                selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "tk:" + list.modelData.state + ":" + index
+                onSelectedChanged: if (selected) board.ensureVisible(tkRow)
                 title: modelData.title; meta: modelData.meta; overdue: modelData.overdue ?? false
                 onClicked: board.show(modelData)
               }
@@ -247,9 +317,12 @@ Item {
         Repeater {
           model: board.drillRows
           delegate: StubRow {
+            id: drRow
             required property var modelData
             required property int index
             first: index === 0
+            selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "dr:" + index
+            onSelectedChanged: if (selected) board.ensureVisible(drRow)
             title: modelData.title; meta: modelData.meta; overdue: modelData.overdue ?? false
             onClicked: board.show(modelData)
           }
@@ -266,10 +339,17 @@ Item {
             id: project
             required property var modelData
             required property int index
+            readonly property bool selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "pr:" + index
+            onSelectedChanged: if (selected) board.ensureVisible(project)
             width: parent ? parent.width : 0
             height: projectLines.implicitHeight + 16
             Rectangle { visible: project.index > 0; x: 10; width: parent.width - 20; height: 1; color: Theme.rule }
-            Rectangle { anchors.fill: parent; anchors.margins: 2; radius: 3; visible: projectHover.containsMouse; color: Qt.alpha(Theme.surfaceInk, 0.05) }
+            Rectangle {
+              anchors.fill: parent; anchors.margins: 2; radius: 3
+              visible: project.selected || projectHover.containsMouse
+              color: project.selected ? Qt.alpha(Theme.accent, 0.14) : Qt.alpha(Theme.surfaceInk, 0.05)
+            }
+            Rectangle { visible: project.selected; x: 2; y: 4; width: 3; height: parent.height - 8; radius: 1.5; color: Theme.accent }
             Column {
               id: projectLines
               x: 10; y: 8
