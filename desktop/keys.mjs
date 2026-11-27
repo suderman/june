@@ -330,7 +330,7 @@ export function helpSections(surface, column, sheet) {
 					["c", "copy newest reply"],
 					["1–9", "visit working clanker"],
 					["SPC", "leader toggles"],
-					["q", "dismiss mini June"],
+					["q / Esc", "dismiss mini June"],
 				],
 			},
 		];

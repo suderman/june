@@ -125,8 +125,7 @@ PanelWindow {
     if (res.action === "cancelLeader") { leader = false; return; }
     leader = false;
     if (res.action === "enterInsert") { enterInsert(); return; }
-    if (res.action === "quit") { dismissed(); return; }
-    if (res.action === "escape") return;
+    if (res.action === "quit" || res.action === "escape") { dismissed(); return; }
     if (res.action === "expandOverlay") { openStripNormal(); return; }
     if (res.action === "hint") {
       if (cell.item && typeof cell.item.collectHints === "function") {
