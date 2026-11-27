@@ -1,6 +1,7 @@
 // The strip itself: the panels newest at the bottom, with momentum scrolling (scroll.mjs) and paging, staying on the
 // newest panel unless the reader has scrolled away. The desktop client and the windowed app each hold one over the same model.
 import QtQuick
+import QtQuick.Controls
 import "scroll.mjs" as Scroll
 
 ListView {
@@ -118,6 +119,65 @@ ListView {
     landing = panel;
     Qt.callLater(showPanel, panel);
     settleOnPanel.restart();
+  }
+
+  // A thin scrub bar on the right, shown while the pointer is over the strip or the bar is held, to sweep through a long
+  // day quickly (Jon, 2026-11-27). Holding it stops following the newest panel; letting go at the bottom follows again.
+  HoverHandler { id: stripHover }
+  ScrollBar.vertical: ScrollBar {
+    id: scrub
+    policy: ScrollBar.AsNeeded
+    minimumSize: 0.04
+    padding: 2
+    onPressedChanged: {
+      if (pressed) {
+        list.follow = false;
+        list.scrollState = Scroll.rest();
+        glider.running = false;
+        paging.stop();
+      } else {
+        list.follow = list.atYEnd;
+      }
+    }
+    contentItem: Rectangle {
+      implicitWidth: 6
+      radius: Theme.consoleLook ? 0 : 3
+      color: scrub.pressed ? Theme.pageInk : Theme.muted
+      opacity: scrub.pressed ? 0.9 : scrub.hovered ? 0.75 : stripHover.hovered ? 0.45 : 0
+      Behavior on opacity { NumberAnimation { duration: 140 } }
+    }
+    background: null
+  }
+
+  // Back to the newest panel in one click, whenever the strip is scrolled up at all.
+  Rectangle {
+    id: toNewest
+    parent: list
+    z: 20
+    readonly property bool wanted: !list.follow && !list.atYEnd && list.count > 0
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    anchors.rightMargin: 14
+    anchors.bottomMargin: 12
+    width: 36
+    height: 36
+    radius: Theme.consoleLook ? 4 : 18
+    color: Theme.surface
+    border.color: newestHover.hovered ? Theme.pageInk : Theme.rule
+    border.width: 1
+    opacity: wanted ? 1 : 0
+    visible: opacity > 0
+    Behavior on opacity { NumberAnimation { duration: 140 } }
+    Text {
+      anchors.centerIn: parent
+      text: "↓"
+      font.family: Theme.caption
+      font.weight: Font.Bold
+      font.pixelSize: 18
+      color: Theme.pageInk
+    }
+    HoverHandler { id: newestHover; cursorShape: Qt.PointingHandCursor }
+    TapHandler { onTapped: { list.landing = ""; list.landOnNewest(); } }
   }
 
   // A comic panel, or the same exchange as console lines.
