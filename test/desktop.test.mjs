@@ -1700,6 +1700,20 @@ test("board cursor lists, state quick-pick mnemonics, ISO date stepping, and she
 	assert.deepEqual(K.dispatchNormalKey({ text: "o" }, { surface: "window", column: "agents" }), { action: "fold" });
 	assert.equal(K.helpSections("window", "agents", "task")[0].title, "Task docket");
 	assert.equal(K.helpSections("window", "agents", "host")[0].title, "Host page");
+
+	// Continuous horizontal navigation across columns + visual section bars.
+	assert.deepEqual(K.stepHorizontal({ column: "chat", agentSection: "activity", projectSection: "agenda", delta: -1 }), { column: "agents", section: "" });
+	assert.deepEqual(K.stepHorizontal({ column: "agents", agentSection: "activity", projectSection: "agenda", delta: -1 }), { column: "agents", section: "clankers" });
+	assert.deepEqual(K.stepHorizontal({ column: "agents", agentSection: "clankers", projectSection: "agenda", delta: -1 }), { column: "agents", section: "hosts" });
+	assert.deepEqual(K.stepHorizontal({ column: "agents", agentSection: "hosts", projectSection: "agenda", delta: -1 }), { column: "agents", section: "hosts" });
+	assert.deepEqual(K.stepHorizontal({ column: "agents", agentSection: "hosts", projectSection: "agenda", delta: 1 }), { column: "agents", section: "clankers" });
+	assert.deepEqual(K.stepHorizontal({ column: "agents", agentSection: "activity", projectSection: "agenda", delta: 1 }), { column: "chat", section: "" });
+	assert.deepEqual(K.stepHorizontal({ column: "chat", agentSection: "activity", projectSection: "agenda", delta: 1 }), { column: "projects", section: "" });
+	assert.deepEqual(K.stepHorizontal({ column: "projects", agentSection: "activity", projectSection: "agenda", delta: 1 }), { column: "projects", section: "tasks" });
+	assert.deepEqual(K.stepHorizontal({ column: "projects", agentSection: "activity", projectSection: "tasks", delta: 1 }), { column: "projects", section: "projects" });
+	assert.deepEqual(K.stepHorizontal({ column: "projects", agentSection: "activity", projectSection: "projects", delta: 1 }), { column: "projects", section: "projects" });
+	assert.deepEqual(K.stepHorizontal({ column: "projects", agentSection: "activity", projectSection: "state", delta: -1 }), { column: "projects", section: "agenda" });
+	assert.deepEqual(K.stepHorizontal({ column: "projects", agentSection: "activity", projectSection: "agenda", delta: -1 }), { column: "chat", section: "" });
 });
 
 test("Avy/Vimium hint mode labels, prefix matching, and shown/user media extraction (keys.mjs)", async () => {

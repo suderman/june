@@ -158,8 +158,19 @@ FloatingWindow {
       return;
     }
     if (res.action === "moveColumn") {
-      const next = KeyNav.stepColumn(win.activeColumn, res.delta);
-      if (win.layout.columns) win.focusColumn = next; else win.shell.windowTab = next;
+      const ab = activeAgentsBoard();
+      const pb = activeProjectsBoard();
+      const dest = KeyNav.stepHorizontal({
+        column: win.activeColumn,
+        agentSection: ab.mode,
+        projectSection: pb.mode,
+        delta: res.delta,
+      });
+      if (win.layout.columns) win.focusColumn = dest.column; else win.shell.windowTab = dest.column;
+      if (dest.section !== "") {
+        if (dest.column === "agents") ab.setSection(dest.section);
+        else if (dest.column === "projects") pb.setSection(dest.section);
+      }
       return;
     }
     if (res.action === "setColumn") {

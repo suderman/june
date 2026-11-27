@@ -15,6 +15,31 @@ export function stepColumn(current, delta) {
 	return COLUMNS[next];
 }
 
+/**
+ * Continuous horizontal navigation across columns and their visual sub-section bars:
+ *   hosts ↔ clankers ↔ activity ↔ chat ↔ agenda ↔ tasks ↔ projects
+ * Returns `{ column, section }` where `section === ""` means keep the target column's current section.
+ */
+export function stepHorizontal({ column, agentSection, projectSection, delta }) {
+	const d = delta < 0 ? -1 : 1;
+	if (column === "agents") {
+		const i = AGENT_SECTIONS.indexOf(agentSection);
+		const cur = i >= 0 ? i : AGENT_SECTIONS.length - 1;
+		if (d < 0) return { column: "agents", section: AGENT_SECTIONS[Math.max(0, cur - 1)] };
+		if (cur < AGENT_SECTIONS.length - 1) return { column: "agents", section: AGENT_SECTIONS[cur + 1] };
+		return { column: "chat", section: "" };
+	}
+	if (column === "projects") {
+		const norm = projectSection === "state" ? "tasks" : projectSection;
+		const i = PROJECT_SECTIONS.indexOf(norm);
+		const cur = i >= 0 ? i : 0;
+		if (d > 0) return { column: "projects", section: PROJECT_SECTIONS[Math.min(PROJECT_SECTIONS.length - 1, cur + 1)] };
+		if (cur > 0) return { column: "projects", section: PROJECT_SECTIONS[cur - 1] };
+		return { column: "chat", section: "" };
+	}
+	return { column: d < 0 ? "agents" : "projects", section: "" };
+}
+
 /** Cycles a board's sub-sections cleanly with wrap-around for `[` (-1) and `]` (+1). */
 export function cycleSection(sections, current, delta) {
 	if (!Array.isArray(sections) || sections.length === 0) return current;

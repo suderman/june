@@ -61,16 +61,20 @@ Item {
     if (top < flick.contentY + 24) flick.contentY = Math.max(0, top - 24);
     else if (bottom > flick.contentY + flick.height - 24) flick.contentY = Math.min(maxY, bottom - flick.height + 24);
   }
-  function cycleSection(delta) {
-    const sections = ["agenda", "tasks", "projects"];
-    const cur = mode === "state" ? "tasks" : mode;
-    const i = sections.indexOf(cur);
-    const next = sections[((i >= 0 ? i : 0) + delta + sections.length) % sections.length];
+  function setSection(next) {
+    if (!next || (next === mode && drill === "")) return;
     detailKey = "";
     drill = "";
     mode = next;
     cursorIndex = 0;
     flick.contentY = 0;
+  }
+  function cycleSection(delta) {
+    const sections = ["agenda", "tasks", "projects"];
+    const cur = mode === "state" ? "tasks" : mode;
+    const i = sections.indexOf(cur);
+    const next = sections[((i >= 0 ? i : 0) + delta + sections.length) % sections.length];
+    setSection(next);
   }
   function scrollBy(dy) {
     const maxY = Math.max(0, flick.contentHeight - flick.height);
