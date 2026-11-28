@@ -476,17 +476,37 @@ test("june_improve writes the user's words, June's reading, and the transcript c
 	const config = {
 		...testConfig(tmp.dir),
 		org: { root, agendaFiles: join(tmp.dir, "agenda"), people: join(root, "people.org") },
-		dispatch: { hosts: ["kit"], agents: ["pi", "claude"], improve: { file: "june.org", agent: "claude" } },
+		herdr: { host: "lab", hosts: {}, allowPrompt: false },
+		dispatch: { hosts: ["cog", "lab"], host: "cog", agents: ["pi", "claude"], improve: { file: "june.org", agent: "claude" } },
+		soulFile: join(tmp.dir, "SOUL.org"),
 	};
+	const clanker = join(tmp.dir, "clankers", "bolt");
+	await mkdir(clanker, { recursive: true });
+	await writeFile(join(clanker, "CARD.org"), "* Bolt\n:PROPERTIES:\n:HOST: cog\n:HARNESS: claude\n:END:\n");
 	const kicks: string[][] = [];
 	const extension = createDispatchExtension(config, new Org(root), new Herdr(config.herdr, async () => "{}"), "inst", async (args) => {
 		kicks.push([...args]);
 		return "";
 	}, { intervalMs: 40, launchMs: 60_000, maxMs: 3_600_000 });
 	const faux = fauxProvider();
+	const improve = (title: string, assignment: { host?: string; agents?: string[] } = {}) => fauxAssistantMessage([fauxToolCall("june_improve", {
+		title, complaint: "why can't you update me every 5 minutes?", gap: "No timer shorter than the hourly heartbeat.", minutes: 20, ...assignment,
+	})], { stopReason: "toolUse" });
 	faux.setResponses([
-		fauxAssistantMessage([fauxToolCall("june_improve", { title: "Let June give timed updates", complaint: "why can't you update me every 5 minutes?", gap: "No timer shorter than the hourly heartbeat.", minutes: 20 })], { stopReason: "toolUse" }),
+		improve("Let June give timed updates"),
 		fauxAssistantMessage("Queued a fix."),
+		improve("Send a remote follow-up to Bolt", { host: "cog", agents: ["bolt", "pi"] }),
+		fauxAssistantMessage("Queued a follow-up."),
+		improve("Reject an unknown worker", { agents: ["nobody"] }),
+		(ctx) => {
+			assert.match(JSON.stringify(ctx.messages.at(-1)), /nobody is neither a clanker/);
+			return fauxAssistantMessage("No such worker.");
+		},
+		improve("Reject an unknown host", { host: "other" }),
+		(ctx) => {
+			assert.match(JSON.stringify(ctx.messages.at(-1)), /other has no dispatcher she may use/);
+			return fauxAssistantMessage("No such host.");
+		},
 		fauxAssistantMessage("The fix is ready for review."),
 	]);
 	const daemon = await openTestDaemon({ ...tmp, faux, config, extensions: [extension] });
@@ -494,14 +514,23 @@ test("june_improve writes the user's words, June's reading, and the transcript c
 	const before = Date.now();
 	assert.equal((await ask(tmp.paths.socket, "can you get that fixed?")).text, "Queued a fix.");
 	const text = await readFile(file, "utf8");
-	assert.match(text, /^\* AUTO Let June give timed updates\n:PROPERTIES:\n:ID: [0-9a-f-]{36}\n:AGENT: claude\n:HOST: kit\n:JUNE_REQUEST: inst:\d+\n:DIR: \/.+\n:END:\nQueued by June: /m);
-	assert.doesNotMatch(text, /:REVIEW: no/, "review stays on");
+	assert.match(text, /^\* AUTO Let June give timed updates\n:PROPERTIES:\n:ID: [0-9a-f-]{36}\n:AGENT: claude\n:HOST: lab\n:JUNE_REQUEST: inst:\d+\n:DIR: \/.+\n:END:\nQueued by June: /m);
 	assert.match(text, /In their words: «why can't you update me every 5 minutes\?»/);
 	const since = Date.parse(/--since (\S+) --detail/.exec(text)![1]!);
 	assert.ok(Math.abs(since - (before - 20 * min)) < 5000, "the transcript starts where the exchange began");
-	assert.ok(kicks.some((args) => args[0] === "systemctl"), "this host's dispatcher is started");
+	assert.equal(kicks.filter((args) => args[0] === "systemctl").length, 1, "the daemon host's dispatcher is started");
 
-	await replaceFile(file, text.replace("* AUTO Let June", "* EVAL Let June"));
+	assert.equal((await ask(tmp.paths.socket, "give Bolt the follow-up on cog")).text, "Queued a follow-up.");
+	const queued = await readFile(file, "utf8");
+	assert.match(queued, /^\* AUTO Send a remote follow-up to Bolt\n:PROPERTIES:\n:ID: [0-9a-f-]{36}\n:AGENTS: bolt pi\n:HOST: cog\n:JUNE_REQUEST: inst:\d+\n:END:\nQueued by June: /m);
+	assert.equal(queued.match(/The conversation is on lab: read it there with =june transcript/g)?.length, 2, "the transcript stays on the daemon host");
+	assert.doesNotMatch(queued, /:REVIEW: no/, "review stays on");
+	assert.equal((await ask(tmp.paths.socket, "try an unknown worker")).text, "No such worker.");
+	assert.equal((await ask(tmp.paths.socket, "try an unknown host")).text, "No such host.");
+	assert.equal(await readFile(file, "utf8"), queued, "refusals write no task");
+	assert.equal(kicks.filter((args) => args[0] === "systemctl").length, 1, "remote or invalid tasks do not kick the local dispatcher");
+
+	await replaceFile(file, queued.replace("* AUTO Let June", "* EVAL Let June"));
 	await until(async () => (await daemon.root.context(BG)).entries.some((e) => (e.data as { source?: string })?.source === "follow"));
 });
 

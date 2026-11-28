@@ -62,8 +62,8 @@ export type Config = {
 	 * dispatcher writes into an AUTO task's drawer when it lacks them and no tag names one: `host` defaults to the first
 	 * of `hosts`, `agent` to pi. `agents` are the ones June may choose for a task, `agent` alone without it. `settle` is
 	 * how many seconds a heading the user typed must stay unchanged before the dispatcher launches it (120 without it).
-	 * `improve` turns on june_improve: the Org file under the root its tasks go in, and the agent and host that run them
-	 * (`agent` and `host` without them).
+	 * `improve` turns on june_improve: the Org file under the root its tasks go in, with optional defaults for the worker
+	 * and host. Without those defaults it uses `dispatch.agent` and the local `herdr.host`.
 	 */
 	readonly dispatch: {
 		readonly hosts: readonly string[];

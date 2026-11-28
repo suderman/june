@@ -714,9 +714,9 @@ export function createDispatchExtension(
 	const defaultAgent = config.dispatch.agent ?? "pi";
 	const agents = dispatchAgents(config.dispatch);
 	const agentParameter = (description: string) => opt(union(agents.map((agent) => lit(agent)), { description }));
-	const agentsParameter = opt(arr(str(), {
+	const agentsParameter = (fallback = "Omitting both agent and agents gives a task in an owned file to its owners") => opt(arr(str(), {
 		minItems: 1,
-		description: `Preferred way to assign clankers: ordered list of clanker slugs (from your team section / clankers_status) or fallback harness names (${agents.join(", ")}), written as :AGENTS:. The dispatcher picks the first free candidate on launch (unless a later one would lose quota at a reset within hours) and uses the rest for handoff. Use your judgment to pick suitable clankers proactively unless ${user()} names one; set host to match your first-choice clanker's host. Omitting both agent and agents gives a task in an owned file to its owners`,
+		description: `Preferred way to assign clankers: ordered list of clanker slugs (from your team section / clankers_status) or fallback harness names (${agents.join(", ")}), written as :AGENTS:. The dispatcher picks the first free candidate on launch (unless a later one would lose quota at a reset within hours) and uses the rest for handoff. Use your judgment to pick suitable clankers proactively unless ${user()} names one; set host to match your first-choice clanker's host. ${fallback}`,
 	}));
 	// Say what the dispatcher could run but June may not choose, so she gives one accurate answer instead of a workaround.
 	const disabled = disabledAgents(config.dispatch);
@@ -741,7 +741,7 @@ export function createDispatchExtension(
 		return `${JSON.stringify(result, null, 1)}\n${note}`;
 	};
 	const improve = config.dispatch.improve;
-	const improveHost = improve?.host ?? defaultHost;
+	const improveHost = improve?.host ?? config.herdr.host;
 	const improveAgent = improve?.agent ?? defaultAgent;
 	return defineExtension({
 		name: "dispatch",
@@ -771,7 +771,7 @@ export function createDispatchExtension(
 					checklist: arr(str(), { minItems: 1, description: "Steps for the agent, one line each, without dashes or boxes" }),
 					host: str({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` }),
 					agent: agentParameter(`Coding agent the dispatcher starts: ${agents.join(" or ")}; default ${defaultAgent}. Choose one when ${user()} names it. It is written as :AGENT: in the drawer, which the dispatcher reads before any agent tag, so no tag is needed`),
-					agents: agentsParameter,
+					agents: agentsParameter(),
 					dir: opt(str({ description: "Existing working directory override, usually one of the project's local repository links. Omit for one-offs without a checkout: the dispatcher uses the project directory" })),
 review: opt(union([bool(), lit("agent")], { description: `Default true: the worker stops at EVAL for ${user()}'s review, including read-only lookups you will review yourself. "agent" only when ${user()} asks for agent review: when the worker finishes at EVAL, the dispatcher starts an independent agent review of its exact commit, sends in-scope fixes back to the same worker, and brings the task to ${user()} only for named human checks or a decision; it needs a Git repository. Set false only when ${user()} explicitly waives review` })),
 					scheduled: opt(str({ description: `Only when ${user()} wants it to start later: the earliest start, in Calgary time as the dispatcher reads it, as a date (2026-11-07, today, tomorrow, fri, +2d; a weekday name is the next one, never today) and optional time (09:30). Omit to start now. It goes into the heading before the file is saved, so the task cannot launch early; a time already past is refused` })),
@@ -801,7 +801,7 @@ review: opt(union([bool(), lit("agent")], { description: `Default true: the work
 						depends: opt(arr(str(), { description: "Keys of tasks in this plan that must be DONE first, or id:UUID of existing Org tasks" })),
 						host: opt(str({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}; default ${defaultHost}` })),
 						agent: agentParameter(`Coding agent: ${agents.join(" or ")}; default ${defaultAgent}`),
-						agents: agentsParameter,
+						agents: agentsParameter(),
 						dir: opt(str({ description: "Existing working directory, usually one of the project's local repository links; omit to use the project directory" })),
 						review: opt(union([bool(), lit("agent")], { description: `Default true: the worker stops at EVAL for review. "agent" only when ${user()} asks for agent review of this task (see org_queue_task). Set false only when ${user()} explicitly waives review for this task` })),
 					}), { minItems: 1 }),
@@ -833,24 +833,27 @@ review: opt(union([bool(), lit("agent")], { description: `Default true: the work
 			}),
 			...(improve === undefined ? [] : [defineTool({
 				name: "june_improve",
-				description: `When ${user()} says you could not do something they expected, or did it badly, and wants it fixed, or agrees when you offer: queue a task for a coding agent to change your own code, prompt, skills, or tools. It goes in ${improve.file} for ${improveAgent} on ${improveHost}, with ${user()}'s words, your reading of the gap, and the june transcript command for that stretch of conversation, which the agent reads itself. It ends at EVAL for ${user()}'s review, and you follow it as for org_queue_task. Never use it on your own initiative, and not for work on ${user()}'s projects.`,
+				description: `When ${user()} says you could not do something they expected, or did it badly, and wants it fixed, or agrees when you offer: queue a task for a coding agent to change your own code, prompt, skills, or tools. Pick a worker suited to the fix using agents, or honor the worker ${user()} names. The task goes in ${improve.file} with ${user()}'s words, your reading of the gap, and the june transcript command for that stretch of conversation, which the agent reads on ${config.herdr.host}. It ends at EVAL for ${user()}'s review, and you follow it as for org_queue_task. Never use it on your own initiative, and not for work on ${user()}'s projects.${agentNote}`,
 				parameters: obj({
 					title: str({ description: "Concise verb-led title for the fix, without keyword or tags, such as \"Let June give timed updates on a task\"" }),
 					complaint: str({ description: `${User()}'s own words about the gap, copied exactly from their messages` }),
 					gap: str({ description: "One line: what you could not do or did badly, and why, as far as you can tell" }),
 					minutes: opt(num({ description: "How many minutes ago the relevant exchange began, so the agent reads from there; default 30, at most 1440" })),
+					host: opt(str({ description: `Machine whose dispatcher runs it: ${hosts.join(", ")}. Default ${improveHost}; specify a host if your first-choice clanker runs elsewhere` })),
+					agents: agentsParameter(`Omit to use ${improveAgent}.`),
 				}),
 				replay: "safe",
 				execute: async (args, api, context) => {
 					const minutes = args.minutes ?? 30;
 					if (!(minutes >= 1 && minutes <= 1440)) throw new Error("minutes must be from 1 to 1440");
+					const host = args.host ?? improveHost;
 					const request = {
 						file: improve.file,
 						title: args.title,
-						body: improveBody(args.complaint, args.gap, new Date(Date.now() - minutes * 60_000), improveHost),
-						host: improveHost,
-						agent: improveAgent,
-						...(SOURCE.startsWith("/nix/store/") ? {} : { dir: SOURCE }),
+						body: improveBody(args.complaint, args.gap, new Date(Date.now() - minutes * 60_000), config.herdr.host),
+						host,
+						...(args.agents ? { agents: args.agents } : { agent: improveAgent }),
+						...(host === config.herdr.host && !SOURCE.startsWith("/nix/store/") ? { dir: SOURCE } : {}),
 						review: true,
 						key: `${instance}:${api.taskId}`,
 					};
