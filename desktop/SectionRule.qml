@@ -7,7 +7,10 @@ Item {
   property string text: ""
   property bool alert: false
   property bool clickable: false
+  property bool collapsible: false
+  property bool expanded: true
   property bool selected: false
+  readonly property bool interactive: clickable || collapsible
   signal clicked()
   default property alias trailing: trail.data
   width: parent ? parent.width : 0
@@ -26,9 +29,9 @@ Item {
     anchors.leftMargin: rule.selected ? 7 : 0
     anchors.verticalCenter: parent.verticalCenter
     role: "section"
-    text: (Theme.consoleLook ? "── " : "") + rule.text + (rule.clickable ? "  ›" : "")
+    text: (Theme.consoleLook ? "── " : "") + rule.text + (rule.collapsible ? (rule.expanded ? "  ▾" : "  ›") : rule.clickable ? "  ›" : "")
     color: rule.selected || rule.alert ? Theme.accent : Theme.neon ? Theme.muted : Qt.alpha(Theme.pageInk, 0.8)
-    font.underline: rule.clickable && hover.containsMouse
+    font.underline: rule.interactive && hover.containsMouse
   }
   Rectangle {
     anchors.left: title.right
@@ -48,8 +51,8 @@ Item {
   MouseArea {
     id: hover
     anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
-    width: title.width
-    enabled: rule.clickable
+    width: title.implicitWidth + (rule.selected ? 14 : 0)
+    enabled: rule.interactive
     hoverEnabled: true
     cursorShape: Qt.PointingHandCursor
     onClicked: rule.clicked()

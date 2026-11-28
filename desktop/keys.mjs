@@ -163,34 +163,64 @@ export function agentsItems(view, mode, opts) {
 		}
 		return out;
 	}
+	const openMap = o.openSections || {};
+	const isOpen = (sec, def) => (openMap[sec] !== undefined ? Boolean(openMap[sec]) : def);
 	const needs = v.needs || [];
-	for (let i = 0; i < needs.length; i++) {
-		out.push({ kind: "need", group: "needs", key: "need:" + i, task: needs[i].task || "", link: needs[i].link || "" });
+	if (needs.length > 0) {
+		out.push({ kind: "section", group: "needs", section: "needs", key: "sec:needs" });
+		if (isOpen("needs", true)) {
+			for (let i = 0; i < needs.length; i++) {
+				out.push({ kind: "need", group: "needs", section: "needs", key: "need:" + i, task: needs[i].task || "", link: needs[i].link || "" });
+			}
+		}
 	}
 	const working = v.working || [];
-	for (let i = 0; i < working.length; i++) {
-		out.push({ kind: "working", group: "working", key: "work:" + i, task: working[i].task || "", link: working[i].link || "" });
+	if (working.length > 0) {
+		out.push({ kind: "section", group: "working", section: "working", key: "sec:working" });
+		if (isOpen("working", true)) {
+			for (let i = 0; i < working.length; i++) {
+				out.push({ kind: "working", group: "working", section: "working", key: "work:" + i, task: working[i].task || "", link: working[i].link || "" });
+			}
+		}
 	}
 	const queued = v.queued || [];
-	const shownQ = o.queueOpen ? queued : queued.slice(0, 3);
-	for (let i = 0; i < shownQ.length; i++) {
-		out.push({ kind: "queued", group: "queued", key: "q:" + i, task: shownQ[i].task || "", link: shownQ[i].link || "" });
+	if (queued.length > 0) {
+		out.push({ kind: "section", group: "queued", section: "queued", key: "sec:queued" });
+		if (isOpen("queued", true)) {
+			const shownQ = o.queueOpen ? queued : queued.slice(0, 3);
+			for (let i = 0; i < shownQ.length; i++) {
+				out.push({ kind: "queued", group: "queued", section: "queued", key: "q:" + i, task: shownQ[i].task || "", link: shownQ[i].link || "" });
+			}
+			if (queued.length > 3) out.push({ kind: "toggleQueue", group: "queued", section: "queued", key: "toggle:queue" });
+		}
 	}
-	if (queued.length > 3) out.push({ kind: "toggleQueue", group: "queued", key: "toggle:queue" });
 	const reviewing = v.reviewing || [];
-	for (let i = 0; i < reviewing.length; i++) {
-		out.push({ kind: "reviewing", group: "reviewing", key: "rev:" + i, task: reviewing[i].task || "", link: reviewing[i].link || "" });
+	if (reviewing.length > 0) {
+		out.push({ kind: "section", group: "reviewing", section: "reviewing", key: "sec:reviewing" });
+		if (isOpen("reviewing", true)) {
+			for (let i = 0; i < reviewing.length; i++) {
+				out.push({ kind: "reviewing", group: "reviewing", section: "reviewing", key: "rev:" + i, task: reviewing[i].task || "", link: reviewing[i].link || "" });
+			}
+		}
 	}
 	const idle = v.idle || [];
-	if (idle.length > 0) out.push({ kind: "toggleIdle", group: "idle", key: "toggle:idle" });
-	if (o.idleOpen) {
-		for (let i = 0; i < idle.length; i++) {
-			out.push({ kind: "idle", group: "idle", key: "idle:" + i, task: idle[i].task || "", link: idle[i].link || "" });
+	if (idle.length > 0) {
+		out.push({ kind: "section", group: "idle", section: "idle", key: "sec:idle" });
+		const idleShown = openMap.idle !== undefined ? Boolean(openMap.idle) : Boolean(o.idleOpen);
+		if (idleShown) {
+			for (let i = 0; i < idle.length; i++) {
+				out.push({ kind: "idle", group: "idle", section: "idle", key: "idle:" + i, task: idle[i].task || "", link: idle[i].link || "" });
+			}
 		}
 	}
 	const recent = (v.recent || []).slice(0, 6);
-	for (let i = 0; i < recent.length; i++) {
-		out.push({ kind: "recent", group: "recent", key: "rec:" + i, task: recent[i].task || "", link: recent[i].link || "" });
+	if (recent.length > 0) {
+		out.push({ kind: "section", group: "recent", section: "recent", key: "sec:recent" });
+		if (isOpen("recent", true)) {
+			for (let i = 0; i < recent.length; i++) {
+				out.push({ kind: "recent", group: "recent", section: "recent", key: "rec:" + i, task: recent[i].task || "", link: recent[i].link || "" });
+			}
+		}
 	}
 	return out;
 }
@@ -489,7 +519,7 @@ export function helpSections(surface, column, sheet) {
 					["j / k", "move row cursor"],
 					["n / p", "page down / up"],
 					["RET", "open docket / card / host"],
-					["Tab / o", "toggle idle / queue (or link)"],
+					["Tab / o", "collapse / expand section"],
 					["C / S", "new clanker / sort (clankers)"],
 					["t / e", "open Herdr / Emacs"],
 					["q / Bksp", "close sheet"],

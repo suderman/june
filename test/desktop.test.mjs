@@ -1680,8 +1680,22 @@ test("board cursor lists, state quick-pick mnemonics, ISO date stepping, and she
 	assert.deepEqual(K.agentsItems(aView, "hosts", {}).map(x => x.key), ["host:kit", "host:cog"]);
 	assert.deepEqual(K.agentsItems(aView, "clankers", { rosterSort: "leaderboard" }).map(x => x.key), ["clanker:wrench", "clanker:pax"]);
 	const actClosed = K.agentsItems(aView, "activity", { queueOpen: false, idleOpen: false }).map(x => x.key);
-	assert.deepEqual(actClosed, ["need:0", "work:0", "q:0", "q:1", "q:2", "toggle:queue", "rev:0", "toggle:idle", "rec:0"]);
-	const actOpen = K.agentsItems(aView, "activity", { queueOpen: true, idleOpen: true }).map(x => x.key);
+	assert.deepEqual(actClosed, [
+		"sec:needs", "need:0",
+		"sec:working", "work:0",
+		"sec:queued", "q:0", "q:1", "q:2", "toggle:queue",
+		"sec:reviewing", "rev:0",
+		"sec:idle",
+		"sec:recent", "rec:0",
+	]);
+	const actCollapsed = K.agentsItems(aView, "activity", { openSections: { needs: false, working: false, queued: false, reviewing: false, idle: false, recent: false } });
+	assert.deepEqual(actCollapsed.map(x => x.key), ["sec:needs", "sec:working", "sec:queued", "sec:reviewing", "sec:idle", "sec:recent"]);
+	const actItems = K.agentsItems(aView, "activity", { queueOpen: false, openSections: { needs: true, working: true, queued: true, reviewing: true, idle: false, recent: true } });
+	assert.equal(actItems[K.stepGroup(actItems, 0, 1)].key, "sec:working");
+	assert.equal(actItems[K.stepGroup(actItems, 4, 1)].key, "sec:reviewing");
+	assert.equal(actItems[K.stepGroup(actItems, 9, 1)].key, "sec:idle");
+	assert.equal(actItems[K.stepGroup(actItems, 11, 1)].key, "sec:recent");
+	const actOpen = K.agentsItems(aView, "activity", { queueOpen: true, openSections: { idle: true } }).map(x => x.key);
 	assert.ok(actOpen.includes("q:3"));
 	assert.ok(actOpen.includes("idle:0"));
 

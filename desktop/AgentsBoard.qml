@@ -14,8 +14,21 @@ Item {
   // agentsView's shape; empty until the daemon's board arrives.
   property var view: ({ summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], hosts: [], roster: [], rosterLeaderboard: [], rosterHasStats: false, rosterHosts: ["kit", "cog"] })
   property bool loaded: false
-  property bool idleOpen: false
+  property var openSections: ({ needs: true, working: true, queued: true, reviewing: true, idle: false, recent: true })
   property bool queueOpen: false
+  function sectionOpen(name) { return openSections[name] !== undefined ? Boolean(openSections[name]) : name !== "idle"; }
+  function toggleSection(name) {
+    const next = Object.assign({}, openSections);
+    const wasOpen = sectionOpen(name);
+    next[name] = !wasOpen;
+    openSections = next;
+    // When collapsing from a child row, land the cursor cleanly on that section's heading.
+    if (wasOpen) {
+      const items = KeyNav.agentsItems(board.view, board.mode, { queueOpen: board.queueOpen, openSections: next, rosterSort: board.rosterSort });
+      const idx = items.findIndex(x => x.key === "sec:" + name);
+      if (idx >= 0) cursorIndex = idx;
+    }
+  }
   // hosts, clankers (cards and editor), or activity (needs, workers, queued, recent).
   property string mode: "activity"
   // The host whose page is open, or "".
@@ -100,7 +113,7 @@ Item {
   readonly property string activeSheet: detailKey !== "" ? "task" : (rosterSlug !== "" || rosterNew) ? (clankerDeploying ? "deploy" : "roster") : hostKey !== "" ? (deployingHarness !== "" ? "deploy" : "host") : ""
   property bool keyboardFocused: false
   property int cursorIndex: 0
-  readonly property var navItems: KeyNav.agentsItems(board.view, board.mode, { queueOpen: board.queueOpen, idleOpen: board.idleOpen, rosterSort: board.rosterSort })
+  readonly property var navItems: KeyNav.agentsItems(board.view, board.mode, { queueOpen: board.queueOpen, openSections: board.openSections, rosterSort: board.rosterSort })
   readonly property string activeItemKey: navItems.length > 0 ? navItems[Math.max(0, Math.min(navItems.length - 1, cursorIndex))].key : ""
   signal copyText(string text)
   signal restoreFocus()
@@ -164,16 +177,16 @@ Item {
     if (!it) return;
     if (it.kind === "host") { board.hostKey = it.host; return; }
     if (it.kind === "clanker") { board.rosterNew = false; board.rosterSlug = it.slug; return; }
+    if (it.kind === "section") { board.toggleSection(it.section); return; }
     if (it.kind === "toggleQueue") { board.queueOpen = !board.queueOpen; return; }
-    if (it.kind === "toggleIdle") { board.idleOpen = !board.idleOpen; return; }
     if (it.kind === "need") { board.show(it.task, ""); return; }
     board.show(it.task, it.link);
   }
   function foldCurrent() {
     const it = currentItem();
-    if (it && it.kind === "need" && it.link !== "") { board.open(it.link); return; }
-    if (it && (it.kind === "queued" || it.kind === "toggleQueue") && (board.view.queued ?? []).length > 3) { board.queueOpen = !board.queueOpen; return; }
-    if ((board.view.idle ?? []).length > 0) board.idleOpen = !board.idleOpen;
+    if (!it) return;
+    if (it.kind === "toggleQueue") { board.queueOpen = !board.queueOpen; return; }
+    if (it.section) { board.toggleSection(it.section); return; }
   }
   function handleSheetKey(ev) {
     if (detailKey !== "") return detailPage.handleKey(ev);
@@ -448,9 +461,19 @@ Item {
         width: parent.width
         spacing: 10
 
-        SectionRule { text: "NEEDS YOU · " + board.view.needs.length; alert: true; visible: board.view.needs.length > 0 }
+        SectionRule {
+          id: needsRule
+          text: "NEEDS YOU · " + board.view.needs.length
+          alert: true
+          collapsible: true
+          expanded: board.sectionOpen("needs")
+          visible: board.view.needs.length > 0
+          selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "sec:needs"
+          onSelectedChanged: if (selected) board.ensureVisible(needsRule)
+          onClicked: board.toggleSection("needs")
+        }
         Repeater {
-          model: board.view.needs
+          model: board.sectionOpen("needs") ? board.view.needs : []
           delegate: NeedDocket {
             id: needCard
             required property var modelData
@@ -470,11 +493,20 @@ Item {
           color: Theme.muted
         }
 
-        SectionRule { text: "WORKING · " + board.view.working.length; visible: board.view.working.length > 0 }
-        Pad {
+        SectionRule {
+          id: workingRule
+          text: "WORKING · " + board.view.working.length
+          collapsible: true
+          expanded: board.sectionOpen("working")
           visible: board.view.working.length > 0
+          selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "sec:working"
+          onSelectedChanged: if (selected) board.ensureVisible(workingRule)
+          onClicked: board.toggleSection("working")
+        }
+        Pad {
+          visible: board.sectionOpen("working") && board.view.working.length > 0
           Repeater {
-            model: board.view.working
+            model: board.sectionOpen("working") ? board.view.working : []
             delegate: StubRow {
               id: workRow
               required property var modelData
@@ -489,10 +521,19 @@ Item {
           }
         }
 
-        SectionRule { text: "QUEUED · " + board.view.queued.length; visible: board.view.queued.length > 0 }
+        SectionRule {
+          id: queuedRule
+          text: "QUEUED · " + board.view.queued.length
+          collapsible: true
+          expanded: board.sectionOpen("queued")
+          visible: board.view.queued.length > 0
+          selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "sec:queued"
+          onSelectedChanged: if (selected) board.ensureVisible(queuedRule)
+          onClicked: board.toggleSection("queued")
+        }
         // Slips on a spike: the queue's next few on top, the rest stacked under them.
         Item {
-          visible: board.view.queued.length > 0
+          visible: board.sectionOpen("queued") && board.view.queued.length > 0
           width: parent.width
           height: queuePad.height + (spike.visible ? 6 : 0)
           Item {
@@ -505,7 +546,7 @@ Item {
             id: queuePad
             width: parent.width - (spike.visible ? 6 : 0)
             Repeater {
-              model: board.queueOpen ? board.view.queued : board.view.queued.slice(0, 3)
+              model: board.sectionOpen("queued") ? (board.queueOpen ? board.view.queued : board.view.queued.slice(0, 3)) : []
               delegate: StubRow {
                 id: qRow
                 required property var modelData
@@ -522,7 +563,7 @@ Item {
         }
         Item {
           id: queueToggleRow
-          visible: board.view.queued.length > 3
+          visible: board.sectionOpen("queued") && board.view.queued.length > 3
           readonly property bool selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "toggle:queue"
           onSelectedChanged: if (selected) board.ensureVisible(queueToggleRow)
           width: parent.width
@@ -541,11 +582,20 @@ Item {
           }
         }
 
-        SectionRule { text: "IN AGENT REVIEW · " + board.view.reviewing.length; visible: board.view.reviewing.length > 0 }
-        Pad {
+        SectionRule {
+          id: reviewingRule
+          text: "IN AGENT REVIEW · " + board.view.reviewing.length
+          collapsible: true
+          expanded: board.sectionOpen("reviewing")
           visible: board.view.reviewing.length > 0
+          selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "sec:reviewing"
+          onSelectedChanged: if (selected) board.ensureVisible(reviewingRule)
+          onClicked: board.toggleSection("reviewing")
+        }
+        Pad {
+          visible: board.sectionOpen("reviewing") && board.view.reviewing.length > 0
           Repeater {
-            model: board.view.reviewing
+            model: board.sectionOpen("reviewing") ? board.view.reviewing : []
             delegate: StubRow {
               id: revRow
               required property var modelData
@@ -562,16 +612,17 @@ Item {
         SectionRule {
           id: idleRule
           visible: board.view.idle.length > 0
-          selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "toggle:idle"
+          collapsible: true
+          expanded: board.sectionOpen("idle")
+          selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "sec:idle"
           onSelectedChanged: if (selected) board.ensureVisible(idleRule)
-          text: "IDLE · " + board.view.idle.length + (board.idleOpen ? "  ▾" : "")
-          clickable: true
-          onClicked: board.idleOpen = !board.idleOpen
+          text: "IDLE · " + board.view.idle.length
+          onClicked: board.toggleSection("idle")
         }
         Pad {
-          visible: board.idleOpen && board.view.idle.length > 0
+          visible: board.sectionOpen("idle") && board.view.idle.length > 0
           Repeater {
-            model: board.idleOpen ? board.view.idle : []
+            model: board.sectionOpen("idle") ? board.view.idle : []
             delegate: StubRow {
               id: idleRow
               required property var modelData
@@ -586,11 +637,20 @@ Item {
           }
         }
 
-        SectionRule { text: "REPORTED TODAY · " + board.view.recent.length; visible: board.view.recent.length > 0 }
-        Pad {
+        SectionRule {
+          id: recentRule
+          text: "REPORTED TODAY · " + board.view.recent.length
+          collapsible: true
+          expanded: board.sectionOpen("recent")
           visible: board.view.recent.length > 0
+          selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "sec:recent"
+          onSelectedChanged: if (selected) board.ensureVisible(recentRule)
+          onClicked: board.toggleSection("recent")
+        }
+        Pad {
+          visible: board.sectionOpen("recent") && board.view.recent.length > 0
           Repeater {
-            model: board.view.recent.slice(0, 6)
+            model: board.sectionOpen("recent") ? board.view.recent.slice(0, 6) : []
             delegate: StubRow {
               id: recRow
               required property var modelData
