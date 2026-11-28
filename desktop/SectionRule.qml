@@ -15,7 +15,7 @@ Item {
 
   Rectangle {
     visible: rule.selected
-    x: -4; y: 1; width: title.implicitWidth + 10; height: parent.height - 2; radius: 4
+    x: 0; y: 1; width: title.implicitWidth + 14; height: parent.height - 2; radius: 4
     color: Qt.alpha(Theme.accent, 0.18)
     border.color: Theme.accent
     border.width: 1
@@ -23,6 +23,7 @@ Item {
   Words {
     id: title
     anchors.left: parent.left
+    anchors.leftMargin: rule.selected ? 7 : 0
     anchors.verticalCenter: parent.verticalCenter
     role: "section"
     text: (Theme.consoleLook ? "── " : "") + rule.text + (rule.clickable ? "  ›" : "")
@@ -31,7 +32,7 @@ Item {
   }
   Rectangle {
     anchors.left: title.right
-    anchors.leftMargin: 8
+    anchors.leftMargin: rule.selected ? 14 : 8
     anchors.right: trail.left
     anchors.rightMargin: trail.implicitWidth > 0 ? 8 : 0
     anchors.verticalCenter: parent.verticalCenter
