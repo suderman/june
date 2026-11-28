@@ -271,6 +271,11 @@ export type StopTaskRequest = {
 
 type RescheduleRequest = StopTaskRequest & { scheduled: string };
 
+export type ReassignRequest = StopTaskRequest & {
+	/** Clanker slugs or harness names, in order, written as :AGENTS: in place of :AGENT:. */
+	agents: readonly string[];
+};
+
 export type RemoveDependenciesRequest = {
 	file: string;
 	heading: string;
@@ -587,6 +592,41 @@ export class Dispatch {
 		}
 	}
 
+	/** Change who runs an unclaimed AUTO task, keeping its state, schedule, prerequisites and follow. */
+	async reassign(request: ReassignRequest) {
+		const { file, heading, revision, key, note, agents } = request;
+		if (!/^id:[0-9A-Za-z][0-9A-Za-z-]{0,63}$/.test(heading)) throw new Error("heading must be id:UUID of the queued task");
+		if (!/^[0-9a-f]{64}$/.test(revision)) throw new Error("revision must be the SHA256 returned by org_read_task");
+		if (!note.trim() || /[\n\r]/.test(note)) throw new Error(`note must be one non-empty line recording ${user()}'s instruction`);
+		const roster = rosterCards(this.#config);
+		checkAgents(agents, dispatchAgents(this.#config.dispatch), roster);
+		const path = await this.#target(file);
+		const task = await this.#org.read(file, heading);
+		const host = /^[ \t]*:HOST:[ \t]+(\S+)/m.exec(task.text.split(/\n\*+ /, 1)[0]!)?.[1] ?? this.#config.dispatch.host ?? this.#config.dispatch.hosts[0];
+		if (host !== this.#config.herdr.host) throw new Error(`The task runs on ${host}; only that host's June or ${user()} can reassign it`);
+		// The dispatcher picks only clankers on its own host, so a card elsewhere would leave the task waiting.
+		for (const name of agents) {
+			const card = findCard(roster, name);
+			if (card?.host && card.host !== host) throw new Error(`${card.name} works on ${card.host}, not ${host}; this keeps the task on ${host}`);
+		}
+		const out = await this.#run([
+			"org-edit", "reassign-task", path, heading, JSON.stringify({ revision, request: key, note: note.trim(), agents }),
+		], 120_000).catch((error: Error) => {
+			if (/usage: org-edit todo\|schedule\|deadline/.test(error.message))
+				throw new Error(`The installed org-edit cannot reassign AUTO tasks and wrote nothing; ${user()} needs to update June's Nix input and activate it. Do not park, resume, duplicate or edit the task as a workaround.`);
+			throw error;
+		});
+		try {
+			const result = JSON.parse(out.trim().split("\n").at(-1)!) as { id: string; state: string | null; agents: string[]; scheduled: string | null; written: boolean };
+			if (heading !== `id:${result.id}` || typeof result.written !== "boolean" ||
+				(result.written && (result.state !== "AUTO" || result.agents.join(" ") !== agents.join(" "))))
+				throw new Error("unexpected reassign result");
+			return { ...result, file: this.#org.rel(path) };
+		} catch (cause) {
+			throw new Error("org-edit did not confirm the reassignment; re-read the whole task and Dialog before retrying", { cause });
+		}
+	}
+
 	/** Remove selected edges without launching work. A queued task is paused for a separate, reviewed resume. */
 	async removeDependencies(request: RemoveDependenciesRequest, herdr: Herdr) {
 		if (!/^id:[0-9A-Za-z][0-9A-Za-z-]{0,63}$/.test(request.heading)) throw new Error("heading must be id:UUID of the existing task");
@@ -878,7 +918,7 @@ review: opt(union([bool(), lit("agent")], { description: `Default true: the work
 			}),
 			defineTool({
 				name: "org_resume_task",
-				description: `When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and code deployment off, and select one host. For explicitly approved live content work, pass liveContent with the exact target, allowed actions and limits, plus the fresh revision from org_read_task. This permits only those content operations, never a theme/plugin deploy, database push, system activation or install. The note must record the user's approval and identify any older production/manual-only gate it supersedes. Existing approval is retained only for unchanged ID, title, directory and Scope, and needs a fresh revision on each new resume; omit liveContent to retain it or pass none to revoke it. Re-read all scope, checklist and Dialog changes before retaining approval; material changes elsewhere need renewed confirmation. Changed scope or malformed approval is refused, never broadened silently. Do not ask again for approval already given for unchanged work. No approval is inferred from AUTO, a HOLD question, or a review verdict. Refuse an active agent or an unconfirmed stop. To switch a running task, use org_stop_task first, never raw terminal keys or manual state edits; re-read after its confirmed stop, then pass the requested agent here. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work. To resume it later rather than now, first set its SCHEDULED with org_set_date while it is still TODO, EVAL, or HOLD, then resume: the dispatcher holds it until then. To correct a task that is already AUTO, use org_reschedule_task instead of resuming it. When ${user()} wants it to wait for other tasks, pass their IDs in depends: org-edit adds them to :DEPENDS: in the same save that sets AUTO, after refusing missing or duplicate IDs, the task itself, and cycles, so it never launches early. The dispatcher then launches it only once every prerequisite is DONE, never at EVAL, and waiting costs nothing. Edges the task already has are kept. To remove selected edges, first use org_remove_dependencies, which pauses AUTO at HOLD; re-read scope and Dialog and resolve any prose gates before resuming.${agentNote}`,
+				description: `When the user explicitly asks to start or resume an existing task, change TODO, EVAL, or HOLD to AUTO through org-edit. Read the task and Dialog first. Preserve its ID, scope, history, directory, and schedule; record the user's instruction in Dialog, set review on and code deployment off, and select one host. For explicitly approved live content work, pass liveContent with the exact target, allowed actions and limits, plus the fresh revision from org_read_task. This permits only those content operations, never a theme/plugin deploy, database push, system activation or install. The note must record the user's approval and identify any older production/manual-only gate it supersedes. Existing approval is retained only for unchanged ID, title, directory and Scope, and needs a fresh revision on each new resume; omit liveContent to retain it or pass none to revoke it. Re-read all scope, checklist and Dialog changes before retaining approval; material changes elsewhere need renewed confirmation. Changed scope or malformed approval is refused, never broadened silently. Do not ask again for approval already given for unchanged work. No approval is inferred from AUTO, a HOLD question, or a review verdict. Refuse an active agent or an unconfirmed stop. To switch a running task, use org_stop_task first, never raw terminal keys or manual state edits; re-read after its confirmed stop, then pass the requested agent here. Start this host's dispatcher and follow the task, including another run after EVAL. Never create a duplicate task to resume work. To resume it later rather than now, first set its SCHEDULED with org_set_date while it is still TODO, EVAL, or HOLD, then resume: the dispatcher holds it until then. To correct a task that is already AUTO, use org_reschedule_task for its start or org_reassign_task for its worker instead of resuming it. When ${user()} wants it to wait for other tasks, pass their IDs in depends: org-edit adds them to :DEPENDS: in the same save that sets AUTO, after refusing missing or duplicate IDs, the task itself, and cycles, so it never launches early. The dispatcher then launches it only once every prerequisite is DONE, never at EVAL, and waiting costs nothing. Edges the task already has are kept. To remove selected edges, first use org_remove_dependencies, which pauses AUTO at HOLD; re-read scope and Dialog and resolve any prose gates before resuming.${agentNote}`,
 				parameters: obj({
 					file: str({ description: "Org agenda file under ~/org" }),
 					heading: str({ description: "Exact title or id:UUID, as org_read_task accepts" }),
@@ -929,6 +969,25 @@ review: opt(union([bool(), lit("agent")], { description: `Default true: the work
 					const note = result.written
 						? "Report the corrected Calgary start. The task stays queued; the timer launches it when eligible, including any prerequisites. No new worker was started."
 						: "This correction was already recorded. Nothing was written on replay; re-read the task before reporting its current state or schedule.";
+					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\n${note}` }] };
+				},
+			}),
+			defineTool({
+				name: "org_reassign_task",
+				description: `When ${user()} asks to change who runs a queued AUTO task that has not started, read the whole task and Dialog with org_read_task and use this tool on its dispatcher host. It writes the new clankers or harness as :AGENTS: and appends the change to Dialog in one locked save, keeping AUTO, the same ID, SCHEDULED, prerequisites, review and deploy settings, history and any existing follow. It starts no worker: the dispatcher launches the task when it is due and eligible, as before. Refuses claimed tasks, active or uncertain workers, remote tasks or sessions, review loops, stale reads, and clankers on another host. If busy or changed, re-read before retrying. For a running task use org_stop_task, then org_resume_task with the agent; for TODO, EVAL or HOLD use org_resume_task. Do not park, resume, duplicate, or directly edit a queued task to change its worker.${agentNote}`,
+				parameters: obj({
+					file: str({ description: "Org agenda file under ~/org" }),
+					heading: str({ description: "id:UUID of the queued AUTO task, from org_read_task" }),
+					revision: str({ description: "Exact revision returned by org_read_task" }),
+					agents: arr(str(), { minItems: 1, description: `Ordered clanker slugs (from your team section / clankers_status) or harness names (${agents.join(", ")}) to replace the task's agent; each must work on the task's host. Use the one ${user()} names` }),
+					note: str({ description: `One line recording ${user()}'s instruction, naming ${user()} rather than writing you` }),
+				}),
+				replay: "safe",
+				execute: async (args, api) => {
+					const result = await dispatch.reassign({ ...args, key: `${instance}:${api.taskId}` });
+					const note = result.written
+						? "Report who now runs it and that its schedule is unchanged. The task stays queued; no worker was started, and your existing follow continues."
+						: "This reassignment was already recorded. Nothing was written on replay; re-read the task before reporting who runs it.";
 					return { output: [{ type: "text", text: `${JSON.stringify(result, null, 1)}\n${note}` }] };
 				},
 			}),

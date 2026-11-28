@@ -51,6 +51,7 @@ June reads Org with ripgrep and writes only through =org-edit= and the dispatche
 - find or create a project file under =~/org/work= (=org_projects=, =org_create_project=);
 - queue a new AUTO task, now or for a later start written with it, and nudge the dispatcher (=org_queue_task=, =org_dispatch_now=), then follow it and report its transitions;
 - correct a queued AUTO task's start when the user asks, without parking or requeueing it (=org_reschedule_task=);
+- change who runs a queued AUTO task that has not started when the user asks, keeping its schedule and state (=org_reassign_task=);
 - queue a plan of connected tasks, each waiting on its prerequisites through =:DEPENDS:=, and follow every one (=org_queue_plan=);
 - park a running local dispatcher task at HOLD when the user asks, then interrupt its exact worker, or kill that one terminal when it does not stop, before any separately authorized reassignment (=org_stop_task=);
 - resume an existing TODO, EVAL, or HOLD task when the user asks, optionally adding prerequisites it waits on; a stopped run gets a fresh worker, and unconfirmed stops cannot resume (=org_resume_task=);

@@ -9,6 +9,7 @@
 ;;   org-edit-date      WHEN
 ;;   org-edit-update-task FILE HEADING JSON
 ;;   org-edit-reschedule-task FILE id:UUID WHEN JSON
+;;   org-edit-reassign-task FILE id:UUID JSON (revision, request, note, agents)
 ;;   org-edit-reply     FILE HEADING JSON (who, text): the user's Dialog reply
 ;;
 ;; Task content updates use a read revision and preserve old wording in Dialog.
@@ -722,6 +723,109 @@ The wrapper holds the launch lock. Replays find the receipt even after a rename.
                         (state . ,(org-get-todo-state)) (written . ,(if replay :false t)))))) t)
     (princ (concat (org-dispatch--json result) "\n"))))
 
+(defun org-edit--check-queued (file revision verb)
+  "Refuse unless the entry at point is a queued, unclaimed AUTO task this host may edit.
+FILE is its true name and REVISION the caller's read. VERB names the edit in errors.
+The wrapper holds the dispatcher lock, so no local run can claim it meanwhile."
+  (let ((id (org-entry-get nil "ID"))
+        (state (org-get-todo-state))
+        (text (org-dispatch--subtree-text)))
+    (unless (equal state "AUTO") (error "only an AUTO task can take %s-task; found %s" verb state))
+    (unless (equal revision (secure-hash 'sha256 (encode-coding-string
+                            (replace-regexp-in-string "\n+\\'" "" text) 'utf-8)))
+      (error "task revision changed; read the whole task and Dialog again"))
+    (let* ((agenda (mapcar #'file-truename (org-dispatch--agenda-files t)))
+           (node (gethash id (org-dispatch--dependency-index (org-dispatch--lookup-files agenda))))
+           (task (org-dispatch--task)))
+      (unless (and (member file agenda) (equal file (plist-get node :file)))
+        (error "%s-task needs a unique task ID in a live agenda file" verb))
+      (unless (and (equal (plist-get task :host) org-dispatch-host) (not (plist-get task :problem)))
+        (error "%s on the task's dispatcher host with valid dispatch settings" verb))
+      (when (plist-get task :review-loop) (error "task has a review contract; ask Jon before you %s it" verb)))
+    (org-dispatch--check-stopped-task)
+    (let ((state-file (org-dispatch--state-file id)))
+      (when (file-exists-p state-file)
+        (let ((receipt (with-temp-buffer (insert-file-contents state-file)
+                                         (json-parse-buffer :object-type 'plist))))
+          (unless (member (plist-get receipt :status) '("finished" "stopped"))
+            (error "task has active or uncertain dispatcher state; inspect before you %s it" verb)))))
+    ;; Check historical links too. A remote session cannot be checked under this host's lock.
+    (let ((offset 0))
+      (while (string-match "herdr:\\([^/ \n]+\\)/\\([^: \n]+\\):\\([0-9a-f-]\\{36\\}\\)" text offset)
+        (let ((host (match-string 1 text)) (agent (match-string 2 text)) (session (match-string 3 text)))
+          (setq offset (match-end 0))
+          (unless (equal host org-dispatch-host) (error "remote session needs its host's coordinator"))
+          (org-dispatch--confirm-settled (list :session session :agent agent)))))))
+
+(defun org-edit--live-file (file)
+  "FILE's true name, refusing files June must not edit and unresolved conflict copies."
+  (setq file (file-truename file))
+  (when (or (member (file-name-nondirectory file) '("asana.org" "inbox.org" "archive.org"))
+            (string-match-p "/archive/\\|\\.sync-conflict-" file)
+            (not (file-in-directory-p file (org-dispatch--org-root))))
+    (error "not a writable live Org file: %s" file))
+  (when (directory-files (file-name-directory file) nil
+                         (concat "\\`" (regexp-quote (file-name-base file)) "\\.sync-conflict-.*\\.org\\'"))
+    (error "resolve the file's Syncthing conflict copies first"))
+  file)
+
+(defun org-edit-reassign-task ()
+  "Change who runs a queued AUTO task: JSON with revision, request, note and agents.
+Writes AGENTS in place of AGENT under the dispatcher lock, appends the change to
+Dialog, and keeps state, ID, planning, prerequisites, permissions and history."
+  (pcase-let* ((`(,file ,heading ,json) (org-edit--args 3 "reassign-task FILE id:UUID JSON"))
+               (spec (json-parse-string json :object-type 'plist :array-type 'list))
+               (revision (plist-get spec :revision)) (request (plist-get spec :request))
+               (note (plist-get spec :note)) (agents (plist-get spec :agents))
+               (create-lockfiles t) (file-precious-flag t) (result nil))
+    (cl-loop for (key _value) on spec by #'cddr do
+             (unless (memq key '(:revision :request :note :agents))
+               (error "unknown reassign-task field %s" key)))
+    (unless (and (string-match-p "\\`id:[[:alnum:]][[:alnum:]-]*\\'" heading)
+                 (stringp revision) (string-match-p "\\`[0-9a-f]\\{64\\}\\'" revision)
+                 (stringp request) (not (string-empty-p request))
+                 (stringp note) (not (string-empty-p (string-trim note)))
+                 (not (string-match-p "[\n\r]" (concat request note)))
+                 (consp agents) (seq-every-p #'stringp agents))
+      (error "reassign-task needs id:UUID, revision SHA256, request, one-line note and agents"))
+    (unless (equal agents (delete-dups (copy-sequence agents)))
+      (error "agents names each agent once"))
+    (let ((known (append org-dispatch-launchable (org-edit--clanker-slugs))))
+      (dolist (agent agents)
+        (unless (member agent known) (error "unknown agent %s" agent))))
+    (setq file (org-edit--live-file file))
+    (org-edit--at
+     file heading
+     (lambda ()
+       (let ((old (or (org-entry-get nil "AGENTS") (org-entry-get nil "AGENT")))
+             (replay (equal request (org-entry-get nil "JUNE_REASSIGN"))))
+         (unless replay
+           (org-edit--check-queued file revision "reassign")
+           ;; AGENTS wins over AGENT in the dispatcher; drop AGENT so the drawer
+           ;; says one thing, as a newly queued roster task does.
+           (org-entry-put nil "AGENTS" (string-join agents " "))
+           (org-entry-delete nil "AGENT")
+           ;; The dispatcher resumes the newest linked session of the chosen harness.
+           ;; A new worker starts fresh rather than reopening another clanker's session.
+           (let ((section (org-dispatch--section-bounds "Sessions")) sessions)
+             (when section
+               (save-excursion
+                 (goto-char (car section))
+                 (while (re-search-forward "herdr:[^/ \n]+/[^: \n]+:\\([0-9a-f-]\\{36\\}\\)" (cdr section) t)
+                   (push (match-string 1) sessions))))
+             (when sessions
+               (org-entry-put nil "JUNE_STOP_SESSIONS"
+                 (string-join (delete-dups (append (split-string (or (org-entry-get nil "JUNE_STOP_SESSIONS") ""))
+                                                   (nreverse sessions))) " "))))
+           (org-entry-put nil "JUNE_REASSIGN" request)
+           (org-dispatch--append "Dialog" (org-dispatch--entry "June"
+             (format "Reassigned from %s to %s. %s" (or old "the default agent") (string-join agents " ") note))))
+         (setq result `((id . ,(org-entry-get nil "ID")) (state . ,(or (org-get-todo-state) :null))
+                        (agents . ,(vconcat (split-string (or (org-entry-get nil "AGENTS") ""))))
+                        (scheduled . ,(or (org-entry-get nil "SCHEDULED") :null))
+                        (written . ,(if replay :false t)))))) t)
+    (princ (concat (org-dispatch--json result) "\n"))))
+
 (defun org-edit-reschedule-task ()
   "Correct an AUTO start with a revision, request and note in JSON.
 With who, the user's own name, the Dialog entry is theirs rather than June's.
@@ -744,51 +848,19 @@ The wrapper holds the dispatcher lock through validation and the atomic save."
       (when (org-edit--worker-p) (error "who is the user's, not a coding worker's")))
     (unless (string-match-p (concat "\\`" date "\\(?: " clock "\\)?\\'") when)
       (error "use a future Calgary date as YYYY-MM-DD or YYYY-MM-DD HH:MM"))
-    (setq file (file-truename file))
-    (when (or (member (file-name-nondirectory file) '("asana.org" "inbox.org" "archive.org"))
-              (string-match-p "/archive/\\|\\.sync-conflict-" file)
-              (not (file-in-directory-p file (org-dispatch--org-root))))
-      (error "not a writable live Org file: %s" file))
-    (when (directory-files (file-name-directory file) nil
-                           (concat "\\`" (regexp-quote (file-name-base file)) "\\.sync-conflict-.*\\.org\\'"))
-      (error "resolve the file's Syncthing conflict copies first"))
+    (setq file (org-edit--live-file file))
     (org-edit--at
      file heading
      (lambda ()
        (let* ((id (org-entry-get nil "ID"))
               (state (org-get-todo-state))
               (old (org-entry-get nil "SCHEDULED"))
-              (text (org-dispatch--subtree-text))
               (replay (equal request (org-entry-get nil "JUNE_RESCHEDULE"))))
          (unless replay
-           (unless (equal state "AUTO") (error "only an AUTO task can be rescheduled here; found %s" state))
-           (unless (equal revision (secure-hash 'sha256 (encode-coding-string
-                                   (replace-regexp-in-string "\n+\\'" "" text) 'utf-8)))
-             (error "task revision changed; read the whole task and Dialog again"))
-           (let* ((agenda (mapcar #'file-truename (org-dispatch--agenda-files t)))
-                  (node (gethash id (org-dispatch--dependency-index (org-dispatch--lookup-files agenda))))
-                  (task (org-dispatch--task)))
-             (unless (and (member file agenda) (equal file (plist-get node :file)))
-               (error "reschedule-task needs a unique task ID in a live agenda file"))
-             (unless (and (equal (plist-get task :host) org-dispatch-host) (not (plist-get task :problem)))
-               (error "reschedule on the task's dispatcher host with valid dispatch settings"))
-             (when (plist-get task :review-loop) (error "task has a review contract; ask Jon before rescheduling")))
-           (when (and old (not (string-match-p (concat "\\`<" date "\\(?: [[:alpha:]]+\\)?\\(?: " clock "\\)?>\\'") old)))
+           (when (and (equal state "AUTO") old
+                      (not (string-match-p (concat "\\`<" date "\\(?: [[:alpha:]]+\\)?\\(?: " clock "\\)?>\\'") old)))
              (error "existing SCHEDULED is not a plain start; keep its range or cookies for Jon to edit"))
-           (org-dispatch--check-stopped-task)
-           (let ((state-file (org-dispatch--state-file id)))
-             (when (file-exists-p state-file)
-               (let ((receipt (with-temp-buffer (insert-file-contents state-file)
-                                                (json-parse-buffer :object-type 'plist))))
-                 (unless (member (plist-get receipt :status) '("finished" "stopped"))
-                   (error "task has active or uncertain dispatcher state; inspect before rescheduling")))))
-           ;; Check historical links too. A remote session cannot be checked under this host's lock.
-           (let ((offset 0))
-             (while (string-match "herdr:\\([^/ \n]+\\)/\\([^: \n]+\\):\\([0-9a-f-]\\{36\\}\\)" text offset)
-               (let ((host (match-string 1 text)) (agent (match-string 2 text)) (session (match-string 3 text)))
-                 (setq offset (match-end 0))
-                 (unless (equal host org-dispatch-host) (error "remote session needs its host's coordinator"))
-                 (org-dispatch--confirm-settled (list :session session :agent agent)))))
+           (org-edit--check-queued file revision "reschedule")
            (let* ((stamp (org-edit--stamp when)) (time (org-time-string-to-time stamp)))
              (unless (equal when (format-time-string (if (string-search " " when) "%F %R" "%F") time))
                (error "%s does not occur in Calgary time" when))

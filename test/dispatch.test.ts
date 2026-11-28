@@ -986,6 +986,157 @@ esac
 	assert.equal(await readFile(f.project, "utf8"), claimed);
 });
 
+const reassign = { file: request.file, heading: "id:resume123", agents: ["pax"], note: "Jon asked for pax, the named clanker, instead of pi.", key: "inst:reassign1" };
+
+/** A removal fixture with clanker cards both org-edit and June read: pax on kit, cid on cog. */
+async function reassignFixture() {
+	const f = await removalFixture();
+	const data = join(f.root, "june-data");
+	for (const [slug, host] of [["pax", "kit"], ["cid", "cog"]] as const) {
+		await mkdir(join(data, "clankers", slug), { recursive: true });
+		await writeFile(join(data, "clankers", slug, "CARD.org"), `* ${slug}\n:PROPERTIES:\n:HOST: ${host}\n:HARNESS: claude\n:END:\nWrites code.\n`);
+	}
+	// Stands in for June's pick: the dispatcher asks it which roster agent takes the task.
+	const picks = join(f.dir, "picks.log");
+	await writeFile(join(f.bin, "june"), `#!/bin/sh
+[ "$1 $2" = "agents pick" ] || exit 0
+printf '%s\\n' "$*" >> ${picks}
+echo '{"chosen":"pax","why":"named","card":{"slug":"pax","name":"pax","host":"kit","harness":"claude"}}'
+`, { mode: 0o755 });
+	const options = { ...f.options, env: { ...f.options.env, JUNE_DATA_DIR: data } };
+	const edit = fileURLToPath(new URL("../org/edit/org-edit", import.meta.url));
+	const run = (argv: readonly string[]) => execFileSync("bash", [edit, ...argv.slice(1)], options);
+	const config = { ...f.config, soulFile: join(data, "SOUL.org"), herdr: { ...f.config.herdr, host: "kit" } };
+	const dispatch = new Dispatch(new Org(f.root), config, async (argv) => run(argv));
+	const move = async (extra: Partial<Parameters<Dispatch["reassign"]>[0]> = {}) => dispatch.reassign({ ...reassign, revision: await f.revision(), ...extra });
+	return { ...f, options, run, config, dispatch, move, picks };
+}
+
+test("reassign passes the read revision and agents to org-edit and refuses other hosts before writing", async (t) => {
+	const f = await fixture();
+	t.after(f.cleanup);
+	const data = join(f.root, "june-data");
+	for (const [slug, host] of [["pax", "kit"], ["cid", "cog"]] as const) {
+		await mkdir(join(data, "clankers", slug), { recursive: true });
+		await writeFile(join(data, "clankers", slug, "CARD.org"), `* ${slug}\n:PROPERTIES:\n:HOST: ${host}\n:HARNESS: claude\n:END:\n`);
+	}
+	await writeFile(f.project, removableTask());
+	const calls: string[][] = [];
+	const config = { ...f.config, soulFile: join(data, "SOUL.org"), herdr: { ...f.config.herdr, host: "kit" } };
+	const dispatch = new Dispatch(new Org(f.root), config, async (argv) => {
+		calls.push([...argv]);
+		return JSON.stringify({ id: "resume123", state: "AUTO", agents: ["pax"], scheduled: "<2026-11-10 Tue>", written: true });
+	});
+	const revision = (await new Org(f.root).read(request.file, "id:resume123")).revision;
+	const result = await dispatch.reassign({ ...reassign, revision });
+	assert.deepEqual(result, { id: "resume123", state: "AUTO", agents: ["pax"], scheduled: "<2026-11-10 Tue>", written: true, file: request.file });
+	assert.deepEqual(calls, [["org-edit", "reassign-task", f.project, "id:resume123", JSON.stringify({ revision, request: reassign.key, note: reassign.note, agents: ["pax"] })]]);
+	await assert.rejects(dispatch.reassign({ ...reassign, revision, agents: ["cid"] }), /cid works on cog, not kit/);
+	await assert.rejects(dispatch.reassign({ ...reassign, revision, agents: ["nobody"] }), /nobody is neither a clanker/);
+	await assert.rejects(dispatch.reassign({ ...reassign, revision, agents: [] }), /at least one/);
+	await writeFile(f.project, removableTask().replace(":HOST: kit", ":HOST: cog"));
+	await assert.rejects(dispatch.reassign({ ...reassign, revision }), /runs on cog; only that host's June/);
+	assert.equal(calls.length, 1, "refusals never reach org-edit");
+	const old = new Dispatch(new Org(f.root), config, async () => { throw new Error("usage: org-edit todo|schedule|deadline"); });
+	await writeFile(f.project, removableTask());
+	await assert.rejects(old.reassign({ ...reassign, revision }), /installed org-edit cannot reassign AUTO tasks and wrote nothing/);
+});
+
+test("reassign changes only who runs a queued task: a future one cannot launch early, duplicate, or be undone by replay", { skip: !hasEmacs }, async (t) => {
+	const f = await reassignFixture();
+	t.after(f.cleanup);
+	const original = scheduledTask();
+	await writeFile(f.project, original);
+	const result = await f.move();
+	assert.deepEqual(result, { file: request.file, id: "resume123", state: "AUTO", agents: ["pax"], scheduled: "<2036-11-20 Thu 23:38>", written: true });
+	const changed = await readFile(f.project, "utf8");
+	assert.match(changed, /^- June .*Reassigned from pi to pax\. Jon asked for pax, the named clanker, instead of pi\.$/m);
+	// Everything else, including SCHEDULED, DEADLINE, DEPENDS, RETRY, REVIEW, DEPLOY, Sessions and Dialog, is byte for byte the same.
+	assert.equal(changed.replace(/^:AGENTS: +pax\n/m, "").replace(/^:JUNE_REASSIGN:.*\n/m, "").replace(/^:JUNE_STOP_SESSIONS: +01a1176c-3aa6-7717-a4c6-eaa0aa0a0833\n/m, "").replace(/^- June .*\n/m, ""), original.replace(":AGENT: pi\n", ""));
+	assert.match(changed, /^:AGENTS: +pax$/m);
+	assert.doesNotMatch(changed, /^:AGENT:/m, "AGENTS stands in for AGENT, as on a newly queued roster task");
+	assert.equal(changed.match(/^:ID: +resume123$/gm)?.length, 1, "the same task, not a copy");
+	assert.equal(changed.match(/^\* AUTO /gm)?.length, 1);
+
+	const dispatcher = (when: string, form: string) => execFileSync("emacs", ["-Q", "--batch", "-l", f.options.env.ORG_DISPATCH_EL, "--eval", `(let* ((now (org-time-string-to-time ${JSON.stringify(when)}))
+		(real-float-time (symbol-function 'float-time)))
+		(cl-letf (((symbol-function 'float-time) (lambda (&optional time) (funcall real-float-time (or time now)))))
+			(prin1 ${form})))`], f.options).trim();
+	const tasks = `(org-dispatch--tasks (list ${JSON.stringify(f.project)}))`;
+	const eligible = (when: string) => dispatcher(when, `(mapcar (lambda (task) (or (plist-get task :dependency) (plist-get task :id))) (org-dispatch--eligible ${tasks} nil t))`);
+	assert.equal(dispatcher("<2036-11-20 Thu 23:38>", `(mapcar (lambda (task) (plist-get task :roster)) ${tasks})`), '(("pax"))', "the dispatcher picks among the new agents");
+	assert.equal(dispatcher("<2036-11-20 Thu 23:38>", `(mapcar (lambda (task) (org-dispatch--session-for (plist-get task :sessions) "pi" (plist-get task :stopped))) ${tasks})`), "(nil)",
+		"the new worker starts fresh rather than reopening the earlier session, which stays linked");
+	assert.match(changed, /^- \[\[herdr:kit\/pi:01a1176c-3aa6-7717-a4c6-eaa0aa0a0833@w9:p1\]\[old run\]\]$/m);
+	assert.match(eligible("<2036-11-20 Thu 23:38>"), /waiting on/, "prerequisites still hold it");
+	await writeFile(f.project, changed.replaceAll("* TODO ", "* DONE "));
+	assert.equal(eligible("<2036-11-20 Thu 23:37>"), "nil", "it cannot launch before its start");
+	assert.equal(eligible("<2036-11-20 Thu 23:38>"), '("resume123")', "and launches once, at the unchanged start");
+	assert.match(await readFile(f.picks, "utf8"), /^agents pick --json --host kit --harnesses \S+ pax$/m, "for pax, not pi");
+	await writeFile(f.project, changed);
+
+	await assert.rejects(f.move({ key: "inst:reassign2", revision: "0".repeat(64) }), /revision changed/);
+	assert.equal(await readFile(f.project, "utf8"), changed);
+	const progressed = changed.replace("* AUTO ", "* PROG ");
+	await writeFile(f.project, progressed);
+	assert.equal((await f.dispatch.reassign({ ...reassign, revision: "f".repeat(64) })).written, false, "a replay after the claim writes nothing");
+	assert.equal(await readFile(f.project, "utf8"), progressed);
+
+	await writeFile(f.project, changed);
+	const back = await f.move({ key: "inst:reassign3", agents: ["claude", "pi"] });
+	assert.deepEqual(back.agents, ["claude", "pi"]);
+	assert.match(await readFile(f.project, "utf8"), /Reassigned from pax to claude pi\./);
+});
+
+test("reassign refuses claimed, active, remote, stale and unknown cases without writing", { skip: !hasEmacs }, async (t) => {
+	const f = await reassignFixture();
+	t.after(f.cleanup);
+	const original = scheduledTask();
+	for (const [text, error, extra] of [
+		[original.replace("* AUTO ", "* PROG "), /only an AUTO task/, {}],
+		[original.replace("* AUTO ", "* HOLD "), /only an AUTO task/, {}],
+		[original.replace("* AUTO ", "* EVAL "), /only an AUTO task/, {}],
+		[original.replace(":ID: keep", ":ID: resume123"), /unique task ID/, {}],
+		[original.replace(":RETRY: 2", ":JUNE_STOP_REQUEST: pending"), /stop is pending/, {}],
+		[original.replace(":RETRY: 2", ":REVIEW_PARENT: a-parent"), /review contract/, {}],
+		[original.replace("herdr:kit/", "herdr:cog/"), /remote session/, {}],
+		[original, /unknown agent nobody/, { agents: ["nobody"] }],
+		[original, /each agent once/, { agents: ["pax", "pax"] }],
+	] as const) {
+		await writeFile(f.project, text);
+		const revision = await f.revision();
+		assert.throws(() => f.run(["org-edit", "reassign-task", f.project, "id:resume123", JSON.stringify({ revision, request: "inst:bad", note: reassign.note, agents: reassign.agents, ...extra })]), error);
+		assert.equal(await readFile(f.project, "utf8"), text);
+	}
+	await writeFile(f.project, original.replace(":HOST: kit", ":HOST: cog"));
+	assert.throws(() => f.run(["org-edit", "reassign-task", f.project, "id:resume123", JSON.stringify({ revision: "a".repeat(64), request: "r", note: "n", agents: ["pi"] })]), /revision changed|dispatcher host/);
+	await writeFile(f.project, original);
+	const revision = await f.revision();
+	const edit = fileURLToPath(new URL("../org/edit/org-edit", import.meta.url));
+	const locked = new Dispatch(new Org(f.root), f.config, async (argv) => execFileSync("flock", ["-n", join(f.runtime, "org-dispatch.lock"), "bash", edit, ...argv.slice(1)], f.options));
+	await assert.rejects(locked.reassign({ ...reassign, agents: ["pi"], revision }), /dispatcher or task edit busy/);
+	const stateDir = join(f.dir, "state/org-dispatch");
+	await mkdir(stateDir, { recursive: true });
+	for (const status of ["starting", "running", "launch-uncertain", "stopping"]) {
+		await writeFile(join(stateDir, "resume123.json"), JSON.stringify({ status }));
+		await assert.rejects(f.move(), /active or uncertain dispatcher state|launch ownership is uncertain|stop is pending/);
+	}
+	await writeFile(join(stateDir, "resume123.json"), JSON.stringify({ status: "finished" }));
+	await writeFile(join(f.bin, "hc"), `#!/bin/sh
+case "$1" in
+  ls) echo '{"terminals":[{"address":"t1","state":"live"}]}' ;;
+  get) echo '{"address":"t1","state":"live","status":{"state":"working"},"labels":{"org.agent":"pi","org.session":"01a1176c-3aa6-7717-a4c6-eaa0aa0a0833"}}' ;;
+  *) exit 66 ;;
+esac
+`, { mode: 0o755 });
+	await assert.rejects(f.move(), /worker t1 is working/);
+	assert.equal(await readFile(f.project, "utf8"), original);
+	const claimed = original.replace("* AUTO ", "* PROG ");
+	const race = new Dispatch(new Org(f.root), f.config, async (argv) => { await writeFile(f.project, claimed); return f.run(argv); });
+	await assert.rejects(race.reassign({ ...reassign, agents: ["pi"], revision }), /only an AUTO task|revision changed/);
+	assert.equal(await readFile(f.project, "utf8"), claimed);
+});
+
 test("real org-edit pauses AUTO in one save, preserves other edges and history, and replays without touching later work", { skip: !hasEmacs }, async (t) => {
 	const f = await removalFixture();
 	t.after(f.cleanup);
