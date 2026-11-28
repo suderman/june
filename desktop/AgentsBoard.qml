@@ -266,6 +266,7 @@ Item {
       anchors.fill: parent
       backLabel: ""
       id: detailPage
+      keyboardFocused: board.keyboardFocused && board.detailKey !== ""
       detail: board.shownTask !== "" ? Board.taskPage(board.tasks, board.shownTask, board.pending, board.user, board.today, Date.now()) : null
       today: board.today
       undo: board.notice.key === board.shownTask || board.notice.key === (detailPage.detail?.key ?? "") ? (board.notice.undo ?? null) : null

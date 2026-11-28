@@ -127,7 +127,7 @@ Item {
 
     Rectangle {
       anchors.centerIn: parent
-      width: Math.min(parent.width - 24, 560)
+      width: Math.min(parent.width - 24, 640)
       height: Math.min(parent.height - 24, helpBody.implicitHeight + 28)
       radius: 10
       color: Theme.cardFill
@@ -172,6 +172,7 @@ Item {
             delegate: Column {
               required property var modelData
               readonly property int sectionCount: Math.max(1, KeyNav.helpSections(overlay.surface, overlay.column, overlay.sheet).length)
+              readonly property int keyColWidth: sectionCount === 1 ? 132 : 112
               width: (helpBody.width - (sectionCount > 1 ? 16 : 0)) / sectionCount
               spacing: 5
               Text {
@@ -184,15 +185,16 @@ Item {
                 delegate: Row {
                   required property var modelData
                   width: parent.width
-                  spacing: 6
+                  spacing: 8
                   Text {
-                    width: 78
+                    width: keyColWidth
+                    elide: Text.ElideRight
                     text: modelData[0]
                     font.family: "monospace"; font.weight: Font.Bold; font.pixelSize: 12
                     color: Theme.cardBusy
                   }
                   Text {
-                    width: parent.width - 84
+                    width: parent.width - keyColWidth - 8
                     text: modelData[1]
                     elide: Text.ElideRight
                     font.family: Theme.caption; font.pixelSize: 12

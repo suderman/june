@@ -7,6 +7,7 @@ Item {
   property string label: ""
   property bool last: false
   property bool clickable: false
+  property bool selected: false
   property real labelWidth: 74
   signal clicked()
   default property alias content: box.data
@@ -15,8 +16,13 @@ Item {
 
   Rectangle {
     anchors.fill: parent
-    visible: row.clickable && hover.containsMouse
-    color: Qt.alpha(Theme.surfaceInk, 0.05)
+    visible: row.selected || (row.clickable && hover.containsMouse)
+    color: row.selected ? Qt.alpha(Theme.accent, 0.14) : Qt.alpha(Theme.surfaceInk, 0.05)
+  }
+  Rectangle {
+    visible: row.selected
+    x: 2; y: 4; width: 3; height: parent.height - 8; radius: 1.5
+    color: Theme.accent
   }
   Words {
     x: 10

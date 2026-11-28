@@ -337,6 +337,25 @@ export function initialNormalMode({ tab, narrow, past }) {
 	return false;
 }
 
+/** Flat ordered list of keyboard-selectable items inside a TaskDetail docket. */
+export function taskDetailItems(opts) {
+	const o = opts || {};
+	const out = [];
+	if (o.renamable) out.push({ kind: "title", group: "slip", key: "title" });
+	if (o.hasAsked) out.push({ kind: "asked", group: "asks", key: "asked", entryKey: o.askedKey || "asked" });
+	const n = Math.max(0, Number(o.earlierCount) || 0);
+	const keys = Array.isArray(o.earlierKeys) ? o.earlierKeys : [];
+	for (let i = 0; i < n; i++) {
+		out.push({ kind: "entry", group: "dialog", key: "entry:" + i, index: i, entryKey: keys[i] || ("entry:" + i) });
+	}
+	if (o.editable) out.push({ kind: "reply", group: "reply", key: "reply" });
+	if ((Number(o.stateCount) || 0) > 0) out.push({ kind: "moveTo", group: "change", key: "moveTo" });
+	if (o.assignable && (Number(o.assignCount) || 0) > 0) out.push({ kind: "handTo", group: "change", key: "handTo" });
+	if (o.editable) out.push({ kind: "schedule", group: "change", key: "schedule" });
+	if (o.editable) out.push({ kind: "deadline", group: "change", key: "deadline" });
+	return out;
+}
+
 /** Extracts plain copyable text from a composed panel object (prefers an artifact's literal body, then June's beats). */
 export function panelCopyText(panel) {
 	if (!panel || !Array.isArray(panel.elements)) return "";
@@ -500,19 +519,27 @@ export function helpSections(surface, column, sheet) {
 	if (sheet === "task") {
 		return [
 			{
-				title: "Task docket",
+				title: "Task docket · Navigate",
 				rows: [
-					["s", "change state (t/a/e/h/d)"],
+					["j / k", "move item cursor"],
+					["h / l", "pick state / clanker pill"],
+					["[ / ]", "prev / next section"],
+					["n / p / Z", "scroll / bottom ↔ top"],
+					["RET", "activate / fold entry"],
+					["Tab / o", "cycle / toggle Dialog"],
+					["q / Esc / Bksp", "close docket"],
+				],
+			},
+			{
+				title: "Quick actions",
+				rows: [
+					["s", "state quick-pick"],
 					["r", "reply in Dialog"],
 					["w / W", "schedule / deadline"],
 					["A", "assign / hand off"],
 					["R", "rename title"],
-					["Tab / o", "fold / unfold Dialog"],
-					["e / t", "open in Emacs / Herdr"],
-					["u / c", "undo edit / copy"],
-					["[ / ]", "prev / next section"],
-					["j k / n p / Z", "scroll / page / bottom ↔ top"],
-					["q / Esc / Bksp", "close docket"],
+					["e / t", "open Emacs / Herdr"],
+					["u / c", "undo / copy focused"],
 				],
 			},
 		];

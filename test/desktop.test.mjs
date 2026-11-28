@@ -1717,8 +1717,13 @@ test("board cursor lists, state quick-pick mnemonics, ISO date stepping, and she
 	assert.deepEqual(K.dispatchNormalKey({ text: "j" }, { surface: "window", previewOpen: true }), { action: "previewScroll", delta: 1 });
 	assert.deepEqual(K.dispatchNormalKey({ text: "Z", shift: true }, { surface: "window", previewOpen: true }), { action: "previewBottomTop" });
 	assert.deepEqual(K.dispatchNormalKey({ text: "o" }, { surface: "window", column: "agents" }), { action: "fold" });
-	assert.equal(K.helpSections("window", "agents", "task")[0].title, "Task docket");
+	assert.equal(K.helpSections("window", "agents", "task")[0].title, "Task docket · Navigate");
 	assert.equal(K.helpSections("window", "agents", "host")[0].title, "Host page");
+	const td = K.taskDetailItems({ renamable: true, hasAsked: false, earlierCount: 3, editable: true, stateCount: 4, assignable: true, assignCount: 5 });
+	assert.deepEqual(td.map(x => x.key), ["title", "entry:0", "entry:1", "entry:2", "reply", "moveTo", "handTo", "schedule", "deadline"]);
+	assert.equal(td[K.stepGroup(td, 0, 1)].key, "entry:0");
+	assert.equal(td[K.stepGroup(td, 1, 1)].key, "reply");
+	assert.equal(td[K.stepGroup(td, 4, 1)].key, "moveTo");
 
 	// Continuous horizontal navigation across columns + visual section bars.
 	assert.deepEqual(K.stepHorizontal({ column: "chat", agentSection: "activity", projectSection: "agenda", delta: -1 }), { column: "agents", section: "" });

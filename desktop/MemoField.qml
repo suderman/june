@@ -8,6 +8,7 @@ Item {
   property alias text: area.text
   property string placeholder: ""
   property int lines: 3
+  property bool selected: false
   signal submitted()
   signal escaped()
   function focusField() { area.forceActiveFocus(); }
@@ -15,7 +16,7 @@ Item {
   width: parent ? parent.width : 0
   implicitHeight: Math.max(lines * Theme.type.body.line + 20, area.implicitHeight + 4)
 
-  Inked { anchors.fill: parent; radius: 4; lift: Theme.consoleLook ? 0 : 2; lineWidth: Theme.neon ? 1.5 : 1.75 }
+  Inked { anchors.fill: parent; radius: 4; lift: Theme.consoleLook ? 0 : 2; edge: memo.selected ? Theme.accent : Theme.edge; lineWidth: memo.selected ? 2.5 : (Theme.neon ? 1.5 : 1.75) }
   Canvas {
     id: ruling
     anchors.fill: parent
