@@ -150,10 +150,7 @@ FloatingWindow {
     if (res.action === "escape" || res.action === "quit") {
       if (preview.open) { preview.close(); return; }
       if (win.activeColumn === "agents" && activeAgentsBoard().dismissSheet()) return;
-      if (win.activeColumn === "projects") {
-        if (activeProjectsBoard().dismissSheet()) return;
-        if (activeProjectsBoard().mode === "state") { activeProjectsBoard().mode = "tasks"; activeProjectsBoard().drill = ""; return; }
-      }
+      if (win.activeColumn === "projects" && activeProjectsBoard().dismissSheet()) return;
       win.dismissHoveredSheet();
       return;
     }

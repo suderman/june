@@ -1699,16 +1699,17 @@ test("board cursor lists, state quick-pick mnemonics, ISO date stepping, and she
 	assert.ok(actOpen.includes("q:3"));
 	assert.ok(actOpen.includes("idle:0"));
 
-	// Projects board flattening across agenda, tasks, state drill, and projects.
+	// Projects board flattening across collapsible agenda days, collapsible inline tasks, and projects.
 	const pView = {
-		sections: [{ rows: [{ title: "A" }] }, { rows: [{ title: "B" }, { title: "C" }] }],
-		lists: [{ state: "EVAL", more: 2, rows: [{ title: "E1" }] }],
+		sections: [{ id: "overdue", rows: [{ title: "A" }] }, { id: "today", rows: [{ title: "B" }, { title: "C" }] }],
+		lists: [{ state: "PROG", rows: [{ title: "P1" }] }, { state: "EVAL", rows: [{ title: "E1" }] }],
 		projects: [{ link: "org://p1" }],
 	};
-	assert.deepEqual(K.projectsItems(pView, "agenda", []).map(x => x.key), ["ag:0:0", "ag:1:0", "ag:1:1"]);
-	assert.deepEqual(K.projectsItems(pView, "tasks", []).map(x => x.key), ["sh:EVAL", "tk:EVAL:0"]);
-	assert.deepEqual(K.projectsItems(pView, "state", [{ title: "D1" }]).map(x => x.key), ["dr:0"]);
-	assert.deepEqual(K.projectsItems(pView, "projects", []).map(x => x.key), ["pr:0"]);
+	assert.deepEqual(K.projectsItems(pView, "agenda", {}).map(x => x.key), ["agsec:0", "ag:0:0", "agsec:1", "ag:1:0", "ag:1:1"]);
+	assert.deepEqual(K.projectsItems(pView, "agenda", { openAgenda: { overdue: false } }).map(x => x.key), ["agsec:0", "agsec:1", "ag:1:0", "ag:1:1"]);
+	assert.deepEqual(K.projectsItems(pView, "tasks", {}).map(x => x.key), ["stsec:PROG", "tk:PROG:0", "stsec:EVAL"]);
+	assert.deepEqual(K.projectsItems(pView, "tasks", { openStates: { PROG: true, EVAL: true }, stateRows: { EVAL: [{ title: "E1" }, { title: "E2" }] } }).map(x => x.key), ["stsec:PROG", "tk:PROG:0", "stsec:EVAL", "tk:EVAL:0", "tk:EVAL:1"]);
+	assert.deepEqual(K.projectsItems(pView, "projects", {}).map(x => x.key), ["pr:0"]);
 
 	// Preview scrolling & fold dispatch + sheet-specific help sections.
 	assert.deepEqual(K.dispatchNormalKey({ text: "j" }, { surface: "window", previewOpen: true }), { action: "previewScroll", delta: 1 });
@@ -1731,21 +1732,21 @@ test("board cursor lists, state quick-pick mnemonics, ISO date stepping, and she
 	assert.deepEqual(K.stepHorizontal({ column: "projects", agentSection: "activity", projectSection: "state", delta: -1 }), { column: "projects", section: "agenda" });
 	assert.deepEqual(K.stepHorizontal({ column: "projects", agentSection: "activity", projectSection: "agenda", delta: -1 }), { column: "chat", section: "" });
 
-	// Org-style sibling heading jump ([ / ]) across agenda days, agent activity sections, and scrollable sheets.
+	// Org-style sibling heading jump ([ / ]) across collapsible agenda days, agent activity sections, and scrollable sheets.
 	const ag = K.projectsItems({
 		sections: [
-			{ rows: [{ title: "O1" }, { title: "O2" }] },
-			{ rows: [{ title: "T1" }, { title: "T2" }, { title: "T3" }] },
-			{ rows: [{ title: "M1" }] },
+			{ id: "overdue", rows: [{ title: "O1" }, { title: "O2" }] },
+			{ id: "today", rows: [{ title: "T1" }, { title: "T2" }, { title: "T3" }] },
+			{ id: "tomorrow", rows: [{ title: "M1" }] },
 		],
-	}, "agenda", []);
-	assert.equal(K.stepGroup(ag, 0, 1), 2, "Overdue -> Today");
-	assert.equal(K.stepGroup(ag, 1, 1), 2, "mid-Overdue -> Today");
-	assert.equal(K.stepGroup(ag, 2, 1), 5, "Today -> Tomorrow");
-	assert.equal(K.stepGroup(ag, 5, 1), 5, "clamps at last section");
-	assert.equal(K.stepGroup(ag, 5, -1), 2, "Tomorrow -> Today");
-	assert.equal(K.stepGroup(ag, 4, -1), 0, "mid-Today -> Overdue");
-	assert.equal(K.stepGroup(ag, 0, -1), 0, "clamps at first section");
+	}, "agenda", {});
+	assert.equal(ag[K.stepGroup(ag, 0, 1)].key, "agsec:1", "Overdue heading -> Today heading");
+	assert.equal(ag[K.stepGroup(ag, 1, 1)].key, "agsec:1", "mid-Overdue -> Today heading");
+	assert.equal(ag[K.stepGroup(ag, 3, 1)].key, "agsec:2", "Today heading -> Tomorrow heading");
+	assert.equal(ag[K.stepGroup(ag, 7, 1)].key, "agsec:2", "clamps at last section heading");
+	assert.equal(ag[K.stepGroup(ag, 7, -1)].key, "agsec:1", "Tomorrow heading -> Today heading");
+	assert.equal(ag[K.stepGroup(ag, 5, -1)].key, "agsec:0", "mid-Today -> Overdue heading");
+	assert.equal(ag[K.stepGroup(ag, 0, -1)].key, "agsec:0", "clamps at first section heading");
 	const flat = [{ group: "clankers" }, { group: "clankers" }, { group: "clankers" }];
 	assert.equal(K.stepGroup(flat, 1, 1), 1, "flat list without sections is a no-op");
 	assert.equal(K.stepGroup(flat, 1, -1), 1, "flat list without sections is a no-op");

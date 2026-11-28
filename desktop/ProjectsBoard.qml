@@ -14,9 +14,10 @@ Item {
   property bool loaded: false
   property string host: ""
   property real generatedAt: 0
-  // agenda, projects, or a state's tasks.
+  // agenda, tasks, or projects.
   property string mode: "agenda"
-  property string drill: ""
+  property var openAgenda: ({})
+  property var openStates: ({ PROG: true, EVAL: false, HOLD: false, TODO: false })
   property string user: ""
   property string detailKey: ""
   // The page the task sheet shows: the open one, else the last, while the sheet slides away.
@@ -47,12 +48,50 @@ Item {
   readonly property string activeSheet: detailKey !== "" ? "task" : ""
   property bool keyboardFocused: false
   property int cursorIndex: 0
-  readonly property var navItems: KeyNav.projectsItems(board.view, board.mode, board.drillRows)
+  function agendaOpen(secId) { return openAgenda[secId] !== undefined ? Boolean(openAgenda[secId]) : true; }
+  function stateOpen(st) { return openStates[st] !== undefined ? Boolean(openStates[st]) : st === "PROG"; }
+  readonly property var expandedStateRows: {
+    const out = {};
+    if (board.mode !== "tasks" || !board.agenda) return out;
+    const lists = board.view.lists ?? [];
+    for (let i = 0; i < lists.length; i++) {
+      const st = lists[i].state;
+      if (stateOpen(st)) out[st] = Board.stateRows(board.agenda, st, board.pending, board.user);
+    }
+    return out;
+  }
+  readonly property var navItems: KeyNav.projectsItems(board.view, board.mode, {
+    openAgenda: board.openAgenda,
+    openStates: board.openStates,
+    stateRows: board.expandedStateRows,
+  })
   readonly property string activeItemKey: navItems.length > 0 ? navItems[Math.max(0, Math.min(navItems.length - 1, cursorIndex))].key : ""
   signal copyText(string text)
   signal restoreFocus()
 
   onModeChanged: cursorIndex = 0
+  function toggleAgendaSection(secId) {
+    const next = Object.assign({}, openAgenda);
+    const wasOpen = agendaOpen(secId);
+    next[secId] = !wasOpen;
+    openAgenda = next;
+    if (wasOpen) {
+      const items = KeyNav.projectsItems(board.view, board.mode, { openAgenda: next, openStates: board.openStates, stateRows: board.expandedStateRows });
+      const idx = items.findIndex(x => x.kind === "agendaSection" && x.sectionId === secId);
+      if (idx >= 0) cursorIndex = idx;
+    }
+  }
+  function toggleStateSection(st) {
+    const next = Object.assign({}, openStates);
+    const wasOpen = stateOpen(st);
+    next[st] = !wasOpen;
+    openStates = next;
+    if (wasOpen) {
+      const items = KeyNav.projectsItems(board.view, board.mode, { openAgenda: board.openAgenda, openStates: next, stateRows: board.expandedStateRows });
+      const idx = items.findIndex(x => x.key === "stsec:" + st);
+      if (idx >= 0) cursorIndex = idx;
+    }
+  }
   function ensureVisible(item) {
     if (!item || !column) return;
     const top = item.mapToItem(column, 0, 0).y;
@@ -62,17 +101,15 @@ Item {
     else if (bottom > flick.contentY + flick.height - 24) flick.contentY = Math.min(maxY, bottom - flick.height + 24);
   }
   function setSection(next) {
-    if (!next || (next === mode && drill === "")) return;
+    if (!next || next === mode) return;
     detailKey = "";
-    drill = "";
     mode = next;
     cursorIndex = 0;
     flick.contentY = 0;
   }
   function cycleSection(delta) {
     const sections = ["agenda", "tasks", "projects"];
-    const cur = mode === "state" ? "tasks" : mode;
-    const i = sections.indexOf(cur);
+    const i = sections.indexOf(mode);
     const next = sections[((i >= 0 ? i : 0) + delta + sections.length) % sections.length];
     setSection(next);
   }
@@ -111,23 +148,16 @@ Item {
   function activateCurrent() {
     const it = currentItem();
     if (!it) return;
-    if (it.kind === "stateHeader") { board.drill = it.state; board.mode = "state"; return; }
+    if (it.kind === "agendaSection") { board.toggleAgendaSection(it.sectionId); return; }
+    if (it.kind === "stateSection") { board.toggleStateSection(it.state); return; }
     if (it.kind === "project") { if (it.link !== "") board.open(it.link); return; }
     if (it.entry) board.show(it.entry);
   }
   function foldCurrent() {
-    if (board.mode === "state") {
-      board.mode = "tasks";
-      board.drill = "";
-      cursorIndex = 0;
-      return;
-    }
     const it = currentItem();
-    if (board.mode === "tasks" && it && (it.state ?? "") !== "") {
-      board.drill = it.state;
-      board.mode = "state";
-      cursorIndex = 0;
-    }
+    if (!it) return;
+    if (it.sectionId) { board.toggleAgendaSection(it.sectionId); return; }
+    if (it.state) { board.toggleStateSection(it.state); return; }
   }
   function handleSheetKey(ev) {
     if (detailKey !== "") return detailPage.handleKey(ev);
@@ -141,14 +171,12 @@ Item {
     return true;
   }
 
-  // Return to the default subsection (agenda) and close any open detail or state drill-down.
+  // Return to the default subsection (agenda) and close any open detail.
   function resetHome() {
     mode = "agenda";
-    drill = "";
     detailKey = "";
   }
 
-  readonly property var drillRows: mode === "state" ? Board.stateRows(agenda, drill, pending, user) : []
   readonly property int openCount: view.counts.reduce((n, c) => n + c.n, 0)
 
   Sheet {
@@ -186,15 +214,15 @@ Item {
     id: sections
     anchors { left: parent.left; right: parent.right; bottom: parent.bottom; rightMargin: 4 }
     sections: [{ id: "agenda", label: "agenda" }, { id: "tasks", label: "tasks" }, { id: "projects", label: "by project" }]
-    current: board.mode === "state" ? "tasks" : board.mode
+    current: board.mode
     // Another section puts away the open task page, which belongs to the one left.
-    onPicked: id => { if (id === (board.mode === "state" ? "tasks" : board.mode)) board.resetSection(); else { board.detailKey = ""; board.mode = id; board.drill = ""; } }
+    onPicked: id => { if (id === board.mode) board.resetSection(); else board.setSection(id); }
   }
 
-  // The showing section again: put its sheet and drill-down away and go back to its top.
+  // The showing section again: put its sheet away and go back to its top.
   function resetSection() {
     detailKey = "";
-    if (mode === "state") { mode = "tasks"; drill = ""; }
+    cursorIndex = 0;
     flick.contentY = 0;
   }
 
@@ -242,7 +270,7 @@ Item {
         }
       }
 
-      // The agenda: overdue, today, then a section a day.
+      // The agenda: overdue, today, then a section a day — all collapsible headings like Org.
       Repeater {
         model: board.mode === "agenda" ? board.view.sections : []
         delegate: Column {
@@ -250,14 +278,25 @@ Item {
           required property var modelData
           required property int index
           readonly property int sectionIndex: index
+          readonly property string secId: section.modelData.id || ("sec:" + index)
+          readonly property bool expanded: board.agendaOpen(secId)
           width: column.width
           spacing: 8
-          SectionRule { text: section.modelData.title; alert: section.modelData.alert }
-          Words { visible: section.modelData.rows.length === 0; role: "lettering"; text: "Nothing on the agenda."; color: Theme.muted }
+          SectionRule {
+            id: agRule
+            text: section.modelData.title
+            alert: section.modelData.alert
+            collapsible: true
+            expanded: section.expanded
+            selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "agsec:" + section.sectionIndex
+            onSelectedChanged: if (selected) board.ensureVisible(agRule)
+            onClicked: board.toggleAgendaSection(section.secId)
+          }
+          Words { visible: section.expanded && section.modelData.rows.length === 0; role: "lettering"; text: "Nothing on the agenda."; color: Theme.muted }
           Pad {
-            visible: section.modelData.rows.length > 0
+            visible: section.expanded && section.modelData.rows.length > 0
             Repeater {
-              model: section.modelData.rows
+              model: section.expanded ? section.modelData.rows : []
               delegate: StubRow {
                 id: agRow
                 required property var modelData
@@ -276,25 +315,29 @@ Item {
         }
       }
 
-      // Every open task by state, dated or not: a few rows each, the rest a click away.
+      // Every open task by state as collapsible inline sections (no truncated preview / drill page).
       Repeater {
         model: board.mode === "tasks" ? (board.view.lists ?? []) : []
         delegate: Column {
           id: list
           required property var modelData
+          readonly property bool expanded: board.stateOpen(list.modelData.state)
+          readonly property var rows: expanded ? (board.expandedStateRows[list.modelData.state] ?? list.modelData.rows) : []
           width: column.width
           spacing: 6
           SectionRule {
             id: stateRule
             text: list.modelData.title + " · " + list.modelData.n
-            clickable: true
-            selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "sh:" + list.modelData.state
+            collapsible: true
+            expanded: list.expanded
+            selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "stsec:" + list.modelData.state
             onSelectedChanged: if (selected) board.ensureVisible(stateRule)
-            onClicked: { board.drill = list.modelData.state; board.mode = "state"; }
+            onClicked: board.toggleStateSection(list.modelData.state)
           }
           Pad {
+            visible: list.expanded && list.rows.length > 0
             Repeater {
-              model: list.modelData.rows
+              model: list.rows
               delegate: StubRow {
                 id: tkRow
                 required property var modelData
@@ -307,12 +350,6 @@ Item {
               }
             }
           }
-          Item {
-            visible: list.modelData.more > 0
-            width: parent.width
-            height: allRows.height
-            PressTab { id: allRows; anchors.right: parent.right; text: "all " + list.modelData.n + " ›"; kind: "quiet"; small: true; onClicked: { board.drill = list.modelData.state; board.mode = "state"; } }
-          }
         }
       }
       Words {
@@ -322,26 +359,6 @@ Item {
         role: "meta"
         text: board.view.queued + " queued for agents, on the agents board"
         color: Theme.muted
-      }
-
-      // One state's tasks.
-      PressTab { visible: board.mode === "state"; text: (Theme.consoleLook ? "< " : "‹  ") + "tasks"; kind: "quiet"; small: true; onClicked: { board.mode = "tasks"; board.drill = ""; } }
-      SectionRule { visible: board.mode === "state"; text: (Board.LISTS.find(l => l[0] === board.drill)?.[1] ?? board.drill) + " · " + board.drillRows.length }
-      Pad {
-        visible: board.mode === "state" && board.drillRows.length > 0
-        Repeater {
-          model: board.drillRows
-          delegate: StubRow {
-            id: drRow
-            required property var modelData
-            required property int index
-            first: index === 0
-            selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "dr:" + index
-            onSelectedChanged: if (selected) board.ensureVisible(drRow)
-            title: modelData.title; meta: modelData.meta; overdue: modelData.overdue ?? false
-            onClicked: board.show(modelData)
-          }
-        }
       }
 
       // Each project a binder divider: its title, where it lives when two share a name, its counts as stamps; it

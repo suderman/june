@@ -1155,10 +1155,7 @@ ShellRoot {
       if (res.action === "escape" || res.action === "quit") {
         if (preview.open) { preview.close(); return; }
         if (window.activeColumn === "agents" && activeAgentsBoard().dismissSheet()) return;
-        if (window.activeColumn === "projects") {
-          if (activeProjectsBoard().dismissSheet()) return;
-          if (activeProjectsBoard().mode === "state") { activeProjectsBoard().mode = "tasks"; activeProjectsBoard().drill = ""; return; }
-        }
+        if (window.activeColumn === "projects" && activeProjectsBoard().dismissSheet()) return;
         if (!window.dismissHoveredSheet() && res.action === "quit") root.hide();
         return;
       }

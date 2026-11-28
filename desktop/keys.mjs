@@ -224,35 +224,41 @@ export function agentsItems(view, mode, opts) {
 }
 
 /** Flat ordered list of keyboard-selectable rows on the Projects board for the current mode. */
-export function projectsItems(view, mode, drillRows) {
+export function projectsItems(view, mode, opts) {
 	const v = view || {};
+	const o = Array.isArray(opts) ? { drillRows: opts } : (opts || {});
 	const out = [];
 	if (mode === "agenda") {
 		const sections = v.sections || [];
+		const openAgenda = o.openAgenda || {};
 		for (let si = 0; si < sections.length; si++) {
-			const rows = sections[si].rows || [];
-			for (let ri = 0; ri < rows.length; ri++) {
-				out.push({ kind: "agenda", group: "sec:" + si, key: "ag:" + si + ":" + ri, entry: rows[ri] });
+			const sec = sections[si];
+			const secId = sec.id || ("sec:" + si);
+			const expanded = openAgenda[secId] !== undefined ? Boolean(openAgenda[secId]) : true;
+			out.push({ kind: "agendaSection", group: "sec:" + si, sectionId: secId, key: "agsec:" + si });
+			if (expanded) {
+				const rows = sec.rows || [];
+				for (let ri = 0; ri < rows.length; ri++) {
+					out.push({ kind: "agenda", group: "sec:" + si, sectionId: secId, key: "ag:" + si + ":" + ri, entry: rows[ri] });
+				}
 			}
 		}
 		return out;
 	}
 	if (mode === "tasks") {
 		const lists = v.lists || [];
+		const openStates = o.openStates || {};
+		const byState = o.stateRows || {};
 		for (let li = 0; li < lists.length; li++) {
 			const l = lists[li];
-			out.push({ kind: "stateHeader", group: "st:" + l.state, key: "sh:" + l.state, state: l.state, more: l.more || 0 });
-			const rows = l.rows || [];
-			for (let ri = 0; ri < rows.length; ri++) {
-				out.push({ kind: "task", group: "st:" + l.state, key: "tk:" + l.state + ":" + ri, state: l.state, more: l.more || 0, entry: rows[ri] });
+			const expanded = openStates[l.state] !== undefined ? Boolean(openStates[l.state]) : l.state === "PROG";
+			out.push({ kind: "stateSection", group: "st:" + l.state, state: l.state, key: "stsec:" + l.state });
+			if (expanded) {
+				const rows = byState[l.state] || l.rows || [];
+				for (let ri = 0; ri < rows.length; ri++) {
+					out.push({ kind: "task", group: "st:" + l.state, state: l.state, key: "tk:" + l.state + ":" + ri, entry: rows[ri] });
+				}
 			}
-		}
-		return out;
-	}
-	if (mode === "state") {
-		const rows = drillRows || [];
-		for (let i = 0; i < rows.length; i++) {
-			out.push({ kind: "drill", group: "drill", key: "dr:" + i, entry: rows[i] });
 		}
 		return out;
 	}
@@ -529,10 +535,10 @@ export function helpSections(surface, column, sheet) {
 					["[ / ]", "prev / next day or state"],
 					["j / k", "move row cursor"],
 					["n / p", "page down / up"],
-					["RET", "open task / drill / project"],
-					["Tab / o", "toggle state drill (tasks)"],
+					["RET", "open task / toggle heading"],
+					["Tab / o", "collapse / expand section"],
 					["e / t", "open Emacs / Herdr"],
-					["q / Bksp", "close sheet / back"],
+					["q / Bksp", "close sheet"],
 				],
 			};
 	return [{ title: "Navigation", rows: nav }, ctx];
