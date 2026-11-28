@@ -145,13 +145,24 @@ internal fun DetailSheet(open: Boolean, onDismiss: () -> Unit, content: @Composa
  * the tab bar counts what needs the user. A tap on a section goes there; on the one showing, it resets it.
  */
 @Composable
-fun SectionBar(labels: List<String>, position: Float, palette: Look.Palette, badges: Map<Int, Int> = emptyMap(), onPick: (Int) -> Unit) {
+fun SectionBar(
+    labels: List<String>,
+    position: Float,
+    palette: Look.Palette,
+    badges: Map<Int, Int> = emptyMap(),
+    modifier: Modifier = Modifier,
+    framed: Boolean = true,
+    onPick: (Int) -> Unit,
+) {
     val p = palette
     val shape = if (p.console) RectangleShape else RoundedCornerShape(23.dp)
-    androidx.compose.foundation.layout.BoxWithConstraints(
-        Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp).height(46.dp)
-            .background(p.field, shape).border(1.dp, p.rule, shape).padding(4.dp),
-    ) {
+    val barModifier = if (framed) {
+        modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp).height(46.dp)
+            .background(p.field, shape).border(1.dp, p.rule, shape).padding(4.dp)
+    } else {
+        modifier.fillMaxWidth().height(46.dp).padding(4.dp)
+    }
+    androidx.compose.foundation.layout.BoxWithConstraints(barModifier) {
         val cell = maxWidth / labels.size
         // The fill, sliding with the pager.
         Box(

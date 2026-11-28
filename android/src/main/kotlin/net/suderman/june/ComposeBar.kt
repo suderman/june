@@ -86,6 +86,7 @@ fun ComposeBar(
     onRecentImage: () -> Unit,
     modifier: Modifier = Modifier,
     fieldModifier: Modifier = Modifier,
+    framed: Boolean = true,
     onFocusChange: ((Boolean) -> Unit)? = null,
     attachMenu: @Composable (dismiss: () -> Unit) -> Unit,
 ) {
@@ -118,8 +119,12 @@ fun ComposeBar(
     Row(
         modifier
             .fillMaxWidth()
-            .background(palette.field, RoundedCornerShape(26.dp))
-            .border(1.dp, palette.rule, RoundedCornerShape(26.dp))
+            .then(
+                if (framed) Modifier
+                    .background(palette.field, RoundedCornerShape(26.dp))
+                    .border(1.dp, palette.rule, RoundedCornerShape(26.dp))
+                else Modifier,
+            )
             .padding(horizontal = 6.dp, vertical = 5.dp),
         verticalAlignment = Alignment.Bottom,
     ) {

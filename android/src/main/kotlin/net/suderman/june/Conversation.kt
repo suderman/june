@@ -13,11 +13,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
@@ -399,25 +401,151 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
         val typing = androidx.compose.foundation.layout.WindowInsets.isImeVisible
         LaunchedEffect(typing) { if (!typing) focus.clearFocus() }
         LaunchedEffect(chat) { if (!chat) { focus.clearFocus(); keyboard?.hide() } }
+
+        // Chat composer state lives above the pager's bottom-bar morph so swiping away and back keeps draft/cursor/attachments.
+        var attach by remember(screen) { mutableStateOf(false) }
+        var used by remember(screen) { mutableStateOf(false) }
+        val offered = screen?.takeUnless { used }
+        val showing = offered?.takeIf { attach }
+        val waiting = Outbox.items
+        val anything = Outbox.draft.isNotBlank() || showing != null || waiting.isNotEmpty()
+        val canSend = link.status is LinkStatus.Linked && anything
+        val send = {
+            if (canSend && link.submit(Outbox.draft, images = Outbox.pictures.map { it.data } + listOfNotNull(showing?.jpeg()), files = Outbox.files)) {
+                Outbox.clear()
+                if (showing != null) used = true
+            }
+        }
+        // Track in-flight recent-image IDs so rapid taps step cleanly through 1st, 2nd, 3rd newest screenshots.
+        val pendingRecent = remember { mutableSetOf<Long>() }
+        val addRecent = {
+            val already = Outbox.items.mapNotNull { it.mediaId }.toSet() + pendingRecent
+            val next = RecentGallery.nextImage(context, already)
+            if (next == null) {
+                Outbox.notice = "no more recent images"
+            } else if (Outbox.pictures.size >= Outbox.MAX_PICTURES) {
+                Outbox.notice = "at most ${Outbox.MAX_PICTURES} pictures a message"
+            } else {
+                pendingRecent.add(next.id)
+                val base64 = Outbox.base64()
+                Thread {
+                    val item = runCatching { Outbox.picture(context, next.uri, "recent-${next.id}.jpg", mediaId = next.id) }.getOrNull()
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        pendingRecent.remove(next.id)
+                        when {
+                            item == null -> Outbox.notice = "recent image could not be read"
+                            base64 + item.data.length > Outbox.MAX_BASE64 -> Outbox.notice = "one message carries at most 30 MiB of attachments"
+                            else -> { Outbox.notice = ""; Outbox.add(item) }
+                        }
+                    }
+                }.start()
+            }
+        }
+        // The field keeps its cursor; the outbox keeps the words, so they outlast the chat page and the screen.
+        var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(Outbox.draft, androidx.compose.ui.text.TextRange(Outbox.draft.length))) }
+        LaunchedEffect(Outbox.draft) { if (field.text != Outbox.draft) field = androidx.compose.ui.text.input.TextFieldValue(Outbox.draft, androidx.compose.ui.text.TextRange(Outbox.draft.length)) }
+        // Summoned again while this shows: ready to type. Only a change since this screen opened counts, once.
+        val words = remember { androidx.compose.ui.focus.FocusRequester() }
+        LaunchedEffect(summoned) {
+            if (summoned != answered) {
+                answered = summoned
+                words.requestFocus()
+                keyboard?.show()
+            }
+        }
+        val chatAttachments: @Composable () -> Unit = {
+            Column(Modifier.fillMaxWidth()) {
+                if (offered != null) Row(
+                    Modifier.padding(top = 8.dp)
+                        .then(if (attach) Modifier.background(palette.field, RoundedCornerShape(8.dp)) else Modifier.border(1.dp, palette.muted, RoundedCornerShape(8.dp)))
+                        .clickable { attach = !attach }.padding(6.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (attach) {
+                        val thumb = remember(offered) { offered.picture.asImageBitmap() }
+                        androidx.compose.foundation.Image(thumb, null, Modifier.size(width = 22.dp, height = 44.dp).clip(RoundedCornerShape(3.dp)))
+                        Text("screen from ${offered.app}", fontSize = 13.sp, color = palette.pageInk)
+                        Text("✕", fontSize = 15.sp, color = palette.muted, modifier = Modifier.padding(horizontal = 8.dp))
+                    } else Text("+ add screen from ${offered.app}", fontSize = 13.sp, color = palette.muted, modifier = Modifier.padding(horizontal = 4.dp))
+                }
+                if (waiting.isNotEmpty()) Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    for (item in waiting) Row(
+                        Modifier.background(palette.field, RoundedCornerShape(8.dp)).clickable { Outbox.remove(item) }.padding(6.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        val thumb = item.thumb
+                        if (thumb != null) {
+                            val image = remember(item) { thumb.asImageBitmap() }
+                            androidx.compose.foundation.Image(image, null, Modifier.size(44.dp).clip(RoundedCornerShape(3.dp)))
+                        } else Text(item.name, fontSize = 13.sp, color = palette.pageInk, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
+                        Text("✕", fontSize = 15.sp, color = palette.muted)
+                    }
+                }
+                if (Outbox.notice.isNotEmpty()) Text("not attached: ${Outbox.notice}", color = palette.accent, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+        val chatComposeBar: @Composable (Modifier, Boolean) -> Unit = { mod, framed ->
+            ComposeBar(
+                value = field,
+                onValueChange = { field = it; Outbox.draft = it.text },
+                placeholder = if (showing != null) "about this screen..." else "to june...",
+                palette = palette,
+                canSend = canSend,
+                onSend = send,
+                onRecentImage = addRecent,
+                modifier = mod,
+                fieldModifier = Modifier.focusRequester(words),
+                framed = framed,
+            ) { dismiss ->
+                for ((source, label) in listOf("camera" to "camera", "photos" to "photos", "files" to "files")) androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        dismiss()
+                        // The screen goes with the rest if Jon added it: the sheet forgets it once it hides.
+                        if (showing != null) {
+                            Outbox.add(Outbox.picture(showing.picture, "screen from ${showing.app}"))
+                            used = true
+                        }
+                        AttachActivity.open(context, source, fromSheet)
+                        if (fromSheet) leave()
+                    },
+                )
+            }
+        }
+
         if (boards) {
             LaunchedEffect(Unit) { link.wantBoards() }
             // The pager spans the screen's full width, so the Terminal page has every column; the boards keep the
-            // conversation's margins and status-header room inside their pages.
+            // conversation's margins and status-header / bottom-bar room inside their pages.
             val edgeToEdge = Modifier.layout { measurable, constraints ->
                 val margin = 16.dp.roundToPx()
                 val w = constraints.maxWidth + 2 * margin
                 val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
                 layout(constraints.maxWidth, placeable.height) { placeable.place(-margin, 0) }
             }
+            val density = androidx.compose.ui.platform.LocalDensity.current
             var headerPx by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-            val headerDp = with(androidx.compose.ui.platform.LocalDensity.current) { headerPx.toDp() }
-            val headerReveal = if (first == 1) (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f) else 1f
+            val headerDp = with(density) { headerPx.toDp() }
+            var bottomBarPx by remember { androidx.compose.runtime.mutableIntStateOf(with(density) { 60.dp.roundToPx() }) }
+            val pos = pager.currentPage + pager.currentPageOffsetFraction - first
+            val agentsEnd = (AgentsSections.size - 1).toFloat()
+            val chatPos = chatPage.toFloat()
+            val projectsStart = projectPages.first.toFloat()
+            val headerReveal = if (first == 1) (pos + 1f).coerceIn(0f, 1f) else 1f
+            val agentsWeight = if (pos <= chatPos) (1f - (pos - agentsEnd).coerceAtLeast(0f)).coerceIn(0f, 1f) else 0f
+            val chatWeight = (1f - kotlin.math.abs(pos - chatPos)).coerceIn(0f, 1f)
+            val projectsWeight = if (pos >= chatPos) (1f - (projectsStart - pos).coerceAtLeast(0f)).coerceIn(0f, 1f) else 0f
+            val showBottomBar = headerReveal > 0.001f && (!typing || chatWeight > 0.001f)
+            val barDp = if (showBottomBar) with(density) { bottomBarPx.toDp() } else 0.dp
             androidx.activity.compose.BackHandler(enabled = board < 0) { pages.launch { pager.animateScrollToPage(lastBoard) } }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxSize().then(edgeToEdge), beyondViewportPageCount = 1) { page ->
-                    val inset = Modifier.fillMaxSize().padding(top = headerDp, start = 16.dp, end = 16.dp)
+                    val inset = Modifier.fillMaxSize().padding(top = headerDp, bottom = barDp, start = 16.dp, end = 16.dp)
                     // The boards span their page, keeping the margins inside, so a sheet over them reaches both edges.
-                    val boardArea = Modifier.fillMaxSize().padding(top = headerDp)
+                    val boardArea = Modifier.fillMaxSize().padding(top = headerDp, bottom = barDp)
                     when (page - first) {
                         -1 -> {
                             // The terminal asked for, else the last one shown, else the first agent the board lists.
@@ -439,142 +567,130 @@ fun Sheet(link: Link, settings: (() -> Unit)? = null, screen: Screen? = null, fr
                         .onSizeChanged { headerPx = it.height }
                         .graphicsLayer { translationX = (1f - headerReveal) * (size.width + 32.dp.toPx()) },
                 )
+                // Continuous bottom bar: one shared capsule morphing smoothly between Agents sub-nav, Chat compose bar,
+                // and Projects sub-nav in 1:1 lockstep with the pager (and sliding in from the right past Terminal).
+                if (showBottomBar) {
+                    val capsuleShape = if (palette.console) androidx.compose.ui.graphics.RectangleShape else RoundedCornerShape(23.dp)
+                    val minBarPx = with(density) { 46.dp.roundToPx() }
+                    val showStop = (link.state.running || link.state.compacting) && chatWeight > 0.001f
+                    Column(
+                        Modifier.align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .onSizeChanged { bottomBarPx = it.height }
+                            .graphicsLayer { translationX = (1f - headerReveal) * (size.width + 32.dp.toPx()) }
+                            .background(palette.page),
+                    ) {
+                        if (chatWeight > 0.001f && (offered != null || waiting.isNotEmpty() || Outbox.notice.isNotEmpty())) {
+                            Box(
+                                Modifier.fillMaxWidth()
+                                    .clipToBounds()
+                                    .layout { measurable, constraints ->
+                                        val placeable = measurable.measure(constraints)
+                                        val h = (placeable.height * chatWeight).roundToInt()
+                                        layout(placeable.width, h) { placeable.place(0, 0) }
+                                    }
+                                    .graphicsLayer {
+                                        alpha = kotlin.math.sqrt(chatWeight)
+                                        translationX = (chatPos - pos) * (size.width + 16.dp.toPx())
+                                    },
+                            ) { chatAttachments() }
+                        }
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.Bottom,
+                        ) {
+                            Box(
+                                Modifier.weight(1f)
+                                    .heightIn(min = 46.dp)
+                                    .clip(capsuleShape)
+                                    .background(palette.field, capsuleShape)
+                                    .border(1.dp, palette.rule, capsuleShape),
+                                contentAlignment = Alignment.BottomCenter,
+                            ) {
+                                if (agentsWeight > 0.001f) {
+                                    val clankers = link.agents?.optJSONArray("roster")?.length() ?: 0
+                                    val needs = link.agents?.optJSONArray("needs")?.length() ?: 0
+                                    SectionBar(
+                                        listOf("hosts", if (clankers > 0) "clankers $clankers" else "clankers", "activity"),
+                                        pos.coerceIn(0f, agentsEnd),
+                                        palette,
+                                        badges = mapOf(AgentsSections.indexOf("activity") to needs),
+                                        modifier = Modifier.graphicsLayer {
+                                            translationX = (agentsEnd - pos).coerceAtMost(0f) * (size.width + 16.dp.toPx())
+                                            alpha = kotlin.math.sqrt(agentsWeight)
+                                        },
+                                        framed = false,
+                                    ) { i ->
+                                        if (agentsWeight > 0.5f) {
+                                            if (board == i) agentsReset++ else pages.launch { pager.animateScrollToPage(first + i) }
+                                        }
+                                    }
+                                }
+                                if (chatWeight > 0.001f) {
+                                    chatComposeBar(
+                                        Modifier
+                                            .layout { measurable, constraints ->
+                                                val placeable = measurable.measure(constraints)
+                                                val h = (minBarPx + (placeable.height - minBarPx) * chatWeight).roundToInt().coerceAtLeast(minBarPx)
+                                                layout(placeable.width, h) { placeable.place(0, h - placeable.height) }
+                                            }
+                                            .graphicsLayer {
+                                                translationX = (chatPos - pos) * (size.width + 16.dp.toPx())
+                                                alpha = kotlin.math.sqrt(chatWeight)
+                                            },
+                                        false,
+                                    )
+                                }
+                                if (projectsWeight > 0.001f) {
+                                    SectionBar(
+                                        ProjectsLabels,
+                                        (pos - projectsStart).coerceIn(0f, (ProjectsSections.size - 1).toFloat()),
+                                        palette,
+                                        modifier = Modifier.graphicsLayer {
+                                            translationX = (projectsStart - pos).coerceAtLeast(0f) * (size.width + 16.dp.toPx())
+                                            alpha = kotlin.math.sqrt(projectsWeight)
+                                        },
+                                        framed = false,
+                                    ) { i ->
+                                        if (projectsWeight > 0.5f) {
+                                            if (board == projectPages.first + i) projectsReset++ else pages.launch { pager.animateScrollToPage(first + projectPages.first + i) }
+                                        }
+                                    }
+                                }
+                            }
+                            if (showStop) Box(
+                                Modifier
+                                    .layout { measurable, constraints ->
+                                        val placeable = measurable.measure(constraints)
+                                        val gap = (8.dp.toPx() * chatWeight).roundToInt()
+                                        val w = (placeable.width * chatWeight).roundToInt()
+                                        layout(gap + w, placeable.height) { placeable.place(gap, 0) }
+                                    }
+                                    .graphicsLayer {
+                                        alpha = kotlin.math.sqrt(chatWeight)
+                                        val s = 0.7f + 0.3f * chatWeight
+                                        scaleX = s; scaleY = s
+                                    }
+                                    .padding(bottom = 5.dp).size(36.dp)
+                                    .background(palette.accent, androidx.compose.foundation.shape.CircleShape)
+                                    .clickable(enabled = chatWeight > 0.5f, onClick = link::stop),
+                                contentAlignment = Alignment.Center,
+                            ) { androidx.compose.material3.Icon(StopSquareIcon, "Stop", Modifier.size(18.dp), tint = if (palette.dark) palette.page else Color.White) }
+                        }
+                    }
+                }
             }
         } else stripPage(Modifier.weight(1f).fillMaxWidth())
         if (link.notice.isNotEmpty()) Text(link.notice, color = Color(0xFFFFD36B), fontSize = 13.sp, modifier = Modifier.padding(vertical = 4.dp))
-        // The agents' sections in the compose bar's place, the same height, so every page keeps one height and their
-        // navigation stays at the bottom; out of sight while the keyboard is up, as the tab bar is.
-        if (boards && board in AgentsSections.indices && !typing) {
-            val clankers = link.agents?.optJSONArray("roster")?.length() ?: 0
-            val needs = link.agents?.optJSONArray("needs")?.length() ?: 0
-            SectionBar(
-                listOf("hosts", if (clankers > 0) "clankers $clankers" else "clankers", "activity"),
-                (pager.currentPage + pager.currentPageOffsetFraction - first).coerceIn(0f, (AgentsSections.size - 1).toFloat()),
-                palette, badges = mapOf(AgentsSections.indexOf("activity") to needs),
-            ) { i -> if (board == i) agentsReset++ else pages.launch { pager.animateScrollToPage(first + i) } }
-        }
-        if (boards && board in projectPages && !typing) SectionBar(
-            ProjectsLabels,
-            (pager.currentPage + pager.currentPageOffsetFraction - first - projectPages.first).coerceIn(0f, (ProjectsSections.size - 1).toFloat()),
-            palette,
-        ) { i -> if (board == projectPages.first + i) projectsReset++ else pages.launch { pager.animateScrollToPage(first + projectPages.first + i) } }
-        if (chat) {
-        // The screen she was summoned over, offered for the next message: off until Jon adds it, since most messages do
-        // not need the picture's tokens; gone once sent.
-        var attach by remember(screen) { mutableStateOf(false) }
-        var used by remember(screen) { mutableStateOf(false) }
-        val offered = screen?.takeUnless { used }
-        val showing = offered?.takeIf { attach }
-        if (offered != null) Row(
-            Modifier.padding(top = 8.dp)
-                .then(if (attach) Modifier.background(palette.field, RoundedCornerShape(8.dp)) else Modifier.border(1.dp, palette.muted, RoundedCornerShape(8.dp)))
-                .clickable { attach = !attach }.padding(6.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (attach) {
-                val thumb = remember(offered) { offered.picture.asImageBitmap() }
-                androidx.compose.foundation.Image(thumb, null, Modifier.size(width = 22.dp, height = 44.dp).clip(RoundedCornerShape(3.dp)))
-                Text("screen from ${offered.app}", fontSize = 13.sp, color = palette.pageInk)
-                Text("✕", fontSize = 15.sp, color = palette.muted, modifier = Modifier.padding(horizontal = 8.dp))
-            } else Text("+ add screen from ${offered.app}", fontSize = 13.sp, color = palette.muted, modifier = Modifier.padding(horizontal = 4.dp))
-        }
-        // Pictures and files waiting for the next message, each removable.
-        val waiting = Outbox.items
-        if (waiting.isNotEmpty()) Row(
-            Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-        ) {
-            for (item in waiting) Row(
-                Modifier.background(palette.field, RoundedCornerShape(8.dp)).clickable { Outbox.remove(item) }.padding(6.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                val thumb = item.thumb
-                if (thumb != null) {
-                    val image = remember(item) { thumb.asImageBitmap() }
-                    androidx.compose.foundation.Image(image, null, Modifier.size(44.dp).clip(RoundedCornerShape(3.dp)))
-                } else Text(item.name, fontSize = 13.sp, color = palette.pageInk, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
-                Text("✕", fontSize = 15.sp, color = palette.muted)
+        if (!boards) {
+            chatAttachments()
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                chatComposeBar(Modifier.weight(1f), true)
+                if (link.state.running || link.state.compacting) Box(
+                    Modifier.padding(bottom = 5.dp).size(36.dp).background(palette.accent, androidx.compose.foundation.shape.CircleShape).clickable(onClick = link::stop),
+                    contentAlignment = Alignment.Center,
+                ) { androidx.compose.material3.Icon(StopSquareIcon, "Stop", Modifier.size(18.dp), tint = if (palette.dark) palette.page else Color.White) }
             }
-        }
-        if (Outbox.notice.isNotEmpty()) Text("not attached: ${Outbox.notice}", color = palette.accent, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
-        // Shared Muse-style rounded compose bar: plus + quick recent-screenshot on the left, newline-capable field in
-        // the middle, circular up-arrow send on the right, and a stop button beside it while June is working.
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = if (boards) 4.dp else 10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val anything = Outbox.draft.isNotBlank() || showing != null || waiting.isNotEmpty()
-            val canSend = link.status is LinkStatus.Linked && anything
-            val send = {
-                if (canSend && link.submit(Outbox.draft, images = Outbox.pictures.map { it.data } + listOfNotNull(showing?.jpeg()), files = Outbox.files)) {
-                    Outbox.clear()
-                    if (showing != null) used = true
-                }
-            }
-            // Track in-flight recent-image IDs so rapid taps step cleanly through 1st, 2nd, 3rd newest screenshots.
-            val pendingRecent = remember { mutableSetOf<Long>() }
-            val addRecent = {
-                val already = Outbox.items.mapNotNull { it.mediaId }.toSet() + pendingRecent
-                val next = RecentGallery.nextImage(context, already)
-                if (next == null) {
-                    Outbox.notice = "no more recent images"
-                } else if (Outbox.pictures.size >= Outbox.MAX_PICTURES) {
-                    Outbox.notice = "at most ${Outbox.MAX_PICTURES} pictures a message"
-                } else {
-                    pendingRecent.add(next.id)
-                    val base64 = Outbox.base64()
-                    Thread {
-                        val item = runCatching { Outbox.picture(context, next.uri, "recent-${next.id}.jpg", mediaId = next.id) }.getOrNull()
-                        android.os.Handler(android.os.Looper.getMainLooper()).post {
-                            pendingRecent.remove(next.id)
-                            when {
-                                item == null -> Outbox.notice = "recent image could not be read"
-                                base64 + item.data.length > Outbox.MAX_BASE64 -> Outbox.notice = "one message carries at most 30 MiB of attachments"
-                                else -> { Outbox.notice = ""; Outbox.add(item) }
-                            }
-                        }
-                    }.start()
-                }
-            }
-            // The field keeps its cursor; the outbox keeps the words, so they outlast the chat page and the screen.
-            var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(Outbox.draft, androidx.compose.ui.text.TextRange(Outbox.draft.length))) }
-            LaunchedEffect(Outbox.draft) { if (field.text != Outbox.draft) field = androidx.compose.ui.text.input.TextFieldValue(Outbox.draft, androidx.compose.ui.text.TextRange(Outbox.draft.length)) }
-            // Summoned again while this shows: ready to type. Only a change since this screen opened counts, once.
-            val words = remember { androidx.compose.ui.focus.FocusRequester() }
-            LaunchedEffect(summoned) {
-                if (summoned != answered) {
-                    answered = summoned
-                    words.requestFocus()
-                    keyboard?.show()
-                }
-            }
-            ComposeBar(
-                value = field,
-                onValueChange = { field = it; Outbox.draft = it.text },
-                placeholder = if (showing != null) "about this screen..." else "to june...",
-                palette = palette,
-                canSend = canSend,
-                onSend = send,
-                onRecentImage = addRecent,
-                modifier = Modifier.weight(1f),
-                fieldModifier = Modifier.focusRequester(words),
-            ) { dismiss ->
-                for ((source, label) in listOf("camera" to "camera", "photos" to "photos", "files" to "files")) androidx.compose.material3.DropdownMenuItem(
-                    text = { Text(label) },
-                    onClick = {
-                        dismiss()
-                        // The screen goes with the rest if Jon added it: the sheet forgets it once it hides.
-                        if (showing != null) {
-                            Outbox.add(Outbox.picture(showing.picture, "screen from ${showing.app}"))
-                            used = true
-                        }
-                        AttachActivity.open(context, source, fromSheet)
-                        if (fromSheet) leave()
-                    },
-                )
-            }
-            if (link.state.running || link.state.compacting) Box(
-                Modifier.padding(bottom = 5.dp).size(36.dp).background(palette.accent, androidx.compose.foundation.shape.CircleShape).clickable(onClick = link::stop),
-                contentAlignment = Alignment.Center,
-            ) { androidx.compose.material3.Icon(StopSquareIcon, "Stop", Modifier.size(18.dp), tint = if (palette.dark) palette.page else Color.White) }
-        }
         }
     }
     }
