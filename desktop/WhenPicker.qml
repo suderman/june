@@ -22,9 +22,13 @@ Rectangle {
   property string time: start.time
   property int year: Number(date.slice(0, 4))
   property int month: Number(date.slice(5, 7))
+  // Which section owns h/l and j/k: "date" (calendar) or "time" (presets & ±15m/±1h), toggled with Tab.
+  property string focusArea: "date"
   readonly property var shown: Board.monthDays(year, month, today)
   readonly property var presets: ["09:00", "12:00", "13:00", "17:00"]
+  readonly property var timeChoices: ["", "09:00", "12:00", "13:00", "17:00"]
 
+  onVisibleChanged: if (visible) focusArea = "date"
   function setDate(iso) {
     if (!iso) return;
     date = iso;
@@ -35,6 +39,20 @@ Rectangle {
     const t = time === "" ? 9 * 60 : Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
     const n = Math.min(23 * 60 + 45, Math.max(0, Math.round((t + minutes) / 15) * 15));
     time = String(Math.floor(n / 60)).padStart(2, "0") + ":" + String(n % 60).padStart(2, "0");
+  }
+  function stepPreset(delta) {
+    const idx = timeChoices.indexOf(time);
+    if (idx >= 0) {
+      time = timeChoices[Math.max(0, Math.min(timeChoices.length - 1, idx + delta))];
+      return;
+    }
+    if (delta > 0) {
+      for (let i = 1; i < timeChoices.length; i++) if (timeChoices[i] > time) { time = timeChoices[i]; return; }
+      time = timeChoices[timeChoices.length - 1];
+    } else {
+      for (let i = timeChoices.length - 1; i >= 1; i--) if (timeChoices[i] < time) { time = timeChoices[i]; return; }
+      time = "";
+    }
   }
   function moveMonth(by) {
     const m = month - 1 + by;
@@ -47,18 +65,28 @@ Rectangle {
     const t = ev.text || "";
     if (k === "Escape" || k === "Backspace" || t === "q") { cancelled(); return true; }
     if (k === "Return" || k === "Enter") { picked(time === "" ? date : date + " " + time); return true; }
+    if (k === "Tab") { focusArea = focusArea === "date" ? "time" : "date"; return true; }
+    if (t >= "0" && t <= "4") { time = timeChoices[Number(t)]; return true; }
+    if (t === "-") { step(-15); return true; }
+    if (t === "+" || t === "=") { step(15); return true; }
+    if (t === "t") { setDate(today); return true; }
+    if (t === "m") { setDate(KeyNav.stepIsoDate(today, 1)); return true; }
+    if (t === "x" && canClear) { cleared(); return true; }
+    if (focusArea === "time") {
+      if (t === "h" || k === "Left") { stepPreset(-1); return true; }
+      if (t === "l" || k === "Right") { stepPreset(1); return true; }
+      if (t === "j" || k === "Down") { step(15); return true; }
+      if (t === "k" || k === "Up") { step(-15); return true; }
+      if (t === "n" || t === "]" || k === "PageDown") { step(60); return true; }
+      if (t === "p" || t === "[" || k === "PageUp") { step(-60); return true; }
+      return true;
+    }
     if (t === "h" || k === "Left") { setDate(KeyNav.stepIsoDate(date, -1)); return true; }
     if (t === "l" || k === "Right") { setDate(KeyNav.stepIsoDate(date, 1)); return true; }
     if (t === "j" || k === "Down") { setDate(KeyNav.stepIsoDate(date, 7)); return true; }
     if (t === "k" || k === "Up") { setDate(KeyNav.stepIsoDate(date, -7)); return true; }
     if (t === "[" || t === "p" || k === "PageUp") { moveMonth(-1); return true; }
     if (t === "]" || t === "n" || k === "PageDown") { moveMonth(1); return true; }
-    if (t === "t") { setDate(today); return true; }
-    if (t === "m") { setDate(KeyNav.stepIsoDate(today, 1)); return true; }
-    if (t === "-") { step(-15); return true; }
-    if (t === "+" || t === "=") { step(15); return true; }
-    if (t === "0") { time = ""; return true; }
-    if (t === "x" && canClear) { cleared(); return true; }
     return false;
   }
 
@@ -136,7 +164,7 @@ Rectangle {
               Rectangle {
                 anchors.centerIn: parent
                 width: 28; height: 28; radius: 14
-                color: cell.chosen ? Theme.pageInk : "transparent"
+                color: cell.chosen ? (picker.focusArea === "date" ? Theme.accent : Theme.pageInk) : "transparent"
                 border.color: Theme.pageInk
                 border.width: cell.modelData.today && !cell.chosen ? 1.5 : 0
               }
@@ -158,27 +186,42 @@ Rectangle {
       }
     }
 
-    // The time: a preset, a quarter hour either way, or none.
-    Flow {
+    // The time: a preset, a quarter hour either way, or none; outlined in accent when Time focus is active.
+    Rectangle {
       width: parent.width
-      spacing: 6
-      Pill { text: "no time"; on: picker.time === ""; onClicked: picker.time = "" }
-      Repeater {
-        model: picker.presets
-        delegate: Pill { required property string modelData; text: modelData; on: picker.time === modelData; onClicked: picker.time = modelData }
+      height: timeGroup.implicitHeight + (picker.focusArea === "time" ? 12 : 0)
+      radius: 8
+      color: picker.focusArea === "time" ? Qt.alpha(Theme.accent, 0.1) : "transparent"
+      border.color: picker.focusArea === "time" ? Theme.accent : "transparent"
+      border.width: picker.focusArea === "time" ? 1.5 : 0
+      Column {
+        id: timeGroup
+        x: picker.focusArea === "time" ? 6 : 0
+        y: picker.focusArea === "time" ? 6 : 0
+        width: parent.width - (picker.focusArea === "time" ? 12 : 0)
+        spacing: 6
+        Flow {
+          width: parent.width
+          spacing: 6
+          Pill { text: "no time"; on: picker.time === ""; accent: picker.focusArea === "time"; onClicked: { picker.focusArea = "time"; picker.time = ""; } }
+          Repeater {
+            model: picker.presets
+            delegate: Pill { required property string modelData; text: modelData; on: picker.time === modelData; accent: picker.focusArea === "time"; onClicked: { picker.focusArea = "time"; picker.time = modelData; } }
+          }
+        }
+        Row {
+          spacing: 6
+          Pill { text: "−15"; onClicked: { picker.focusArea = "time"; picker.step(-15); } }
+          Text {
+            width: 64; height: 28
+            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+            text: picker.time === "" ? "all day" : picker.time
+            font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 14
+            color: picker.focusArea === "time" ? Theme.accent : Theme.pageInk
+          }
+          Pill { text: "+15"; onClicked: { picker.focusArea = "time"; picker.step(15); } }
+        }
       }
-    }
-    Row {
-      spacing: 6
-      Pill { text: "−15"; onClicked: picker.step(-15) }
-      Text {
-        width: 64; height: 28
-        horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-        text: picker.time === "" ? "all day" : picker.time
-        font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 14
-        color: Theme.pageInk
-      }
-      Pill { text: "+15"; onClicked: picker.step(15) }
     }
     Text {
       width: parent.width
@@ -197,7 +240,9 @@ Rectangle {
     Text {
       width: parent.width
       wrapMode: Text.Wrap
-      text: "h/l day · j/k wk · [/] mo · t/m today/tmrw · -/+ time · RET set"
+      text: picker.focusArea === "time"
+        ? "h/l preset · j/k ±15m · n/p ±1h · 0-4 preset · Tab date · RET set"
+        : "h/l day · j/k wk · [/] mo · Tab time · 0-4 preset · RET set"
       font.family: "monospace"; font.pixelSize: 10
       color: Theme.muted
     }
@@ -207,12 +252,13 @@ Rectangle {
     id: pill
     property string text: ""
     property bool on: false
+    property bool accent: false
     signal clicked()
     width: pillLabel.implicitWidth + 18
     height: 28
     radius: 14
-    color: on ? Theme.pageInk : "transparent"
-    border.color: Theme.pageInk
+    color: on ? (accent ? Theme.accent : Theme.pageInk) : "transparent"
+    border.color: on && accent ? Theme.accent : Theme.pageInk
     border.width: 2
     Text { id: pillLabel; anchors.centerIn: parent; text: pill.text; font.family: Theme.caption; font.weight: Font.Bold; font.pixelSize: 12; color: pill.on ? Theme.paper : Theme.pageInk }
     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: pill.clicked() }
