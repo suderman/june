@@ -32,7 +32,7 @@ Item {
     const k = ev.key || "";
     const t = ev.text || "";
     if (k === "Tab" || k === "Space" || t === " " || t === "?") return false;
-    if (k === "Escape" || t === "q") {
+    if (k === "Escape" || k === "Backspace" || t === "q") {
       if (confirmingDelete) { confirmingDelete = false; return true; }
       if (editing && !creating) { editing = false; return true; }
       page.back();

@@ -45,7 +45,7 @@ Rectangle {
     if (!ev || ev.ctrl || ev.alt) return false;
     const k = ev.key || "";
     const t = ev.text || "";
-    if (k === "Escape" || t === "q") { cancelled(); return true; }
+    if (k === "Escape" || k === "Backspace" || t === "q") { cancelled(); return true; }
     if (k === "Return" || k === "Enter") { picked(time === "" ? date : date + " " + time); return true; }
     if (t === "h" || k === "Left") { setDate(KeyNav.stepIsoDate(date, -1)); return true; }
     if (t === "l" || k === "Right") { setDate(KeyNav.stepIsoDate(date, 1)); return true; }

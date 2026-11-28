@@ -379,7 +379,7 @@ export function helpSections(surface, column, sheet) {
 					["e / t", "open in Emacs / Herdr"],
 					["u / c", "undo edit / copy"],
 					["j k / Z", "scroll / bottom ↔ top"],
-					["q / Esc", "close docket"],
+					["q / Esc / Bksp", "close docket"],
 				],
 			},
 		];
@@ -391,7 +391,7 @@ export function helpSections(surface, column, sheet) {
 				["n / p", "page down / up"],
 				["RET", "deploy harness / open session"],
 				["Z", "bottom ↔ top"],
-				["q / Esc", "close host page"],
+				["q / Esc / Bksp", "close host page"],
 			]
 			: sheet === "roster"
 				? [
@@ -399,13 +399,13 @@ export function helpSections(surface, column, sheet) {
 					["e", "edit clanker card"],
 					["j k / n p", "scroll / page"],
 					["Z", "bottom ↔ top"],
-					["q / Esc", "close card"],
+					["q / Esc / Bksp", "close card"],
 				]
 				: [
 					["j / k", "select folder"],
 					["n / p", "page down / up"],
 					["RET", "deploy there / type path"],
-					["q / Esc", "back"],
+					["q / Esc / Bksp", "back"],
 				];
 		return [{ title: sheet === "host" ? "Host page" : sheet === "roster" ? "Clanker card" : "Deploy picker", rows: rows }];
 	}
@@ -506,7 +506,7 @@ export function dispatchNormalKey(ev, ctx) {
 
 	// Preview modal takes precedence when open.
 	if (ctx.previewOpen) {
-		if (key === "Escape" || text === "q") return { action: "closePreview" };
+		if (key === "Escape" || key === "Backspace" || text === "q") return { action: "closePreview" };
 		if (text === "h" || key === "Left") return { action: "previewPrev" };
 		if (text === "l" || key === "Right") return { action: "previewNext" };
 		if (text === "j" || key === "Down") return { action: "previewScroll", delta: 1 };
@@ -524,6 +524,7 @@ export function dispatchNormalKey(ev, ctx) {
 	if (key === "Space" || text === " ") return { action: "openLeader" };
 	if (text === "?") return { action: "toggleHelp" };
 	if (key === "Escape") return { action: "escape" };
+	if (key === "Backspace" && surface !== "mini") return { action: "escape" };
 	if (text === "q") return { action: "quit" };
 
 	// Mini June NORMAL mode.

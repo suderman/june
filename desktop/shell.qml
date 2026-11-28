@@ -45,6 +45,7 @@ ShellRoot {
   function keyEv(event) {
     const k = event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab ? "Tab"
       : event.key === Qt.Key_Escape ? "Escape"
+      : event.key === Qt.Key_Backspace ? "Backspace"
       : event.key === Qt.Key_Return || event.key === Qt.Key_Enter ? "Return"
       : event.key === Qt.Key_Space ? "Space"
       : event.key === Qt.Key_Left ? "Left"

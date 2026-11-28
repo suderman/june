@@ -1517,6 +1517,8 @@ test("modal keyboard navigation (keys.mjs): Tab, Z bottom/top toggle, hjkl/np, S
 	assert.deepEqual(dispatchNormalKey({ key: "Tab", text: "\t" }, win), { action: "enterInsert" });
 	assert.deepEqual(dispatchNormalKey({ text: "i" }, win), { action: "enterInsert" });
 	assert.deepEqual(dispatchNormalKey({ key: "Escape" }, win), { action: "escape" });
+	assert.deepEqual(dispatchNormalKey({ key: "Backspace" }, win), { action: "escape" });
+	assert.deepEqual(dispatchNormalKey({ key: "Backspace" }, { ...win, previewOpen: true }), { action: "closePreview" });
 	assert.deepEqual(dispatchNormalKey({ text: "q" }, win), { action: "quit" });
 	assert.deepEqual(dispatchNormalKey({ text: "Z", shift: true }, win), { action: "toggleBottomTop" });
 	assert.equal(dispatchNormalKey({ text: "g" }, win), null, "bare g is left unassigned (Emacs Meow meaning)");

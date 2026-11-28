@@ -99,7 +99,7 @@ Item {
     if (page.picking === "handoff") return handoffPicker.handleKey(ev);
     if (page.picking === "schedule" || page.picking === "deadline") return datePicker.handleKey(ev);
     if (page.statePick) {
-      if (k === "Escape" || t === "q") { page.statePick = false; return true; }
+      if (k === "Escape" || k === "Backspace" || t === "q") { page.statePick = false; return true; }
       for (let i = 0; i < page.stateOptions.length; i++) {
         const opt = page.stateOptions[i];
         if (opt.key === t) {
@@ -113,7 +113,7 @@ Item {
     }
     if (page.assignPick) {
       const list = page.assignCandidates;
-      if (k === "Escape" || t === "q") { page.assignPick = false; return true; }
+      if (k === "Escape" || k === "Backspace" || t === "q") { page.assignPick = false; return true; }
       if (t >= "1" && t <= "9") {
         const idx = Number(t) - 1;
         if (idx >= 0 && idx < list.length) {
@@ -138,7 +138,7 @@ Item {
       return true;
     }
     if (page.handoff !== null) {
-      if (k === "Escape" || t === "q") { page.handoff = null; return true; }
+      if (k === "Escape" || k === "Backspace" || t === "q") { page.handoff = null; return true; }
       if (k === "Return" || k === "Enter") { confirmHandoff(); return true; }
       if (t === "w") { page.picking = "handoff"; scrollToBottom(); return true; }
       if ((t === "h" || t === "l" || k === "Left" || k === "Right") && !page.handoff.fixed) {
@@ -153,7 +153,7 @@ Item {
       }
       return true;
     }
-    if (k === "Escape" || t === "q") {
+    if (k === "Escape" || k === "Backspace" || t === "q") {
       if (page.renaming) { page.renaming = false; return true; }
       page.back();
       return true;
