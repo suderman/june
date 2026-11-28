@@ -35,6 +35,8 @@ Item {
     const t = ev.text || "";
     if (k === "Tab" || k === "Space" || t === " " || t === "?") return false;
     if (k === "Escape" || k === "Backspace" || t === "q") { page.back(); return true; }
+    if (t === "[" && harnesses.length > 0) { cursorIndex = 0; flick.contentY = 0; return true; }
+    if (t === "]" && sessions.length > 0) { cursorIndex = harnesses.length; return true; }
     if (t === "j" || k === "Down") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, 1); return true; }
     if (t === "k" || k === "Up") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, -1); return true; }
     if (t === "n" || t === "N" || k === "PageDown") { cursorIndex = KeyNav.stepCursor(itemCount, cursorIndex, 5); return true; }

@@ -177,10 +177,10 @@ FloatingWindow {
       if (win.layout.columns) win.focusColumn = res.column; else win.shell.windowTab = res.column;
       return;
     }
-    if (res.action === "cycleSection") {
-      if (win.activeColumn === "agents") activeAgentsBoard().cycleSection(res.delta);
-      else if (win.activeColumn === "projects") activeProjectsBoard().cycleSection(res.delta);
-      else masthead.stepDay(res.delta);
+    if (res.action === "jumpHeading") {
+      if (win.activeColumn === "agents") activeAgentsBoard().stepSection(res.delta);
+      else if (win.activeColumn === "projects") activeProjectsBoard().stepSection(res.delta);
+      else strip.stepExchange(res.delta);
       return;
     }
     if (res.action === "tradeSize") { win.settingsOpen = !win.settingsOpen; return; }

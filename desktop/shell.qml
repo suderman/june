@@ -1182,10 +1182,10 @@ ShellRoot {
         if (boardsPaper.fits) root.overlayColumn = res.column; else root.overlayTab = res.column;
         return;
       }
-      if (res.action === "cycleSection") {
-        if (window.activeColumn === "agents") activeAgentsBoard().cycleSection(res.delta);
-        else if (window.activeColumn === "projects") activeProjectsBoard().cycleSection(res.delta);
-        else masthead.stepDay(res.delta);
+      if (res.action === "jumpHeading") {
+        if (window.activeColumn === "agents") activeAgentsBoard().stepSection(res.delta);
+        else if (window.activeColumn === "projects") activeProjectsBoard().stepSection(res.delta);
+        else list.stepExchange(res.delta);
         return;
       }
       if (res.action === "tradeSize") { root.toMini(); return; }

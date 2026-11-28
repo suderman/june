@@ -83,6 +83,15 @@ Item {
   function scrollToBottom() {
     flick.contentY = Math.max(0, flick.contentHeight - flick.height);
   }
+  function jumpSection(delta) {
+    const stops = [0];
+    if (asksRule.visible) stops.push(asksRule.mapToItem(column, 0, 0).y);
+    stops.push(dialogRule.mapToItem(column, 0, 0).y);
+    if (reply.visible) stops.push(reply.mapToItem(column, 0, 0).y);
+    if (changeRule.visible) stops.push(changeRule.mapToItem(column, 0, 0).y);
+    const maxY = Math.max(0, flick.contentHeight - flick.height);
+    flick.contentY = KeyNav.stepSectionY(stops, flick.contentY, delta, maxY);
+  }
   function confirmHandoff() {
     if (page.handoff === null) return;
     const c = { action: "assign", agent: page.handoff.agent };
@@ -158,6 +167,8 @@ Item {
       page.back();
       return true;
     }
+    if (t === "[") { jumpSection(-1); return true; }
+    if (t === "]") { jumpSection(1); return true; }
     if (t === "j" || k === "Down") { scrollBy(96); return true; }
     if (t === "k" || k === "Up") { scrollBy(-96); return true; }
     if (t === "n" || t === "N" || k === "PageDown") { scrollBy(Math.max(160, flick.height * 0.8)); return true; }
@@ -366,9 +377,9 @@ Item {
       }
 
       // The question first, when the task asks the user; then the rest of the Dialog, oldest first.
-      SectionRule { visible: page.asked !== null; text: "ASKS YOU"; alert: true }
+      SectionRule { id: asksRule; visible: page.asked !== null; text: "ASKS YOU"; alert: true }
       Entry { visible: page.asked !== null; entry: page.asked; width: column.width; lead: true }
-      SectionRule { text: page.asked !== null ? "EARLIER IN DIALOG · " + page.earlier.length : "DIALOG" }
+      SectionRule { id: dialogRule; text: page.asked !== null ? "EARLIER IN DIALOG · " + page.earlier.length : "DIALOG" }
       Words { visible: (page.detail?.dialog ?? []).length === 0; role: "lettering"; text: "No Dialog yet."; color: Theme.muted }
       Repeater {
         model: page.earlier
@@ -400,7 +411,7 @@ Item {
       }
 
       // The slip's fields, to change: where its state can go, who to hand it to, and its dates.
-      SectionRule { visible: page.orgState !== ""; text: "CHANGE" }
+      SectionRule { id: changeRule; visible: page.orgState !== ""; text: "CHANGE" }
       Item {
         visible: page.orgState !== ""
         width: parent.width

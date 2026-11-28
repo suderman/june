@@ -60,6 +60,44 @@ export function stepCursor(length, current, delta) {
 	return Math.max(0, Math.min(length - 1, base + delta));
 }
 
+/**
+ * Org-style sibling-heading jump (`[` = -1, `]` = +1) across items tagged with `.group`.
+ * Jumps to the first item of the previous or next group; falls back to stepping by 5 in flat lists.
+ */
+export function stepGroup(items, currentIndex, delta) {
+	if (!Array.isArray(items) || items.length === 0) return 0;
+	const cur = stepCursor(items.length, currentIndex, 0);
+	const starts = [0];
+	for (let i = 1; i < items.length; i++) {
+		if ((items[i].group ?? "") !== (items[i - 1].group ?? "")) starts.push(i);
+	}
+	if (starts.length <= 1) return stepCursor(items.length, cur, delta < 0 ? -5 : 5);
+	let g = 0;
+	for (let i = 0; i < starts.length; i++) {
+		if (starts[i] <= cur) g = i;
+		else break;
+	}
+	const nextG = delta < 0 ? Math.max(0, g - 1) : Math.min(starts.length - 1, g + 1);
+	return starts[nextG];
+}
+
+/** Jumps a Flickable's `contentY` to the previous (-1) or next (+1) section stop Y. */
+export function stepSectionY(stops, currentY, delta, maxY) {
+	if (!Array.isArray(stops) || stops.length === 0) return Math.max(0, currentY);
+	const cap = Math.max(0, maxY ?? 0);
+	const sorted = [];
+	for (let i = 0; i < stops.length; i++) {
+		const y = Math.max(0, Math.min(cap, Math.round(stops[i])));
+		if (sorted.length === 0 || y > sorted[sorted.length - 1] + 4) sorted.push(y);
+	}
+	if (delta > 0) {
+		for (let i = 0; i < sorted.length; i++) if (sorted[i] > currentY + 12) return sorted[i];
+		return sorted[sorted.length - 1];
+	}
+	for (let i = sorted.length - 1; i >= 0; i--) if (sorted[i] < currentY - 12) return sorted[i];
+	return sorted[0];
+}
+
 /** Steps an ISO YYYY-MM-DD date string by `days` using UTC so local DST never skips a day. */
 export function stepIsoDate(iso, days) {
 	const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso ?? ""));
@@ -114,45 +152,45 @@ export function agentsItems(view, mode, opts) {
 	if (mode === "hosts") {
 		const hosts = v.hosts || [];
 		for (let i = 0; i < hosts.length; i++) {
-			out.push({ kind: "host", key: "host:" + hosts[i].host, host: hosts[i].host });
+			out.push({ kind: "host", group: "hosts", key: "host:" + hosts[i].host, host: hosts[i].host });
 		}
 		return out;
 	}
 	if (mode === "clankers") {
 		const cards = o.rosterSort === "leaderboard" ? (v.rosterLeaderboard || []) : (v.roster || []);
 		for (let i = 0; i < cards.length; i++) {
-			out.push({ kind: "clanker", key: "clanker:" + cards[i].slug, slug: cards[i].slug });
+			out.push({ kind: "clanker", group: "clankers", key: "clanker:" + cards[i].slug, slug: cards[i].slug });
 		}
 		return out;
 	}
 	const needs = v.needs || [];
 	for (let i = 0; i < needs.length; i++) {
-		out.push({ kind: "need", key: "need:" + i, task: needs[i].task || "", link: needs[i].link || "" });
+		out.push({ kind: "need", group: "needs", key: "need:" + i, task: needs[i].task || "", link: needs[i].link || "" });
 	}
 	const working = v.working || [];
 	for (let i = 0; i < working.length; i++) {
-		out.push({ kind: "working", key: "work:" + i, task: working[i].task || "", link: working[i].link || "" });
+		out.push({ kind: "working", group: "working", key: "work:" + i, task: working[i].task || "", link: working[i].link || "" });
 	}
 	const queued = v.queued || [];
 	const shownQ = o.queueOpen ? queued : queued.slice(0, 3);
 	for (let i = 0; i < shownQ.length; i++) {
-		out.push({ kind: "queued", key: "q:" + i, task: shownQ[i].task || "", link: shownQ[i].link || "" });
+		out.push({ kind: "queued", group: "queued", key: "q:" + i, task: shownQ[i].task || "", link: shownQ[i].link || "" });
 	}
-	if (queued.length > 3) out.push({ kind: "toggleQueue", key: "toggle:queue" });
+	if (queued.length > 3) out.push({ kind: "toggleQueue", group: "queued", key: "toggle:queue" });
 	const reviewing = v.reviewing || [];
 	for (let i = 0; i < reviewing.length; i++) {
-		out.push({ kind: "reviewing", key: "rev:" + i, task: reviewing[i].task || "", link: reviewing[i].link || "" });
+		out.push({ kind: "reviewing", group: "reviewing", key: "rev:" + i, task: reviewing[i].task || "", link: reviewing[i].link || "" });
 	}
 	const idle = v.idle || [];
-	if (idle.length > 0) out.push({ kind: "toggleIdle", key: "toggle:idle" });
+	if (idle.length > 0) out.push({ kind: "toggleIdle", group: "idle", key: "toggle:idle" });
 	if (o.idleOpen) {
 		for (let i = 0; i < idle.length; i++) {
-			out.push({ kind: "idle", key: "idle:" + i, task: idle[i].task || "", link: idle[i].link || "" });
+			out.push({ kind: "idle", group: "idle", key: "idle:" + i, task: idle[i].task || "", link: idle[i].link || "" });
 		}
 	}
 	const recent = (v.recent || []).slice(0, 6);
 	for (let i = 0; i < recent.length; i++) {
-		out.push({ kind: "recent", key: "rec:" + i, task: recent[i].task || "", link: recent[i].link || "" });
+		out.push({ kind: "recent", group: "recent", key: "rec:" + i, task: recent[i].task || "", link: recent[i].link || "" });
 	}
 	return out;
 }
@@ -166,7 +204,7 @@ export function projectsItems(view, mode, drillRows) {
 		for (let si = 0; si < sections.length; si++) {
 			const rows = sections[si].rows || [];
 			for (let ri = 0; ri < rows.length; ri++) {
-				out.push({ kind: "agenda", key: "ag:" + si + ":" + ri, entry: rows[ri] });
+				out.push({ kind: "agenda", group: "sec:" + si, key: "ag:" + si + ":" + ri, entry: rows[ri] });
 			}
 		}
 		return out;
@@ -175,10 +213,10 @@ export function projectsItems(view, mode, drillRows) {
 		const lists = v.lists || [];
 		for (let li = 0; li < lists.length; li++) {
 			const l = lists[li];
-			out.push({ kind: "stateHeader", key: "sh:" + l.state, state: l.state, more: l.more || 0 });
+			out.push({ kind: "stateHeader", group: "st:" + l.state, key: "sh:" + l.state, state: l.state, more: l.more || 0 });
 			const rows = l.rows || [];
 			for (let ri = 0; ri < rows.length; ri++) {
-				out.push({ kind: "task", key: "tk:" + l.state + ":" + ri, state: l.state, more: l.more || 0, entry: rows[ri] });
+				out.push({ kind: "task", group: "st:" + l.state, key: "tk:" + l.state + ":" + ri, state: l.state, more: l.more || 0, entry: rows[ri] });
 			}
 		}
 		return out;
@@ -186,14 +224,14 @@ export function projectsItems(view, mode, drillRows) {
 	if (mode === "state") {
 		const rows = drillRows || [];
 		for (let i = 0; i < rows.length; i++) {
-			out.push({ kind: "drill", key: "dr:" + i, entry: rows[i] });
+			out.push({ kind: "drill", group: "drill", key: "dr:" + i, entry: rows[i] });
 		}
 		return out;
 	}
 	if (mode === "projects") {
 		const projs = v.projects || [];
 		for (let i = 0; i < projs.length; i++) {
-			out.push({ kind: "project", key: "pr:" + i, link: projs[i].link || "" });
+			out.push({ kind: "project", group: "projects", key: "pr:" + i, link: projs[i].link || "" });
 		}
 	}
 	return out;
@@ -379,6 +417,7 @@ export function helpSections(surface, column, sheet) {
 					["Tab / o", "fold / unfold Dialog"],
 					["e / t", "open in Emacs / Herdr"],
 					["u / c", "undo edit / copy"],
+					["[ / ]", "prev / next section"],
 					["j k / n p / Z", "scroll / page / bottom ↔ top"],
 					["q / Esc / Bksp", "close docket"],
 				],
@@ -389,6 +428,7 @@ export function helpSections(surface, column, sheet) {
 		const rows = sheet === "host"
 			? [
 				["j / k", "select harness / session"],
+				["[ / ]", "harnesses ↔ sessions"],
 				["n / p", "page down / up"],
 				["RET", "deploy harness / open session"],
 				["Z", "bottom ↔ top"],
@@ -398,6 +438,7 @@ export function helpSections(surface, column, sheet) {
 				? [
 					["d / RET", "visit or deploy clanker"],
 					["e", "edit clanker card"],
+					["[ / ]", "prev / next section"],
 					["j k / n p", "scroll / page"],
 					["Z", "bottom ↔ top"],
 					["q / Esc / Bksp", "close card"],
@@ -414,7 +455,7 @@ export function helpSections(surface, column, sheet) {
 		["i / a", "Insert mode (Esc back)"],
 		["h / l", "left / right across bars"],
 		["1 / 2 / 3", "agents / chat / projects"],
-		["[ / ]", "cycle sub-sections"],
+		["[ / ]", "prev / next heading"],
 		["j / k", "step down / up"],
 		["n / p", "page down / up"],
 		["Z", "bottom ↔ top"],
@@ -429,6 +470,7 @@ export function helpSections(surface, column, sheet) {
 			title: "Chat strip",
 			rows: [
 				["k / j", "older / newer panel"],
+				["[ / ]", "older / newer exchange"],
 				["p / n", "page up / down"],
 				["Tab", "toggle tool cards"],
 				["RET", "open artifact / link"],
@@ -436,15 +478,14 @@ export function helpSections(surface, column, sheet) {
 				["c", "copy focused panel"],
 				["/", "search history"],
 				["d", "calendar & search"],
-				["< / >", "prev / next day"],
-				["T", "back to today"],
+				["< / > / T", "prev / next day / today"],
 			],
 		}
 		: column === "agents"
 			? {
 				title: "Agents board",
 				rows: [
-					["[ / ]", "hosts / clankers / activity"],
+					["[ / ]", "prev / next section"],
 					["j / k", "move row cursor"],
 					["n / p", "page down / up"],
 					["RET", "open docket / card / host"],
@@ -457,7 +498,7 @@ export function helpSections(surface, column, sheet) {
 			: {
 				title: "Projects board",
 				rows: [
-					["[ / ]", "agenda / tasks / projects"],
+					["[ / ]", "prev / next day or state"],
 					["j / k", "move row cursor"],
 					["n / p", "page down / up"],
 					["RET", "open task / drill / project"],
@@ -510,8 +551,8 @@ export function dispatchNormalKey(ev, ctx) {
 	// Preview modal takes precedence when open.
 	if (ctx.previewOpen) {
 		if (key === "Escape" || key === "Backspace" || text === "q") return { action: "closePreview" };
-		if (text === "h" || key === "Left") return { action: "previewPrev" };
-		if (text === "l" || key === "Right") return { action: "previewNext" };
+		if (text === "h" || text === "[" || key === "Left") return { action: "previewPrev" };
+		if (text === "l" || text === "]" || key === "Right") return { action: "previewNext" };
 		if (text === "j" || key === "Down") return { action: "previewScroll", delta: 1 };
 		if (text === "k" || key === "Up") return { action: "previewScroll", delta: -1 };
 		if (text === "n" || text === "N" || key === "PageDown") return { action: "previewPage", delta: 1 };
@@ -547,8 +588,8 @@ export function dispatchNormalKey(ev, ctx) {
 	if (text === "1") return { action: "setColumn", column: "agents" };
 	if (text === "2") return { action: "setColumn", column: "chat" };
 	if (text === "3") return { action: "setColumn", column: "projects" };
-	if (text === "[") return { action: "cycleSection", delta: -1 };
-	if (text === "]") return { action: "cycleSection", delta: 1 };
+	if (text === "[") return { action: "jumpHeading", delta: -1 };
+	if (text === "]") return { action: "jumpHeading", delta: 1 };
 	if (text === "z") return { action: "tradeSize" };
 	if (text === "Z" || (shift && key === "Z")) return { action: "toggleBottomTop" };
 	if (text === "j" || key === "Down") return { action: "step", delta: 1 };

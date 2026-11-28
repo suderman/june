@@ -1530,8 +1530,8 @@ test("modal keyboard navigation (keys.mjs): Tab, Z bottom/top toggle, hjkl/np, S
 	assert.deepEqual(dispatchNormalKey({ text: "P", shift: true }, win), { action: "page", delta: -1 });
 	assert.deepEqual(dispatchNormalKey({ text: "h" }, win), { action: "moveColumn", delta: -1 });
 	assert.deepEqual(dispatchNormalKey({ text: "l" }, win), { action: "moveColumn", delta: 1 });
-	assert.deepEqual(dispatchNormalKey({ text: "[" }, win), { action: "cycleSection", delta: -1 });
-	assert.deepEqual(dispatchNormalKey({ text: "]" }, win), { action: "cycleSection", delta: 1 });
+	assert.deepEqual(dispatchNormalKey({ text: "[" }, win), { action: "jumpHeading", delta: -1 });
+	assert.deepEqual(dispatchNormalKey({ text: "]" }, win), { action: "jumpHeading", delta: 1 });
 	assert.deepEqual(dispatchNormalKey({ text: "/" }, win), { action: "search" });
 	assert.deepEqual(dispatchNormalKey({ text: "<" }, win), { action: "stepDay", delta: -1 });
 	assert.deepEqual(dispatchNormalKey({ text: ">" }, win), { action: "stepDay", delta: 1 });
@@ -1716,6 +1716,26 @@ test("board cursor lists, state quick-pick mnemonics, ISO date stepping, and she
 	assert.deepEqual(K.stepHorizontal({ column: "projects", agentSection: "activity", projectSection: "projects", delta: 1 }), { column: "projects", section: "projects" });
 	assert.deepEqual(K.stepHorizontal({ column: "projects", agentSection: "activity", projectSection: "state", delta: -1 }), { column: "projects", section: "agenda" });
 	assert.deepEqual(K.stepHorizontal({ column: "projects", agentSection: "activity", projectSection: "agenda", delta: -1 }), { column: "chat", section: "" });
+
+	// Org-style sibling heading jump ([ / ]) across agenda days, agent activity sections, and scrollable sheets.
+	const ag = K.projectsItems({
+		sections: [
+			{ rows: [{ title: "O1" }, { title: "O2" }] },
+			{ rows: [{ title: "T1" }, { title: "T2" }, { title: "T3" }] },
+			{ rows: [{ title: "M1" }] },
+		],
+	}, "agenda", []);
+	assert.equal(K.stepGroup(ag, 0, 1), 2, "Overdue -> Today");
+	assert.equal(K.stepGroup(ag, 1, 1), 2, "mid-Overdue -> Today");
+	assert.equal(K.stepGroup(ag, 2, 1), 5, "Today -> Tomorrow");
+	assert.equal(K.stepGroup(ag, 5, 1), 5, "clamps at last section");
+	assert.equal(K.stepGroup(ag, 5, -1), 2, "Tomorrow -> Today");
+	assert.equal(K.stepGroup(ag, 4, -1), 0, "mid-Today -> Overdue");
+	assert.equal(K.stepGroup(ag, 0, -1), 0, "clamps at first section");
+	assert.equal(K.stepSectionY([0, 200, 520], 0, 1, 600), 200);
+	assert.equal(K.stepSectionY([0, 200, 520], 200, 1, 600), 520);
+	assert.equal(K.stepSectionY([0, 200, 520], 520, -1, 600), 200);
+	assert.equal(K.stepSectionY([0, 200, 520], 200, -1, 600), 0);
 });
 
 test("Avy/Vimium hint mode labels, prefix matching, and shown/user media extraction (keys.mjs)", async () => {

@@ -153,6 +153,30 @@ ListView {
     if (next === 0) { landOnNewest(); return; }
     positionViewAtIndex(next, ListView.Contain);
   }
+  /** Jump to previous (-1, older/up) or next (+1, newer/down) conversation exchange (panel with a user turn). */
+  function stepExchange(delta) {
+    if (count === 0) return;
+    const cur = cursorIndex < 0 ? 0 : cursorIndex;
+    const dir = delta < 0 ? 1 : -1; // BottomToTop: older = higher index, newer = lower index.
+    let target = -1;
+    for (let i = cur + dir; i >= 0 && i < count; i += dir) {
+      try {
+        const p = JSON.parse(model.get(i).json);
+        if (Array.isArray(p.elements) && p.elements.some(e => e && e.kind === "user")) { target = i; break; }
+      } catch (e) {}
+    }
+    if (target < 0) target = delta < 0 ? count - 1 : 0;
+    if (target === 0) { landOnNewest(); return; }
+    if (target === count - 1 && delta < 0) { landOnOldest(); return; }
+    follow = false;
+    landingTop = false;
+    settleTop.stop();
+    scrollState = Scroll.rest();
+    glider.running = false;
+    paging.stop();
+    cursorIndex = target;
+    positionViewAtIndex(target, ListView.Contain);
+  }
   /** Jon's Emacs `Z`: go to bottom (newest); if already at bottom, go to top (oldest). */
   function toggleBottomTop() {
     if (count === 0) return;

@@ -137,6 +137,10 @@ Item {
     if (navItems.length === 0) { scrollStep(delta); return; }
     cursorIndex = KeyNav.stepCursor(navItems.length, cursorIndex, delta);
   }
+  function stepSection(delta) {
+    if (navItems.length === 0) { scrollPage(delta); return; }
+    cursorIndex = KeyNav.stepGroup(navItems, cursorIndex, delta);
+  }
   function pageRows(delta) {
     if (navItems.length === 0) { scrollPage(delta); return; }
     cursorIndex = KeyNav.stepCursor(navItems.length, cursorIndex, delta * 6);

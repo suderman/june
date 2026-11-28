@@ -3,6 +3,7 @@
 // create a new clanker or edit this one, where destroying asks once more before it archives the clanker's folder.
 import QtQuick
 import "board.mjs" as Board
+import "keys.mjs" as KeyNav
 
 Item {
   id: page
@@ -36,6 +37,16 @@ Item {
       if (confirmingDelete) { confirmingDelete = false; return true; }
       if (editing && !creating) { editing = false; return true; }
       page.back();
+      return true;
+    }
+    if (t === "[" || t === "]") {
+      const stops = [0];
+      if (!editing && card !== null) {
+        stops.push(directivesRule.mapToItem(col, 0, 0).y);
+        if (historyRule.visible) stops.push(historyRule.mapToItem(col, 0, 0).y);
+      }
+      const maxY = Math.max(0, flick.contentHeight - flick.height);
+      flick.contentY = KeyNav.stepSectionY(stops, flick.contentY, t === "]" ? 1 : -1, maxY);
       return true;
     }
     if (t === "j" || k === "Down") { scrollBy(96); return true; }
@@ -230,7 +241,7 @@ Item {
           }
         }
 
-        SectionRule { text: "DIRECTIVES" }
+        SectionRule { id: directivesRule; text: "DIRECTIVES" }
         Item {
           width: parent.width
           height: ordersText.implicitHeight + 18
@@ -246,7 +257,7 @@ Item {
           }
         }
 
-        SectionRule { visible: (page.card?.runs ?? 0) > 0; text: "HISTORY" }
+        SectionRule { id: historyRule; visible: (page.card?.runs ?? 0) > 0; text: "HISTORY" }
         Item {
           visible: (page.card?.runs ?? 0) > 0
           width: parent.width
