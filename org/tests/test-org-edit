@@ -402,7 +402,7 @@ check "a reply indents its continuation lines" line "$reply_file" '^  Cog only l
 check "a reply leaves state, planning and the question mark alone" bash -c "grep -q '^\* EVAL Hand off' '$reply_file' && grep -q '^SCHEDULED: <2026-11-22 Sun>' '$reply_file' && grep -q '^:ASKED:' '$reply_file'"
 check "a reply keeps the next heading apart" line "$reply_file" '^\* TODO Next$'
 cp "$reply_file" "$fixture/reply-once"
-check "a reply refuses an agent's name" has "$(run reply "$reply_file" "Hand off" '{"who":"Agent","text":"x"}')" "the user.s own name"
+check "a reply refuses an agent's name" has "$(run reply "$reply_file" "Hand off" '{"who":"Agent","text":"x"}')" "the user.*s own name"
 check "a reply refuses a heading in its text" has "$(run reply "$reply_file" "Hand off" '{"who":"Jon","text":"* TODO sneak"}')" "without headings"
 check "a reply refuses unknown fields" has "$(run reply "$reply_file" "Hand off" '{"who":"Jon","text":"x","state":"AUTO"}')" "unknown reply field"
 check "refused replies write nothing" cmp -s "$reply_file" "$fixture/reply-once"

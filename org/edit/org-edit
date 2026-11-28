@@ -26,6 +26,9 @@ here="$(dirname "$(readlink -f "$0")")"
 # org-dispatch.el pins Calgary time; without zone data Emacs silently runs in UTC,
 # so evenings would date tomorrow. NixOS keeps zones in /etc/zoneinfo, not the libc default.
 if [[ -z ${TZDIR:-} && ! -d /usr/share/zoneinfo && -d /etc/zoneinfo ]]; then export TZDIR=/etc/zoneinfo; fi
+# Batch Emacs decodes CLI arguments and encodes stdout through the process locale;
+# under C/POSIX (Nix sandboxes, minimal services), non-ASCII headings and JSON garble.
+if [[ ${LC_ALL:-${LC_CTYPE:-${LANG:-}}} != *[Uu][Tt][Ff]*8* ]]; then export LC_ALL=C.UTF-8; fi
 # The dispatcher holds this lock through each pass. Callers fail at once unless ORG_EDIT_WAIT names seconds to wait
 # for it, as June's boards do for the user's own edits; a coding worker leaves it unset.
 if [[ ${ORG_EDIT_WAIT:-} =~ ^[0-9]+$ ]]; then lockwait=(-w "$ORG_EDIT_WAIT"); else lockwait=(-n); fi

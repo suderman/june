@@ -15,7 +15,7 @@ test("Qt renders artifact beats in both looks, bounds previews and copies full l
 	const dir = await mkdtemp(join(tmpdir(), "june-artifacts-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	await mkdir(join(dir, "ui"));
-	for (const file of ["Artifact.qml", "ArtifactButton.qml", "ArtifactIcon.qml", "Preview.qml", "ConsolePanel.qml", "Panel.qml", "Balloon.qml", "Backdrop.qml", "Scenery.qml", "FileCard.qml", "Code.mjs", "console.mjs", "compose.mjs", "strip.mjs", "light.mjs", "live.mjs", "scenery.mjs"]) await copyFile(new URL(`../desktop/${file}`, import.meta.url), join(dir, "ui", file));
+	for (const file of ["Artifact.qml", "ArtifactButton.qml", "ArtifactIcon.qml", "Preview.qml", "ConsolePanel.qml", "Panel.qml", "Balloon.qml", "Backdrop.qml", "Scenery.qml", "FileCard.qml", "Code.mjs", "console.mjs", "compose.mjs", "strip.mjs", "light.mjs", "live.mjs", "scenery.mjs", "keys.mjs"]) await copyFile(new URL(`../desktop/${file}`, import.meta.url), join(dir, "ui", file));
 	await copyFile(new URL("../desktop/harnesses.mjs", import.meta.url), join(dir, "ui", "harnesses.mjs"));
 	const theme = (await readFile(new URL("../desktop/Theme.qml", import.meta.url), "utf8")).replace("import Quickshell\n", "").replace("Singleton {", "QtObject {");
 	await writeFile(join(dir, "ui", "Theme.qml"), theme);
