@@ -165,6 +165,17 @@ ListView {
     const idx = cursorIndex >= 0 && cursorIndex < count ? cursorIndex : 0;
     try { return JSON.parse(model.get(idx).json); } catch (e) { return null; }
   }
+  /** Toggles tool chips/cards open or closed on the currently focused panel (Org-style Tab). */
+  function toggleFocusedTools() {
+    if (count === 0) return false;
+    const idx = cursorIndex >= 0 && cursorIndex < count ? cursorIndex : 0;
+    const kids = list.contentItem ? list.contentItem.children : [];
+    for (let i = 0; i < kids.length; i++) {
+      const c = kids[i];
+      if (c && c.index === idx && c.item && typeof c.item.toggleTools === "function") return c.item.toggleTools();
+    }
+    return false;
+  }
   /** Collects visible actionable targets across panels in view, newest first, with home-row hint codes. */
   function collectVisibleHints(targetItem) {
     if (!targetItem || count === 0) return [];

@@ -348,7 +348,8 @@ export function helpSections(surface, column, sheet) {
 			{
 				title: "Mini June",
 				rows: [
-					["Tab / i / a", "back to Insert"],
+					["i / a", "back to Insert"],
+					["Tab", "toggle tools / expand"],
 					["k / p / z", "expand full overlay"],
 					["SPC", "leader toggles"],
 					["q / Esc", "dismiss mini June"],
@@ -375,10 +376,10 @@ export function helpSections(surface, column, sheet) {
 					["w / W", "schedule / deadline"],
 					["A", "assign / hand off"],
 					["R", "rename title"],
-					["o", "fold / unfold Dialog"],
+					["Tab / o", "fold / unfold Dialog"],
 					["e / t", "open in Emacs / Herdr"],
 					["u / c", "undo edit / copy"],
-					["j k / Z", "scroll / bottom ↔ top"],
+					["j k / n p / Z", "scroll / page / bottom ↔ top"],
 					["q / Esc / Bksp", "close docket"],
 				],
 			},
@@ -410,17 +411,18 @@ export function helpSections(surface, column, sheet) {
 		return [{ title: sheet === "host" ? "Host page" : sheet === "roster" ? "Clanker card" : "Deploy picker", rows: rows }];
 	}
 	const nav = [
-		["Tab / i / a", "Insert mode"],
-		["h / l", "left / right column"],
+		["i / a", "Insert mode (Esc back)"],
+		["h / l", "left / right across bars"],
 		["1 / 2 / 3", "agents / chat / projects"],
 		["[ / ]", "cycle sub-sections"],
 		["j / k", "step down / up"],
 		["n / p", "page down / up"],
 		["Z", "bottom ↔ top"],
+		["Tab", "fold / unfold nested"],
 		["z", surface === "overlay" ? "shrink to mini June" : "toggle settings"],
 		["SPC", "leader toggles"],
 		["q", surface === "overlay" ? "close sheet / dismiss" : "close open sheet"],
-		["Esc", "cancel / close sheet"],
+		["Esc / Bksp", "cancel / close sheet"],
 	];
 	const ctx = column === "chat"
 		? {
@@ -428,6 +430,7 @@ export function helpSections(surface, column, sheet) {
 			rows: [
 				["k / j", "older / newer panel"],
 				["p / n", "page up / down"],
+				["Tab", "toggle tool cards"],
 				["RET", "open artifact / link"],
 				["f", "hint links / files / tools"],
 				["c", "copy focused panel"],
@@ -445,10 +448,10 @@ export function helpSections(surface, column, sheet) {
 					["j / k", "move row cursor"],
 					["n / p", "page down / up"],
 					["RET", "open docket / card / host"],
-					["o", "direct link / toggle idle/queue"],
+					["Tab / o", "toggle idle / queue (or link)"],
 					["C / S", "new clanker / sort (clankers)"],
 					["t / e", "open Herdr / Emacs"],
-					["q / Esc", "close sheet"],
+					["q / Bksp", "close sheet"],
 				],
 			}
 			: {
@@ -458,9 +461,9 @@ export function helpSections(surface, column, sheet) {
 					["j / k", "move row cursor"],
 					["n / p", "page down / up"],
 					["RET", "open task / drill / project"],
-					["o", "drill into state (tasks)"],
+					["Tab / o", "toggle state drill (tasks)"],
 					["e / t", "open Emacs / Herdr"],
-					["q / Esc", "close sheet / back"],
+					["q / Bksp", "close sheet / back"],
 				],
 			};
 	return [{ title: "Navigation", rows: nav }, ctx];
@@ -520,7 +523,8 @@ export function dispatchNormalKey(ev, ctx) {
 	}
 
 	// Universal NORMAL keys.
-	if (key === "Tab" || text === "i" || text === "a") return { action: "enterInsert" };
+	if (text === "i" || text === "a") return { action: "enterInsert" };
+	if (key === "Tab") return { action: "fold" };
 	if (key === "Space" || text === " ") return { action: "openLeader" };
 	if (text === "?") return { action: "toggleHelp" };
 	if (key === "Escape") return { action: "escape" };

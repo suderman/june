@@ -125,6 +125,10 @@ PanelWindow {
     if (res.action === "cancelLeader") { leader = false; return; }
     leader = false;
     if (res.action === "enterInsert") { enterInsert(); return; }
+    if (res.action === "fold") {
+      if (!(cell.item && typeof cell.item.toggleTools === "function" && cell.item.toggleTools())) openStripNormal();
+      return;
+    }
     if (res.action === "quit" || res.action === "escape") { dismissed(); return; }
     if (res.action === "expandOverlay") { openStripNormal(); return; }
     if (res.action === "hint") {
@@ -287,7 +291,7 @@ PanelWindow {
       TapHandler { onTapped: win.openStrip() }
     }
 
-      // The strip's compose bar, where the strip has it. Tab and Esc enter Normal mode; q in Normal dismisses mini June.
+      // The strip's compose bar, where the strip has it. Esc enters Normal mode; Tab in Insert unfolds the full strip.
       Composer {
         id: composer
         visible: win.inputShown
@@ -302,7 +306,7 @@ PanelWindow {
         unattach: win.unattach
         paste: win.paste
         pick: win.pick
-        tabAction: () => win.enterNormal()
+        tabAction: () => win.openStrip()
         escAction: () => win.enterNormal()
         onEnteredInsert: win.enterInsert()
       }

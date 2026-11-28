@@ -214,7 +214,8 @@ FloatingWindow {
       return;
     }
     if (res.action === "fold") {
-      if (win.activeColumn === "agents") activeAgentsBoard().foldCurrent();
+      if (win.activeColumn === "chat") strip.toggleFocusedTools();
+      else if (win.activeColumn === "agents") activeAgentsBoard().foldCurrent();
       else if (win.activeColumn === "projects") activeProjectsBoard().foldCurrent();
       return;
     }
@@ -505,7 +506,7 @@ FloatingWindow {
       unattach: index => win.shell.unattach(index)
       paste: fallback => win.shell.pasteInto(fallback)
       pick: () => windowPicker.open()
-      tabAction: () => win.enterNormal()
+      tabAction: () => {}
       escAction: () => win.enterNormal()
       onEnteredInsert: win.enterInsert()
     }

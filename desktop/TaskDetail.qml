@@ -95,7 +95,7 @@ Item {
     if (!ev || ev.ctrl || ev.alt) return false;
     const k = ev.key || "";
     const t = ev.text || "";
-    if (k === "Tab" || k === "Space" || t === " " || t === "?") return false;
+    if (k === "Space" || t === " " || t === "?") return false;
     if (page.picking === "handoff") return handoffPicker.handleKey(ev);
     if (page.picking === "schedule" || page.picking === "deadline") return datePicker.handleKey(ev);
     if (page.statePick) {
@@ -181,7 +181,7 @@ Item {
     if (t === "R" && page.renamable && page.detail) { page.renaming = true; rename.text = page.detail.title; flick.contentY = 0; rename.focusField(); return true; }
     if (t === "e" && (page.detail?.emacs ?? "") !== "" && page.detail.emacs !== "null") { page.open(page.detail.emacs); return true; }
     if (t === "t" && (page.detail?.herdr ?? "") !== "" && page.detail.herdr !== "null") { page.open(page.detail.herdr); return true; }
-    if (t === "o") { page.entriesExpanded = !page.entriesExpanded; page.toggleEntries(page.entriesExpanded); return true; }
+    if (k === "Tab" || t === "o") { page.entriesExpanded = !page.entriesExpanded; page.toggleEntries(page.entriesExpanded); return true; }
     if (t === "u" && !page.busy && page.undo !== null) { page.send(page.undo); return true; }
     if (t === "c" && page.detail) {
       const parts = [page.detail.title ?? ""];

@@ -1219,7 +1219,8 @@ ShellRoot {
         return;
       }
       if (res.action === "fold") {
-        if (window.activeColumn === "agents") activeAgentsBoard().foldCurrent();
+        if (window.activeColumn === "chat") list.toggleFocusedTools();
+        else if (window.activeColumn === "agents") activeAgentsBoard().foldCurrent();
         else if (window.activeColumn === "projects") activeProjectsBoard().foldCurrent();
         return;
       }
@@ -1515,7 +1516,7 @@ ShellRoot {
         unattach: index => root.unattach(index)
         paste: fallback => root.pasteInto(fallback)
         pick: () => filePicker.open()
-        tabAction: () => window.enterNormal()
+        tabAction: () => root.toMini()
         escAction: () => window.enterNormal()
         onEnteredInsert: window.enterInsert()
       }

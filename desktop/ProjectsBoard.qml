@@ -112,10 +112,17 @@ Item {
     if (it.entry) board.show(it.entry);
   }
   function foldCurrent() {
+    if (board.mode === "state") {
+      board.mode = "tasks";
+      board.drill = "";
+      cursorIndex = 0;
+      return;
+    }
     const it = currentItem();
     if (board.mode === "tasks" && it && (it.state ?? "") !== "") {
       board.drill = it.state;
       board.mode = "state";
+      cursorIndex = 0;
     }
   }
   function handleSheetKey(ev) {

@@ -1514,7 +1514,7 @@ test("modal keyboard navigation (keys.mjs): Tab, Z bottom/top toggle, hjkl/np, S
 	assert.equal(initialNormalMode({ tab: "chat", narrow: false, past: true }), true, "past day starts in NORMAL");
 
 	const win = { surface: "window", column: "chat", leader: false, helpOpen: false, previewOpen: false };
-	assert.deepEqual(dispatchNormalKey({ key: "Tab", text: "\t" }, win), { action: "enterInsert" });
+	assert.deepEqual(dispatchNormalKey({ key: "Tab", text: "\t" }, win), { action: "fold" });
 	assert.deepEqual(dispatchNormalKey({ text: "i" }, win), { action: "enterInsert" });
 	assert.deepEqual(dispatchNormalKey({ key: "Escape" }, win), { action: "escape" });
 	assert.deepEqual(dispatchNormalKey({ key: "Backspace" }, win), { action: "escape" });

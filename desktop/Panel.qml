@@ -48,6 +48,23 @@ Item {
   readonly property var sources: ({ tui: "terminal", kitty: "terminal", apk: "phone", telegram: "telegram", cli: "command line" })
 
   function kindOf(e) { return e.kind === "tools" ? (e.items.length > 1 ? "card" : "chip") : e.kind; }
+  function toggleTools() {
+    let anyClosed = false;
+    let found = 0;
+    for (let i = 0; i < elements.count; i++) {
+      const slot = elements.itemAt(i);
+      if (slot && slot.item && (slot.kind === "chip" || slot.kind === "card")) {
+        found++;
+        if (!slot.item.open) anyClosed = true;
+      }
+    }
+    if (found === 0) return false;
+    for (let i = 0; i < elements.count; i++) {
+      const slot = elements.itemAt(i);
+      if (slot && slot.item && (slot.kind === "chip" || slot.kind === "card")) slot.item.open = anyClosed;
+    }
+    return true;
+  }
   function collectHints(targetItem, attachedBase) {
     const out = [];
     if (!targetItem) return out;

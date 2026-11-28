@@ -59,7 +59,7 @@ Item {
       if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
         memo.submitted();
         event.accepted = true;
-      } else if (event.key === Qt.Key_Escape || (event.key === Qt.Key_Tab && event.modifiers === Qt.NoModifier)) {
+      } else if (event.key === Qt.Key_Escape) {
         area.focus = false;
         memo.escaped();
         event.accepted = true;

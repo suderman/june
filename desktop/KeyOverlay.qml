@@ -158,7 +158,7 @@ Item {
           Item { width: 10; height: 1 }
           Text {
             anchors.verticalCenter: parent.verticalCenter
-            text: "Tab / Esc · ? closes"
+            text: "i Insert · Esc Normal · ? closes"
             font.family: Theme.caption; font.pixelSize: 12
             color: Theme.muted
           }
