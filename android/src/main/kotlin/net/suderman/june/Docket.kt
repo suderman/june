@@ -254,7 +254,7 @@ internal fun TaskDocket(
                         val start = if (held.start.isNotEmpty()) held.start.replace("T", " ") else if (starts == "now") "now" else "at its schedule, $starts"
                         Text("Hand to ${held.name}${if (held.fixed) " on ${held.host}" else ""}, starting $start.", style = t.row.copy(color = p.surfaceInk))
                         if (!held.fixed && hosts.size > 1) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.Center) {
-                            Text("on", Modifier.padding(top = 14.dp, end = 4.dp), style = t.label.copy(color = p.surfaceMuted))
+                            Text("on", Modifier.padding(top = 9.dp, end = 4.dp), style = t.label.copy(color = p.surfaceMuted))
                             for (h in hosts) Stamp(h, p.line, on = h == held.host, tilt = 0f) { handoff = held.copy(host = h) }
                         }
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

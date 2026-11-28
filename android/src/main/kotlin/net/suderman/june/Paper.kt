@@ -153,7 +153,8 @@ fun tiltOf(text: String): Float = (Math.floorMod(text.hashCode(), 5) - 2) * 0.9f
 /**
  * A state or status as a rubber stamp: TONE ink in a double border, tilted a little (paper); a small neon sign
  * (neon); a bracketed tag (console). An OFF stamp, a choice not taken, has a faint dashed edge and no fill, its
- * text still at full strength to read; with ONCLICK it is a button at least 48 dp to tap.
+ * text still at full strength to read; with ONCLICK it is a compact 36 dp touch button so wrapped stamp rows stay
+ * visually cohesive.
  */
 @Composable
 fun Stamp(text: String, tone: Color, modifier: Modifier = Modifier, on: Boolean = true, tilt: Float = tiltOf(text), big: Boolean = false, onClick: (() -> Unit)? = null) {
@@ -162,7 +163,7 @@ fun Stamp(text: String, tone: Color, modifier: Modifier = Modifier, on: Boolean 
     val label = text.uppercase()
     val ink = if (on || !p.console) tone else p.muted
     val style = (if (big) t.button else t.label).copy(color = ink, letterSpacing = t.label.letterSpacing)
-    val tap = if (onClick != null) Modifier.heightIn(min = 48.dp).semantics { role = Role.Button; selected = on }.clickable(onClick = onClick) else Modifier
+    val tap = if (onClick != null) Modifier.heightIn(min = 36.dp).semantics { role = Role.Button; selected = on }.clickable(onClick = onClick) else Modifier
     Box(modifier.then(tap), contentAlignment = Alignment.Center) {
         if (p.console) {
             Text(
@@ -170,7 +171,11 @@ fun Stamp(text: String, tone: Color, modifier: Modifier = Modifier, on: Boolean 
                 modifier = if (on && onClick != null) Modifier.background(tone).padding(horizontal = 2.dp) else Modifier,
             )
         } else {
-            val pad = if (big) Modifier.padding(horizontal = 10.dp, vertical = 5.dp) else Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+            val pad = when {
+                big -> Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                onClick != null -> Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                else -> Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+            }
             Text(
                 label, style = style, maxLines = 1,
                 modifier = Modifier.rotate(tilt).drawBehind {
