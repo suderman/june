@@ -15,7 +15,6 @@ Item {
   property var view: ({ summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], hosts: [], roster: [], rosterLeaderboard: [], rosterHasStats: false, rosterHosts: ["kit", "cog"] })
   property bool loaded: false
   property var openSections: ({ needs: true, working: true, queued: true, reviewing: true, idle: false, recent: true })
-  property bool queueOpen: false
   function sectionOpen(name) { return openSections[name] !== undefined ? Boolean(openSections[name]) : name !== "idle"; }
   function toggleSection(name) {
     const next = Object.assign({}, openSections);
@@ -24,7 +23,7 @@ Item {
     openSections = next;
     // When collapsing from a child row, land the cursor cleanly on that section's heading.
     if (wasOpen) {
-      const items = KeyNav.agentsItems(board.view, board.mode, { queueOpen: board.queueOpen, openSections: next, rosterSort: board.rosterSort });
+      const items = KeyNav.agentsItems(board.view, board.mode, { openSections: next, rosterSort: board.rosterSort });
       const idx = items.findIndex(x => x.key === "sec:" + name);
       if (idx >= 0) cursorIndex = idx;
     }
@@ -113,7 +112,7 @@ Item {
   readonly property string activeSheet: detailKey !== "" ? "task" : (rosterSlug !== "" || rosterNew) ? (clankerDeploying ? "deploy" : "roster") : hostKey !== "" ? (deployingHarness !== "" ? "deploy" : "host") : ""
   property bool keyboardFocused: false
   property int cursorIndex: 0
-  readonly property var navItems: KeyNav.agentsItems(board.view, board.mode, { queueOpen: board.queueOpen, openSections: board.openSections, rosterSort: board.rosterSort })
+  readonly property var navItems: KeyNav.agentsItems(board.view, board.mode, { openSections: board.openSections, rosterSort: board.rosterSort })
   readonly property string activeItemKey: navItems.length > 0 ? navItems[Math.max(0, Math.min(navItems.length - 1, cursorIndex))].key : ""
   signal copyText(string text)
   signal restoreFocus()
@@ -178,14 +177,12 @@ Item {
     if (it.kind === "host") { board.hostKey = it.host; return; }
     if (it.kind === "clanker") { board.rosterNew = false; board.rosterSlug = it.slug; return; }
     if (it.kind === "section") { board.toggleSection(it.section); return; }
-    if (it.kind === "toggleQueue") { board.queueOpen = !board.queueOpen; return; }
     if (it.kind === "need") { board.show(it.task, ""); return; }
     board.show(it.task, it.link);
   }
   function foldCurrent() {
     const it = currentItem();
     if (!it) return;
-    if (it.kind === "toggleQueue") { board.queueOpen = !board.queueOpen; return; }
     if (it.section) { board.toggleSection(it.section); return; }
   }
   function handleSheetKey(ev) {
@@ -531,54 +528,21 @@ Item {
           onSelectedChanged: if (selected) board.ensureVisible(queuedRule)
           onClicked: board.toggleSection("queued")
         }
-        // Slips on a spike: the queue's next few on top, the rest stacked under them.
-        Item {
+        Pad {
           visible: board.sectionOpen("queued") && board.view.queued.length > 0
-          width: parent.width
-          height: queuePad.height + (spike.visible ? 6 : 0)
-          Item {
-            id: spike
-            visible: !board.queueOpen && board.view.queued.length > 3 && !Theme.consoleLook
-            Inked { x: 6; y: 6; width: queuePad.width; height: queuePad.height; lift: 0; lineWidth: 1.5 }
-            Inked { x: 3; y: 3; width: queuePad.width; height: queuePad.height; lift: 0; lineWidth: 1.5 }
-          }
-          Pad {
-            id: queuePad
-            width: parent.width - (spike.visible ? 6 : 0)
-            Repeater {
-              model: board.sectionOpen("queued") ? (board.queueOpen ? board.view.queued : board.view.queued.slice(0, 3)) : []
-              delegate: StubRow {
-                id: qRow
-                required property var modelData
-                required property int index
-                first: index === 0
-                selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "q:" + index
-                onSelectedChanged: if (selected) board.ensureVisible(qRow)
-                title: modelData.title; meta: modelData.who
-                lead: board.whenLead(modelData.when); leadWidth: 66
-                onClicked: board.show(modelData.task, modelData.link ?? "")
-              }
+          Repeater {
+            model: board.sectionOpen("queued") ? board.view.queued : []
+            delegate: StubRow {
+              id: qRow
+              required property var modelData
+              required property int index
+              first: index === 0
+              selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "q:" + index
+              onSelectedChanged: if (selected) board.ensureVisible(qRow)
+              title: modelData.title; meta: modelData.who
+              lead: board.whenLead(modelData.when); leadWidth: 66
+              onClicked: board.show(modelData.task, modelData.link ?? "")
             }
-          }
-        }
-        Item {
-          id: queueToggleRow
-          visible: board.sectionOpen("queued") && board.view.queued.length > 3
-          readonly property bool selected: board.keyboardFocused && !board.sheetOpen && board.activeItemKey === "toggle:queue"
-          onSelectedChanged: if (selected) board.ensureVisible(queueToggleRow)
-          width: parent.width
-          height: moreQueued.height
-          Rectangle {
-            visible: queueToggleRow.selected
-            anchors.fill: moreQueued; anchors.margins: -3; radius: 5
-            color: Qt.alpha(Theme.accent, 0.16); border.color: Theme.accent; border.width: 1
-          }
-          PressTab {
-            id: moreQueued
-            anchors.right: parent.right
-            text: board.queueOpen ? "fewer" : "all " + board.view.queued.length + " ›"
-            kind: "quiet"; small: true
-            onClicked: board.queueOpen = !board.queueOpen
           }
         }
 

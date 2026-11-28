@@ -187,11 +187,9 @@ export function agentsItems(view, mode, opts) {
 	if (queued.length > 0) {
 		out.push({ kind: "section", group: "queued", section: "queued", key: "sec:queued" });
 		if (isOpen("queued", true)) {
-			const shownQ = o.queueOpen ? queued : queued.slice(0, 3);
-			for (let i = 0; i < shownQ.length; i++) {
-				out.push({ kind: "queued", group: "queued", section: "queued", key: "q:" + i, task: shownQ[i].task || "", link: shownQ[i].link || "" });
+			for (let i = 0; i < queued.length; i++) {
+				out.push({ kind: "queued", group: "queued", section: "queued", key: "q:" + i, task: queued[i].task || "", link: queued[i].link || "" });
 			}
-			if (queued.length > 3) out.push({ kind: "toggleQueue", group: "queued", section: "queued", key: "toggle:queue" });
 		}
 	}
 	const reviewing = v.reviewing || [];
