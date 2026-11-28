@@ -87,7 +87,7 @@ Item {
     cursorIndex = KeyNav.stepCursor(navItems.length, cursorIndex, delta);
   }
   function stepSection(delta) {
-    if (navItems.length === 0) { scrollPage(delta); return; }
+    if (navItems.length === 0) return;
     cursorIndex = KeyNav.stepGroup(navItems, cursorIndex, delta);
   }
   function pageRows(delta) {

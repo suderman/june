@@ -62,7 +62,7 @@ export function stepCursor(length, current, delta) {
 
 /**
  * Org-style sibling-heading jump (`[` = -1, `]` = +1) across items tagged with `.group`.
- * Jumps to the first item of the previous or next group; falls back to stepping by 5 in flat lists.
+ * Jumps to the first item of the previous or next group; no-op on flat lists without section headings.
  */
 export function stepGroup(items, currentIndex, delta) {
 	if (!Array.isArray(items) || items.length === 0) return 0;
@@ -71,7 +71,7 @@ export function stepGroup(items, currentIndex, delta) {
 	for (let i = 1; i < items.length; i++) {
 		if ((items[i].group ?? "") !== (items[i - 1].group ?? "")) starts.push(i);
 	}
-	if (starts.length <= 1) return stepCursor(items.length, cur, delta < 0 ? -5 : 5);
+	if (starts.length <= 1) return cur;
 	let g = 0;
 	for (let i = 0; i < starts.length; i++) {
 		if (starts[i] <= cur) g = i;
@@ -470,7 +470,7 @@ export function helpSections(surface, column, sheet) {
 			title: "Chat strip",
 			rows: [
 				["k / j", "older / newer panel"],
-				["[ / ]", "older / newer exchange"],
+				["[ / ]", "prev / next turn (you)"],
 				["p / n", "page up / down"],
 				["Tab", "toggle tool cards"],
 				["RET", "open artifact / link"],

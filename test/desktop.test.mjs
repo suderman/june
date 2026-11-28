@@ -1732,6 +1732,9 @@ test("board cursor lists, state quick-pick mnemonics, ISO date stepping, and she
 	assert.equal(K.stepGroup(ag, 5, -1), 2, "Tomorrow -> Today");
 	assert.equal(K.stepGroup(ag, 4, -1), 0, "mid-Today -> Overdue");
 	assert.equal(K.stepGroup(ag, 0, -1), 0, "clamps at first section");
+	const flat = [{ group: "clankers" }, { group: "clankers" }, { group: "clankers" }];
+	assert.equal(K.stepGroup(flat, 1, 1), 1, "flat list without sections is a no-op");
+	assert.equal(K.stepGroup(flat, 1, -1), 1, "flat list without sections is a no-op");
 	assert.equal(K.stepSectionY([0, 200, 520], 0, 1, 600), 200);
 	assert.equal(K.stepSectionY([0, 200, 520], 200, 1, 600), 520);
 	assert.equal(K.stepSectionY([0, 200, 520], 520, -1, 600), 200);
