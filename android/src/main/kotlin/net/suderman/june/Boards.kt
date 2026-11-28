@@ -302,8 +302,9 @@ private fun ActivityPage(link: Link, decisions: Decisions, modifier: Modifier, r
     val v = rememberAgentsView(link, decisions)
     val colours = rememberColours(decisions)
     val open = LocalUriHandler.current
-    var idleOpen by rememberSaveable { mutableStateOf(false) }
-    var queueOpen by rememberSaveable { mutableStateOf(false) }
+    var openSections by rememberSaveable { mutableStateOf("needs,working,queued,reviewing,recent") }
+    fun sectionOpen(id: String) = hasToken(openSections, id)
+    fun toggleSection(id: String) { openSections = toggleToken(openSections, id) }
     var page by rememberSaveable { mutableStateOf("") }
     OnReset(reset) { page = "" }
     // A rename moves a task without an ID to a new key; its page follows.
@@ -322,12 +323,12 @@ private fun ActivityPage(link: Link, decisions: Decisions, modifier: Modifier, r
             item { AgentsWaiting(v) }
             if (v != null && colours != null) {
             val needs = v.optJSONArray("needs").objects()
-            if (needs.isNotEmpty()) item { SectionRule("NEEDS YOU · ${needs.size}", alert = true) }
+            if (needs.isNotEmpty()) item { SectionRule("NEEDS YOU · ${needs.size}", alert = true, expanded = sectionOpen("needs"), onClick = { toggleSection("needs") }) }
             else item { Text("Nothing needs you.", Modifier.padding(top = 6.dp), style = p.type.lettering.copy(color = p.muted)) }
-            for (n in needs) item(key = "need|" + n.optString("key")) { NeedDocket(n, colours, { show(n.optString("task"), "") }) { url -> open.openUri(url) } }
+            if (sectionOpen("needs")) for (n in needs) item(key = "need|" + n.optString("key")) { NeedDocket(n, colours, { show(n.optString("task"), "") }) { url -> open.openUri(url) } }
             val working = v.optJSONArray("working").objects()
-            if (working.isNotEmpty()) item { SectionRule("WORKING · ${working.size}") }
-            if (working.isNotEmpty()) item(key = "working") {
+            if (working.isNotEmpty()) item { SectionRule("WORKING · ${working.size}", expanded = sectionOpen("working"), onClick = { toggleSection("working") }) }
+            if (sectionOpen("working") && working.isNotEmpty()) item(key = "working") {
                 Pad {
                     working.forEachIndexed { i, w ->
                         StubRow(w.optString("title"), w.optString("where"), first = i == 0, art = { Clanker(w.optString("harness"), colours, 32) }, onClick = clickOf(w) { show(w.optString("task"), w.optString("link")) })
@@ -335,29 +336,22 @@ private fun ActivityPage(link: Link, decisions: Decisions, modifier: Modifier, r
                 }
             }
             val queued = v.optJSONArray("queued").objects()
-            if (queued.isNotEmpty()) item { SectionRule("QUEUED · ${queued.size}") }
-            if (queued.isNotEmpty()) item(key = "queued") {
-                val shown = if (queueOpen) queued else queued.take(3)
-                Column(horizontalAlignment = Alignment.End) {
-                    // Slips on a spike: the queue's next few on top, the rest stacked under them.
-                    Spiked(queued.size > shown.size) {
-                        Pad {
-                            shown.forEachIndexed { i, q ->
-                                StubRow(q.optString("title"), q.optString("who"), lead = whenLead(q.optString("when")), leadWidth = 68.dp, first = i == 0) { show(q.optString("task"), q.optString("link")) }
-                            }
-                        }
+            if (queued.isNotEmpty()) item { SectionRule("QUEUED · ${queued.size}", expanded = sectionOpen("queued"), onClick = { toggleSection("queued") }) }
+            if (sectionOpen("queued") && queued.isNotEmpty()) item(key = "queued") {
+                Pad {
+                    queued.forEachIndexed { i, q ->
+                        StubRow(q.optString("title"), q.optString("who"), lead = whenLead(q.optString("when")), leadWidth = 68.dp, first = i == 0) { show(q.optString("task"), q.optString("link")) }
                     }
-                    if (queued.size > 3) PressTab(if (queueOpen) "fewer" else "all ${queued.size} ›", { queueOpen = !queueOpen }, kind = Press.Quiet, small = true)
                 }
             }
             val reviewing = v.optJSONArray("reviewing").objects()
-            if (reviewing.isNotEmpty()) item { SectionRule("IN AGENT REVIEW · ${reviewing.size}") }
-            if (reviewing.isNotEmpty()) item(key = "reviewing") {
+            if (reviewing.isNotEmpty()) item { SectionRule("IN AGENT REVIEW · ${reviewing.size}", expanded = sectionOpen("reviewing"), onClick = { toggleSection("reviewing") }) }
+            if (sectionOpen("reviewing") && reviewing.isNotEmpty()) item(key = "reviewing") {
                 Pad { reviewing.forEachIndexed { i, r -> StubRow(r.optString("title"), r.optString("who"), stamp = "EVAL", first = i == 0) { show(r.optString("task"), r.optString("link")) } } }
             }
             val idle = v.optJSONArray("idle").objects()
-            if (idle.isNotEmpty()) item { SectionRule("IDLE · ${idle.size}" + if (idleOpen) "  ▾" else "", onClick = { idleOpen = !idleOpen }) }
-            if (idleOpen && idle.isNotEmpty()) item(key = "idle") {
+            if (idle.isNotEmpty()) item { SectionRule("IDLE · ${idle.size}", expanded = sectionOpen("idle"), onClick = { toggleSection("idle") }) }
+            if (sectionOpen("idle") && idle.isNotEmpty()) item(key = "idle") {
                 Pad {
                     idle.forEachIndexed { i, w ->
                         StubRow(w.optString("title"), w.optString("where") + " · " + w.optString("status"), first = i == 0, art = { Clanker(w.optString("harness"), colours, 26, claws = false) }, onClick = clickOf(w) { show(w.optString("task"), w.optString("link")) })
@@ -365,8 +359,8 @@ private fun ActivityPage(link: Link, decisions: Decisions, modifier: Modifier, r
                 }
             }
             val recent = v.optJSONArray("recent").objects()
-            if (recent.isNotEmpty()) item { SectionRule("REPORTED TODAY · ${recent.size}") }
-            if (recent.isNotEmpty()) item(key = "recent") {
+            if (recent.isNotEmpty()) item { SectionRule("REPORTED TODAY · ${recent.size}", expanded = sectionOpen("recent"), onClick = { toggleSection("recent") }) }
+            if (sectionOpen("recent") && recent.isNotEmpty()) item(key = "recent") {
                 Pad {
                     recent.take(6).forEachIndexed { i, r ->
                         StubRow(r.optString("title"), r.optString("when").let { if (it.isEmpty()) "" else "$it ago" }, stamp = r.optString("state"), quote = r.optString("line"), first = i == 0) { show(r.optString("task"), r.optString("link")) }
@@ -620,17 +614,21 @@ private fun ProjectsBoardPage(link: Link, decisions: Decisions, section: String,
     val p = LocalPalette.current
     LaunchedEffect(Unit) { link.wantBoards() }
     val colours = rememberColours(decisions)
-    // The tasks page drills into one state's tasks; the page shows agenda, tasks, that state, or by project.
-    var drill by rememberSaveable { mutableStateOf("") }
-    val mode = if (section == "tasks" && drill.isNotEmpty()) "state" else section
+    var closedAgenda by rememberSaveable { mutableStateOf("") }
+    var openStates by rememberSaveable { mutableStateOf("PROG") }
     val user = link.agents?.optString("user") ?: ""
     val view by produceState<JSONObject?>(null, link.agenda, link.pending) {
         val agenda = link.agenda
         value = if (agenda == null) null else runCatching { JSONObject(decisions.call("board.agendaView", agenda, link.pending, user)) }.getOrNull()
     }
-    val rows by produceState<List<JSONObject>>(emptyList(), link.agenda, drill, link.pending) {
+    val expandedRows by produceState<Map<String, List<JSONObject>>>(emptyMap(), link.agenda, section, openStates, link.pending) {
         val agenda = link.agenda
-        value = if (agenda == null || drill.isEmpty()) emptyList() else runCatching { JSONArray(decisions.call("board.stateRows", agenda, drill, link.pending, user)).objects() }.getOrDefault(emptyList())
+        if (agenda == null || section != "tasks") { value = emptyMap(); return@produceState }
+        val out = LinkedHashMap<String, List<JSONObject>>()
+        for (st in openStates.split(',').filter { it.isNotEmpty() }) {
+            out[st] = runCatching { JSONArray(decisions.call("board.stateRows", agenda, st, link.pending, user)).objects() }.getOrDefault(emptyList())
+        }
+        value = out
     }
     val open = LocalUriHandler.current
     var page by rememberSaveable { mutableStateOf("") }
@@ -638,7 +636,6 @@ private fun ProjectsBoardPage(link: Link, decisions: Decisions, section: String,
     LaunchedEffect(reset) {
         if (reset != seenReset) {
             seenReset = reset
-            drill = ""
             page = ""
         }
     }
@@ -650,7 +647,6 @@ private fun ProjectsBoardPage(link: Link, decisions: Decisions, section: String,
             link.requested = null
         }
     }
-    androidx.activity.compose.BackHandler(enabled = mode == "state") { drill = "" }
     val show: (JSONObject) -> Unit = { e -> val task = e.optString("task"); if (task.isNotEmpty() && link.task(task) != null) page = task else e.optString("link").takeIf { it.isNotEmpty() && it != "null" }?.let { open.openUri(it) } }
     val v = view
     val shown = keptWhileClosing(page)
@@ -658,41 +654,40 @@ private fun ProjectsBoardPage(link: Link, decisions: Decisions, section: String,
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = BoardMargin), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // The sections are named in the bar below; only the wait for the board shows up here.
         if (v == null) item { Text("asking Emacs…", Modifier.padding(top = 6.dp), style = p.type.meta.copy(color = p.muted)) }
-        if (v != null && colours != null) when (mode) {
+        if (v != null && colours != null) when (section) {
             "agenda" -> {
-                for (section in v.optJSONArray("sections").objects()) {
-                    val id = section.optString("id")
-                    item(key = "s|$id") { SectionRule(section.optString("title"), alert = section.optBoolean("alert")) }
-                    val entries = section.optJSONArray("rows").objects()
-                    if (entries.isEmpty()) item(key = "e|$id") { Text("Nothing on the agenda.", style = p.type.lettering.copy(color = p.muted)) }
-                    else item(key = "r|$id") {
-                        Pad {
-                            entries.forEachIndexed { i, e ->
-                                val lead = if (e.optBoolean("allDay")) "all day" else e.optString("time")
-                                StubRow(e.optString("title"), e.optString("meta"), lead = lead, leadWidth = 56.dp, stamp = e.optString("state"), overdue = e.optBoolean("overdue"), first = i == 0) { show(e) }
+                for (sec in v.optJSONArray("sections").objects()) {
+                    val id = sec.optString("id")
+                    val expanded = !hasToken(closedAgenda, id)
+                    item(key = "s|$id") { SectionRule(sec.optString("title"), alert = sec.optBoolean("alert"), expanded = expanded, onClick = { closedAgenda = toggleToken(closedAgenda, id) }) }
+                    if (expanded) {
+                        val entries = sec.optJSONArray("rows").objects()
+                        if (entries.isEmpty()) item(key = "e|$id") { Text("Nothing on the agenda.", style = p.type.lettering.copy(color = p.muted)) }
+                        else item(key = "r|$id") {
+                            Pad {
+                                entries.forEachIndexed { i, e ->
+                                    val lead = if (e.optBoolean("allDay")) "all day" else e.optString("time")
+                                    StubRow(e.optString("title"), e.optString("meta"), lead = lead, leadWidth = 56.dp, stamp = e.optString("state"), overdue = e.optBoolean("overdue"), first = i == 0) { show(e) }
+                                }
                             }
                         }
                     }
                 }
             }
-            // Every open task by state, dated or not: a few rows each, the rest a tap away.
+            // Every open task by state as inline collapsible sections.
             "tasks" -> {
                 for (l in v.optJSONArray("lists").objects()) {
                     val state = l.optString("state")
-                    item(key = "l|$state") { SectionRule("${l.optString("title")} · ${l.optInt("n")}", onClick = { drill = state }) }
-                    item(key = "l|$state|rows") {
-                        Column(horizontalAlignment = Alignment.End) {
-                            Pad { l.optJSONArray("rows").objects().forEachIndexed { i, e -> StubRow(e.optString("title"), e.optString("meta"), overdue = e.optBoolean("overdue"), first = i == 0) { show(e) } } }
-                            if (l.optInt("more") > 0) PressTab("all ${l.optInt("n")} ›", { drill = state }, kind = Press.Quiet, small = true)
+                    val expanded = hasToken(openStates, state)
+                    item(key = "l|$state") { SectionRule("${l.optString("title")} · ${l.optInt("n")}", expanded = expanded, onClick = { openStates = toggleToken(openStates, state) }) }
+                    if (expanded) {
+                        val stateItems = expandedRows[state] ?: l.optJSONArray("rows").objects()
+                        if (stateItems.isNotEmpty()) item(key = "l|$state|rows") {
+                            Pad { stateItems.forEachIndexed { i, e -> StubRow(e.optString("title"), e.optString("meta"), overdue = e.optBoolean("overdue"), first = i == 0) { show(e) } } }
                         }
                     }
                 }
                 if (v.optInt("queued") > 0) item { Text("${v.optInt("queued")} queued for agents, on the agents board", style = p.type.meta.copy(color = p.muted)) }
-            }
-            "state" -> {
-                item { BackLink("tasks", { drill = "" }) }
-                item { SectionRule("${listTitle(drill)} · ${rows.size}") }
-                if (rows.isNotEmpty()) item(key = "d|rows") { Pad { rows.forEachIndexed { i, e -> StubRow(e.optString("title"), e.optString("meta"), overdue = e.optBoolean("overdue"), first = i == 0) { show(e) } } } }
             }
             // Each project a binder divider: its title, where it lives when two share a name, its counts as stamps;
             // it opens in Emacs (↗), where the project file is.
@@ -726,5 +721,10 @@ private fun ProjectsBoardPage(link: Link, decisions: Decisions, section: String,
     }
 }
 
-/** A state's list title, as board.mjs LISTS names it. */
-private fun listTitle(state: String) = when (state) { "PROG" -> "IN PROGRESS"; "EVAL" -> "IN REVIEW"; "HOLD" -> "ON HOLD"; "TODO" -> "TO DO"; else -> state }
+/** Saveable comma-separated token set helpers for collapsible board sections. */
+private fun hasToken(csv: String, key: String): Boolean = csv.split(',').any { it == key }
+private fun toggleToken(csv: String, key: String): String {
+    val items = csv.split(',').filter { it.isNotEmpty() }.toMutableSet()
+    if (!items.remove(key)) items.add(key)
+    return items.joinToString(",")
+}

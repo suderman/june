@@ -238,10 +238,11 @@ fun PressTab(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, k
 
 /**
  * A section's rule: its title in small caps and a thin line running on to the right edge; the console draws
- * "── TITLE ──". With ONCLICK the title gets a chevron and the whole rule is a 48 dp target. TRAILING sits at the end.
+ * "── TITLE ──". With EXPANDED it shows ▾/› as a collapsible heading; with ONCLICK alone it shows ›. Any clickable
+ * rule is a 48 dp target. TRAILING sits at the end.
  */
 @Composable
-fun SectionRule(title: String, modifier: Modifier = Modifier, alert: Boolean = false, onClick: (() -> Unit)? = null, trailing: @Composable () -> Unit = {}) {
+fun SectionRule(title: String, modifier: Modifier = Modifier, alert: Boolean = false, expanded: Boolean? = null, onClick: (() -> Unit)? = null, trailing: @Composable () -> Unit = {}) {
     val p = LocalPalette.current
     val ink = if (alert) p.accent else if (p.neon) p.muted else p.pageInk.copy(alpha = 0.78f)
     Row(
@@ -249,7 +250,12 @@ fun SectionRule(title: String, modifier: Modifier = Modifier, alert: Boolean = f
             .then(if (onClick != null) Modifier.semantics { role = Role.Button }.clickable(onClick = onClick) else Modifier),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val text = if (p.console) "── $title${if (onClick != null) " ›" else ""} " else title + if (onClick != null) "  ›" else ""
+        val glyph = when {
+            expanded == true -> if (p.console) " ▾" else "  ▾"
+            expanded == false || onClick != null -> if (p.console) " ›" else "  ›"
+            else -> ""
+        }
+        val text = if (p.console) "── $title$glyph " else title + glyph
         Text(text, style = p.type.section.copy(color = ink), maxLines = 1)
         Spacer(Modifier.width(8.dp))
         Box(

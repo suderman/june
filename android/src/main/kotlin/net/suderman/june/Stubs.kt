@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
@@ -23,8 +22,8 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
 /**
- * The boards' lists as docket stubs: the masthead over its folder tabs, pads of ruled rows, a queue's slips on a
- * spike, and the docket for what needs the user. The boards (Boards.kt) fill them from board.mjs.
+ * The boards' lists as docket stubs: the masthead over its folder tabs, pads of ruled rows, and the docket for what
+ * needs the user. The boards (Boards.kt) fill them from board.mjs.
  */
 
 /** A worker row opens its task or terminal when it has one. */
@@ -65,18 +64,6 @@ internal fun NeedDocket(n: JSONObject, colours: Colours, page: () -> Unit, open:
 @Composable
 internal fun Pad(content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxWidth().inked(lift = 2.dp, width = 1.75.dp), content = content)
-}
-
-/** A pad with more slips stacked under it, their edges showing below and to the right. */
-@Composable
-internal fun Spiked(more: Boolean, content: @Composable () -> Unit) {
-    val p = LocalPalette.current
-    if (!more || p.console) { content(); return }
-    Box(Modifier.padding(end = 6.dp, bottom = 6.dp)) {
-        Box(Modifier.matchParentSize().offset(6.dp, 6.dp).inked(lift = 0.dp, width = 1.5.dp))
-        Box(Modifier.matchParentSize().offset(3.dp, 3.dp).inked(lift = 0.dp, width = 1.5.dp))
-        content()
-    }
 }
 
 /**
