@@ -18,6 +18,7 @@ Item {
   property string mode: "agenda"
   property var openAgenda: ({})
   property var openStates: ({ PROG: true, EVAL: false, HOLD: false, TODO: false })
+  property var tabCycle: null
   property string user: ""
   property string detailKey: ""
   // The page the task sheet shows: the open one, else the last, while the sheet slides away.
@@ -69,27 +70,54 @@ Item {
   signal copyText(string text)
   signal restoreFocus()
 
-  onModeChanged: cursorIndex = 0
+  onModeChanged: { cursorIndex = 0; tabCycle = null; }
+  onCursorIndexChanged: tabCycle = null
+  function snapToAgenda(secId, nextMap) {
+    const items = KeyNav.projectsItems(board.view, board.mode, { openAgenda: nextMap, openStates: board.openStates, stateRows: board.expandedStateRows });
+    const idx = items.findIndex(x => x.kind === "agendaSection" && x.sectionId === secId);
+    if (idx >= 0) cursorIndex = idx;
+  }
+  function snapToState(st, nextMap) {
+    const items = KeyNav.projectsItems(board.view, board.mode, { openAgenda: board.openAgenda, openStates: nextMap, stateRows: board.expandedStateRows });
+    const idx = items.findIndex(x => x.key === "stsec:" + st);
+    if (idx >= 0) cursorIndex = idx;
+  }
   function toggleAgendaSection(secId) {
+    tabCycle = null;
     const next = Object.assign({}, openAgenda);
     const wasOpen = agendaOpen(secId);
     next[secId] = !wasOpen;
     openAgenda = next;
-    if (wasOpen) {
-      const items = KeyNav.projectsItems(board.view, board.mode, { openAgenda: next, openStates: board.openStates, stateRows: board.expandedStateRows });
-      const idx = items.findIndex(x => x.kind === "agendaSection" && x.sectionId === secId);
-      if (idx >= 0) cursorIndex = idx;
-    }
+    if (wasOpen) snapToAgenda(secId, next);
   }
   function toggleStateSection(st) {
+    tabCycle = null;
     const next = Object.assign({}, openStates);
     const wasOpen = stateOpen(st);
     next[st] = !wasOpen;
     openStates = next;
-    if (wasOpen) {
-      const items = KeyNav.projectsItems(board.view, board.mode, { openAgenda: board.openAgenda, openStates: next, stateRows: board.expandedStateRows });
-      const idx = items.findIndex(x => x.key === "stsec:" + st);
-      if (idx >= 0) cursorIndex = idx;
+    if (wasOpen) snapToState(st, next);
+  }
+  function cycleFold(globalOnly) {
+    const it = currentItem();
+    if (board.mode === "agenda") {
+      const secs = (board.view.sections ?? []).map((s, i) => s.id || ("sec:" + i));
+      if (secs.length === 0) return;
+      const target = (it && it.sectionId) ? it.sectionId : secs[0];
+      const r = KeyNav.cycleSections(secs, openAgenda, () => true, target, tabCycle, Boolean(globalOnly));
+      openAgenda = r.openMap;
+      snapToAgenda(target, r.openMap);
+      tabCycle = r.nextCycle;
+      return;
+    }
+    if (board.mode === "tasks") {
+      const secs = (board.view.lists ?? []).map(l => l.state);
+      if (secs.length === 0) return;
+      const target = (it && it.state) ? it.state : secs[0];
+      const r = KeyNav.cycleSections(secs, openStates, s => s === "PROG", target, tabCycle, Boolean(globalOnly));
+      openStates = r.openMap;
+      snapToState(target, r.openMap);
+      tabCycle = r.nextCycle;
     }
   }
   function ensureVisible(item) {

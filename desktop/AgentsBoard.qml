@@ -15,18 +15,41 @@ Item {
   property var view: ({ summary: "", needs: [], working: [], idle: [], queued: [], reviewing: [], recent: [], down: [], hosts: [], roster: [], rosterLeaderboard: [], rosterHasStats: false, rosterHosts: ["kit", "cog"] })
   property bool loaded: false
   property var openSections: ({ needs: true, working: true, queued: true, reviewing: true, idle: false, recent: true })
+  property var tabCycle: null
   function sectionOpen(name) { return openSections[name] !== undefined ? Boolean(openSections[name]) : name !== "idle"; }
+  function visibleSections() {
+    const out = [];
+    if ((board.view.needs ?? []).length > 0) out.push("needs");
+    if ((board.view.working ?? []).length > 0) out.push("working");
+    if ((board.view.queued ?? []).length > 0) out.push("queued");
+    if ((board.view.reviewing ?? []).length > 0) out.push("reviewing");
+    if ((board.view.idle ?? []).length > 0) out.push("idle");
+    if ((board.view.recent ?? []).length > 0) out.push("recent");
+    return out;
+  }
+  function snapToSection(name, sectionsMap) {
+    const items = KeyNav.agentsItems(board.view, board.mode, { openSections: sectionsMap, rosterSort: board.rosterSort });
+    const idx = items.findIndex(x => x.key === "sec:" + name);
+    if (idx >= 0) cursorIndex = idx;
+  }
   function toggleSection(name) {
+    tabCycle = null;
     const next = Object.assign({}, openSections);
     const wasOpen = sectionOpen(name);
     next[name] = !wasOpen;
     openSections = next;
-    // When collapsing from a child row, land the cursor cleanly on that section's heading.
-    if (wasOpen) {
-      const items = KeyNav.agentsItems(board.view, board.mode, { openSections: next, rosterSort: board.rosterSort });
-      const idx = items.findIndex(x => x.key === "sec:" + name);
-      if (idx >= 0) cursorIndex = idx;
-    }
+    if (wasOpen) snapToSection(name, next);
+  }
+  function cycleFold(globalOnly) {
+    if (board.mode !== "activity") return;
+    const secs = visibleSections();
+    if (secs.length === 0) return;
+    const it = currentItem();
+    const target = (it && it.section) ? it.section : secs[0];
+    const r = KeyNav.cycleSections(secs, openSections, s => s !== "idle", target, tabCycle, Boolean(globalOnly));
+    openSections = r.openMap;
+    snapToSection(target, r.openMap);
+    tabCycle = r.nextCycle;
   }
   // hosts, clankers (cards and editor), or activity (needs, workers, queued, recent).
   property string mode: "activity"
@@ -117,7 +140,8 @@ Item {
   signal copyText(string text)
   signal restoreFocus()
 
-  onModeChanged: cursorIndex = 0
+  onModeChanged: { cursorIndex = 0; tabCycle = null; }
+  onCursorIndexChanged: tabCycle = null
   function ensureVisible(item) {
     if (!item || !column) return;
     const top = item.mapToItem(column, 0, 0).y;

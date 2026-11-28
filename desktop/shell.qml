@@ -58,7 +58,7 @@ ShellRoot {
     return {
       key: k,
       text: event.text || "",
-      shift: Boolean(event.modifiers & Qt.ShiftModifier),
+      shift: Boolean(event.modifiers & Qt.ShiftModifier) || event.key === Qt.Key_Backtab,
       ctrl: Boolean(event.modifiers & Qt.ControlModifier),
       alt: Boolean(event.modifiers & Qt.AltModifier),
     };
@@ -1219,6 +1219,13 @@ ShellRoot {
         if (window.activeColumn === "chat") list.toggleFocusedTools();
         else if (window.activeColumn === "agents") activeAgentsBoard().foldCurrent();
         else if (window.activeColumn === "projects") activeProjectsBoard().foldCurrent();
+        return;
+      }
+      if (res.action === "cycleFold" || res.action === "cycleAll") {
+        const all = res.action === "cycleAll";
+        if (window.activeColumn === "chat") list.toggleFocusedTools();
+        else if (window.activeColumn === "agents") activeAgentsBoard().cycleFold(all);
+        else if (window.activeColumn === "projects") activeProjectsBoard().cycleFold(all);
         return;
       }
       if (res.action === "hint") {

@@ -216,6 +216,13 @@ FloatingWindow {
       else if (win.activeColumn === "projects") activeProjectsBoard().foldCurrent();
       return;
     }
+    if (res.action === "cycleFold" || res.action === "cycleAll") {
+      const all = res.action === "cycleAll";
+      if (win.activeColumn === "chat") strip.toggleFocusedTools();
+      else if (win.activeColumn === "agents") activeAgentsBoard().cycleFold(all);
+      else if (win.activeColumn === "projects") activeProjectsBoard().cycleFold(all);
+      return;
+    }
     if (res.action === "hint") {
       if (strip.visible) {
         const found = strip.collectVisibleHints(win.contentItem);

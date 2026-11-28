@@ -1514,7 +1514,9 @@ test("modal keyboard navigation (keys.mjs): Tab, Z bottom/top toggle, hjkl/np, S
 	assert.equal(initialNormalMode({ tab: "chat", narrow: false, past: true }), true, "past day starts in NORMAL");
 
 	const win = { surface: "window", column: "chat", leader: false, helpOpen: false, previewOpen: false };
-	assert.deepEqual(dispatchNormalKey({ key: "Tab", text: "\t" }, win), { action: "fold" });
+	assert.deepEqual(dispatchNormalKey({ key: "Tab", text: "\t" }, win), { action: "cycleFold" });
+	assert.deepEqual(dispatchNormalKey({ key: "Tab", shift: true }, win), { action: "cycleAll" });
+	assert.deepEqual(dispatchNormalKey({ text: "o" }, win), { action: "fold" });
 	assert.deepEqual(dispatchNormalKey({ text: "i" }, win), { action: "enterInsert" });
 	assert.deepEqual(dispatchNormalKey({ key: "Escape" }, win), { action: "escape" });
 	assert.deepEqual(dispatchNormalKey({ key: "Backspace" }, win), { action: "escape" });
@@ -1754,6 +1756,35 @@ test("board cursor lists, state quick-pick mnemonics, ISO date stepping, and she
 	assert.equal(K.stepSectionY([0, 200, 520], 200, 1, 600), 520);
 	assert.equal(K.stepSectionY([0, 200, 520], 520, -1, 600), 200);
 	assert.equal(K.stepSectionY([0, 200, 520], 200, -1, 600), 0);
+
+	// Org-style Tab visibility cycle (repeat Tab expands/collapses all; Shift+Tab cycles globally).
+	const ids = ["PROG", "EVAL", "HOLD", "TODO"];
+	const def = s => s === "PROG";
+	// Starting from PROG open, rest closed: Tab on PROG -> closes PROG (all closed) -> Tab expands all -> Tab collapses all.
+	const c1 = K.cycleSections(ids, {}, def, "PROG", null, false);
+	assert.deepEqual(c1.openMap, { PROG: false, EVAL: false, HOLD: false, TODO: false });
+	const c2 = K.cycleSections(ids, c1.openMap, def, "PROG", c1.nextCycle, false);
+	assert.deepEqual(c2.openMap, { PROG: true, EVAL: true, HOLD: true, TODO: true });
+	const c3 = K.cycleSections(ids, c2.openMap, def, "PROG", c2.nextCycle, false);
+	assert.deepEqual(c3.openMap, { PROG: false, EVAL: false, HOLD: false, TODO: false });
+	// Starting from closed EVAL: Tab opens EVAL -> Tab expands all -> Tab collapses all.
+	const e1 = K.cycleSections(ids, {}, def, "EVAL", null, false);
+	assert.deepEqual(e1.openMap, { PROG: true, EVAL: true, HOLD: false, TODO: false });
+	const e2 = K.cycleSections(ids, e1.openMap, def, "EVAL", e1.nextCycle, false);
+	assert.deepEqual(e2.openMap, { PROG: true, EVAL: true, HOLD: true, TODO: true });
+	// Starting from all open (Agenda): Tab closes today -> Tab collapses all -> Tab expands all.
+	const aIds = ["overdue", "today", "tomorrow"];
+	const a1 = K.cycleSections(aIds, {}, () => true, "today", null, false);
+	assert.deepEqual(a1.openMap, { overdue: true, today: false, tomorrow: true });
+	const a2 = K.cycleSections(aIds, a1.openMap, () => true, "today", a1.nextCycle, false);
+	assert.deepEqual(a2.openMap, { overdue: false, today: false, tomorrow: false });
+	const a3 = K.cycleSections(aIds, a2.openMap, () => true, "today", a2.nextCycle, false);
+	assert.deepEqual(a3.openMap, { overdue: true, today: true, tomorrow: true });
+	// Shift+Tab cycles global visibility immediately.
+	const g1 = K.cycleSections(ids, {}, def, "PROG", null, true);
+	assert.deepEqual(g1.openMap, { PROG: true, EVAL: true, HOLD: true, TODO: true });
+	const g2 = K.cycleSections(ids, g1.openMap, def, "PROG", g1.nextCycle, true);
+	assert.deepEqual(g2.openMap, { PROG: false, EVAL: false, HOLD: false, TODO: false });
 });
 
 test("Avy/Vimium hint mode labels, prefix matching, and shown/user media extraction (keys.mjs)", async () => {

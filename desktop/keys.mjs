@@ -98,6 +98,65 @@ export function stepSectionY(stops, currentY, delta, maxY) {
 	return sorted[0];
 }
 
+/**
+ * Org-style `Tab` visibility cycle across a board's collapsible sections.
+ * - First press on `targetId`: toggles `targetId` directly, then arms `"expandAll"` or `"collapseAll"` for a repeat press.
+ * - Consecutive `Tab` press on the same `targetId` (or `globalOnly` for Shift+Tab): expands all or collapses all.
+ * Returns `{ openMap, nextCycle }` where `nextCycle = { targetId, phase }`.
+ */
+export function cycleSections(sectionIds, openMap, defaultOpenFn, targetId, prevCycle, globalOnly) {
+	const ids = Array.isArray(sectionIds) ? sectionIds : [];
+	const current = {};
+	for (let i = 0; i < ids.length; i++) {
+		const id = ids[i];
+		current[id] = openMap && openMap[id] !== undefined ? Boolean(openMap[id]) : Boolean(defaultOpenFn(id));
+	}
+	const next = Object.assign({}, openMap || {}, current);
+	if (ids.length === 0) return { openMap: next, nextCycle: null };
+
+	const allOpen = (map) => {
+		for (let i = 0; i < ids.length; i++) if (!map[ids[i]]) return false;
+		return true;
+	};
+	const allClosed = (map) => {
+		for (let i = 0; i < ids.length; i++) if (map[ids[i]]) return false;
+		return true;
+	};
+	const setAll = (val) => {
+		for (let i = 0; i < ids.length; i++) next[ids[i]] = val;
+	};
+
+	if (globalOnly) {
+		const wantOpen = !allOpen(current);
+		setAll(wantOpen);
+		return { openMap: next, nextCycle: { targetId: targetId, phase: wantOpen ? "collapseAll" : "expandAll" } };
+	}
+
+	if (prevCycle && prevCycle.targetId === targetId && (prevCycle.phase === "expandAll" || prevCycle.phase === "collapseAll")) {
+		if (prevCycle.phase === "expandAll") {
+			if (allOpen(current)) {
+				setAll(false);
+				return { openMap: next, nextCycle: { targetId: targetId, phase: "expandAll" } };
+			}
+			setAll(true);
+			return { openMap: next, nextCycle: { targetId: targetId, phase: "collapseAll" } };
+		}
+		if (allClosed(current)) {
+			setAll(true);
+			return { openMap: next, nextCycle: { targetId: targetId, phase: "collapseAll" } };
+		}
+		setAll(false);
+		return { openMap: next, nextCycle: { targetId: targetId, phase: "expandAll" } };
+	}
+
+	const wasOpen = Boolean(current[targetId]);
+	next[targetId] = !wasOpen;
+	let phase;
+	if (!wasOpen) phase = allOpen(next) ? "collapseAll" : "expandAll";
+	else phase = allClosed(next) ? "expandAll" : "collapseAll";
+	return { openMap: next, nextCycle: { targetId: targetId, phase: phase } };
+}
+
 /** Steps an ISO YYYY-MM-DD date string by `days` using UTC so local DST never skips a day. */
 export function stepIsoDate(iso, days) {
 	const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso ?? ""));
@@ -493,7 +552,7 @@ export function helpSections(surface, column, sheet) {
 		["j / k", "step down / up"],
 		["n / p", "page down / up"],
 		["Z", "bottom ↔ top"],
-		["Tab", "fold / unfold nested"],
+		["Tab / o", "cycle fold / toggle one"],
 		["z", surface === "overlay" ? "shrink to mini June" : "toggle settings"],
 		["SPC", "leader toggles"],
 		["q", surface === "overlay" ? "close sheet / dismiss" : "close open sheet"],
@@ -523,7 +582,8 @@ export function helpSections(surface, column, sheet) {
 					["j / k", "move row cursor"],
 					["n / p", "page down / up"],
 					["RET", "open docket / card / host"],
-					["Tab / o", "collapse / expand section"],
+					["Tab / S-Tab", "cycle fold (repeat: all)"],
+					["o", "toggle this heading"],
 					["C / S", "new clanker / sort (clankers)"],
 					["t / e", "open Herdr / Emacs"],
 					["q / Bksp", "close sheet"],
@@ -536,7 +596,8 @@ export function helpSections(surface, column, sheet) {
 					["j / k", "move row cursor"],
 					["n / p", "page down / up"],
 					["RET", "open task / toggle heading"],
-					["Tab / o", "collapse / expand section"],
+					["Tab / S-Tab", "cycle fold (repeat: all)"],
+					["o", "toggle this heading"],
 					["e / t", "open Emacs / Herdr"],
 					["q / Bksp", "close sheet"],
 				],
@@ -599,7 +660,7 @@ export function dispatchNormalKey(ev, ctx) {
 
 	// Universal NORMAL keys.
 	if (text === "i" || text === "a") return { action: "enterInsert" };
-	if (key === "Tab") return { action: "fold" };
+	if (key === "Tab") return { action: shift ? "cycleAll" : "cycleFold" };
 	if (key === "Space" || text === " ") return { action: "openLeader" };
 	if (text === "?") return { action: "toggleHelp" };
 	if (key === "Escape") return { action: "escape" };

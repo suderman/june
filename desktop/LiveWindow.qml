@@ -125,7 +125,7 @@ PanelWindow {
     if (res.action === "cancelLeader") { leader = false; return; }
     leader = false;
     if (res.action === "enterInsert") { enterInsert(); return; }
-    if (res.action === "fold") {
+    if (res.action === "fold" || res.action === "cycleFold" || res.action === "cycleAll") {
       if (!(cell.item && typeof cell.item.toggleTools === "function" && cell.item.toggleTools())) openStripNormal();
       return;
     }
